@@ -8,6 +8,11 @@
 > **Prerequisites**: [Beginner 7 -- Arrays and Vec<T>](../beginner/07_vec_arrays.md)
 > and [Intermediate 15 -- Math, random numbers, and clone](15_math_rng.md).
 
+`print` only accepts scalar values (i64, f64, bool, Str, OwnedStr) --
+it can't print a `Vec<T>` directly. The examples below use a small
+`vec_to_str` helper to render a `Vec<i64>` as a bracketed string for
+display purposes.
+
 ---
 
 ## Sorting variants
@@ -15,22 +20,43 @@
 ```vani
 intent "Vec sorting";
 
+fn vec_to_str(v: ref Vec<i64>) -> OwnedStr {
+  let s: OwnedStr = "[" + "";
+  let i: i64 = 0;
+  let n: i64 = len(v) as i64;
+  while i < n {
+    s = s + i64_to_str(v[i]);
+    if i < n - 1 { s = s + ", "; }
+    i = i + 1;
+  }
+  s = s + "]";
+  return s;
+}
+
 fn main() -> i64 {
-  let xs: Vec<i64> = [3, 1, 4, 1, 5, 9, 2, 6];
+  let xs: Vec<i64> = vec(3, 1, 4, 1, 5, 9, 2, 6);
 
   sort(mut ref xs);           // ascending in place
-  print "sorted:", xs;
+  print "sorted:", vec_to_str(ref xs);
 
   sort_desc(mut ref xs);      // descending in place
-  print "desc:", xs;
+  print "desc:", vec_to_str(ref xs);
 
   // sort_by: custom comparator (returns negative / 0 / positive)
-  let ys: Vec<i64> = [10, 3, 7, 1];
+  let ys: Vec<i64> = vec(10, 3, 7, 1);
   sort_by(mut ref ys, fn(a: i64, b: i64) -> i64 { return a - b; });
-  print "custom sort:", ys;
+  print "custom sort:", vec_to_str(ref ys);
 
   return 0;
 }
+```
+
+Expected output:
+
+```
+sorted: [1, 1, 2, 3, 4, 5, 6, 9]
+desc: [9, 6, 5, 4, 3, 2, 1, 1]
+custom sort: [1, 3, 7, 10]
 ```
 
 | Builtin | What it does |
@@ -53,9 +79,10 @@ struct Point { x: i64, y: i64 }
 fn cmp_by_x(a: Point, b: Point) -> i64 { return a.x - b.x; }
 
 fn main() -> i64 {
-  let pts: Vec<Point> = [Point { x: 3, y: 0 }, Point { x: 1, y: 0 }];
+  let pts: Vec<Point> = vec(Point { x: 3, y: 0 }, Point { x: 1, y: 0 });
   sort_by(mut ref pts, cmp_by_x);
-  print "sorted by x:", pts;  // [Point{x:1,...}, Point{x:3,...}]
+  print "sorted by x[0]:", pts[0].x;  // 1
+  print "sorted by x[1]:", pts[1].x;  // 3
   return 0;
 }
 ```
@@ -80,20 +107,25 @@ error: sort() only supports `Vec<i64> or Vec<f64>` in v1, got element type Owned
 
 ## Argmin / argmax and k-th smallest
 
+`vec_argmin`/`vec_argmax`/`vec_min`/`vec_max` take a **required
+fallback value** as their second argument, used if the `Vec` is
+empty (so the return type can stay a plain `i64`/`f64` instead of an
+`Option`):
+
 ```vani
 intent "Vec argmin/argmax";
 
 fn main() -> i64 {
-  let xs: Vec<i64> = [3, 1, 4, 1, 5, 9];
+  let xs: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
 
-  let mn: i64 = vec_argmin(ref xs);    // index of minimum (0-indexed)
-  let mx: i64 = vec_argmax(ref xs);    // index of maximum
-  print "argmin index:", mn;           // 1 (value 1)
-  print "argmax index:", mx;           // 5 (value 9)
+  let mn: i64 = vec_argmin(ref xs, -1);  // index of minimum (0-indexed); -1 if empty
+  let mx: i64 = vec_argmax(ref xs, -1);  // index of maximum; -1 if empty
+  print "argmin index:", mn;             // 1 (value 1)
+  print "argmax index:", mx;             // 5 (value 9)
 
   // k-th smallest (0-indexed, not sorted -- uses quickselect)
   let med: i64 = vec_kth_smallest(mut ref xs, 2);
-  print "3rd smallest:", med;          // 3
+  print "3rd smallest:", med;            // 3
 
   return 0;
 }
@@ -101,8 +133,8 @@ fn main() -> i64 {
 
 | Builtin | `Vec<i64>` returns | `Vec<f64>` returns | Description |
 |---------|-------------------|-------------------|-------------|
-| `vec_argmin(ref xs)` | `i64` | `i64` | Index of minimum element (always integer) |
-| `vec_argmax(ref xs)` | `i64` | `i64` | Index of maximum element |
+| `vec_argmin(ref xs, fallback)` | `i64` | `i64` | Index of minimum element (always integer); `fallback` used if empty |
+| `vec_argmax(ref xs, fallback)` | `i64` | `i64` | Index of maximum element; `fallback` used if empty |
 | `vec_kth_smallest(ref xs, k)` | `i64` | `f64` (qNaN if k out of bounds) | k-th smallest; quickselect |
 | `vec_median(ref xs)` | `i64` | `f64` | Median value; quickselect |
 
@@ -110,22 +142,24 @@ fn main() -> i64 {
 
 ## Statistical aggregates
 
+`vec_min`/`vec_max` also take a required fallback value (same
+empty-`Vec` rationale as `vec_argmin`/`vec_argmax` above):
+
 ```vani
 intent "Vec statistics";
 
 fn main() -> i64 {
-  let xs: Vec<i64> = [2, 4, 4, 4, 5, 5, 7, 9];
+  let xs: Vec<i64> = vec(2, 4, 4, 4, 5, 5, 7, 9);
 
   print "sum:",  vec_sum(ref xs);               // 40
-  print "min:",  vec_min(ref xs);               // 2
-  print "max:",  vec_max(ref xs);               // 9
+  print "min:",  vec_min(ref xs, 0);            // 2
+  print "max:",  vec_max(ref xs, 0);            // 9
   print "mean:", vec_mean(ref xs);              // 5 (integer division)
   print "mode:", vec_mode(ref xs);              // 4 (most frequent)
 
-  // f64 versions for floating-point precision
-  let fs: Vec<f64> = [1.0, 2.0, 3.0, 4.0];
-  print "harmonic mean:", f64_harmonic_mean(ref fs);  // 1.92
-  print "geometric mean:", f64_geometric_mean(ref fs); // 2.213
+  // harmonic/geometric mean of TWO scalars (not a Vec reduction)
+  print "harmonic mean(2,4):", f64_harmonic_mean(2.0, 4.0);   // 2.667
+  print "geometric mean(2,4):", f64_geometric_mean(2.0, 4.0); // 2.828
 
   return 0;
 }
@@ -134,12 +168,16 @@ fn main() -> i64 {
 | Builtin | `Vec<i64>` returns | `Vec<f64>` returns | Description |
 |---------|-------------------|-------------------|-------------|
 | `vec_sum(ref xs)` | `i64` | `f64` | Sum of all elements |
-| `vec_min(ref xs)` | `i64` | `f64` | Minimum element |
-| `vec_max(ref xs)` | `i64` | `f64` | Maximum element |
+| `vec_min(ref xs, fallback)` | `i64` | `f64` | Minimum element; `fallback` used if empty |
+| `vec_max(ref xs, fallback)` | `i64` | `f64` | Maximum element; `fallback` used if empty |
 | `vec_mean(ref xs)` | `i64` (floor div) | `f64` | Arithmetic mean |
 | `vec_mode(ref xs)` | `i64` | — | Most frequent element |
-| `f64_harmonic_mean(ref xs)` | — | `f64` | 1 / mean(1/xi) |
-| `f64_geometric_mean(ref xs)` | — | `f64` | (∏ xi)^(1/n) |
+
+`f64_harmonic_mean(a, b)` and `f64_geometric_mean(a, b)` are
+**2-argument scalar math functions** (mean of exactly two numbers),
+not `Vec<f64>` reductions -- despite the name, they don't take a
+`ref Vec<f64>`. See [Sec.15a](15a_math_deep.md) for the rest of the
+scalar math library.
 
 ---
 
@@ -148,17 +186,30 @@ fn main() -> i64 {
 ```vani
 intent "Running sums";
 
+fn vec_to_str(v: ref Vec<i64>) -> OwnedStr {
+  let s: OwnedStr = "[" + "";
+  let i: i64 = 0;
+  let n: i64 = len(v) as i64;
+  while i < n {
+    s = s + i64_to_str(v[i]);
+    if i < n - 1 { s = s + ", "; }
+    i = i + 1;
+  }
+  s = s + "]";
+  return s;
+}
+
 fn main() -> i64 {
-  let xs: Vec<i64> = [1, 2, 3, 4, 5];
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
 
   let rs: Vec<i64> = vec_running_sum(ref xs);
-  print "running sum:", rs;       // [1, 3, 6, 10, 15]
+  print "running sum:", vec_to_str(ref rs);       // [1, 3, 6, 10, 15]
 
   let cm: Vec<i64> = vec_cumulative_max(ref xs);
-  print "cumulative max:", cm;    // [1, 2, 3, 4, 5]
+  print "cumulative max:", vec_to_str(ref cm);    // [1, 2, 3, 4, 5]
 
   let cn: Vec<i64> = vec_cumulative_min(ref xs);
-  print "cumulative min:", cn;    // [1, 1, 1, 1, 1]
+  print "cumulative min:", vec_to_str(ref cn);    // [1, 1, 1, 1, 1]
 
   return 0;
 }
@@ -178,14 +229,14 @@ fn main() -> i64 {
 intent "Vec set ops";
 
 fn main() -> i64 {
-  let a: Vec<i64> = [1, 2, 3, 4];
-  let b: Vec<i64> = [3, 4, 5, 6];
+  let a: Vec<i64> = vec(1, 2, 3, 4);
+  let b: Vec<i64> = vec(3, 4, 5, 6);
 
   print "subset:",    vec_subset_of(ref a, ref b);    // false (1,2 not in b)
   print "disjoint:",  vec_disjoint(ref a, ref b);     // false (3,4 shared)
   print "equal set:", vec_equal_set(ref a, ref b);    // false
 
-  let c: Vec<i64> = [1, 2];
+  let c: Vec<i64> = vec(1, 2);
   print "c subset a:", vec_subset_of(ref c, ref a);   // true
 
   return 0;
@@ -204,6 +255,12 @@ These do linear scans -- for large vecs, load into a `HashSet<i64>` first.
 
 ## Functional combinators
 
+`map`/`filter`/`fold` are called as `vec_map`/`vec_filter`/`vec_fold`
+(bare `map`/`filter`/`fold` don't exist as standalone functions).
+`find(ref xs, needle)` searches for a **value**, not a predicate --
+it returns `Option<i64>` (the index of the first occurrence, or
+`None`), not a bare `i64` with a `-1` sentinel:
+
 ```vani
 intent "Vec combinators";
 
@@ -211,24 +268,37 @@ fn double(x: i64) -> i64 { return x * 2; }
 fn is_even(x: i64) -> bool { return x % 2 == 0; }
 fn add(acc: i64, x: i64) -> i64 { return acc + x; }
 
+fn vec_to_str(v: ref Vec<i64>) -> OwnedStr {
+  let s: OwnedStr = "[" + "";
+  let i: i64 = 0;
+  let n: i64 = len(v) as i64;
+  while i < n {
+    s = s + i64_to_str(v[i]);
+    if i < n - 1 { s = s + ", "; }
+    i = i + 1;
+  }
+  s = s + "]";
+  return s;
+}
+
 fn main() -> i64 {
-  let xs: Vec<i64> = [1, 2, 3, 4, 5];
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
 
-  let doubled: Vec<i64> = map(ref xs, double);
-  print "map:", doubled;           // [2, 4, 6, 8, 10]
+  let doubled: Vec<i64> = vec_map(ref xs, double);
+  print "map:", vec_to_str(ref doubled);           // [2, 4, 6, 8, 10]
 
-  let evens: Vec<i64> = filter(ref xs, is_even);
-  print "filter:", evens;          // [2, 4]
+  let evens: Vec<i64> = vec_filter(ref xs, is_even);
+  print "filter:", vec_to_str(ref evens);          // [2, 4]
 
-  let total: i64 = fold(ref xs, 0, add);
-  print "fold:", total;            // 15
+  let total: i64 = vec_fold(ref xs, 0, add);
+  print "fold:", total;                            // 15
 
-  // find: first element matching predicate, or -1
-  let first_even: i64 = find(ref xs, is_even);
-  print "find:", first_even;       // 2
+  // find: index of the first element equal to a value, or None
+  let idx: Option<i64> = find(ref xs, 2);
+  print "find(2) index:", option_unwrap_or(idx, -1);  // 1
 
-  // contains: any element matches?
-  print "contains 3:", contains(ref xs, 3);  // true
+  // contains: any element equals v?
+  print "contains 3:", contains(ref xs, 3);        // true
 
   return 0;
 }
@@ -240,7 +310,7 @@ fn main() -> i64 {
 | `vec_filter(ref xs, pred)` | `fn(i64)->bool -> Vec<i64>` | `fn(f64)->bool -> Vec<f64>` | Keep elements where pred is true |
 | `vec_fold(ref xs, init, f)` | `i64, fn(i64,i64)->i64 -> i64` | `f64, fn(f64,f64)->f64 -> f64` | Left-fold with initial value |
 | `vec_dot(ref xs, ref ys)` | `-> i64` | `-> f64` | Inner / dot product |
-| `find(ref xs, pred)` | `-> i64` | — | First matching element, or -1 |
+| `find(ref xs, needle)` | `-> Option<i64>` | — | Index of first element equal to `needle`, or `None` |
 | `contains(ref xs, v)` | `-> bool` | — | Any element equals v |
 
 ---
@@ -248,20 +318,33 @@ fn main() -> i64 {
 ## Mutation combinators
 
 ```vani
+fn vec_to_str(v: ref Vec<i64>) -> OwnedStr {
+  let s: OwnedStr = "[" + "";
+  let i: i64 = 0;
+  let n: i64 = len(v) as i64;
+  while i < n {
+    s = s + i64_to_str(v[i]);
+    if i < n - 1 { s = s + ", "; }
+    i = i + 1;
+  }
+  s = s + "]";
+  return s;
+}
+
 fn main() -> i64 {
-  let xs: Vec<i64> = [3, 1, 4, 1, 5, 2];
+  let xs: Vec<i64> = vec(3, 1, 4, 1, 5, 2);
 
   // replace all occurrences of 1 with 99
   vec_replace_all(mut ref xs, 1, 99);
-  print "after replace:", xs;   // [3, 99, 4, 99, 5, 2]
+  print "after replace:", vec_to_str(ref xs);   // [3, 99, 4, 99, 5, 2]
 
   // remove element at index 2
   vec_remove_at(mut ref xs, 2);
-  print "after remove_at(2):", xs;  // [3, 99, 99, 5, 2]
+  print "after remove_at(2):", vec_to_str(ref xs);  // [3, 99, 99, 5, 2]
 
   // swap indices 0 and 4
   vec_swap(mut ref xs, 0, 4);
-  print "after swap(0,4):", xs;
+  print "after swap(0,4):", vec_to_str(ref xs); // [2, 99, 99, 5, 3]
 
   return 0;
 }
@@ -283,13 +366,26 @@ fn main() -> i64 {
 ```vani
 intent "letter frequency";
 
+fn vec_to_str(v: ref Vec<i64>) -> OwnedStr {
+  let s: OwnedStr = "[" + "";
+  let i: i64 = 0;
+  let n: i64 = len(v) as i64;
+  while i < n {
+    s = s + i64_to_str(v[i]);
+    if i < n - 1 { s = s + ", "; }
+    i = i + 1;
+  }
+  s = s + "]";
+  return s;
+}
+
 fn main() -> i64 {
   // Count how many times each distinct value appears
-  let data: Vec<i64> = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5];
+  let data: Vec<i64> = vec(3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5);
 
   // sort to group duplicates, then count runs
   sort(mut ref data);
-  print "sorted:", data;
+  print "sorted:", vec_to_str(ref data);
   print "mode (most frequent):", vec_mode(ref data);  // 5
   print "median:", vec_median(mut ref data);           // 4
 
