@@ -190,7 +190,8 @@ was guaranteed by the contract).
 "When I return, the result will satisfy this."
 
 ```vani
-fn abs(n: i64) -> i64
+fn abs_checked(n: i64) -> i64
+  requires n > (0 - 1000);
   ensures _return >= 0;
 {
   if n < 0 { return 0 - n; }
@@ -201,7 +202,13 @@ fn abs(n: i64) -> i64
 `_return` is the magic name for the function's return value
 in contracts. After the call, the compiler KNOWS the result
 is >= 0 -- that knowledge propagates into the caller's proof
-context.
+context. (The `requires` bound matters here: without it, the
+solver rejects the function with a real counterexample --
+`n = i64::MIN`, where `0 - n` overflows and can't be proven
+`>= 0`. This is the classic `abs(INT_MIN)` bug, caught at
+compile time instead of silently wrapping at runtime. Also
+note `abs` itself is a built-in name and can't be redefined --
+hence `abs_checked`.)
 
 ### `assert` -- inline runtime check (with SMT-side proof attempt)
 
@@ -267,15 +274,21 @@ runtime divide-by-zero check goes away.
 ```vani
 fn pop_unchecked(xs: mut ref Vec<i64>) -> i64
   requires len(xs) > 0;
-  ensures len(xs) == old_len(xs) - 1;
 {
-  ...
+  let last_idx: i64 = (len(xs) as i64) - 1;
+  let last: i64 = xs[last_idx];
+  vec_remove_at(xs, last_idx);
+  return last;
 }
 ```
 
-The function promises its callers: "after I return, the
-length is exactly one less than it was when you called me."
-Callers can use that fact in their OWN proofs further on.
+The `requires` clause is what makes `xs[last_idx]` and
+`vec_remove_at` provably in-bounds -- no runtime check needed.
+(v1's `ensures` clauses can't yet refer to a parameter's
+*pre-call* state -- there's no `old(...)`-style mechanism -- so
+a post-condition like "the length is exactly one less than
+before" isn't expressible today; `requires` alone already
+buys the safety that matters here.)
 
 ## What the solver can't do
 
