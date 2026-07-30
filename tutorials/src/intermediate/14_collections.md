@@ -140,7 +140,7 @@ fn main() -> i64 {
 
   // Collect unique values.
   let i: i64 = 0;
-  while i < len(v) {
+  while i < (len(v) as i64) {
     let _ = hashset_insert(mut ref seen, v[i]);
     i = i + 1;
   }
@@ -185,7 +185,7 @@ The sugar is documented in
 // Count how many times each number appears in a list.
 let freq: HashMap<i64, i64> = hashmap_new();
 let i: i64 = 0;
-while i < len(data) {
+while i < (len(data) as i64) {
   let cur: i64 = option_unwrap_or(hashmap_get(ref freq, data[i]), 0);
   let _ = hashmap_insert(mut ref freq, data[i], cur + 1);
   i = i + 1;
@@ -195,9 +195,9 @@ while i < len(data) {
 **Deduplication pipeline**:
 ```vani
 let seen: HashSet<i64> = hashset_new();
-let unique: Vec<i64> = vec![];
+let unique: Vec<i64> = vec();
 let i: i64 = 0;
-while i < len(data) {
+while i < (len(data) as i64) {
   if !hashset_contains(ref seen, data[i]) {
     let _ = hashset_insert(mut ref seen, data[i]);
     push(mut ref unique, data[i]);
