@@ -207,6 +207,10 @@ impl std::fmt::Display for EmitError {
 }
 
 fn preamble(out: &mut String) {
+    // Must precede every system header: glibc gates syscall() and other
+    // GNU/BSD extensions behind _GNU_SOURCE, and the compiler is invoked
+    // with -std=c11 (strict ISO), which does not imply it on its own.
+    out.push_str("#define _GNU_SOURCE\n");
     out.push_str("#include <assert.h>\n");
     out.push_str("#include <stdatomic.h>\n");
     out.push_str("#include <stdint.h>\n");
