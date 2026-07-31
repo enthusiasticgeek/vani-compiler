@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-07-28
+Last updated: 2026-07-31
 
 ---
 
@@ -3936,5 +3936,98 @@ verifying the four fixes above against their tutorial worked examples
   `backend_c.rs` or `ssa_backend_c.rs`, wherever parameter types are
   stringified to their monomorphized C struct name) versus how the
   same resolution is done correctly for the body/call sites.
+
+---
+
+## Async/await compiler crash found resuming the advanced tutorial-track audit (added+fixed 2026-07-31)
+
+- [x] **BUG-48. Every `await(...)` call inside an `async fn` crashed the
+  compiler (`vanic check`/`run`, both v3.1 state-machine paths) with a
+  native stack overflow (`fatal runtime error: stack overflow`, abort,
+  exit 134) — 100% reproducible, not input-dependent.** Found bisecting
+  the crash recorded mid-investigation in the previous session's
+  handoff notes while resuming the `tutorials/src/advanced/`
+  audit.** ✅ fixed 2026-07-31.
+  Minimal repro (previously crashed; now a clean diagnostic — see BUG-49):
+  ```vani
+  async fn handler1(fd: i64) -> i64 {
+    let req: i64 = await(io_recv_async(fd, 64));
+    return req;
+  }
+  fn main() -> i64 { return 0; }
+  ```
+  **Root cause** (confirmed with `gdb -batch -ex run -ex "thread apply
+  all bt -50"`, showing `vani::parser::anf_lift_body` recursing into
+  itself ~8860+ times with identical frame shapes): `await(inner)`
+  parser-desugars to `match inner { Future.Ready(v) then v,
+  Future.Pending then 0 }` (`synthesize_await_desugar`, `parser.rs`).
+  Because `Future.Ready`/`Future.Pending` are Variant-shaped patterns,
+  `try_desugar_let_match_with_suspends` routed this into
+  `try_desugar_match_via_tag_extraction` (the Phase 2.3c/2.3d
+  machinery, working as designed for its actual tested use case — see
+  the `v31_phase23c_*`/`v31_phase23d_*` tests in `lib.rs`, all of
+  which scrutinize a plain enum-returning helper fn with the suspend
+  in an ARM BODY). Tag-extraction synthesizes `let __match_tag_X: i64
+  = match SCRUT { <same Variant patterns>, ... };` — but for
+  `await()`'s shape, `SCRUT` (`inner`, the `io_*_async` call) is
+  *itself* the suspend, and the arm bodies are trivial (`v` / `0`), so
+  the synthesized statement is structurally indistinguishable from the
+  input that triggered tag-extraction in the first place. When
+  `anf_lift_body` recursively re-processes its own synthesized output
+  (`parser.rs` ~line 7588), the identical transform fires again,
+  forever — this exact shape had never been exercised by the Phase
+  2.3c/2.3d test suite, which only ever scrutinizes a separate,
+  non-suspending helper-fn call, never the suspending call itself.
+  **Fix**: `try_desugar_let_match_with_suspends` now only routes to
+  tag-extraction when an ARM BODY (not just the scrutinee) contains a
+  suspend (`arms_suspend` check, `parser.rs`) — i.e. only when
+  per-arm state-splitting is actually needed, which is the sole case
+  Phase 2.3c/2.3d ever implemented or tested. Scrutinee-only suspends
+  (the `await()` shape) now fall through to the ALREADY-EXISTING
+  `validate_v31_linear_body` diagnostic ("unsupported pattern shape"),
+  converting a guaranteed compiler abort into an honest compile error
+  — zero risk of newly-wrong codegen, since this input never compiled
+  correctly before either way. Regression test:
+  `bug48_await_scrutinee_only_suspend_does_not_crash_compiler`
+  (`lib.rs`) — this test alone would previously have aborted the
+  entire `cargo test` process. Full `cargo test --release --workspace`
+  reverified clean (2599 lib tests + every integration-test binary, 0
+  failed) after the fix.
+
+- [ ] **BUG-49 (found fixing BUG-48, NOT fixed — deep, sensitive
+  language-feature gap: `await()` does not actually work yet, it now
+  just fails cleanly instead of crashing).** BUG-48's fix makes the
+  compiler reject `await()`'s scrutinee-only-suspend shape gracefully;
+  it does not make it compile. To make the minimal repro above
+  actually run, the compiler needs to: (1) hoist the `io_*_async`
+  scrutinee out to its own suspend-point `Let` (an early attempt at
+  this — extending `anf_lift_expr`'s `Match` case to lift the
+  scrutinee like any other subexpression — was tried and reverted this
+  session: it compiles, but the hoisted local gets stamped
+  `Type::I64` by the existing `__anf_N` hoisting convention, which
+  loses the scrutinee's real `Future<T>` shape and the checker no
+  longer recognizes the `Future.Ready`/`Future.Pending` patterns
+  against it, producing a confusing "scrutinee is of integer type
+  i64" error instead of a working program); and then (2) teach the
+  checker/synthesizer to recognize a match against that hoisted local
+  as the special "resume with the awaited value" case (mirroring how
+  the existing `is_direct_suspend` / direct `let x = io_async_call()`
+  path already treats the local's *declared* type as the awaited
+  value's type, not `Future<T>`, and bypasses ordinary variant
+  matching entirely) — likely by recognizing the exact
+  `synthesize_await_desugar` output shape end-to-end (scrutinee is
+  directly an `io_*_async` call, arms are exactly
+  `Future.Ready(v)`/`Future.Pending`) as its own case in
+  `try_desugar_let_match_with_suspends`, rather than trying to make
+  the general tag-extraction/ANF machinery handle it. Also still open,
+  independent of the crash: `01a_async_primer.md`'s tutorial text uses
+  a bare-statement `await(io_send_async(fd, resp));` (no `let`), which
+  doesn't parse ("expected statement") regardless of this bug — the
+  doc's own example needs a syntax fix (or a real bare-statement-await
+  parser feature) whenever this is picked up. Whoever picks this up
+  next: start from `try_desugar_let_match_with_suspends` in
+  `parser.rs` (the `has_variant` branch) and `validate_v31_linear_body`
+  (the "unsupported pattern shape" diagnostic this now hits) — both are
+  right next to BUG-48's fix.
 
 ---

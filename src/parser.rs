@@ -6624,6 +6624,21 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
                 },
             )
         }
+        // A Match reaches here only when it does NOT need per-arm
+        // state-splitting (try_desugar_let_match_with_suspends
+        // routes suspending-arm matches through tag-extraction
+        // before this is called) -- e.g. the scrutinee-only-suspend
+        // `await(inner)` shape. Deliberately left unlifted here:
+        // the scrutinee's checker type (e.g. `Future<T>`, whose
+        // `Future.Ready`/`Future.Pending` patterns the checker only
+        // recognizes for the literal `let x = io_async_call(...)`
+        // shape) would be lost if hoisted into a plain i64 ANF
+        // temp. Falling through unchanged means
+        // `validate_v31_linear_body` reports its existing clean
+        // "unsupported pattern shape" diagnostic instead of
+        // mistyped codegen -- correct behavior until a real
+        // Phase 2.3d lands full scrutinee-only-suspend support.
+        //
         // Other expr shapes don't typically contain io_*_async
         // in v3.1 narrow scope; return unchanged.
         _ => (vec![], expr.clone()),
@@ -6691,10 +6706,30 @@ fn try_desugar_let_match_with_suspends(
                 | crate::ast::Pattern::VariantWithBinding { .. }
         )
     });
-    if has_variant {
+    // Tag-extraction is only needed when an ARM BODY itself
+    // suspends (per-arm state-splitting). When the suspend is
+    // only in the SCRUTINEE -- the common `await(inner)` desugar
+    // shape, `match inner { Future.Ready(v) then v, Future.Pending
+    // then 0 }`, whose arm bodies are trivial -- tag-extraction is
+    // both unnecessary and unsound: it re-embeds the SAME
+    // io_async scrutinee into a freshly synthesized Match with
+    // the same Variant-shaped patterns, which this same function
+    // then detects as needing tag-extraction AGAIN on the next
+    // `anf_lift_body` pass over its own output, forever (this was
+    // a real, 100%-reproducible stack overflow on every `await()`
+    // call -- see docs/TODO_CURRENT.md BUG-48). Route scrutinee-
+    // only suspends through the plain ANF path instead (`None`
+    // here falls through to `anf_lift_expr`'s `Match` case, which
+    // hoists the scrutinee to its own suspend-point Let and
+    // leaves a plain, non-suspending match behind).
+    let arms_suspend = arms.iter().any(|a| expr_contains_io_async(&a.body));
+    if has_variant && arms_suspend {
         return try_desugar_match_via_tag_extraction(
             name, annotation, scrutinee, arms, span,
         );
+    }
+    if has_variant {
+        return None;
     }
     // Validate arms: Pattern::Int | Bool | Str | Float OR
     // trailing Pattern::Wildcard.

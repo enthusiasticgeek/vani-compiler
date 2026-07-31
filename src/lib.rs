@@ -24200,6 +24200,46 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
+    /// BUG-48 regression — `await(inner)` desugars to `match inner
+    /// { Future.Ready(v) then v, Future.Pending then 0 }`, where the
+    /// SUSPEND is in the scrutinee (`inner`, the io_*_async call
+    /// itself), not any arm body. Before the fix,
+    /// `try_desugar_let_match_with_suspends` routed this into
+    /// `try_desugar_match_via_tag_extraction` (triggered by the
+    /// Variant-shaped `Future.Ready`/`Future.Pending` patterns,
+    /// same as Phase 2.3c/2.3d above), which re-embeds the SAME
+    /// io_async scrutinee into a freshly synthesized tag-extraction
+    /// match with the same Variant-shaped patterns -- structurally
+    /// indistinguishable from the original trigger, so
+    /// `anf_lift_body` re-desugared its own synthesized output
+    /// forever, stack-overflowing (aborting) the whole compiler
+    /// process on 100% of `await()` calls. The fix gates
+    /// tag-extraction on whether an ARM BODY (not just the
+    /// scrutinee) contains a suspend; scrutinee-only suspends now
+    /// fall through to `validate_v31_linear_body`'s existing clean
+    /// diagnostic instead of recursing. Full await() support is
+    /// real future work (not yet implemented, no compiler crash
+    /// either way -- see docs/TODO_CURRENT.md).
+    #[test]
+    fn bug48_await_scrutinee_only_suspend_does_not_crash_compiler() {
+        let source = r#"
+            async fn handler1(fd: i64) -> i64 {
+              let req: i64 = await(io_recv_async(fd, 64));
+              return req;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "await()'s scrutinee-only-suspend shape isn't supported yet -- \
+             must fail with a clean diagnostic, not crash/hang the compiler"
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("unsupported pattern shape")),
+            "expected the v3.1 'unsupported pattern shape' diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 3a — non-i64 locals (bool + f64). Lifts
     /// the historical i64-only rule for locals with obvious
     /// defaults. Task struct fields take the actual annotation;
