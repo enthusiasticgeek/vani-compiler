@@ -151,8 +151,8 @@ let m: Mutex<i64> = mutex_new(0);
 let g: Guard<i64> = mutex_lock(ref m);
 // pseudo: wait until predicate holds
 let _ = condvar_wait(ref cv, mut ref g);
-let _ = condvar_signal_one(ref cv);
-let _ = condvar_signal_all(ref cv);
+let _ = condvar_notify_one(ref cv);   // wake exactly one waiter
+let _ = condvar_notify_all(ref cv);   // wake every waiter
 ```
 
 - Used together with `Mutex` for "wait until X" patterns.
@@ -200,12 +200,20 @@ writes and you want to avoid Mutex contention.
 ```vani
 fn main() -> i64 {
   let rw: RwLock<i64> = rwlock_new(0);
+  let v: i64 = 0;
 
-  // Shared read -- many threads can hold a ReadGuard at once
-  let r: ReadGuard<i64> = rwlock_read(ref rw);
-  let v: i64 = read_guard_get(ref r);
-  print "current value =", v;
-  // ReadGuard drops here -> read lock released
+  // Shared read -- many threads can hold a ReadGuard at once.
+  // Both rwlock_read AND rwlock_write take `mut ref` -- acquiring
+  // even a read lock mutates the lock's internal reader-count.
+  // Scoped in its own block so the ReadGuard drops (releasing the
+  // read lock) BEFORE the write-lock acquisition below -- holding
+  // a live guard across another acquisition on the same thread
+  // deadlocks (there's no other thread left to release it).
+  {
+    let r: ReadGuard<i64> = rwlock_read(mut ref rw);
+    v = read_guard_get(ref r);
+    print "current value =", v;
+  }   // ReadGuard drops here -> read lock released
 
   // Exclusive write -- blocks until all readers have released
   let w: WriteGuard<i64> = rwlock_write(mut ref rw);
