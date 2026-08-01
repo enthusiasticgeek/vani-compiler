@@ -281,6 +281,102 @@ fn expr_calls_file_line_read(expr: &TypedExpr) -> bool {
     }
 }
 
+/// BUG found auditing 05_simd.md (2026-08-01): SSA-C never
+/// implemented `vec_with_capacity` (SSA-LLVM did) -- the checker
+/// accepts it cleanly, but SSA-C's builtin dispatch falls through
+/// to an ordinary (nonexistent) function call, failing a real `cc`
+/// compile with "implicit declaration of function". Mirrors
+/// `stmt_calls_file_line_read`/`expr_calls_file_line_read` exactly.
+fn stmt_calls_vec_with_capacity(stmt: &TypedStmt) -> bool {
+    match stmt {
+        TypedStmt::Let { expr, .. } | TypedStmt::Reassign { expr, .. } => {
+            expr_calls_vec_with_capacity(expr)
+        }
+        TypedStmt::Discard { expr }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } => expr_calls_vec_with_capacity(expr),
+        TypedStmt::Print { items } => items.iter().any(|i| match i {
+            TypedPrintItem::Expr(e) => expr_calls_vec_with_capacity(e),
+            TypedPrintItem::Str(_) => false,
+        }),
+        TypedStmt::If { cond, then_body, else_body } => {
+            expr_calls_vec_with_capacity(cond)
+                || then_body.iter().any(stmt_calls_vec_with_capacity)
+                || else_body.iter().any(stmt_calls_vec_with_capacity)
+        }
+        TypedStmt::While { cond, body, .. } => {
+            expr_calls_vec_with_capacity(cond)
+                || body.iter().any(stmt_calls_vec_with_capacity)
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            expr_calls_vec_with_capacity(start)
+                || expr_calls_vec_with_capacity(end)
+                || body.iter().any(stmt_calls_vec_with_capacity)
+        }
+        TypedStmt::ForIter { body, .. } => {
+            body.iter().any(stmt_calls_vec_with_capacity)
+        }
+        TypedStmt::IndexAssign { index, value, .. } => {
+            expr_calls_vec_with_capacity(index) || expr_calls_vec_with_capacity(value)
+        }
+        TypedStmt::FieldAssign { object, value, .. } => {
+            expr_calls_vec_with_capacity(object) || expr_calls_vec_with_capacity(value)
+        }
+        TypedStmt::TaskSpawn { body, .. } => {
+            body.iter().any(stmt_calls_vec_with_capacity)
+        }
+        _ => false,
+    }
+}
+
+fn expr_calls_vec_with_capacity(expr: &TypedExpr) -> bool {
+    use vani::ir::TypedExprKind as E;
+    if let E::Call { name, args, .. } = &expr.kind {
+        if name == "vec_with_capacity" {
+            return true;
+        }
+        return args.iter().any(expr_calls_vec_with_capacity);
+    }
+    match &expr.kind {
+        E::Unary { expr, .. } | E::Cast { expr, .. } | E::Len { array: expr, .. } => {
+            expr_calls_vec_with_capacity(expr)
+        }
+        E::Binary { left, right, .. } => {
+            expr_calls_vec_with_capacity(left) || expr_calls_vec_with_capacity(right)
+        }
+        E::ArrayLit { elements } => elements.iter().any(expr_calls_vec_with_capacity),
+        E::CallIndirect { callee, args } => {
+            expr_calls_vec_with_capacity(callee)
+                || args.iter().any(expr_calls_vec_with_capacity)
+        }
+        E::Index { array, index, .. } => {
+            expr_calls_vec_with_capacity(array) || expr_calls_vec_with_capacity(index)
+        }
+        E::Tuple { elements } => elements.iter().any(expr_calls_vec_with_capacity),
+        E::TupleAccess { tuple, .. } => expr_calls_vec_with_capacity(tuple),
+        E::StructLit { fields, .. } => {
+            fields.iter().any(|(_, e)| expr_calls_vec_with_capacity(e))
+        }
+        E::FieldAccess { object, .. } => expr_calls_vec_with_capacity(object),
+        E::EnumVariantWithPayload { payload, .. } => expr_calls_vec_with_capacity(payload),
+        E::IfExpr { cond, then_value, else_value } => {
+            expr_calls_vec_with_capacity(cond)
+                || expr_calls_vec_with_capacity(then_value)
+                || expr_calls_vec_with_capacity(else_value)
+        }
+        E::Match { scrutinee, arms } => {
+            expr_calls_vec_with_capacity(scrutinee)
+                || arms.iter().any(|arm| expr_calls_vec_with_capacity(&arm.body))
+        }
+        E::Block { stmts, tail } => {
+            stmts.iter().any(stmt_calls_vec_with_capacity)
+                || expr_calls_vec_with_capacity(tail)
+        }
+        _ => false,
+    }
+}
+
 fn ty_contains_vec_of_atomic_or_channel(ty: &Type) -> bool {
     match ty {
         Type::Vec(inner) => matches!(
@@ -419,6 +515,17 @@ fn ssa_c_extra_reject(stmt: &TypedStmt) -> bool {
     // of erroring. Fall back to tree-C, which has always implemented
     // these correctly.
     stmt_calls_f64_to_str_fixed(stmt) || stmt_calls_file_line_read(stmt)
+        // Found auditing tutorials/src/advanced/05_simd.md
+        // (2026-08-01): `vec_with_capacity` is implemented in
+        // SSA-LLVM (`ssa_backend_llvm.rs`) but was never ported to
+        // SSA-C -- unlike `vec_fill` (already in the shared
+        // `expr_ssa_supported` reject list above, since it's
+        // missing from BOTH SSA backends), `vec_with_capacity`
+        // genuinely works on SSA-LLVM, so rejecting it in the
+        // *shared* list would needlessly lose LLVM's SSA fast path
+        // too. Reject only on the C side here instead, matching
+        // this function's existing per-backend-gap pattern.
+        || stmt_calls_vec_with_capacity(stmt)
 }
 
 fn ssa_type_supported(ty: &Type) -> bool {

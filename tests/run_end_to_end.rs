@@ -5302,3 +5302,56 @@ fn main() -> i64 {
         );
     }
 }
+
+// Found auditing tutorials/src/advanced/05_simd.md (2026-08-01): two
+// bugs, both C-backend-only. (1) vec_fill/vec_with_capacity's tree-C
+// codegen computed the Vec bundle's struct name via an LLVM-backend
+// naming helper by mistake, producing a stale name a real cc rejects
+// (src/lib.rs's compile_to_c-based unit tests cover this half). (2)
+// vec_with_capacity is implemented in SSA-LLVM but was never ported to
+// SSA-C, and nothing routed it to the tree-C fallback -- SSA-C fell
+// through to an ordinary (nonexistent) function call. Since
+// compile_to_c always calls the tree backend directly, only a real CLI
+// invocation (which goes through main.rs's SSA-first dispatch) can
+// prove bug (2) is actually fixed.
+#[test]
+fn vec_with_capacity_compiles_and_runs_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_with_capacity_real_cc",
+        r#"
+fn main() -> i64 {
+  let a: Vec<i64> = vec_with_capacity(4);
+  let _ = push(mut ref a, 10);
+  let _ = push(mut ref a, 20);
+  print "len:", len(a);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "len: 2\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "vec_with_capacity produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}

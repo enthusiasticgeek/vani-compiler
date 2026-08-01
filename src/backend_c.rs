@@ -16559,7 +16559,7 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 _ => unreachable!("vec_with_capacity() must return Vec<_>"),
             };
             let c_element = c_element_storage(element);
-            let vec_ty = format!("intent_vec_{}", crate::backend_llvm::vec_struct_tag(element));
+            let vec_ty = vec_c_struct(element);
             let n_expr = emit_expr(&args[0]);
             format!(
                 "({{ int64_t _vwc_n = (int64_t)({n}); \
@@ -16581,7 +16581,7 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             };
             let elt_bytes = crate::backend_llvm::vec_element_byte_size(element);
             let c_element = c_element_storage(element);
-            let vec_ty = format!("intent_vec_{}", crate::backend_llvm::vec_struct_tag(element));
+            let vec_ty = vec_c_struct(element);
             let n_expr = emit_expr(&args[0]);
             let val_expr = emit_expr(&args[1]);
             if elt_bytes == 1 {

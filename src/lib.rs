@@ -51294,5 +51294,69 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG found auditing tutorials/src/advanced/05_simd.md (2026-08-01):
+    /// `vec_fill`'s and `vec_with_capacity`'s tree-C codegen
+    /// (`backend_c.rs`) computed their Vec bundle's struct name via
+    /// `crate::backend_llvm::vec_struct_tag` -- an LLVM-BACKEND naming
+    /// helper, reused by mistake in C codegen -- instead of the C
+    /// backend's own `vec_c_struct`/`element_tag`. For `i64` this
+    /// produced the stale name `intent_vec_i64` instead of the real
+    /// `intent_vec_int64_t` that `emit_vec_bundle_typedef` actually
+    /// generates, failing a real `cc` compile ("unknown type name
+    /// 'intent_vec_i64'"). No prior test existed for either builtin at
+    /// all -- that's how this went uncaught. Fixed by using
+    /// `vec_c_struct(element)` at both call sites, matching the
+    /// convention used everywhere else in this file.
+    #[test]
+    fn vec_fill_uses_real_vec_struct_name_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: Vec<i64> = vec_fill(8, 1);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("vec_fill program must compile to C");
+        assert!(
+            !c.contains("intent_vec_i64 "),
+            "C output must not reference the stale intent_vec_i64 name:\n{c}"
+        );
+        assert!(
+            c.contains("intent_vec_int64_t v_a"),
+            "expected the real intent_vec_int64_t struct name:\n{c}"
+        );
+    }
+
+    #[test]
+    fn vec_with_capacity_uses_real_vec_struct_name_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: Vec<i64> = vec_with_capacity(10);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("vec_with_capacity program must compile to C");
+        assert!(
+            !c.contains("intent_vec_i64 "),
+            "C output must not reference the stale intent_vec_i64 name:\n{c}"
+        );
+        assert!(
+            c.contains("intent_vec_int64_t v_a"),
+            "expected the real intent_vec_int64_t struct name:\n{c}"
+        );
+    }
+
+    // The other half of the same bug -- `vec_with_capacity` is
+    // implemented in SSA-LLVM (`ssa_backend_llvm.rs`) but was never
+    // ported to SSA-C, so the CLI's default `--backend=c` path (which
+    // routes through `main.rs`'s `emit_c_via_ssa`/`ssa_path_supports`,
+    // NOT the `compile_to_c` helper used above -- that helper always
+    // calls the tree backend directly and can't exercise this bug at
+    // all) fell through to an ordinary (nonexistent) function call.
+    // Fixed by adding `stmt_calls_vec_with_capacity` to
+    // `ssa_c_extra_reject` in `main.rs`. Only a real CLI invocation
+    // proves this -- see
+    // `vec_with_capacity_compiles_and_runs_on_both_backends` in
+    // `tests/run_end_to_end.rs`.
+
 }
 

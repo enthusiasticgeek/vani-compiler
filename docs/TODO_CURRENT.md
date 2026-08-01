@@ -4264,4 +4264,50 @@ verifying the four fixes above against their tutorial worked examples
   --release --workspace` clean (2611 passed, 0 failed) after both
   fixes.
 
+## Two more bugs found auditing 05_simd.md (added+fixed 2026-08-01)
+
+- [x] **BUG-55. `vec_fill`/`vec_with_capacity` failed a real `cc`
+  compile on `Vec<i64>` (and every other element type) — "unknown
+  type name 'intent_vec_i64'; did you mean 'intent_vec_int64_t'".**
+  Found running the chapter's own first example (`vec_fill(8, 1 as
+  i64)`) through the real compiler. Root cause: both builtins'
+  tree-C codegen (`backend_c.rs`) computed their Vec bundle's C
+  struct name via `crate::backend_llvm::vec_struct_tag` — an
+  **LLVM-backend** naming helper, reused by mistake inside C codegen
+  — instead of the C backend's own `vec_c_struct`/`element_tag`
+  (already used correctly at ~15 other call sites in the same file).
+  For `i64` this produced the stale name `intent_vec_i64`, not the
+  real `intent_vec_int64_t` that `emit_vec_bundle_typedef` actually
+  emits. **Fixed**: both call sites now use `vec_c_struct(element)`,
+  matching the file's own established convention. No prior test
+  existed for either builtin at all — that's how this went
+  uncaught. Added unit tests asserting the correct struct name
+  appears (and the stale one doesn't) in the emitted C.
+- [x] **BUG-56. `vec_with_capacity` failed a real `cc` compile via
+  the actual CLI's default `--backend=c` path — "implicit
+  declaration of function 'fn_vec_with_capacity'" — even after
+  BUG-55 was fixed.** Root cause: `vec_with_capacity` is implemented
+  in SSA-LLVM (`ssa_backend_llvm.rs`) but was never ported to SSA-C,
+  and nothing routed it to the tree-C fallback the way `vec_fill`
+  already was (see `main.rs`'s `expr_ssa_supported`, which explicitly
+  rejects `vec_fill` for exactly this reason) — so SSA-C silently fell
+  through to an ordinary (nonexistent) function call. Same root-cause
+  shape as BUG-44/BUG-53 (a builtin ported to one backend's SSA path
+  but not the other's, with nothing gating the gap). Since
+  `vec_with_capacity` genuinely DOES work on SSA-LLVM, adding it to
+  the *shared* `expr_ssa_supported` rejection list (like `vec_fill`)
+  would have needlessly forced LLVM back to the tree path too —
+  instead added a new `stmt_calls_vec_with_capacity`/
+  `expr_calls_vec_with_capacity` pair (mirroring the existing
+  `stmt_calls_file_line_read` pattern exactly) wired into
+  `ssa_c_extra_reject` only, so just the C side falls back. **Caught
+  a testing-methodology gap while writing the regression test**: the
+  library's `compile_to_c` helper always calls the tree-C backend
+  directly and can NEVER exercise this SSA-routing bug — only a real
+  CLI invocation (which goes through `main.rs`'s SSA-first dispatch)
+  can. Added `vec_with_capacity_compiles_and_runs_on_both_backends`
+  (`tests/run_end_to_end.rs`) for that; the `src/lib.rs` unit tests
+  cover BUG-55's struct-naming half only. Full `cargo test --release
+  --workspace` clean (2613 passed, 0 failed) after both fixes.
+
 ---
