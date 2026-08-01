@@ -129,7 +129,7 @@ mutual recursion via call-graph cycle detection.
 #[no_recursion]
 fn safe_sum(xs: ref Vec<i64>) -> i64 {
   let acc: i64 = 0;
-  for i in 0..len(xs) { acc = acc + xs[i]; }
+  for i from 0 to len(xs) { acc = acc + xs[i]; }
   return acc;
 }
 ```
@@ -159,15 +159,17 @@ Required alongside `#[bounded_stack]` when using `#[asil_d]` or
 
 ---
 
-### `#[bounded_stack(N)]`
+### `#[bounded_stack(bytes = N)]`
 
 Assert that the function's total stack usage (frame size + all
-transitive calls) does not exceed `N` bytes.
+transitive calls) does not exceed `N` bytes. The `bytes =` keyword
+is required -- a bare positional `#[bounded_stack(512)]` doesn't
+parse ("expected identifier"), confirmed by testing.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
-#[bounded_stack(512)]
+#[bounded_stack(bytes = 512)]
 fn handle_packet(buf: ref [u8; 64]) -> i64 {
   // Compile error if any path through this fn uses > 512 bytes of stack.
   return 0;
@@ -176,25 +178,6 @@ fn handle_packet(buf: ref [u8; 64]) -> i64 {
 
 `vanic stack-depth` reports the estimate; `--max=N` on that
 command makes the budget a CI gate.
-
----
-
-### `#[recursion_bound(N)]`
-
-Limit the maximum recursion depth to `N`. The compiler generates
-a runtime depth counter and panics if exceeded.
-
-```vani
-#[recursion_bound(100)]
-fn fibonacci(n: i64) -> i64 {
-  if n <= 1 { return n; }
-  return fibonacci(n - 1) + fibonacci(n - 2);
-}
-```
-
-Required for DO-178C / ASIL-D on functions that must be
-"dynamically bounded." Combine with `#[bounded_stack]` for
-full stack-safety certification.
 
 ---
 
@@ -239,9 +222,19 @@ reference the exact symbol name.
 
 ### `#[bounded(N)]`
 
-For mutually recursive functions: declare that the function is
-part of a mutually-recursive group bounded by `N` total steps.
-Used by `vanic acyclicity` to allow bounded cycles.
+Limits the maximum recursion depth to `N`. The compiler generates a
+real runtime depth counter and aborts if it's exceeded -- confirmed
+by testing (`#[bounded(3)]` on a function whose actual call chain
+goes 10 deep compiles cleanly, then aborts at runtime the moment
+depth 3 is crossed). This is v1's ONLY recursion-bound attribute --
+an earlier version of this page also documented a separate
+`#[recursion_bound(N)]` with the same description; that name doesn't
+exist and is rejected as an unknown attribute.
+
+`#[bounded(N)]` is also what makes `vanic acyclicity` accept
+mutually recursive functions -- without it, `vanic acyclicity` would
+reject the cycle between `even` and `odd` below outright, since it
+can't otherwise prove the mutual recursion terminates:
 
 ```vani
 #[bounded(10)]
@@ -257,8 +250,8 @@ fn odd(n: i64) -> bool {
 }
 ```
 
-Without `#[bounded]`, `vanic acyclicity` would reject the mutual
-recursion between `even` and `odd`.
+Combine with `#[bounded_stack]` for full stack-safety certification
+on DO-178C / ASIL-D, where recursion must be "dynamically bounded."
 
 ---
 
@@ -363,7 +356,7 @@ Has no effect in the C backend.
 #[vectorize]
 fn dot_product(a: ref Vec<f64>, b: ref Vec<f64>) -> f64 {
   let acc: f64 = 0.0;
-  for i in 0..len(a) { acc = acc + a[i] * b[i]; }
+  for i from 0 to len(a) { acc = acc + a[i] * b[i]; }
   return acc;
 }
 ```
@@ -379,7 +372,7 @@ Attributes can be stacked. A typical bare-metal ISR:
 #[link_section = ".text.isr"]
 #[interrupt]
 #[no_heap]
-#[bounded_stack(256)]
+#[bounded_stack(bytes = 256)]
 fn HardFault_Handler() -> i64 {
   // Hardware fault handler -- no heap, bounded stack, no mangling,
   // placed in the .text.isr section.
@@ -402,11 +395,10 @@ named in the diagnostic.
 | `#[no_nan]` | Reject NaN-contract builtins (`f64_nan`, `vec_kth_smallest<f64>`) | None (compile-time) |
 | `#[no_recursion]` | Reject direct/mutual recursion via call-graph cycle | None (compile-time) |
 | `#[wcet(cycles=N)]` | Worst-case cycle budget | None (compile-time estimate) |
-| `#[bounded_stack(N)]` | Stack budget <= N bytes | None (compile-time estimate) |
+| `#[bounded_stack(bytes = N)]` | Stack budget <= N bytes | None (compile-time estimate) |
 | `#[deterministic_timing]` | No dynamic-dispatch / unbounded loops | None (compile-time) |
 | `#[interrupt]` | ISR calling convention | Register save/restore at entry/exit |
-| `#[recursion_bound(N)]` | Max recursion depth | 1 counter increment per call |
-| `#[bounded(N)]` | Allow bounded mutual recursion in acyclicity | None |
+| `#[bounded(N)]` | Max recursion depth (runtime abort if exceeded); also allows bounded mutual recursion in `vanic acyclicity` | 1 counter increment per call |
 | `#[inline]` | Inline body at call sites; stack merged by analyser | None |
 | `#[vectorize]` | SIMD auto-vectorization hint (LLVM backend only) | None |
 | `#[no_mangle]` | Exact symbol name in object file | None |
