@@ -7915,6 +7915,30 @@ fn monomorphize_type_decls_in_program(
         for stmt in f.body.iter_mut() {
             rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
         }
+        // BUG-46 fix: rewrite_apply_in_stmt (just above) only
+        // rewrites Type::Apply occurrences in TYPE positions
+        // (Let annotations) -- it never touches VALUE-level bare
+        // `EnumName.Variant(payload)` constructor expressions
+        // (parsed as MethodCall{receiver: Var(name), ...}). So once
+        // 2+ instantiations of the same generic enum exist in the
+        // program, the checker's later `resolve_enum_name` "exactly
+        // one candidate in the whole program" heuristic can't
+        // disambiguate a bare `Option.Some(1)` anymore, and EVERY
+        // constructor call for that enum breaks -- confirmed by
+        // testing. `f.return_type` (just rewritten above) already
+        // tells us the exact concrete instantiation a `return`
+        // statement's expression must produce; a `let` statement's
+        // own (already-rewritten) annotation tells us the same for
+        // its initializer. Resolve the ambiguity right here, while
+        // we still have that context, by rewriting the bare
+        // template name straight to the mangled one.
+        let fn_return_enum = match &f.return_type {
+            Type::Enum(n) => Some(n.clone()),
+            _ => None,
+        };
+        for stmt in f.body.iter_mut() {
+            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names);
+        }
     }
     for s in program.structs.iter_mut() {
         for fld in s.fields.iter_mut() {
@@ -7938,6 +7962,14 @@ fn monomorphize_type_decls_in_program(
             rewrite_apply_in_ty(&mut method.return_type, &struct_names, &enum_names);
             for stmt in method.body.iter_mut() {
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
+            }
+            // BUG-46 fix -- same as the plain-function loop above.
+            let method_return_enum = match &method.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
             }
         }
     }
@@ -7964,7 +7996,84 @@ fn monomorphize_type_decls_in_program(
             for stmt in method.body.iter_mut() {
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
+            // BUG-46 fix -- same as the plain-function loop above.
+            let method_return_enum = match &method.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
+            }
         }
+    }
+}
+
+/// BUG-46 fix. Rewrites a bare `EnumName.Variant(payload)`
+/// constructor expression's receiver from the generic template
+/// name (e.g. `"Option"`) to a specific monomorphized name (e.g.
+/// `"Option__i64"`) when the expression sits somewhere its
+/// concrete instantiation is already known from context (a
+/// `return` against a known return type, or a `let` against its
+/// own type annotation). Leaves anything else untouched --
+/// `resolve_enum_name`'s existing "exactly one instantiation in
+/// the whole program" fallback still covers every other position
+/// (call arguments, bare expression statements, etc.) exactly as
+/// before, so this can only ADD resolving power, never take any
+/// away.
+fn resolve_bare_enum_ctor_receiver(
+    expr: &mut Expr,
+    target_enum_name: &str,
+    enum_template_names: &std::collections::HashSet<String>,
+) {
+    if let ExprKind::MethodCall { receiver, .. } = &mut expr.kind {
+        if let ExprKind::Var(name) = &mut receiver.kind {
+            if enum_template_names.contains(name.as_str()) {
+                *name = target_enum_name.to_string();
+            }
+        }
+    }
+}
+
+/// Walks a statement (recursing into `if`/`while`/`for` bodies)
+/// applying `resolve_bare_enum_ctor_receiver` to `return`
+/// expressions (against `fn_return_enum`, the enclosing function's
+/// already-monomorphized return type) and `let` expressions
+/// (against that same `let`'s own already-monomorphized
+/// annotation, if any).
+fn resolve_bare_enum_ctors_in_stmt(
+    stmt: &mut Stmt,
+    fn_return_enum: Option<&str>,
+    enum_template_names: &std::collections::HashSet<String>,
+) {
+    match stmt {
+        Stmt::Let { annotation: Some(Type::Enum(target)), expr, .. } => {
+            let target = target.clone();
+            resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+        }
+        Stmt::Return { expr, .. } => {
+            if let Some(target) = fn_return_enum {
+                resolve_bare_enum_ctor_receiver(expr, target, enum_template_names);
+            }
+        }
+        Stmt::If { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
+        Stmt::While { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
+        Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
+        _ => {}
     }
 }
 

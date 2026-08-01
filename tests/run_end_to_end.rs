@@ -5500,6 +5500,70 @@ fn main() -> i64 {
     }
 }
 
+// BUG-46, found in an earlier tutorial audit and fixed here
+// (2026-08-01): with 2+ instantiations of a builtin generic enum
+// (Option<T> or Result<T,E>) in the same program, EVERY constructor
+// call for that enum broke -- not just the "extra" ones. Only a
+// real run proves the fix produces the CORRECT runtime values, not
+// just that the file compiles.
+#[test]
+fn result_with_three_instantiations_produces_correct_values_on_both_backends() {
+    let src = write_tmp_vani(
+        "result_three_instantiations_real_run",
+        r#"
+struct IoError { code: i64 }
+struct ParseError { code: i64 }
+struct ConfigError { code: i64 }
+
+fn read_file(ok: bool) -> Result<i64, IoError> {
+  if ok { return Result.Ok(42); }
+  return Result.Err(IoError { code: 1 });
+}
+fn parse_value(ok: bool) -> Result<i64, ParseError> {
+  if ok { return Result.Ok(7); }
+  return Result.Err(ParseError { code: 2 });
+}
+fn load_config(ok: bool) -> Result<i64, ConfigError> {
+  if ok { return Result.Ok(99); }
+  return Result.Err(ConfigError { code: 3 });
+}
+fn main() -> i64 {
+  let a: Result<i64, IoError> = read_file(true);
+  let b: Result<i64, ParseError> = parse_value(false);
+  let c: Result<i64, ConfigError> = load_config(true);
+  if let Result.Ok(v) = a { print v; }
+  if let Result.Err(e) = b { print e.code; }
+  if let Result.Ok(v) = c { print v; }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "3 differently-parameterized Result<i64, E> constructors must all compile and run \
+             for {:?}; stderr: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\n2\n99\n",
+            "wrong values for {:?} -- expected read_file's Ok(42), parse_value's Err(2), \
+             load_config's Ok(99)",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(

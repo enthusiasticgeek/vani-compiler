@@ -41865,6 +41865,94 @@ função main() -> i64 {
         compile_to_llvm(source).expect("generic Result<i64, i64> compiles");
     }
 
+    /// BUG-46 (found in an earlier tutorial audit, fixed here
+    /// 2026-08-01): ANY constructor call (`EnumName.Variant(...)`)
+    /// for the BUILT-IN generic `Option<T>` broke at EVERY call
+    /// site in the program the instant a second, differently-
+    /// parameterized `Option<T>` instantiation existed anywhere
+    /// else — confirmed by testing: `fn f() -> Option<i64> { return
+    /// Option.Some(1); }` alone compiles, but adding a sibling `fn
+    /// g() -> Option<OwnedStr> { return Option.Some("x" + ""); }`
+    /// breaks BOTH with "unknown variable 'Option'" / "cannot call
+    /// method 'Some' on i64". Root cause: `resolve_enum_name`
+    /// (checker.rs) only resolves a bare generic-enum name to its
+    /// mangled instantiation when there's EXACTLY ONE candidate in
+    /// the whole program (a deliberate, documented v1 restriction,
+    /// closure #281) — value-level constructor expressions never
+    /// got the benefit of the SURROUNDING CONTEXT (the enclosing
+    /// `return`'s function signature, or the `let`'s own type
+    /// annotation) that already unambiguously pins down which
+    /// instantiation is meant. Fixed with
+    /// `resolve_bare_enum_ctors_in_stmt` in
+    /// `monomorphize_type_decls_in_program`: for a `return`
+    /// statement, resolve using the enclosing function's own
+    /// (already-monomorphized) return type; for a `let` with an
+    /// explicit type annotation, resolve using that annotation.
+    /// Anything NOT covered by these two shapes (e.g. a bare
+    /// constructor passed directly as a function-call argument)
+    /// keeps the exact pre-existing behavior — confirmed by testing
+    /// that shape still gets the same diagnostic as before, i.e.
+    /// this fix only ADDS resolving power, never changes existing
+    /// behavior.
+    #[test]
+    fn option_constructor_resolves_correctly_with_two_different_instantiations() {
+        let source = r#"
+            fn f() -> Option<i64> { return Option.Some(1); }
+            fn g() -> Option<OwnedStr> { return Option.Some("x" + ""); }
+            fn main() -> i64 {
+              let a: Option<i64> = f();
+              let b: Option<OwnedStr> = g();
+              return 0;
+            }
+        "#;
+        compile(source).expect("Option<i64> and Option<OwnedStr> constructors must both resolve");
+    }
+
+    #[test]
+    fn result_constructor_resolves_correctly_with_three_different_instantiations() {
+        let source = r#"
+            struct IoError { code: i64 }
+            struct ParseError { code: i64 }
+            struct ConfigError { code: i64 }
+
+            fn read_file(ok: bool) -> Result<i64, IoError> {
+              if ok { return Result.Ok(42); }
+              return Result.Err(IoError { code: 1 });
+            }
+            fn parse_value(ok: bool) -> Result<i64, ParseError> {
+              if ok { return Result.Ok(7); }
+              return Result.Err(ParseError { code: 2 });
+            }
+            fn load_config(ok: bool) -> Result<i64, ConfigError> {
+              if ok { return Result.Ok(99); }
+              return Result.Err(ConfigError { code: 3 });
+            }
+            fn main() -> i64 {
+              let a: Result<i64, IoError> = read_file(true);
+              let b: Result<i64, ParseError> = parse_value(false);
+              let c: Result<i64, ConfigError> = load_config(true);
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "three differently-parameterized Result<i64, E> constructors must all resolve",
+        );
+    }
+
+    #[test]
+    fn option_constructor_in_let_annotation_resolves_with_two_instantiations() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: Option<i64> = Option.Some(5);
+              let b: Option<OwnedStr> = Option.Some("hi" + "");
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "let-annotated Option<i64>/Option<OwnedStr> constructors must both resolve",
+        );
+    }
+
     #[test]
     fn generic_enum_with_mismatched_arg_count_rejected() {
         let source = r#"
