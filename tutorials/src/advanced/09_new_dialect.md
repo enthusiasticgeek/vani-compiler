@@ -44,7 +44,7 @@ Suppose you're adding Burmese (မြန်မာ, U+1000..U+109F).
 
 In `src/lexer.rs`, add a new `*_keyword` function:
 
-```vani
+```rust
 fn burmese_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "လုပ်ဆောင်ချက်" => TokenKind::Fn,
@@ -59,7 +59,7 @@ fn burmese_keyword(text: &str) -> Option<TokenKind> {
 
 Then wire it into the fallback chain in `lex_unicode_ident`:
 
-```vani
+```rust
 let kind = devanagari_keyword(text)
     .or_else(|| bengali_keyword(text))
     .or_else(|| tamil_keyword(text))
@@ -71,7 +71,7 @@ let kind = devanagari_keyword(text)
 
 Add the `DialectLang` variant:
 
-```vani
+```rust
 enum DialectLang {
     ...
     Burmese,
@@ -80,7 +80,7 @@ enum DialectLang {
 
 Add the pragma alias in `detect_language_pragma`:
 
-```vani
+```rust
 "burmese" | "myanmar" | "my" => Some(DialectLang::Burmese),
 ```
 
@@ -91,7 +91,7 @@ Update `DialectLang::name()` and `DialectLang::script()`.
 Add a new `Script` variant + Unicode block check in
 `Script::classify`:
 
-```vani
+```rust
 if ('\u{1000}'..='\u{109F}').contains(&c) {
     return Script::Burmese;
 }
@@ -110,6 +110,21 @@ Add a new `PrintLangMode::Burmese` variant. Wire it through:
   *outside* the U+0xxx range, so the existing helper-emit
   template needs a tweak).
 - Same for SSA-C, tree-LLVM, SSA-LLVM.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+**This step is real -- and shipped Burmese is still missing it** --
+confirmed by testing (`examples/language/burmese/basics.vani`, a real
+example in the repo, prints its integer result in plain ASCII digits,
+not Burmese digits). `PrintLangMode` (`src/lexer.rs`) has no
+`Burmese` variant at all; the enum's last entry is `Persian`. Steps
+1-3, 5, and 6 below ARE fully done for Burmese (it's a real,
+compiler-level dialect you can use today, per Phase 13.30) -- only
+this specific numeral-printing step was never finished. If you pick
+Burmese as your reference dialect while reading this chapter, don't
+expect step 4 to have a finished example to point at; it's exactly
+the kind of gap this Challenge section's "sketch the full set of
+changes" exercise is good practice for.
 
 ### 5. Diagnostic labels
 
