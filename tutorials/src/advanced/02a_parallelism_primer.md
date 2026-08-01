@@ -167,7 +167,7 @@ for loop:
 
 ```vani
 parallel for i from 0 to 1000 {
-  let r: i64 = expensive_compute(i);
+  let r: i64 = expensive_compute(i);   // must be `pure fn` -- see below
   results[i] = r;
 }
 ```
@@ -185,7 +185,10 @@ parallelize.
 
 For the example above, each iteration writes to `results[i]`
 where `i` is unique to the iteration -- no two iterations write
-the same slot. Safe.
+the same slot. Safe. (`expensive_compute` itself must be declared
+`pure fn` -- a `parallel for` body can only call pure functions,
+confirmed by testing; calling an ordinary function is rejected the
+same way a `task` body rejects one, below.)
 
 If the body did `results[0] = ...` for every iteration -- REJECTED;
 they all clobber the same slot, mathematically impossible to
@@ -197,10 +200,14 @@ What if you want to SUM all the values?
 
 ```vani
 let sum: i64 = 0;
-parallel for i from 0 to 1000 reduce sum with + {
+parallel for i from 0 to 1000 reduce sum with +;
+{
   sum = sum + expensive_value(i);
 }
 ```
+
+(the `;` after `reduce sum with +` is required -- confirmed by
+testing, the loop doesn't parse without it.)
 
 `reduce sum with +` tells the compiler: each iteration
 contributes to `sum`; combine all contributions using `+`.
@@ -222,19 +229,31 @@ parallel rather than thousands), use `task` + `join`:
 
 ```vani
 task download_a {
-  let data: OwnedStr = fetch("a");
-  // do something with data
+  let _ = sleep_ms(20);   // stand-in for a real download
 }
 task download_b {
-  let data: OwnedStr = fetch("b");
-  // do something with data
+  let _ = sleep_ms(10);   // stand-in for a real download
 }
 
 // ... do other things in the main thread ...
 
 join download_a;
 join download_b;
+print "both downloads done";
 ```
+
+Confirmed by testing -- and worth calling out, since it's easy to
+get wrong by analogy with other languages: a `task { ... }` body is
+checked with the SAME purity rules as a `parallel for` body (no
+`print`, no calling a non-`pure` user-defined function -- even a
+one-line wrapper around a builtin gets rejected). It can call
+*builtin* I/O primitives directly (`sleep_ms`, the `tcp_*`/
+`io_*_async` family, ...), which is what makes `task` useful for
+real concurrent I/O at all -- but there is no way to route that I/O
+through your own helper function; the builtin call has to be
+written literally inside the `task` body. This is why the two tasks
+above call `sleep_ms` inline rather than through a `fetch`-style
+wrapper, and why `print` moved to after `join`.
 
 Each `task` body runs in parallel on its own OS thread. `join`
 waits for it to complete. Variables CAPTURED by the task body
