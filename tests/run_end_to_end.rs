@@ -96,6 +96,54 @@ fn rwlock_struct_payload_example_compiles_and_runs_on_both_backends() {
     }
 }
 
+// BUG-49 (2026-07-31): `await(io_*_async(..))` -- BUG-48 fixed the
+// stack-overflow crash on every `await()` call but deliberately left
+// it rejecting cleanly instead of actually compiling. This is the
+// follow-up: `try_desugar_let_match_with_suspends` now recognizes the
+// exact `synthesize_await_desugar` output shape (`match inner {
+// Future.Ready(v) then v, Future.Pending then 0 }` where `inner` is
+// directly an `io_*_async` call) and rewrites it straight to the
+// already-working direct-suspend `Let` form, bypassing the
+// `Future`-variant match entirely. A compile-only check can't catch a
+// regression here (an earlier naive scrutinee-hoist attempt this
+// session compiled fine but produced the WRONG type for the local) --
+// only a real TCP round-trip through the compiler-synthesized
+// Task/poll-fn state machine, using `await()` at every suspend point,
+// proves the awaited value is actually correct at runtime.
+#[test]
+fn bug49_await_builtin_example_compiles_and_runs_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug49_await_builtin.vani",
+        manifest_dir
+    );
+    let expected = "server bound (port > 0): true\nechoed bytes: 7\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "await(io_*_async(..)) produced the wrong result for {:?} -- \
+             the awaited value must match a real 7-byte TCP payload \
+             (\"await49\") round-tripped through both suspend points",
+            backend_args
+        );
+    }
+}
+
 // BUG-21 Path B (2026-07-28): `Task<R>` -- a genuine expression-form
 // `task callee(args)` / `join name` that spawns a real OS thread
 // running a `pure fn` and carries its return value back across the

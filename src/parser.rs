@@ -6722,6 +6722,48 @@ fn try_desugar_let_match_with_suspends(
     // here falls through to `anf_lift_expr`'s `Match` case, which
     // hoists the scrutinee to its own suspend-point Let and
     // leaves a plain, non-suspending match behind).
+    // BUG-49 fix: recognize the exact `synthesize_await_desugar` output
+    // shape (`let X = await(io_*_async(..));`) end-to-end and bypass the
+    // Match entirely. `io_*_async` builtins already check + codegen as a
+    // plain scalar suspend value (see `is_direct_suspend` below, and
+    // `check_epoll_builtin`/the alias rewrite to the nb variant in
+    // checker.rs) -- the local's real value is never actually wrapped in
+    // a `Future` at runtime in v1's synchronous desugar, so matching it
+    // against `Future.Ready`/`Future.Pending` was never meaningful for
+    // this shape. Turn `let X: T = await(io_*_async(..));` into
+    // `let X: T = io_*_async(..);`, which the direct-suspend path just
+    // below (and the ANF pass that re-processes this fn's return value)
+    // already handles correctly, preserving the local's real type
+    // instead of losing it to the generic `__anf_N: i64` hoist.
+    if let ExprKind::Call { name: scrut_name, .. } = &scrutinee.kind {
+        let is_async_suspend_call = matches!(
+            scrut_name.as_str(),
+            "io_recv_async" | "io_send_async" | "io_accept_async"
+        );
+        if is_async_suspend_call && arms.len() == 2 {
+            let ready_ok = matches!(
+                &arms[0].pattern,
+                crate::ast::Pattern::VariantWithBinding { enum_name, variant, binding }
+                    if enum_name == "Future" && variant == "Ready"
+                        && arms[0].guard.is_none()
+                        && matches!(&arms[0].body.kind, ExprKind::Var(v) if v == binding)
+            );
+            let pending_ok = matches!(
+                &arms[1].pattern,
+                crate::ast::Pattern::Variant { enum_name, variant }
+                    if enum_name == "Future" && variant == "Pending"
+            ) && arms[1].guard.is_none()
+                && matches!(&arms[1].body.kind, ExprKind::Int(0));
+            if ready_ok && pending_ok {
+                return Some(vec![Stmt::Let {
+                    name: name.to_string(),
+                    annotation: annotation.clone(),
+                    expr: (**scrutinee).clone(),
+                    span,
+                }]);
+            }
+        }
+    }
     let arms_suspend = arms.iter().any(|a| expr_contains_io_async(&a.body));
     if has_variant && arms_suspend {
         return try_desugar_match_via_tag_extraction(

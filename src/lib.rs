@@ -24215,11 +24215,11 @@ fn main() -> i64 {
     /// forever, stack-overflowing (aborting) the whole compiler
     /// process on 100% of `await()` calls. The fix gates
     /// tag-extraction on whether an ARM BODY (not just the
-    /// scrutinee) contains a suspend; scrutinee-only suspends now
-    /// fall through to `validate_v31_linear_body`'s existing clean
-    /// diagnostic instead of recursing. Full await() support is
-    /// real future work (not yet implemented, no compiler crash
-    /// either way -- see docs/TODO_CURRENT.md).
+    /// scrutinee) contains a suspend; scrutinee-only suspends fall
+    /// through past tag-extraction entirely, no longer recursing.
+    /// Regression-tests only the "doesn't crash" half; BUG-49 below
+    /// covers the "actually compiles and runs" half, added once
+    /// that follow-up landed (see docs/TODO_CURRENT.md).
     #[test]
     fn bug48_await_scrutinee_only_suspend_does_not_crash_compiler() {
         let source = r#"
@@ -24229,15 +24229,97 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err(
-            "await()'s scrutinee-only-suspend shape isn't supported yet -- \
-             must fail with a clean diagnostic, not crash/hang the compiler"
+        // BUG-49 fix made this actually compile (no longer rejected) --
+        // the regression this test guards is specifically "does not
+        // crash/hang the compiler", which still holds either way.
+        compile(source).expect(
+            "await()'s scrutinee-only-suspend shape must compile cleanly \
+             (BUG-49) and, at minimum, must never crash/hang the compiler \
+             (BUG-48)"
         );
-        assert!(
-            errors.iter().any(|e| e.message.contains("unsupported pattern shape")),
-            "expected the v3.1 'unsupported pattern shape' diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+    }
+
+    /// BUG-49 regression — `await(io_*_async(..))` (BUG-48's
+    /// previously-crashing, then previously-rejected shape) must
+    /// actually compile into a working suspend point, not just fail
+    /// cleanly. `io_*_async` builtins already check/codegen as a
+    /// plain scalar suspend value (same as the pre-existing direct
+    /// `let x = io_recv_async(..);` form) -- the `Future.Ready`/
+    /// `Future.Pending` match `await()` wraps it in was never
+    /// semantically meaningful for this shape, since the value is
+    /// never actually boxed in a `Future` at runtime under v1's
+    /// synchronous desugar. `try_desugar_let_match_with_suspends`
+    /// now recognizes the exact `synthesize_await_desugar` output
+    /// shape and rewrites it straight to the direct-suspend `Let`,
+    /// preserving the local's real declared type (fixes the
+    /// `__anf_N: i64` type-loss a naive scrutinee-hoist attempt hit
+    /// -- see docs/TODO_CURRENT.md's BUG-49 entry). Checks the
+    /// `Future`-match is structurally GONE (not merely that
+    /// something compiles) and matches the direct form's state-machine
+    /// shape 1:1 -- exact string equality against the direct form
+    /// doesn't hold since `await(..)`'s extra source characters shift
+    /// every downstream span, and this compiler's temp/return names
+    /// are span-derived (`__intent_ret_63` etc.), so the two programs'
+    /// codegen differs in identifiers even when structurally identical.
+    /// A real end-to-end TCP echo using `await()` on both suspend
+    /// points (`bug49_await_builtin_example_compiles_and_runs_on_both_backends`
+    /// in `tests/run_end_to_end.rs`) separately proves the awaited
+    /// value is actually correct at runtime, not just type-correct.
+    #[test]
+    fn bug49_await_scrutinee_only_suspend_compiles_and_matches_direct_form() {
+        let awaited = r#"
+            async fn handler1(fd: i64) -> i64 {
+              let req: i64 = await(io_recv_async(fd, 64));
+              return req;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let direct = r#"
+            async fn handler1(fd: i64) -> i64 {
+              let req: i64 = io_recv_async(fd, 64);
+              return req;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c_awaited = compile_to_c(awaited).expect("await() form must compile on C");
+        let ll_awaited = compile_to_llvm(awaited).expect("await() form must compile on LLVM");
+        let c_direct = compile_to_c(direct).expect("direct-suspend form must compile on C");
+        let ll_direct = compile_to_llvm(direct).expect("direct-suspend form must compile on LLVM");
+        for (label, awaited_out, direct_out) in [
+            ("C", &c_awaited, &c_direct),
+            ("LLVM", &ll_awaited, &ll_direct),
+        ] {
+            assert!(
+                awaited_out.contains("Task__handler1") && awaited_out.contains("__poll_handler1"),
+                "{label}: await() form must synthesize the same Task/poll-fn state machine"
+            );
+            // The Future.Ready/Future.Pending match must be fully
+            // eliminated -- not routed through some OTHER path that
+            // also happens to compile but still carries Future/the
+            // arm-binding temp around.
+            assert!(
+                !awaited_out.contains("Future"),
+                "{label}: await() form must not reference Future at all once desugared"
+            );
+            assert!(
+                !awaited_out.contains("__await_v"),
+                "{label}: await()'s arm-binding temp must not leak into codegen"
+            );
+            // Same state-machine shape as the direct form: one suspend
+            // point (state_tag 0 -> 1) and one Task field for the
+            // awaited value -- both span-independent, literal-name
+            // substrings.
+            assert_eq!(
+                awaited_out.matches("state_tag ==").count(),
+                direct_out.matches("state_tag ==").count(),
+                "{label}: await() form must have the same number of suspend states as the direct form"
+            );
+            assert_eq!(
+                awaited_out.matches("req").count(),
+                direct_out.matches("req").count(),
+                "{label}: await() form must carry the awaited value through the same number of `req` references as the direct form"
+            );
+        }
     }
 
     /// Arc 8 v3.1 Phase 3a — non-i64 locals (bool + f64). Lifts

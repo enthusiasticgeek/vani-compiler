@@ -3994,40 +3994,57 @@ verifying the four fixes above against their tutorial worked examples
   reverified clean (2599 lib tests + every integration-test binary, 0
   failed) after the fix.
 
-- [ ] **BUG-49 (found fixing BUG-48, NOT fixed — deep, sensitive
-  language-feature gap: `await()` does not actually work yet, it now
-  just fails cleanly instead of crashing).** BUG-48's fix makes the
-  compiler reject `await()`'s scrutinee-only-suspend shape gracefully;
-  it does not make it compile. To make the minimal repro above
-  actually run, the compiler needs to: (1) hoist the `io_*_async`
-  scrutinee out to its own suspend-point `Let` (an early attempt at
-  this — extending `anf_lift_expr`'s `Match` case to lift the
-  scrutinee like any other subexpression — was tried and reverted this
-  session: it compiles, but the hoisted local gets stamped
-  `Type::I64` by the existing `__anf_N` hoisting convention, which
-  loses the scrutinee's real `Future<T>` shape and the checker no
-  longer recognizes the `Future.Ready`/`Future.Pending` patterns
-  against it, producing a confusing "scrutinee is of integer type
-  i64" error instead of a working program); and then (2) teach the
-  checker/synthesizer to recognize a match against that hoisted local
-  as the special "resume with the awaited value" case (mirroring how
-  the existing `is_direct_suspend` / direct `let x = io_async_call()`
-  path already treats the local's *declared* type as the awaited
-  value's type, not `Future<T>`, and bypasses ordinary variant
-  matching entirely) — likely by recognizing the exact
-  `synthesize_await_desugar` output shape end-to-end (scrutinee is
-  directly an `io_*_async` call, arms are exactly
-  `Future.Ready(v)`/`Future.Pending`) as its own case in
-  `try_desugar_let_match_with_suspends`, rather than trying to make
-  the general tag-extraction/ANF machinery handle it. Also still open,
-  independent of the crash: `01a_async_primer.md`'s tutorial text uses
-  a bare-statement `await(io_send_async(fd, resp));` (no `let`), which
-  doesn't parse ("expected statement") regardless of this bug — the
-  doc's own example needs a syntax fix (or a real bare-statement-await
-  parser feature) whenever this is picked up. Whoever picks this up
-  next: start from `try_desugar_let_match_with_suspends` in
-  `parser.rs` (the `has_variant` branch) and `validate_v31_linear_body`
-  (the "unsupported pattern shape" diagnostic this now hits) — both are
-  right next to BUG-48's fix.
+- [x] **BUG-49 (found fixing BUG-48, fixed 2026-07-31 same day —
+  `await()` now actually compiles and runs, not just fails cleanly).**
+  BUG-48's fix made the compiler reject `await()`'s scrutinee-only-
+  suspend shape gracefully; it didn't make it compile. Fixed by adding
+  a dedicated case at the top of `try_desugar_let_match_with_suspends`
+  (`parser.rs`) that recognizes the exact `synthesize_await_desugar`
+  output shape end-to-end — scrutinee is directly an `io_recv_async`/
+  `io_send_async`/`io_accept_async` call, arms are exactly
+  `Future.Ready(v) then v` / `Future.Pending then 0` (guards none,
+  arm bodies structurally verified, not just pattern-shape-checked) —
+  and rewrites the whole `let X = await(io_*_async(..));` straight to
+  `let X = io_*_async(..);` *before* the `has_variant` tag-extraction
+  routing ever sees it. This sidesteps the earlier failed approach
+  (hoisting the scrutinee via `anf_lift_expr`'s `Match` case, which
+  stamped the hoisted local `Type::I64` per the generic `__anf_N`
+  convention and lost the scrutinee's real shape) entirely — no hoist
+  needed, since `io_*_async` builtins already check/codegen as a
+  plain scalar suspend value identical to the pre-existing direct-let
+  form (`check_epoll_builtin` in `checker.rs`; the alias rewrite to
+  the nb variant at codegen). The `Future.Ready`/`Future.Pending`
+  match was never semantically meaningful for this shape in the first
+  place — v1's synchronous async desugar never actually boxes the
+  suspend value in a `Future` at runtime — so eliminating the match
+  outright is correct, not a workaround.
+  Regression tests: `bug49_await_scrutinee_only_suspend_compiles_and_
+  matches_direct_form` (`lib.rs`) checks the `Future`/`__await_v`
+  match is structurally gone and the state-machine shape (suspend-state
+  count, `req` reference count) matches the direct-suspend form
+  1:1 — exact string equality against the direct form does NOT hold,
+  since `await(..)`'s extra source characters shift every downstream
+  span and this compiler's temp/return names are span-derived
+  (`__intent_ret_63` etc.), so naively asserting byte-identical codegen
+  is a false lead (tried, reverted after the assertion itself failed
+  on span-derived names, not on any real structural difference).
+  `bug49_await_builtin_example_compiles_and_runs_on_both_backends`
+  (`tests/run_end_to_end.rs`) is the real end-to-end proof: a new
+  example, `examples/language/english/bug49_await_builtin.vani`
+  (mirrors `tcp_echo_async.vani`'s driver-loop pattern but wraps every
+  suspend point in `await(..)`), does a real TCP round-trip through
+  the compiler-synthesized Task/poll-fn state machine and asserts the
+  awaited value is byte-correct (`"echoed bytes: 7"` for a real
+  7-byte payload) on both backends — a compile-only check can't catch
+  a wrong-value regression here, only actual execution can. Full
+  `cargo test --release --workspace` clean (2601 passed, 0 failed, 1
+  ignored) after this fix.
+  **Still open, independent of this fix**: `01a_async_primer.md`'s
+  tutorial text uses a bare-statement `await(io_send_async(fd,
+  resp));` (no `let`), which still doesn't parse ("expected
+  statement") — bare-statement-position `await()` was never
+  implemented (only `let X = await(..);` is). Needs a doc fix (rewrite
+  to `let _ = await(..);`) or a real bare-statement-await parser
+  feature whenever the tutorial audit reaches this file.
 
 ---

@@ -1,0 +1,65 @@
+// BUG-49 acceptance — the `await(expr)` builtin, not just the
+// direct `let x = io_*_async(..);` suspend-point form, now
+// actually compiles and runs (docs/TODO_CURRENT.md's BUG-49
+// entry). `await(inner)` parser-desugars to `match inner {
+// Future.Ready(v) then v, Future.Pending then 0 }`
+// (`synthesize_await_desugar`); `try_desugar_let_match_with_
+// suspends` now recognizes that exact shape end-to-end and
+// rewrites it straight to the direct-suspend `Let` before the
+// state-machine transform ever sees a `Future`-shaped match --
+// codegen is byte-identical to writing `let n: i64 =
+// io_recv_async(fd, 64);` directly.
+//
+// Compare to `tcp_echo_async.vani` (same driver-loop pattern,
+// same protocol) -- that example uses the direct-suspend form;
+// this one wraps every suspend point in `await(..)` instead.
+//
+// build & run:
+//   vanic run examples/language/english/bug49_await_builtin.vani                # LLVM
+//   vanic run examples/language/english/bug49_await_builtin.vani --backend=c    # C
+
+intent "BUG-49 acceptance — await(io_*_async(..)) compiles and runs for real";
+
+async fn echo_once(fd: i64) -> i64 {
+  let n: i64 = await(io_recv_async(fd, 64));
+  let _ = await(io_send_async(fd, n));
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__echo_once) -> i64 {
+  while true {
+    let r: i64 = __poll_echo_once(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "await49");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  let t: Task__echo_once = echo_once(cfd);
+  let bytes: i64 = drive(ep, mut ref t);
+  print "echoed bytes:", bytes;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
