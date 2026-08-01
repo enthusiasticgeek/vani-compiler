@@ -7597,11 +7597,11 @@ pub(crate) fn emit_intent_condvar_helpers_c(out: &mut String) {
              \x20 atomic_store_explicit(&cv.seq, 0, memory_order_seq_cst);\n\
              \x20 return cv;\n\
              }\n\
-             static int64_t intent_condvar_wait(intent_condvar* cv, intent_guard_i64* g) INTENT_UNUSED;\n\
-             static int64_t intent_condvar_wait(intent_condvar* cv, intent_guard_i64* g) {\n\
+             static int64_t intent_condvar_wait(intent_condvar* cv, intent_guard_int64_t* g) INTENT_UNUSED;\n\
+             static int64_t intent_condvar_wait(intent_condvar* cv, intent_guard_int64_t* g) {\n\
              \x20 int snapshot = atomic_load_explicit(&cv->seq, memory_order_seq_cst);\n\
              \x20 /* Release the mutex while we wait. */\n\
-             \x20 intent_guard_i64_unlock(g);\n\
+             \x20 intent_guard_int64_t_unlock(g);\n\
              #if defined(__linux__) || defined(_WIN32)\n\
              \x20 intent_mutex_futex_wait(&cv->seq, snapshot);\n\
              #else\n\
@@ -7613,14 +7613,14 @@ pub(crate) fn emit_intent_condvar_helpers_c(out: &mut String) {
              #endif\n\
              \x20 /* Re-acquire the mutex so the caller's guard is valid on\n\
              \x20    return. We re-lock the SAME underlying mutex. */\n\
-             \x20 intent_guard_i64 reacquired = intent_mutex_i64_lock(g->m);\n\
+             \x20 intent_guard_int64_t reacquired = intent_mutex_int64_t_lock(g->m);\n\
              \x20 (void)reacquired;\n\
              \x20 return 0;\n\
              }\n\
-             static bool intent_condvar_wait_timeout(intent_condvar* cv, intent_guard_i64* g, int64_t timeout_ms) INTENT_UNUSED;\n\
-             static bool intent_condvar_wait_timeout(intent_condvar* cv, intent_guard_i64* g, int64_t timeout_ms) {\n\
+             static bool intent_condvar_wait_timeout(intent_condvar* cv, intent_guard_int64_t* g, int64_t timeout_ms) INTENT_UNUSED;\n\
+             static bool intent_condvar_wait_timeout(intent_condvar* cv, intent_guard_int64_t* g, int64_t timeout_ms) {\n\
              \x20 int snapshot = atomic_load_explicit(&cv->seq, memory_order_seq_cst);\n\
-             \x20 intent_guard_i64_unlock(g);\n\
+             \x20 intent_guard_int64_t_unlock(g);\n\
              \x20 bool notified = false;\n\
              #if defined(__linux__)\n\
              \x20 struct timespec ts;\n\
@@ -7643,7 +7643,7 @@ pub(crate) fn emit_intent_condvar_helpers_c(out: &mut String) {
              \x20 }\n\
              \x20 notified = (atomic_load_explicit(&cv->seq, memory_order_seq_cst) != snapshot);\n\
              #endif\n\
-             \x20 intent_guard_i64 reacquired = intent_mutex_i64_lock(g->m);\n\
+             \x20 intent_guard_int64_t reacquired = intent_mutex_int64_t_lock(g->m);\n\
              \x20 (void)reacquired;\n\
              \x20 return notified;\n\
              }\n\

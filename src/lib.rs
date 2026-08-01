@@ -13708,6 +13708,53 @@ fn main() -> i64 {
         );
     }
 
+    /// BUG found auditing tutorials/src/advanced/03b_condvar_primer.md
+    /// (2026-08-01): `emit_intent_condvar_helpers_c`'s hardcoded C text
+    /// for `intent_condvar_wait`/`intent_condvar_wait_timeout` referenced
+    /// the STALE type/function names `intent_guard_i64`/
+    /// `intent_mutex_i64_lock`/`intent_guard_i64_unlock` -- names that
+    /// only exist via a separate "legacy alias" typedef block
+    /// (`emit_intent_mutex_helpers_c`) which is called from
+    /// `ssa_backend_c.rs` but NOT from the tree-C driver that actually
+    /// calls `emit_intent_condvar_helpers_c`. Any program using
+    /// `condvar_wait`/`condvar_wait_timeout` (not just
+    /// `condvar_notify_*`, which this test's sibling
+    /// `condvar_emits_runtime_helpers_in_c` above never exercised the
+    /// buggy functions at all) failed a REAL `cc` compile with "unknown
+    /// type name 'intent_guard_i64'; did you mean
+    /// 'intent_guard_int64_t'" -- the actual name `emit_mutex_bundle`
+    /// generates for `Mutex<i64>`/`Guard<i64>`. A substring check on
+    /// emitted C text (this test) can't catch a real `cc`-rejected
+    /// identifier by itself, only prove the fix didn't regress the
+    /// rename -- the real proof is
+    /// `condvar_wait_and_wait_timeout_compile_and_run_with_real_cc` in
+    /// `tests/run_end_to_end.rs`, which does an actual `cc` build.
+    /// Fixed by rewriting the hardcoded text to use the real
+    /// `intent_guard_int64_t`/`intent_mutex_int64_t_lock`/
+    /// `intent_guard_int64_t_unlock` names directly.
+    #[test]
+    fn condvar_wait_uses_real_guard_type_name_not_stale_i64_alias() {
+        let source = r#"
+            fn main() -> i64 {
+              let cv: Condvar = condvar_new();
+              let mx: Mutex<i64> = mutex_new(0);
+              let g: Guard<i64> = mutex_lock(ref mx);
+              let signaled: bool = condvar_wait_timeout(ref cv, mut ref g, 10);
+              let _ = signaled;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("condvar_wait_timeout program must compile");
+        assert!(
+            !c.contains("intent_guard_i64") && !c.contains("intent_mutex_i64_lock"),
+            "C output must not reference the stale intent_guard_i64/intent_mutex_i64_lock names:\n{c}"
+        );
+        assert!(
+            c.contains("intent_condvar_wait_timeout(intent_condvar* cv, intent_guard_int64_t* g"),
+            "expected intent_condvar_wait_timeout to take the real intent_guard_int64_t* type:\n{c}"
+        );
+    }
+
     #[test]
     fn condvar_emits_typedef_in_llvm() {
         // LLVM backend emits the %intent_condvar typedef when

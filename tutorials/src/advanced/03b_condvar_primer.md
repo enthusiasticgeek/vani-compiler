@@ -113,19 +113,24 @@ let cv:  Condvar   = condvar_new();
 let mx:  Mutex<i64> = mutex_new(0);   // 0 = not ready
 
 // --- Waiter thread ---
-let g: Guard<i64> = mutex_lock(mut ref mx);
-while mutex_get(ref g) == 0 {          // "not ready"
-    condvar_wait(ref cv, mut ref g);
-}
-// predicate is now true
-let value: i64 = mutex_get(ref g);
-mutex_unlock(g);
+// (`mutex_lock` takes `ref`, not `mut ref` -- unlike rwlock_read/write,
+// which DO need `mut ref`; a Guard's value is read/written through
+// guard_get/guard_set, never mutex_get/mutex_set, which don't exist.)
+{
+    let g: Guard<i64> = mutex_lock(ref mx);
+    while guard_get(ref g) == 0 {          // "not ready"
+        condvar_wait(ref cv, mut ref g);
+    }
+    // predicate is now true
+    let value: i64 = guard_get(ref g);
+}   // Guard drops here -> mutex released automatically (RAII, no manual unlock)
 
 // --- Producer thread ---
-let g2: Guard<i64> = mutex_lock(mut ref mx);
-mutex_set(mut ref g2, 42);             // set value
-mutex_unlock(g2);
-condvar_notify_one(ref cv);            // wake the waiter
+{
+    let g2: Guard<i64> = mutex_lock(ref mx);
+    let _ = guard_set(mut ref g2, 42);     // set value
+}   // Guard drops here -> mutex released automatically
+let _ = condvar_notify_one(ref cv);        // wake the waiter
 ```
 
 ### Notify after unlock
@@ -144,15 +149,20 @@ safer habit.
 ```vani
 let cv: Condvar   = condvar_new();
 let mx: Mutex<i64> = mutex_new(0);
-let g:  Guard<i64> = mutex_lock(mut ref mx);
+{
+    let g:  Guard<i64> = mutex_lock(ref mx);
 
-// Wait at most 200 ms for the predicate
-let signaled: bool = condvar_wait_timeout(ref cv, mut ref g, 200);
-if !signaled {
-    print "timeout -- no event in 200 ms";
-}
-mutex_unlock(g);
+    // Wait at most 200 ms for the predicate
+    let signaled: bool = condvar_wait_timeout(ref cv, mut ref g, 200);
+    if !signaled {
+        print "timeout -- no event in 200 ms";
+    }
+}   // Guard drops here -> mutex released automatically
 ```
+
+(Verified end to end against the real compiler, both backends --
+`vanic run --backend=c` runs this through a real `cc` invocation, not
+just the checker.)
 
 `condvar_wait_timeout` returns `true` if a notification arrived
 before the timeout, `false` if the deadline elapsed.

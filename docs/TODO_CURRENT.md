@@ -4160,4 +4160,50 @@ verifying the four fixes above against their tutorial worked examples
   Full `cargo test --release --workspace` clean (2603 passed, 0
   failed) after this fix.
 
+- [x] **BUG-52. Any program calling `condvar_wait`/`condvar_wait_timeout`
+  (not just `condvar_notify_one`/`condvar_notify_all`) failed a REAL
+  `cc` compile on the C backend — "unknown type name
+  'intent_guard_i64'; did you mean 'intent_guard_int64_t'".** Found
+  auditing `tutorials/src/advanced/03b_condvar_primer.md`'s "Pattern"
+  and `wait_timeout` sections against the real compiler. Root cause:
+  `emit_intent_condvar_helpers_c`'s hardcoded C text for
+  `intent_condvar_wait`/`intent_condvar_wait_timeout` referenced the
+  STALE names `intent_guard_i64`/`intent_mutex_i64_lock`/
+  `intent_guard_i64_unlock` — names that only exist via a separate
+  "legacy alias" typedef block (`emit_intent_mutex_helpers_c`, whose
+  own doc comment literally says "Used by the condvar helper (which
+  still references intent_guard_i64)") that is called from
+  `ssa_backend_c.rs` but NOT from the tree-C driver that actually
+  calls `emit_intent_condvar_helpers_c` — so the alias was never
+  actually in scope where it was needed. The pre-existing test
+  (`condvar_emits_runtime_helpers_in_c`) only exercised
+  `condvar_notify_all`, never `condvar_wait`/`condvar_wait_timeout`
+  themselves, so this never got caught. **Fixed**: rewrote the
+  hardcoded text to reference the REAL names `emit_mutex_bundle`
+  generates for `Mutex<i64>`/`Guard<i64>` (`intent_guard_int64_t`,
+  `intent_mutex_int64_t_lock`, `intent_guard_int64_t_unlock`) directly,
+  removing the dependency on the legacy alias path entirely.
+  Also confirmed (not a bug, but a real trap in the doc's own
+  examples): `mutex_get`/`mutex_set`/`mutex_unlock` don't exist —
+  Mutex's real API is `guard_get`/`guard_set` + RAII scope-exit
+  (matching the pattern `03_concurrency.md`'s own Mutex section
+  already documents correctly) — and `condvar_signal_one`/
+  `condvar_signal_all` don't exist either (real names:
+  `condvar_notify_one`/`condvar_notify_all`, same BUG-51-adjacent typo
+  class already fixed in `03_concurrency.md` this same session). Fixed
+  all three in `03b_condvar_primer.md`'s two worked snippets, plus
+  scoped each `Guard` in its own block so it drops before the next
+  acquisition (the doc's un-scoped version would leave two guards
+  live on the same conceptual "thread" at once — the exact deadlock
+  hazard `02c_rwlock_primer.md` already warns about for RwLock).
+  Regression tests:
+  `condvar_wait_uses_real_guard_type_name_not_stale_i64_alias`
+  (`src/lib.rs`) pins the emitted C text. The real proof is
+  `condvar_wait_and_wait_timeout_compile_and_run_with_real_cc`
+  (`tests/run_end_to_end.rs`) — a substring check on emitted C text
+  can prove the identifier got renamed but can't prove `cc` actually
+  accepts the result; this test runs `vanic run --backend=c` end to
+  end through a real `cc` invocation. Full `cargo test --release
+  --workspace` clean (2604 passed, 0 failed) after this fix.
+
 ---

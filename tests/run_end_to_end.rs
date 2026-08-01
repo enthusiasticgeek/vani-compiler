@@ -5195,3 +5195,53 @@ fn main() -> i64 {
         );
     }
 }
+
+// Found auditing tutorials/src/advanced/03b_condvar_primer.md (2026-08-01):
+// emit_intent_condvar_helpers_c's hardcoded C text for condvar_wait/
+// condvar_wait_timeout referenced the stale type name intent_guard_i64
+// (only defined via a legacy-alias code path the tree-C driver never
+// actually calls) instead of the real intent_guard_int64_t that
+// emit_mutex_bundle generates for Mutex<i64>/Guard<i64> -- any program
+// calling condvar_wait/condvar_wait_timeout (not just condvar_notify_*)
+// failed a REAL cc compile with "unknown type name 'intent_guard_i64'".
+// A substring check on emitted C text can prove the identifier got
+// renamed but can't prove cc actually accepts the result -- only an
+// actual --backend=c run (through a real cc invocation) does.
+#[test]
+fn condvar_wait_and_wait_timeout_compile_and_run_with_real_cc() {
+    let src = write_tmp_vani(
+        "condvar_wait_real_cc",
+        r#"
+fn main() -> i64 {
+  let cv: Condvar = condvar_new();
+  let mx: Mutex<i64> = mutex_new(0);
+  {
+    let g: Guard<i64> = mutex_lock(ref mx);
+    let signaled: bool = condvar_wait_timeout(ref cv, mut ref g, 10);
+    if signaled {
+      print "unexpected: signaled with no notifier";
+    } else {
+      print "wait_timeout returned false as expected";
+    }
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run --backend=c should execute");
+    assert!(
+        output.status.success(),
+        "condvar_wait_timeout must compile and run via a real cc invocation on the C backend; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.replace("\r\n", "\n"),
+        "wait_timeout returned false as expected\n",
+        "condvar_wait_timeout with no notifier must time out and return false"
+    );
+}
