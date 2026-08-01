@@ -2323,6 +2323,76 @@ fn emit_instr(
                 .unwrap();
                 return Ok(());
             }
+            // BUG found auditing tutorials/src/advanced/04b_cross_compile_primer.md
+            // (2026-08-01): mmio_read_u8/u16/mmio_write_u8/u16 were
+            // implemented in the legacy tree-C backend
+            // (backend_c.rs) but never ported to this SSA fast path
+            // -- any program calling them hit "implicit declaration
+            // of function" from a real `cc` invocation, since nothing
+            // routed these names to the tree-backend fallback the way
+            // e.g. `#[no_mangle]` does (BUG-44). mmio_read_u32/
+            // write_u32 were already correctly ported above; these
+            // mirror that exact pattern at the narrower widths.
+            if name == "mmio_read_u8" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_read_u8 expects 1 arg".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = (*((const volatile uint8_t*)((uintptr_t)({}))));",
+                    instr.result.0,
+                    c_operand(addr)
+                )
+                .unwrap();
+                return Ok(());
+            }
+            if name == "mmio_read_u16" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_read_u16 expects 1 arg".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = (*((const volatile uint16_t*)((uintptr_t)({}))));",
+                    instr.result.0,
+                    c_operand(addr)
+                )
+                .unwrap();
+                return Ok(());
+            }
+            if name == "mmio_write_u8" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_write_u8 expects 2 args".to_string(),
+                })?;
+                let val = args.get(1).ok_or_else(|| EmitError {
+                    message: "mmio_write_u8 expects 2 args".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = ((*((volatile uint8_t*)((uintptr_t)({})))) = ({}), (int64_t)0);",
+                    instr.result.0,
+                    c_operand(addr),
+                    c_operand(val)
+                )
+                .unwrap();
+                return Ok(());
+            }
+            if name == "mmio_write_u16" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_write_u16 expects 2 args".to_string(),
+                })?;
+                let val = args.get(1).ok_or_else(|| EmitError {
+                    message: "mmio_write_u16 expects 2 args".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = ((*((volatile uint16_t*)((uintptr_t)({})))) = ({}), (int64_t)0);",
+                    instr.result.0,
+                    c_operand(addr),
+                    c_operand(val)
+                )
+                .unwrap();
+                return Ok(());
+            }
             // T2.2 — volatile_read / volatile_write (ref-based).
             // `ref i64` operand is `const int64_t*`; cast to
             // `volatile int64_t*` for the load or store.

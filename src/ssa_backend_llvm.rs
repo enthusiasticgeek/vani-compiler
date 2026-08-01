@@ -3243,10 +3243,21 @@ fn emit_instr(
                         let widened = if ity == "i64" {
                             arg_str
                         } else {
+                            // BUG found auditing 04b_cross_compile_primer.md
+                            // (2026-08-01): this always used `sext`,
+                            // regardless of signedness -- printing an
+                            // unsigned narrow type (u8/u16/u32) whose
+                            // high bit was set (e.g. u8 250 = 0xFA)
+                            // sign-extended into a negative i64 (-6),
+                            // confirmed by testing (LLVM printed -6,
+                            // the C backend correctly printed 250 for
+                            // the identical program). Unsigned types
+                            // must zero-extend.
+                            let ext_op = if is_signed_int(&aty) { "sext" } else { "zext" };
                             let w = format!("%v_{}.pw", instr.result.0);
                             out.push_str(&format!(
-                                "  {} = sext {} {} to i64\n",
-                                w, ity, arg_str
+                                "  {} = {} {} {} to i64\n",
+                                w, ext_op, ity, arg_str
                             ));
                             w
                         };
@@ -4502,6 +4513,80 @@ fn emit_instr(
                 ));
                 // Result is i64 (0) — bind the SSA result so
                 // downstream uses still resolve.
+                out.push_str(&format!(
+                    "  %v_{} = add i64 0, 0\n",
+                    instr.result.0
+                ));
+                return Ok(());
+            }
+            // BUG found auditing tutorials/src/advanced/04b_cross_compile_primer.md
+            // (2026-08-01): mmio_read_u8/u16/mmio_write_u8/u16 were
+            // implemented in the legacy tree-LLVM backend
+            // (backend_llvm.rs) but never ported to this SSA fast
+            // path -- since the SSA path is the DEFAULT and nothing
+            // routed these names to the tree-backend fallback (unlike
+            // e.g. `#[no_mangle]`, see BUG-44), any program calling
+            // them fell through to an ordinary (nonexistent) function
+            // call, crashing `lli` with "use of undefined value".
+            // mmio_read_u32/write_u32 were already correctly ported
+            // above; these mirror that exact pattern at the narrower
+            // widths (i8/align 1, i16/align 2).
+            if name == "mmio_read_u8" {
+                let addr = operand_str(&args[0]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  %v_{} = load volatile i8, i8* {}, align 1\n",
+                    instr.result.0, ptr
+                ));
+                return Ok(());
+            }
+            if name == "mmio_read_u16" {
+                let addr = operand_str(&args[0]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i16*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  %v_{} = load volatile i16, i16* {}, align 2\n",
+                    instr.result.0, ptr
+                ));
+                return Ok(());
+            }
+            if name == "mmio_write_u8" {
+                let addr = operand_str(&args[0]);
+                let v = operand_str(&args[1]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  store volatile i8 {}, i8* {}, align 1\n",
+                    v, ptr
+                ));
+                out.push_str(&format!(
+                    "  %v_{} = add i64 0, 0\n",
+                    instr.result.0
+                ));
+                return Ok(());
+            }
+            if name == "mmio_write_u16" {
+                let addr = operand_str(&args[0]);
+                let v = operand_str(&args[1]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i16*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  store volatile i16 {}, i16* {}, align 2\n",
+                    v, ptr
+                ));
                 out.push_str(&format!(
                     "  %v_{} = add i64 0, 0\n",
                     instr.result.0

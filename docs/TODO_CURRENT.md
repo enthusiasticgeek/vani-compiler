@@ -4206,4 +4206,62 @@ verifying the four fixes above against their tutorial worked examples
   end through a real `cc` invocation. Full `cargo test --release
   --workspace` clean (2604 passed, 0 failed) after this fix.
 
+## Two more bugs found auditing 04b_cross_compile_primer.md (added+fixed 2026-08-01)
+
+- [x] **BUG-53. `mmio_read_u8`/`mmio_read_u16`/`mmio_write_u8`/
+  `mmio_write_u16` crashed `lli` ("use of undefined value") or failed
+  a real `cc` compile ("implicit declaration of function") on ANY
+  program calling them — 100% reproducible.** `mmio_read_u32`/
+  `mmio_write_u32` were unaffected. Found auditing the MMIO builtins
+  table in `04b_cross_compile_primer.md` against the real compiler.
+  Root cause: these four builtins were implemented in the legacy
+  tree-LLVM/tree-C backends (`backend_llvm.rs`/`backend_c.rs`) but
+  never ported to the SSA fast path (`ssa_backend_llvm.rs`/
+  `ssa_backend_c.rs`) that compiles by default — `mmio_read_u32`/
+  `mmio_write_u32` WERE already correctly ported, so this was
+  specific to the narrower widths. Unlike `#[no_mangle]` (BUG-44),
+  nothing routed these four names to the tree-backend fallback, so
+  they stayed on the unimplemented SSA path and fell through to
+  ordinary (nonexistent) function-call codegen. **Fixed**: ported
+  all four directly into both SSA backends, mirroring the exact
+  pattern the already-correct `mmio_read_u32`/`mmio_write_u32` SSA
+  implementations use (just narrower — i8/align 1, i16/align 2
+  instead of i32/align 4). The pre-existing `mmio_read_u8_compiles_c`
+  test only asserted `c.contains("uint8_t")`, which is present in
+  every C file's boilerplate typedefs regardless of whether
+  `mmio_read_u8` itself codegens correctly — too weak to have caught
+  this; added 6 new tests asserting the actual volatile-access
+  codegen (`load volatile i8`/`store volatile i16`/
+  `volatile uint8_t*` etc.), mirroring the u32 tests' existing rigor.
+- [x] **BUG-54. Printing an unsigned narrow type (`u8`/`u16`) whose
+  high bit was set produced a NEGATIVE number on the LLVM backend
+  while the C backend printed the correct value for the byte-identical
+  program — a real backend-parity break, not just wrong in
+  isolation.** Found immediately after fixing BUG-53, while building a
+  real test program to exercise the mmio fix (`let a: u8 = 200; let b:
+  u8 = 50; print a + b;` printed `-6` on LLVM, `250` on C). Root
+  cause: `ssa_backend_llvm.rs`'s `print`-argument widening
+  (`intent_print_item`'s generic integer arm) ALWAYS used `sext`
+  (sign-extend) to widen a sub-i64 integer to i64 before printing,
+  regardless of the value's actual signedness — `250` (200+50) as a
+  signed i8 bit pattern is `-6`, so `sext i8 -6 to i64` correctly
+  reproduces the BIT PATTERN but the WRONG mathematical value for an
+  unsigned source type. The
+  legacy tree-LLVM backend already had this right
+  (`ty.is_unsigned_integer()` dispatches to a zext path via
+  `widen_int_to_64(..., false)`); only the SSA fast path (the
+  default) had the bug. **Fixed**: choose `zext` vs `sext` based on
+  `is_signed_int(&aty)` (already defined in the same file for an
+  unrelated reduction-widening use), matching the tree backend's
+  existing logic exactly. Regression tests:
+  `print_unsigned_narrow_int_zero_extends_not_sign_extends`
+  (`src/lib.rs`) pins the emitted instruction.
+  `unsigned_narrow_int_prints_same_value_on_both_backends`
+  (`tests/run_end_to_end.rs`) is the real proof — a compile-only
+  IR-text check can confirm the instruction changed but can't prove
+  the two backends now agree on the actual printed value the way a
+  real side-by-side execution comparison does. Full `cargo test
+  --release --workspace` clean (2611 passed, 0 failed) after both
+  fixes.
+
 ---

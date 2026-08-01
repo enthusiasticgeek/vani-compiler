@@ -5245,3 +5245,60 @@ fn main() -> i64 {
         "condvar_wait_timeout with no notifier must time out and return false"
     );
 }
+
+// BUG-54, found auditing tutorials/src/advanced/04b_cross_compile_primer.md
+// (2026-08-01): the SSA LLVM backend's print-argument widening always used
+// `sext` regardless of signedness -- printing an unsigned narrow type
+// (u8/u16) whose high bit was set sign-extended into a negative i64. The C
+// backend was unaffected, so this was a real backend-parity break: the
+// SAME program printed different numbers depending on --backend. A
+// compile-only IR-text check (src/lib.rs) can confirm the instruction
+// changed from sext to zext, but only a REAL side-by-side execution proves
+// the two backends now agree on the actual printed value.
+#[test]
+fn unsigned_narrow_int_prints_same_value_on_both_backends() {
+    let src = write_tmp_vani(
+        "unsigned_narrow_print_parity",
+        r#"
+fn main() -> i64 {
+  let a: u8 = 200;
+  let b: u8 = 50;
+  let c: u8 = a + b;
+  print "u8:", c;
+
+  let g: u16 = 60000;
+  let h: u16 = 5000;
+  let k: u16 = g + h;
+  print "u16:", k;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "u8: 250\nu16: 65000\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "unsigned narrow-int printing must match between backends for {:?} -- \
+             a negative number here means the value was sign-extended instead of zero-extended",
+            backend_args
+        );
+    }
+}

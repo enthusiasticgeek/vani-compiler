@@ -164,12 +164,19 @@ vanic build firmware.vani --target=arm-none-eabi -o firmware.elf
 
 ## `#[no_mangle]` -- use the exact function name
 
-vāṇī mangles every generated function name to avoid collisions:
+vāṇī mangles every generated function name to avoid collisions --
+confirmed by testing, the real prefix is `fn_`, not `intent_`:
 
 ```
-fn main()          -> intent_main
-fn Reset_Handler() -> intent_Reset_Handler
+fn Reset_Handler() -> fn_Reset_Handler
 ```
+
+`fn main()` is a special case, on both backends: it's never mangled
+at all (the user's body compiles to an internal `fn_main`, but the
+compiler always ALSO emits a literal, unmangled `int main(void)` /
+`@main` trampoline that calls it) -- `#[no_mangle]` on `main` itself
+has no additional effect, since the linker-visible name is already
+bare.
 
 A bare-metal linker script expects the **exact** name at the
 reset vector -- `Reset_Handler`, `_start`, `HardFault_Handler`.

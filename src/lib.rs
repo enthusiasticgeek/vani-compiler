@@ -46739,6 +46739,155 @@ função main() -> i64 {
         );
     }
 
+    /// BUG-53 (found auditing tutorials/src/advanced/04b_cross_compile_primer.md,
+    /// 2026-08-01): mmio_read_u8/u16 and mmio_write_u8/u16 were
+    /// implemented in the legacy tree-LLVM/tree-C backends but never
+    /// ported to the SSA fast path (`ssa_backend_llvm.rs`/
+    /// `ssa_backend_c.rs`) that actually runs by default. Since
+    /// nothing routed these names to the tree-backend fallback the
+    /// way `#[no_mangle]` does (BUG-44), any real program calling
+    /// them crashed `lli` ("use of undefined value") or failed a real
+    /// `cc` compile ("implicit declaration of function") -- the
+    /// mmio_read_u32 variant was already correctly ported, so this
+    /// bug was specific to the narrower widths. The pre-existing
+    /// `mmio_read_u8_compiles_c` test below only asserted
+    /// `c.contains("uint8_t")`, which is present in every C file's
+    /// boilerplate typedefs regardless of whether mmio_read_u8 itself
+    /// codegens correctly -- too weak to have caught this. These
+    /// tests assert the actual volatile-access codegen, mirroring
+    /// mmio_read_u32/write_u32's existing (correct) test rigor above.
+    #[test]
+    fn mmio_read_u8_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u8 {
+              return mmio_read_u8(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_read_u8 compiles to LLVM");
+        assert!(
+            ll.contains("load volatile i8"),
+            "expected `load volatile i8` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_read_u16_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u16 {
+              return mmio_read_u16(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_read_u16 compiles to LLVM");
+        assert!(
+            ll.contains("load volatile i16"),
+            "expected `load volatile i16` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_write_u8_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn write_reg(addr: i64, v: u8) -> i64 {
+              return mmio_write_u8(addr, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_write_u8 compiles to LLVM");
+        assert!(
+            ll.contains("store volatile i8"),
+            "expected `store volatile i8` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_write_u16_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn write_reg(addr: i64, v: u16) -> i64 {
+              return mmio_write_u16(addr, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_write_u16 compiles to LLVM");
+        assert!(
+            ll.contains("store volatile i16"),
+            "expected `store volatile i16` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_read_u8_emits_volatile_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u8 {
+              return mmio_read_u8(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("mmio_read_u8 compiles to C");
+        assert!(
+            c.contains("volatile uint8_t*"),
+            "expected a `volatile uint8_t*` cast/dereference in C, got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn mmio_read_u16_emits_volatile_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u16 {
+              return mmio_read_u16(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("mmio_read_u16 compiles to C");
+        assert!(
+            c.contains("volatile uint16_t*"),
+            "expected a `volatile uint16_t*` cast/dereference in C, got:\n{c}"
+        );
+    }
+
+    /// BUG-54 (found auditing the same file, same session): the SSA
+    /// LLVM backend's `print`-argument widening ALWAYS used `sext`
+    /// (sign-extend) regardless of the argument's actual signedness --
+    /// printing an unsigned narrow type (u8/u16/u32) whose high bit
+    /// was set sign-extended into a negative i64. Confirmed by testing:
+    /// `let a: u8 = 200; let b: u8 = 50; print a + b;` printed `-6` on
+    /// LLVM (250 as a signed i8 bit pattern) but the correct `250` on
+    /// the C backend for the IDENTICAL program -- a backend-parity
+    /// break, not just a wrong-in-isolation value. The legacy tree-LLVM
+    /// backend already had this right (`ty.is_unsigned_integer()`
+    /// dispatches to a zext path); only the SSA fast path (the default)
+    /// had the bug. Fixed by choosing `zext` vs `sext` based on
+    /// `is_signed_int(&aty)`, matching the tree backend's existing logic.
+    #[test]
+    fn print_unsigned_narrow_int_zero_extends_not_sign_extends() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: u8 = 200;
+              let b: u8 = 50;
+              let c: u8 = a + b;
+              print "u8:", c;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("u8 arithmetic + print compiles to LLVM");
+        assert!(
+            ll.contains("zext i8"),
+            "expected `zext i8` (not `sext i8`) when printing an unsigned u8, got:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
     #[test]
     fn mmio_read_u32_rejects_wrong_arg_count() {
         let source = r#"
