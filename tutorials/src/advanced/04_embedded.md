@@ -28,9 +28,9 @@ which code needs extra scrutiny.
 ```vani
 intent "Advanced 4 -- raw pointer + region-scoped arena.";
 
-fn poke(addr: *mut i32, val: i32) -> i64 {
+fn poke(addr: *mut i64, val: i64) -> i64 {
   unsafe(reason = "raw pointer write -- hardware register") {
-    *addr = val;
+    let _ = raw_store(addr, val);
   }
   return 0;
 }
@@ -38,7 +38,14 @@ fn poke(addr: *mut i32, val: i32) -> i64 {
 
 - `unsafe(reason = "raw pointer write -- hardware register") { ... }` blocks are the only place where the
   following are allowed:
-  - Dereferencing a raw pointer (`*p`).
+  - Reading/writing through a raw pointer, via the builtins
+    `raw_load(p) -> Tainted<T>` / `raw_store(p, v) -> i64` --
+    **NOT** a bare `*p` / `*p = v` dereference, which isn't valid
+    syntax at all (confirmed by testing: "expected expression" /
+    "expected statement"). `raw_load`'s result comes back wrapped
+    in `Tainted<T>` and must be unwrapped with `assert_safe(t) ->
+    T` before use, forcing an explicit "I vouch for this read" at
+    the call site.
   - Calling a `pure extern "C" fn` that's marked `unsafe`.
 - The compiler proves *every other* operation safe. The
   `unsafe` keyword is a request to suspend specific safety
@@ -51,21 +58,28 @@ fn poke(addr: *mut i32, val: i32) -> i64 {
 ## Raw pointers: `*const T` and `*mut T`
 
 For interop with hardware MMIO, FFI buffers, or hand-written
-allocators:
+allocators. **Pointer arithmetic (`base + offset`) is rejected
+outright** -- confirmed by testing ("pointer arithmetic on raw
+pointer ... MISRA C 2012 Rule 18.4 forbids +/-/shift/bitwise on
+pointer types"). For offset/indexed access, wrap the pointer in a
+`BoundedPtr<T>` and use bounds-checked `bptr_get`/`bptr_set`
+instead:
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
-fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {
+fn write_register(base: *mut i64, count: i64, offset: i64, value: i64) -> i64 {
   unsafe(reason = "raw pointer write -- hardware register") {
-    *(base + offset) = value;
+    let bp: BoundedPtr<i64> = bptr_new(base, count, count);
+    let _ = bptr_set(mut ref bp, offset, value);
   }
   return 0;
 }
 ```
 
-The C backend lowers these to plain `*` dereferences; the
-LLVM backend uses `load` / `store` instructions.
+The C backend lowers `raw_load`/`raw_store`/`bptr_get`/`bptr_set`
+to plain `*` dereferences; the LLVM backend uses `load` / `store`
+instructions.
 
 ## Two arena mechanisms: `Pool<T>` (v1, runtime-checked) vs `Region` + `ArenaRef<T>` (v2, compile-time-checked)
 
@@ -134,6 +148,11 @@ fn use_region() -> i64 {
     return aref_load(a);   // 42
   }
   // `arena`'s entire backing storage frees in one call here.
+  return 0;   // unreachable in practice, but required: the checker's
+              // return-completeness pass doesn't treat a `region`
+              // block's own `return` as covering the whole function
+              // (confirmed by testing -- omitting this line gets
+              // "function 'use_region' must return a i64").
 }
 ```
 
@@ -274,14 +293,16 @@ This attribute is targeted at audio DSP callbacks, control-loop
 ISRs, and cryptographic primitives where constant-time is a
 security or real-time requirement.
 
-### `#[recursion_bound(N)]`
+### `#[bounded(N)]`
 
-Caps the maximum recursion depth at N. Together with
-`#[bounded_stack]`, this lets the compiler prove the total stack
-usage is finite.
+Caps the maximum recursion depth at N (`#[recursion_bound(N)]` is
+NOT a real attribute -- confirmed by testing, rejected as unknown;
+the compiler's own diagnostic lists `#[bounded(N)]` as the
+recognized name). Together with `#[bounded_stack]`, this lets the
+compiler prove the total stack usage is finite.
 
 ```vani
-#[recursion_bound(32)]
+#[bounded(32)]
 #[bounded_stack(bytes=4096)]
 fn tree_height(depth: i64) -> i64 {
   if depth <= 0 {
@@ -341,9 +362,9 @@ the linker will fail with an undefined-reference error.
 Example — FreeRTOS task via FFI on an RP2040:
 
 ```vani
-extern fn xTaskCreate(f: fn() -> i64, name: ref i8,
+extern "C" fn xTaskCreate(f: fn() -> i64, name: Str,
                       stack: i64, arg: i64, prio: i64, handle: i64) -> i64;
-extern fn vTaskStartScheduler() -> i64;
+extern "C" fn vTaskStartScheduler() -> i64;
 
 fn core1_task() -> i64 {
     // process second half of buffer here
@@ -352,11 +373,19 @@ fn core1_task() -> i64 {
 
 fn main() -> i64 {
     // core 0 processes first half inline; core 1 via FreeRTOS task
-    let _ = xTaskCreate(core1_task, ref "c1" as i8, 512, 0, 1, 0);
+    let _ = xTaskCreate(core1_task, "c1", 512, 0, 1, 0);
     let _ = vTaskStartScheduler();
     return 0;
 }
 ```
+
+(Two syntax fixes over an earlier version of this page, both
+confirmed by testing: `extern` alone doesn't parse -- it's always
+`extern "C" fn` with an explicit ABI string, same as every other FFI
+declaration; and `name: ref i8` + `ref "c1" as i8` at the call site
+doesn't type-check at all (`ref` can only borrow a named variable,
+never a literal) -- a C string parameter is just `name: Str`, and a
+plain string literal passes directly, no `ref`/cast needed.)
 
 For single-core targets, just use a plain `while` loop — no workaround
 needed, and the verifier + SMT checks still apply.
