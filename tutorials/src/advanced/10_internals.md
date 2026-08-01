@@ -42,8 +42,11 @@ This chapter walks each one.
     v
   TypedProgram  (src/ir.rs)
     |
-    |  src/lower.rs        -- TypedProgram -> SSA Module (for
-    |                        the SSA backends; tree-* skip this)
+    |  src/ssa.rs           -- TypedProgram -> SSA Module (for
+    |                        the SSA backends; tree-* skip this;
+    |                        confirmed by testing -- an earlier
+    |                        version of this page said `src/lower.rs`,
+    |                        which doesn't exist)
     v
    IR Module  (src/ir.rs)
     |
@@ -60,16 +63,23 @@ falls back to the tree backend automatically.
 
 ## Module-by-module pointers
 
+All function names below confirmed by testing/grepping the real
+source (an earlier version of this table had six wrong names --
+`parse_fn_decl`, `check_program`, `check_call_args`,
+`check_dyn_coerce`, `encode_predicate`, `discharge_proof`, and
+`emit_program` don't exist anywhere in the codebase; `src/lower.rs`
+doesn't exist as a file at all).
+
 | File | Purpose | What to look for |
 |---|---|---|
 | `src/lexer.rs` | Tokens + multi-script purity | `Script::classify`, `enforce_language_purity`, the per-script `*_keyword` functions |
-| `src/parser.rs` | Recursive-descent parser | `parse_fn_decl`, `parse_let_stmt`, the SOV-shape detectors |
+| `src/parser.rs` | Recursive-descent parser | `parse_function`, `parse_let_stmt`, the SOV-shape detectors |
 | `src/ast.rs` | Untyped AST | `enum Stmt`, `enum Expr`, the `CLOSURE_MAKE_REGISTRY` thread-locals |
-| `src/checker.rs` | Type checker + affine borrow checker | `check_program`, `check_call_args`, `check_dyn_coerce` |
-| `src/smt.rs` | SMT encoder (Z3 backend) | `encode_predicate`, `discharge_proof`, the `VANIC_SMT_DEBUG` env var |
+| `src/checker.rs` | Type checker + affine borrow checker | `check` (the top-level entry point), `check_call`, `make_dyn_coerce` |
+| `src/smt.rs` | SMT encoder (Z3 backend) | `try_prove` (the top-level discharge entry point, returns a `Verdict`), `build_query`, the `VANIC_SMT_DEBUG` env var |
 | `src/ir.rs` | TypedProgram + IR Module | `TypedExprKind`, `Instruction`, `BasicBlock` |
-| `src/lower.rs` | TypedProgram -> SSA Module | `lower_program`, `lower_expr` |
-| `src/backend_c.rs` | Tree-C codegen | `emit_program`, `emit_print_expr_no_newline`, the per-script numeral helpers |
+| `src/ssa.rs` | TypedProgram -> SSA Module | `lower_program`, `lower_expr_to_value`/`lower_expr_to_operand` |
+| `src/backend_c.rs` | Tree-C codegen | `emit_c` (the real entry point behind `CBackend::emit`), `emit_print_expr_no_newline`, the per-script numeral helpers |
 | `src/ssa_backend_c.rs` | SSA-C codegen | `emit`, `intent_print_item` handler |
 | `src/backend_llvm.rs` | Tree-LLVM codegen | `emit_llvm`, `emit_print_items`, `emit_brahmi_print_helper_ll` |
 | `src/ssa_backend_llvm.rs` | SSA-LLVM codegen | `emit`, the LLVM IR helper emitter |
@@ -190,8 +200,11 @@ Two consequences for anyone adding a language feature or builtin:
 ## How to contribute a fix
 
 1. **Find the failing test or symptom**. The test ledger lives
-   in `src/lib.rs` (1900+ tests) and `tests/run_end_to_end.rs`
-   (54 parity tests).
+   in `src/lib.rs` (2400+ tests as of 2026-08-01, up from an
+   earlier "1900+" -- the count only grows, check
+   `grep -c '#\[test\]' src/lib.rs` for the current figure rather
+   than trusting a number in prose) and `tests/run_end_to_end.rs`
+   (100+ tests, similarly grown from an earlier "54").
 2. **Reproduce locally**: `cargo test --release --lib <name>`.
 3. **Trace the diagnostic** with `VANIC_SMT_DEBUG=1` if it's an
    SMT failure; for codegen issues, run `vanic emit foo.vani
@@ -207,8 +220,8 @@ Two consequences for anyone adding a language feature or builtin:
 
 | Suite | Where | What it covers |
 |---|---|---|
-| Lib tests (~1900) | `src/lib.rs` | Per-pass unit tests -- checker, lower, codegen shape pins, regression for each phase |
-| Parity sweep (54) | `tests/run_end_to_end.rs` | One test per backend feature; the `llvm_backend_run_produces_same_output_as_c` test iterates 60+ examples internally |
+| Lib tests (2400+) | `src/lib.rs` | Per-pass unit tests -- checker, lower, codegen shape pins, regression for each phase |
+| Parity + regression sweep (100+) | `tests/run_end_to_end.rs` | Real `vanic run`/`emit` invocations through the actual CLI (the only layer that exercises the SSA-vs-tree fallback -- see the warning above) -- backend-parity tests, real end-to-end bug regressions, and the `llvm_backend_run_produces_same_output_as_c` test, which iterates 60+ examples internally |
 | Example walks | `tests/run_end_to_end.rs` | Cover the design-pattern + dialect examples |
 
 ## Where the dialect surface lives
@@ -234,7 +247,12 @@ All dialect-related source-of-truth files:
 - Debugging a "proof failed" you can't reduce. `VANIC_SMT_DEBUG=1`
   + `src/smt.rs` are the answer.
 - Building a tool that consumes vāṇी AST. `cargo run --release
-  --bin vanic -- ast foo.vani` prints the JSON AST.
+  --bin vanic -- ast foo.vani` prints the AST -- as Rust's `{:#?}`
+  pretty-debug format, NOT JSON (confirmed by testing; an earlier
+  version of this page overclaimed JSON, and there's no `--json`
+  flag on this subcommand to get it). Skips the type checker, so it
+  still shows you something even for a program the checker would
+  reject.
 - Contributing a new backend feature. Start by reading two
   parallel backend files (tree-C and SSA-C) side by side --
   the shapes line up.

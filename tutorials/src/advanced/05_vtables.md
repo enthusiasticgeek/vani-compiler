@@ -105,7 +105,9 @@ that holds the right fat-pointer type.
   in `src/backend_c.rs`.
 - **C codegen of the dispatch site**: search for `DynDispatch`
   in `src/backend_c.rs`.
-- **Coercion checker**: `check_dyn_coerce` in `src/checker.rs`.
+- **Coercion checker**: `make_dyn_coerce` in `src/checker.rs`
+  (confirmed by grep -- `check_dyn_coerce` doesn't exist; an
+  earlier version of this page had the wrong name).
 - **End-to-end examples**: the 22 GoF design patterns at
   `examples/language/english/design_patterns/` -- `observer.vani`,
   `strategy.vani`, `factory_method.vani` all use `dyn Iface`
