@@ -41,24 +41,32 @@ fn aileron_deflection(angle: i64) -> i64 {
 ```vani
 // MISRA C 2012 — implies no_heap + no_recursion.
 // Rule 13.5 (short-circuit side effects), Rule 14.1 (dead branches),
-// Rule 15.5 (single exit), and complexity ceiling are all enforced.
+// Rule 15.5 (single exit), and complexity ceiling are all enforced --
+// note the single-exit style below: Rule 15.5 applies to every
+// composite-tagged function, not just #[misra_c_2012] (confirmed by
+// testing; an earlier version of this example had two `return`
+// statements and did NOT actually pass `vanic check`).
 #[misra_c_2012]
 fn filter_sensor(raw: i64) -> i64 {
+  let result: i64 = raw;
   if raw < 0 {
-    return 0;
+    result = 0;
   }
-  return raw;
+  return result;
 }
 ```
 
 ```vani
-// IEC 62304 Class C — medical devices. Implies no_heap + no_recursion.
+// IEC 62304 Class C — medical devices. Implies no_heap + no_recursion,
+// and (like every composite tag) Rule 15.5 single exit -- hence the
+// single trailing `return` here too (confirmed by testing).
 #[iec_62304_class_c]
 fn dose_clamp(dose: i64, max: i64) -> i64 {
+  let result: i64 = dose;
   if dose > max {
-    return max;
+    result = max;
   }
-  return dose;
+  return result;
 }
 ```
 
@@ -71,6 +79,17 @@ fn dose_clamp(dose: i64, max: i64) -> i64 {
 | `asil_d` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `do178c_level_a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
+The compiler actually recognizes three more composite tags beyond
+the four this chapter focuses on (confirmed by grep in
+`src/parser.rs`): `#[iec_61508_sil3]` and `#[iec_61508_sil4]`
+(industrial functional safety, same expansion as `asil_d`/
+`do178c_level_a`) and `#[autosar_ap]` (no_heap + no_recursion +
+deterministic_timing, but float is permitted, and bounded_stack +
+wcet must still be declared explicitly). Everything in this chapter
+-- the CLI subcommands, MISRA rules, deviation tracking -- applies
+to all seven the same way; only the four most commonly requested
+ones get dedicated example code here.
+
 ---
 
 ## MISRA rules enforced
@@ -81,7 +100,7 @@ fn dose_clamp(dose: i64, max: i64) -> i64 {
 | **14.1** | No unreachable / always-dead branches (`if true`, `while false`) | Any function with a composite tag |
 | **15.5** | Single point of exit (≤ 1 `return`) | Any function with a composite tag |
 | **2.1** | No dead code after `return` / `break` / `continue` | All functions (Required rule) |
-| **18.x** | Cyclomatic complexity ceiling (advisory) | Warning when score > 15; error under `#[misra_c_2012]` |
+| **18.x** | Cyclomatic complexity ceiling (advisory) | Compile-time enforcement is opt-in via `INTENT_CHECK_COMPLEXITY=1` (or `INTENT_MAX_COMPLEXITY=<N>`); when enabled it flags **any** function over the threshold, tagged or not -- there's no `#[misra_c_2012]`-specific behavior, and this compiler has no warning/error severity split (confirmed by testing; an earlier version of this row was wrong on both counts). `vanic complexity` (below) always reports scores regardless of the env var. |
 
 ---
 
@@ -134,16 +153,31 @@ vanic stack-depth src/firmware.vani --max=8192
 vanic stack-depth src/firmware.vani --format=json
 ```
 
-Example output:
+Example output (real, from running `vanic stack-depth` against the
+`compute_brake_torque` / `aileron_deflection` / `filter_sensor` /
+`dose_clamp` functions shown above -- confirmed by testing; an
+earlier version of this page showed a fabricated `entry main — max
+depth …` / `Functions with unbounded recursion:` format that this
+subcommand doesn't actually produce):
 
 ```
-entry main — max depth 1240 bytes
-  main → compute_brake_torque (256 B)
-  main → filter_sensor (48 B)
+Per-function frame sizes:
+  compute_brake_torque             56 bytes (locals: 24, prologue: 32)
+  aileron_deflection               48 bytes (locals: 16, prologue: 32)
+  filter_sensor                    64 bytes (locals: 32, prologue: 32)
+  dose_clamp                       72 bytes (locals: 40, prologue: 32)
+  main                             40 bytes (locals: 8, prologue: 32)
 
-Functions with unbounded recursion:
-  (none)
+Per-entry-point max stack depths:
+  compute_brake_torque             56 bytes  via compute_brake_torque
+  aileron_deflection               48 bytes  via aileron_deflection
+  filter_sensor                    64 bytes  via filter_sensor
+  dose_clamp                       72 bytes  via dose_clamp
+  main                             112 bytes  via main -> dose_clamp
 ```
+
+With `--max=<N>`, any entry point whose depth exceeds `N` gets an
+extra `EXCEEDS --max=<N> by <K> bytes` line and the command exits 1.
 
 For functions with `#[bounded(N)]`, the estimator models N+1 stack
 frames (worst case just before the runtime guard trips).
@@ -179,19 +213,34 @@ estimated cycle count exceeds `N`.
 #[wcet(cycles = 200)]
 fn read_sensor_array(data: [i64; 8]) -> i64 {
   let total: i64 = 0;
-  for x in &data {          // fixed-size array: 8 iterations × body cost
-    total = total + x;
+  for i from 0 to 8 {          // index-based: 8 iterations × body cost
+    total = total + data[i];
   }
   return total;
 }
 ```
 
+This is confirmed by testing -- an earlier version of this example
+used `for x in &data`, which is invalid syntax twice over: this
+language has no `&` borrow operator (it's `ref`), and even the
+correctly-spelled collection form (`for x in ref data`) is rejected
+here specifically *because* `#[do178c_level_a]` implies
+`#[deterministic_timing]`, which rejects every `for ... in
+<collection>` iterator outright regardless of whether the collection
+is a fixed-size array -- it wants an index-based `for i from 0 to N`
+loop instead. Drop `#[do178c_level_a]` (keep bare `#[wcet]`) if you
+want the collection-iteration form; see the note in the cycle model
+below.
+
 The cycle model (conservative):
 - ALU op / load / store: 2 cycles
 - Function call: 10 cycles (or the callee's declared `wcet` if annotated)
 - `print` / `eprint`: 50 cycles (syscall baseline)
-- `for i in 0..N` with literal N: body cycles × N
-- `for x in &arr` over `[T; N]`: body cycles × N (S-12 improvement)
+- `for i from 0 to N` with literal N: body cycles × N
+- `for x in ref arr` over `[T; N]`: body cycles × N (S-12 improvement)
+  -- **only** under a bare `#[wcet(...)]`; rejected under
+  `#[deterministic_timing]` / `#[asil_d]` / `#[do178c_level_a]`
+  (confirmed by testing), which require the index-based form above
 - Unbounded loops, Vec iteration, calls to unannotated functions: UNBOUNDED (error)
 
 ---
@@ -299,21 +348,27 @@ DO-178C Software Accomplishment Summary or ISO 26262 Work Product.
 ```vani
 // Pulse oximeter SpO2 sample accumulator.
 // IEC 62304 Class C — patient-safety-critical path.
-// No dynamic allocation. No recursion. Single exit per function.
+// No dynamic allocation. No recursion. Single exit per function
+// (confirmed by testing -- an earlier version of this example had
+// two `return` statements and a `for s in &samples` collection
+// loop, neither of which actually passes `vanic check` here: MISRA
+// 15.5 rejects the second `return`, and `&` isn't this language's
+// borrow syntax -- it's `ref`).
 #[iec_62304_class_c]
 fn accumulate_spo2(samples: [i64; 16]) -> i64 {
   let total: i64 = 0;
   let count: i64 = 0;
-  for s in &samples {
+  for s in ref samples {
     if s >= 0 {
       total = total + s;
       count = count + 1;
     }
   }
-  if count == 0 {
-    return -1;    // sentinel: no valid samples
+  let result: i64 = -1;    // sentinel: no valid samples
+  if count > 0 {
+    result = total / count;
   }
-  return total / count;
+  return result;
 }
 
 fn main() -> i64 {
