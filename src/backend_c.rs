@@ -20943,6 +20943,16 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             Type::WriteGuard(element) => {
                 format!("const {}* {}", c_write_guard_storage(element), name)
             }
+            // BUG-47 fix: `ref HashMap<K, V>` -- same missing-arm gap
+            // as the Mutex/RwLock arms above, just never caught by
+            // the BUG-22 pass since HashMap wasn't parametric yet at
+            // the time. Without this arm, every `ref HashMap<K, V>`
+            // parameter fell through to `c_leaf_type`'s hardcoded
+            // `intent_hashmap_i64_i64`, ignoring the real K/V --
+            // wrong struct name in the emitted C signature whenever
+            // any OTHER HashMap instantiation existed anywhere else
+            // in the program (real `cc` compile failure).
+            Type::HashMap(k, v) => format!("const {}* {}", hashmap_prefix_from_kv(k, v), name),
             other => format!("const {}* {}", c_leaf_type(other), name),
         },
         Type::RefMut(inner) => match &**inner {
@@ -20981,6 +20991,9 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             Type::RwLock(element) => format!("{}* {}", c_rwlock_storage(element), name),
             Type::ReadGuard(element) => format!("{}* {}", c_read_guard_storage(element), name),
             Type::WriteGuard(element) => format!("{}* {}", c_write_guard_storage(element), name),
+            // BUG-47 fix: `mut ref HashMap<K, V>` -- same gap as the
+            // `Ref` arm above.
+            Type::HashMap(k, v) => format!("{}* {}", hashmap_prefix_from_kv(k, v), name),
             other => format!("{}* {}", c_leaf_type(other), name),
         },
         Type::Atomic(element) => format!("{} {}", c_atomic_storage(element), name),
@@ -21004,6 +21017,9 @@ fn format_declarator(ty: &Type, name: &str) -> String {
         Type::RwLock(element) => format!("{} {}", c_rwlock_storage(element), name),
         Type::ReadGuard(element) => format!("{} {}", c_read_guard_storage(element), name),
         Type::WriteGuard(element) => format!("{} {}", c_write_guard_storage(element), name),
+        // BUG-47 fix: bare `HashMap<K, V>` (e.g. a struct field or
+        // by-value fn param) -- same gap as the Ref/RefMut arms above.
+        Type::HashMap(k, v) => format!("{} {}", hashmap_prefix_from_kv(k, v), name),
         Type::FnPtr(params, ret) => {
             // C function pointer declarator:
             //   R (*name)(T1, T2, ...)

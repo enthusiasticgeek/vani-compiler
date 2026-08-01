@@ -5430,6 +5430,65 @@ fn main() -> i64 {
     }
 }
 
+// BUG-47, found in an earlier tutorial audit and fixed here (2026-08-01):
+// `format_declarator` (backend_c.rs) had no `Type::HashMap` arm in its
+// bare/`Ref`/`RefMut` matches, so every `HashMap<K, V>` FUNCTION PARAMETER
+// (by value, `ref`, or `mut ref`) fell through to the hardcoded
+// `intent_hashmap_i64_i64` fallback regardless of its real K/V -- a real
+// `cc` compile error whenever the parameter's declared type didn't match
+// the type actually used in the function body (which always uses the
+// correct per-(K,V) name via a completely separate, already-correct code
+// path). Only a real `cc` invocation proves the fix -- a
+// `compile_to_c` string-contains check (also added, in src/lib.rs) can't
+// tell you the file as a whole actually compiles.
+#[test]
+fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
+    let src = write_tmp_vani(
+        "hashmap_owned_str_param_real_cc",
+        r#"
+fn lookup(map: ref HashMap<OwnedStr, i64>, key: OwnedStr) -> Option<i64> {
+  return hashmap_get(map, key);
+}
+fn insert_it(map: mut ref HashMap<OwnedStr, i64>, key: OwnedStr, v: i64) -> i64 {
+  let _ = hashmap_insert(map, key, v);
+  return 0;
+}
+fn count_ints(map: ref HashMap<i64, i64>) -> i64 {
+  return hashmap_len(map);
+}
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, i64> = hashmap_new();
+  let _ = insert_it(mut ref m, "a" + "", 1);
+  let r: Option<i64> = lookup(ref m, "a" + "");
+  if let Option.Some(v) = r { print v; }
+
+  let m2: HashMap<i64, i64> = hashmap_new();
+  let _ = hashmap_insert(mut ref m2, 5, 50);
+  print count_ints(ref m2);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run --backend=c should execute");
+    assert!(
+        output.status.success(),
+        "a HashMap<OwnedStr, i64> ref/mut-ref parameter, alongside a \
+         second HashMap<i64, i64> instantiation in the same program, \
+         must compile and run via a real cc invocation; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.replace("\r\n", "\n"),
+        "1\n1\n",
+        "expected the OwnedStr-keyed lookup (1) then the i64-keyed len (1)"
+    );
+}
+
 #[test]
 fn vec256_dot_product_runs_consistently_without_alignment_crash() {
     let src = write_tmp_vani(

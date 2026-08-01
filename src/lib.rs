@@ -44964,6 +44964,66 @@ função main() -> i64 {
         assert!(c.contains("intent_hashmap_int64_t_uint64_t_new"));
     }
 
+    /// BUG-47 (found via the "fix documented TODO bugs" pass,
+    /// 2026-08-01): `format_declarator` (backend_c.rs) had no
+    /// `Type::HashMap` arm in its bare/`Ref`/`RefMut` match arms --
+    /// same missing-arm gap BUG-22 fixed for Mutex/Guard/RwLock/
+    /// ReadGuard/WriteGuard, just never caught for HashMap since it
+    /// wasn't parametric yet when BUG-22 landed. Every
+    /// `ref`/`mut ref`/bare `HashMap<K, V>` FUNCTION PARAMETER fell
+    /// through to `c_leaf_type`'s hardcoded `intent_hashmap_i64_i64`,
+    /// producing a real `cc` compile error (declared type doesn't
+    /// match the type actually used in the function body) whenever
+    /// a non-(i64,i64) HashMap was passed as a parameter -- and,
+    /// per the original bug report, silently the WRONG (i64,i64)-
+    /// unrelated struct name once a second, different HashMap
+    /// instantiation existed anywhere else in the same program.
+    #[test]
+    fn hashmap_owned_str_ref_param_emits_real_type_not_stale_i64_i64_fallback() {
+        let source = r#"
+            fn lookup(map: ref HashMap<OwnedStr, i64>, key: OwnedStr) -> Option<i64> {
+              return hashmap_get(map, key);
+            }
+            fn insert_it(map: mut ref HashMap<OwnedStr, i64>, key: OwnedStr, v: i64) -> i64 {
+              let _ = hashmap_insert(map, key, v);
+              return 0;
+            }
+            fn count_ints(map: ref HashMap<i64, i64>) -> i64 {
+              return hashmap_len(map);
+            }
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let _ = insert_it(mut ref m, "a" + "", 1);
+              let r: Option<i64> = lookup(ref m, "a" + "");
+              let m2: HashMap<i64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m2, 5, 50);
+              return count_ints(ref m2);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> params → C");
+        let lookup_sig = c
+            .lines()
+            .find(|l| l.contains("fn_lookup(const"))
+            .unwrap_or_else(|| panic!("no fn_lookup prototype found in:\n{}", &c[..c.len().min(6000)]));
+        let insert_sig = c
+            .lines()
+            .find(|l| l.starts_with("static int64_t fn_insert_it("))
+            .unwrap_or_else(|| panic!("no fn_insert_it prototype found in:\n{}", &c[..c.len().min(6000)]));
+        assert!(
+            lookup_sig.contains("intent_hashmap_owned_str_int64_t* v_map"),
+            "fn_lookup's `map` param must use the real per-(K,V) struct \
+             name, not the stale hardcoded (i64,i64) fallback; got: {}",
+            lookup_sig
+        );
+        assert!(
+            insert_sig.contains("intent_hashmap_owned_str_int64_t* v_map"),
+            "fn_insert_it's `map` param must use the real per-(K,V) \
+             struct name, not the stale hardcoded (i64,i64) fallback; \
+             got: {}",
+            insert_sig
+        );
+    }
+
     #[test]
     fn hashmap_i64_i32_c_backend_emits_per_pair_bundle() {
         let source = r#"
