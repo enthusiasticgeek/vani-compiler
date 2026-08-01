@@ -25951,6 +25951,63 @@ fn main() -> i64 {
         );
     }
 
+    /// BUG-51 (found auditing `02_parallel.md`, 2026-08-01): the LLVM
+    /// backend's outlined-function id counter (`FnCtx::next_outline`,
+    /// used for `parallel for`, block-form `task { … }`, and
+    /// expression-form `task fn(args)`) is scoped to the CURRENT
+    /// PARENT function only -- it restarts at 0 for every new
+    /// top-level function's `FnCtx`. Two different functions each
+    /// containing exactly one `parallel for` therefore both generated
+    /// the LLVM symbol `@__intent_par_0` -- a 100%-reproducible
+    /// "invalid redefinition of function" `lli` crash the instant a
+    /// program had more than one such function (which the tutorial's
+    /// own `double_all`/`dot_product` pair, side by side in one file,
+    /// hit immediately). Fixed by splicing the enclosing top-level
+    /// function's own name into the outlined symbol
+    /// (`__intent_par_<parent_fn>_<id>`), guaranteeing global
+    /// uniqueness since function names are already unique in a vāṇी
+    /// program. Two functions, each with a trivial `parallel for`
+    /// over the SAME iteration count (so the id counter alone can't
+    /// tell them apart either) -- checks the LLVM output defines TWO
+    /// distinct outlined functions, not one followed by a duplicate.
+    #[test]
+    fn two_functions_each_with_parallel_for_get_distinct_llvm_outline_names() {
+        let source = r#"
+            fn double_all(xs: mut ref Vec<i64>) -> i64 {
+              let n: u64 = len(xs);
+              parallel for i from 0 to n {
+                xs[i] = xs[i] * 2;
+              }
+              return 0;
+            }
+            fn triple_all(xs: mut ref Vec<i64>) -> i64 {
+              let n: u64 = len(xs);
+              parallel for i from 0 to n {
+                xs[i] = xs[i] * 3;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("two parallel-for functions must compile");
+        let outline_defines: Vec<&str> = ll
+            .lines()
+            .filter(|l| l.starts_with("define internal") && l.contains("@__intent_par_"))
+            .collect();
+        assert_eq!(
+            outline_defines.len(),
+            2,
+            "expected exactly 2 outlined parallel-for definitions (one per function), got {}:\n{}",
+            outline_defines.len(),
+            outline_defines.join("\n")
+        );
+        assert_ne!(
+            outline_defines[0], outline_defines[1],
+            "the two outlined functions must have DISTINCT names, not a duplicate definition:\n{}",
+            outline_defines.join("\n")
+        );
+    }
+
     #[test]
     fn atomic_new_rejects_unsupported_element_type() {
         // Heap-allocated / composite types (OwnedStr, structs, …) are not
@@ -26063,8 +26120,12 @@ fn main() -> i64 {
         // uses CreateThread + WaitForSingleObject).
         let checked = compile(source).expect("LLVM compiles");
         let llvm = crate::backend_llvm::LlvmBackend.emit(&checked.ir);
+        // BUG-51: the outlined fn name is now qualified with the
+        // enclosing top-level function's name (`main`, here) so two
+        // different functions each spawning a task never collide on
+        // the same LLVM symbol.
         assert!(
-            llvm.contains("define internal i8* @intent_task_0("),
+            llvm.contains("define internal i8* @intent_task_main_0("),
             "expected outlined task fn in LLVM IR:\n{llvm}"
         );
         #[cfg(not(target_os = "windows"))]

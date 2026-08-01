@@ -4113,4 +4113,51 @@ verifying the four fixes above against their tutorial worked examples
   sees it) and `01a_async_primer.md` (bare-statement `await(...)`,
   which never parses, plus a call to an undefined `process` fn).
 
+- [x] **BUG-51. Any program with two DIFFERENT functions each
+  containing their own `parallel for` (or block-form `task { … }`, or
+  expression-form `task fn(args)` spawn) crashed the LLVM backend with
+  "invalid redefinition of function" — 100% reproducible, not
+  input-dependent.** Found auditing `tutorials/src/advanced/
+  02_parallel.md`'s `double_all`/`dot_product` pair (side by side in
+  one file, each with its own `parallel for`) against the real
+  compiler; the C backend was unaffected. Root cause:
+  `backend_llvm.rs`'s `FnCtx.next_outline` counter (used by all three
+  outlining sites — `emit_parallel_for_via_gomp`,
+  `emit_task_via_pthread`, `emit_task_spawn_call` — to generate
+  `@__intent_par_<N>` / `@intent_task_<N>` / `@intent_task_call_<N>`
+  symbol names) is scoped to the CURRENT PARENT function only; it
+  restarts at 0 for every new top-level function's `FnCtx`. LLVM
+  symbol names are module-global, so two functions each with exactly
+  one outlined construct both generated the identical `..._0` name —
+  the compiler tried to `define` the same function twice. **Fixed**:
+  added a new `FnCtx.outline_prefix` field, set to the enclosing
+  top-level function's own name right after that `FnCtx` is
+  constructed (and copied into the two nested outlined-fn `FnCtx`s so
+  recursively-nested outlines stay qualified by the ORIGINAL top-level
+  function rather than losing the qualifier), and spliced into all
+  three symbol-name `format!` call sites
+  (`__intent_par_<parent_fn>_<id>` etc.) — function names are already
+  unique in a vāṇी program, so this guarantees global uniqueness
+  without a new module-level counter. C backend untouched (its own
+  naming, in `backend_c.rs`, wasn't affected by this bug — separate
+  code, separate counter).
+  Regression tests:
+  `two_functions_each_with_parallel_for_get_distinct_llvm_outline_names`
+  (`src/lib.rs`) asserts the LLVM IR defines exactly 2 outlined
+  functions with DISTINCT names, not one followed by a silent
+  duplicate. `two_functions_each_with_parallel_for_run_correctly_on_
+  both_backends` (`tests/run_end_to_end.rs`) is the real proof: two
+  functions, each multiplying every element of the SAME captured
+  `Vec` by a different constant, called back to back — a compile-only
+  check can't catch a wrong-value regression (e.g. the second
+  outlined fn accidentally reusing the first's captures) the way an
+  actual `lli`-executed run with real, distinguishable expected output
+  (`xs = 6 12 18 24`) can. Updated one pre-existing test
+  (`task_spawn_lowers_to_pthread_create_with_outlined_body`) whose
+  LLVM assertion hardcoded the old unqualified `@intent_task_0` name
+  to expect `@intent_task_main_0` instead (its `main`-only source
+  program was never wrong, just written before this fix existed).
+  Full `cargo test --release --workspace` clean (2603 passed, 0
+  failed) after this fix.
+
 ---

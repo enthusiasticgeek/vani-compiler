@@ -5125,3 +5125,73 @@ fn main() -> i64 {
         );
     }
 }
+
+// Found auditing tutorials/src/advanced/02_parallel.md (2026-08-01): the
+// LLVM backend crashed on ANY program with two different functions each
+// containing their own `parallel for` (or block-form `task { ... }`, or
+// `task fn(args)` spawn) -- the outlined-function id counter restarts at
+// 0 per top-level function, so both functions generated the identical
+// LLVM symbol `@__intent_par_0`, an "invalid redefinition of function"
+// error on 100% of such programs (the tutorial's own double_all/
+// dot_product pair, side by side in one file, hit this immediately). A
+// compile-only check (src/lib.rs's IR-text assertion) proves the names
+// no longer collide; only a real `lli`-executed run proves the fix
+// doesn't just avoid the crash but produces the CORRECT values from
+// each independently-outlined function.
+#[test]
+fn two_functions_each_with_parallel_for_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "two_parallel_for_fns",
+        r#"
+fn double_all(xs: mut ref Vec<i64>) -> i64 {
+  let n: u64 = len(xs);
+  parallel for i from 0 to n {
+    xs[i] = xs[i] * 2;
+  }
+  return 0;
+}
+
+fn triple_all(xs: mut ref Vec<i64>) -> i64 {
+  let n: u64 = len(xs);
+  parallel for i from 0 to n {
+    xs[i] = xs[i] * 3;
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3, 4);
+  let _ = double_all(mut ref xs);
+  let _ = triple_all(mut ref xs);
+  print "xs =", xs[0], xs[1], xs[2], xs[3];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "xs = 6 12 18 24\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "two functions each with their own parallel-for produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}

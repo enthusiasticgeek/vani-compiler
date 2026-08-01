@@ -2305,6 +2305,10 @@ fn emit_function(
     out.push_str("entry:\n");
 
     let mut ctx = FnCtx::new(assert_msg_indices, print_str_indices);
+    // BUG-51: qualify every outlined-fn symbol this function emits
+    // (parallel-for / task-block / task-spawn) with the function's own
+    // name so two different functions never collide on `..._0`.
+    ctx.outline_prefix = function.name.clone();
     ctx.current_block = "entry".to_string();
     ctx.force_vectorize = function.vectorize;
     // Closure #289 tree-LLVM: record the fn's bounded-name
@@ -2460,6 +2464,23 @@ struct FnCtx<'a> {
     /// Monotonic counter for outlined function ids; bumped each
     /// time a parallel-for is encountered in the current parent.
     next_outline: u32,
+    /// BUG-51: the enclosing top-level function's own name, spliced
+    /// into every `__intent_par_<N>` / `intent_task_<N>` /
+    /// `intent_task_call_<N>` outlined-function name alongside `id`.
+    /// `next_outline` alone is only unique WITHIN one parent function
+    /// (it restarts at 0 for every new top-level function's FnCtx) --
+    /// two different functions each containing exactly one outlined
+    /// construct (a `parallel for`, a `task NAME { … }` block, or a
+    /// `task fn(args)` spawn) previously collided on the identical
+    /// LLVM symbol name `..._0`, an "invalid redefinition of function"
+    /// error 100% reproducible the moment a program had more than one
+    /// such function. Empty for the top-level FnCtx only in the sense
+    /// that it's set immediately after construction in `emit_function`;
+    /// nested outlined-fn FnCtxs copy it from the parent so recursively
+    /// nested outlines (an outline whose own body outlines again) stay
+    /// qualified by the ORIGINAL top-level function, not the outline's
+    /// own synthesized name.
+    outline_prefix: String,
     /// Bare name (no leading `%`) of the basic block we're
     /// currently emitting into. Updated each time a label is
     /// printed to `out`. Phi nodes use this to know the
@@ -2513,6 +2534,7 @@ impl<'a> FnCtx<'a> {
             print_str_indices,
             deferred_functions: String::new(),
             next_outline: 0,
+            outline_prefix: String::new(),
             // The function entry implicitly opens an unnamed
             // `0` block in LLVM IR. Code emitted before any
             // user-introduced label belongs there. We pin
@@ -44729,7 +44751,7 @@ fn emit_task_via_pthread(
 ) {
     let id = ctx.next_outline;
     ctx.next_outline += 1;
-    let fn_name = format!("intent_task_{}", id);
+    let fn_name = format!("intent_task_{}_{}", ctx.outline_prefix, id);
 
     // Anonymous ctx struct: one field per capture, by-value.
     let field_tys: Vec<String> =
@@ -44877,6 +44899,7 @@ fn emit_task_via_pthread(
     // actually-exercised bug in a "C vs LLVM backend parity" test.
     outlined_ctx.skip_alloca_hoisting = true;
     outlined_ctx.next_outline = ctx.next_outline;
+    outlined_ctx.outline_prefix = ctx.outline_prefix.clone();
     for (i, (cap_name, cap_ty)) in captures.iter().enumerate() {
         let slot_p = format!("%cap_slot_{}", i);
         deferred.push_str(&format!(
@@ -44967,7 +44990,7 @@ fn emit_task_spawn_call(
 ) -> String {
     let id = ctx.next_outline;
     ctx.next_outline += 1;
-    let fn_name = format!("intent_task_call_{}", id);
+    let fn_name = format!("intent_task_call_{}_{}", ctx.outline_prefix, id);
 
     let arg_ll_tys: Vec<String> = arg_types.iter().map(llvm_type_string).collect();
     let result_ll_ty = llvm_type_string(result_ty);
@@ -45178,7 +45201,7 @@ fn emit_parallel_for_via_gomp(
 ) {
     let id = ctx.next_outline;
     ctx.next_outline += 1;
-    let fn_name = format!("__intent_par_{}", id);
+    let fn_name = format!("__intent_par_{}_{}", ctx.outline_prefix, id);
     let lty = llvm_type(ty);
 
     // Discover what outer bindings the body reads, in document
@@ -45376,6 +45399,7 @@ fn emit_parallel_for_via_gomp(
     // two-pass flush that `emit_function` uses for alloca_preamble. Skip
     // hoisting so let-allocas go directly to the output buffer.
     outlined_ctx.skip_alloca_hoisting = true;
+    outlined_ctx.outline_prefix = ctx.outline_prefix.clone();
     outlined_ctx
         .locals
         .insert(var.to_string(), (ty.clone(), "%i_addr".to_string()));
