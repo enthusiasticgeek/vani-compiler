@@ -157,14 +157,32 @@ Sometimes you genuinely need to:
   track.
 - Call into legacy C firmware that doesn't follow vāṇी rules.
 
-For these, you write:
+For the first case, note that `volatile_read`/`volatile_write`
+(guaranteeing the compiler won't coalesce or reorder register
+accesses) DON'T actually need an `unsafe` block at all -- they take
+a plain `ref`/`mut ref i64`, gated only on the embedded build target
+(`INTENT_TARGET_EMBEDDED=1`; see
+[`examples/embedded/mmio_blink.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/embedded/mmio_blink.vani)
+for the full runnable pattern). v1 has no way to construct a raw
+pointer from an arbitrary hardcoded address (`0x40020000 as *mut T`
+is rejected outright -- casting TO a raw pointer type only works
+FROM an existing vāṇी binding, `&x as *const T` / `&mut x as *mut
+T`); real firmware binds a fixed hardware address to a vāṇी variable
+via a linker symbol instead (`#[link_section]`, covered in
+[Advanced 4b](04b_cross_compile_primer.md)), not pointer casting.
+
+`unsafe` genuinely IS required for the second and third cases --
+raw pointer arithmetic and legacy C interop:
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
-unsafe(reason = "GPIO pin 13 toggle -- hardware-defined memory address") {
-  let gpio_pin_13: *mut u32 = 0x40020000 as *mut u32;
-  write_volatile(gpio_pin_13, 1);
+unsafe(reason = "scratch buffer via raw pointer for pointer-arithmetic demo") {
+  let p: *mut i64 = unsafe_alloc(3);
+  let bp: BoundedPtr<i64> = bptr_new(p, 3, 3);
+  let _ = bptr_set(mut ref bp, 0, 42);
+  let v: i64 = option_unwrap_or(bptr_get(ref bp, 0), 0 - 1);
+  print "v =", v;
 }
 ```
 
