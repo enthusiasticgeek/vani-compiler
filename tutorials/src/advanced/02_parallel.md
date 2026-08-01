@@ -86,14 +86,15 @@ fn bad_prefix(xs: mut ref Vec<i64>, n: u64) -> i64 {
 }
 ```
 
+This is the real, exact `vanic check` output (confirmed by testing):
+
 ```
 error: 'parallel for' body cannot mutate 'xs[i] = …' (indexed write is a side effect)
-    xs[i] = xs[i - 1] + 1;   // wrong: reads a slot another iteration writes
+    xs[i] = xs[i - 1] + 1;
        ^
-  help: Pure functions in vāṇी are honored by both SMT (allowed inside
-  `requires` / `ensures`) AND the parallel-for safety pass. They must be
-  safe to call multiple times with the same arguments and produce the
-  same result, with no externally visible mutation.
+  help: 1. Function `'parallel for' body` is declared as a `pure` function, but its body has an observable side effect.
+  help: 2. Pure functions in vāṇी are honored by both SMT (allowed inside `requires` / `ensures`) AND the parallel-for safety pass. They must be safe to call multiple times with the same arguments and produce the same result, no externally visible mutation.
+  help: 3. Remove the `pure` qualifier if the function genuinely needs the side effect (then it can't be used in SMT clauses or pure-call positions); or refactor the body to return the would-be side effect as a value the caller threads through explicitly.
 ```
 
 Indexed assignment on a captured `Vec` is exactly the "assignments to
@@ -206,8 +207,13 @@ fail with an undefined-reference error.
 
 ```vani
 // Split the range by hand and create one task per slice.
-// The FreeRTOS xTaskCreate symbol is available via FFI:
-extern fn xTaskCreate(f: fn() -> i64, name: ref i8, stack: i64,
+// The FreeRTOS xTaskCreate symbol is available via FFI. Confirmed
+// by testing (parses + type-checks; an earlier version of this
+// page used `extern fn` -- this language requires the ABI string,
+// `extern "C" fn` -- and `ref i8` / `ref "w0" as i8` for the task
+// name, neither of which is valid; C strings are `Str`, passed as
+// plain string literals):
+extern "C" fn xTaskCreate(f: fn() -> i64, name: Str, stack: i64,
                       arg: i64, prio: i64, handle: i64) -> i64;
 
 fn worker_0() -> i64 {
@@ -219,8 +225,8 @@ fn worker_1() -> i64 {
     return 0;
 }
 fn main() -> i64 {
-    let _ = xTaskCreate(worker_0, ref "w0" as i8, 256, 0, 1, 0);
-    let _ = xTaskCreate(worker_1, ref "w1" as i8, 256, 0, 1, 0);
+    let _ = xTaskCreate(worker_0, "w0", 256, 0, 1, 0);
+    let _ = xTaskCreate(worker_1, "w1", 256, 0, 1, 0);
     // ... vTaskStartScheduler() via FFI to begin execution
     return 0;
 }

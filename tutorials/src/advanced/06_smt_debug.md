@@ -22,9 +22,17 @@ Set the env var, then re-run any compile command:
 VANIC_SMT_DEBUG=1 vanic check ~/myprog.vani 2> smt.log
 ```
 
-Every SMT query the verifier emits -- for every `prove`,
-`assert`, `requires` at call sites, `ensures` at returns, and
-loop invariants -- is written to stderr in two parts:
+Every SMT query the verifier emits -- for `prove`, `requires` at
+call sites, `ensures` at returns, and loop invariants -- is
+written to stderr in two parts. Note: plain `assert` is NOT in
+this list -- confirmed by testing, and by reading
+`checker.rs`'s `Stmt::Assert` handling, which never calls into
+the SMT layer at all. An `assert` always compiles down to a
+runtime check, unconditionally, regardless of whether the
+condition happens to be statically provable; only `prove` gets a
+compile-time SMT attempt. (This is unrelated to `assert`'s
+*optional* `, "message"` form -- that's just a custom panic
+string, still runtime-only.)
 
 1. **The query** in SMT-LIB v2 format, ready to paste into a
    standalone `z3` invocation.
@@ -36,14 +44,17 @@ compiling for long files.
 
 ## Reading a counterexample
 
-A typical failing assert looks like:
+A typical failing `prove` looks like (confirmed by testing; an
+earlier version of this page showed `assert x - b >= 0;` here,
+but plain `assert` never produces this diagnostic shape -- see
+the note above -- only `prove` does):
 
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```
 src/foo.vani:42:5: error: proof failed: SMT counterexample [x = 9223372036854775807, b = -9223372036854775808]
-  assert x - b >= 0;
-         ^^^^^^^^^^^
+  prove x - b >= 0;
+        ^^^^^^^^^^
 ```
 
 The bracketed `[x = ..., b = ...]` is the **smallest set of
@@ -111,17 +122,36 @@ to a runtime `assert`.
 
 ## Reading the SMT-LIB output
 
-The query block looks like:
+The real query block for `checked_sub`'s `ensures _return >= 0;`
+check looks like this (confirmed by testing with
+`VANIC_SMT_DEBUG=1`; an earlier version of this page showed
+unbounded `Int` declarations and plain `>=`/`-` operators, which
+is NOT how this encoder actually works):
 
 ```
-(declare-const x Int)
-(declare-const b Int)
-(assert (>= x b))
-(assert (>= b 0))
-(assert (<= x 1000000000))
-(assert (not (>= (- x b) 0)))    ; the negation of the goal
+(set-logic ALL)
+(declare-const v_a (_ BitVec 64))
+(declare-const v_b (_ BitVec 64))
+(assert (bvsge v_a v_b))
+(assert (bvsge v_b (_ bv0 64)))
+(assert (bvsle v_a (_ bv1000000000 64)))
+(assert (not (bvsge (bvsub v_a v_b) (_ bv0 64))))
 (check-sat)
+(get-model)
 ```
+
+Every integer type is encoded as a fixed-width `BitVec`, and
+arithmetic uses the `bv`-prefixed bitvector operators (`bvsge`,
+`bvsub`, ...) -- not mathematical `Int`. This matters: it means
+the solver faithfully models wraparound overflow the same way the
+generated C/LLVM code does at runtime, rather than treating `-`
+as unbounded-precision subtraction. That's *why* the three
+`requires` clauses in `checked_sub` are load-bearing -- without
+`a <= 1000000000`, the solver can pick `a` near `i64::MAX` and
+`b` near `i64::MIN`, and `a - b` genuinely wraps below zero in
+64-bit two's-complement arithmetic, which is exactly the
+`[x = 9223372036854775807, b = -9223372036854775808]`
+counterexample shown earlier.
 
 `unsat` means the goal is provable -- there's no model that
 satisfies the negated goal under the assumptions. `sat` plus a

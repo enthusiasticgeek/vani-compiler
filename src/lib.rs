@@ -26354,7 +26354,7 @@ fn main() -> i64 {
     // BUG-13 (2026-07-27): `verify_pure_body`'s IndexAssign arm
     // unconditionally rejected EVERY indexed write in a `parallel
     // for` body, with no allowance for the single most common safe
-    // parallel-map pattern -- `xs[i] = â€¦;` where `i` is the loop's
+    // parallel-map pattern -- `xs[i] = …;` where `i` is the loop's
     // own index. Each iteration owns a distinct `i`, so two threads
     // never write the same slot. The fix adds a narrow strip pass
     // (`strip_safe_same_index_writes`, parallel-for-specific --
@@ -26416,6 +26416,35 @@ fn main() -> i64 {
         assert!(
             errors.iter().any(|e| e.message.contains("cannot mutate")),
             "expected the indexed-write impurity diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn indexed_write_side_effect_diagnostic_uses_real_ellipsis_not_mojibake() {
+        // Found via the tutorial audit (advanced/02_parallel.md): the
+        // IndexAssign diagnostic in verify_pure_body had the UTF-8
+        // ellipsis "…" pasted in as its mangled Latin-1-reinterpreted
+        // bytes "â€¦" directly in the Rust string literal, so every
+        // real occurrence of this error showed mojibake to users.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              parallel for i from 1 to 5 {
+                xs[i] = xs[i-1] + 1;
+              }
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("cross-iteration race must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("xs[i] = …")),
+            "expected the real ellipsis character in the diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            !errors.iter().any(|e| e.message.contains("â€¦")),
+            "diagnostic still contains mojibake bytes: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
         );
     }
@@ -51457,6 +51486,47 @@ fn main() -> i64 { return leak_check(); }
         assert!(
             !elaborations.iter().any(|e| e.contains("INTENT_TRACE_SMT")),
             "hint must not reference the dead INTENT_TRACE_SMT env var; got: {:?}",
+            elaborations
+        );
+    }
+
+    /// Found via the tutorial audit (advanced/06_smt_debug.md): an
+    /// unprovable `prove` statement's elaboration was
+    /// `assert_not_proven("this prove")`, whose text claims "this is
+    /// NOT a build failure -- the program still compiles" and that
+    /// the compiler "emits a runtime check" instead. Both claims are
+    /// false for `prove` (confirmed by testing: `vanic run` on this
+    /// exact program refuses to run, exit code 1) -- that fallback
+    /// behavior only actually applies to plain `assert`, which never
+    /// goes through the SMT path at all (`Stmt::Assert` in checker.rs
+    /// never calls try_smt_prove). Switched to the already-correct
+    /// `proof_failed()` elaboration, which was already used for the
+    /// SkippedUnsupported/Unavailable verdicts on this same
+    /// `prove_with_calls` match -- just not the Disproven/Unknown
+    /// arms actually exercised here. `assert_not_proven` is now
+    /// unused (nothing else called it) and was deleted.
+    #[test]
+    fn unprovable_prove_elaboration_does_not_falsely_claim_build_still_succeeds() {
+        let source = r#"
+            fn foo(x: i64, b: i64) -> i64 {
+              prove x - b >= 0;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unprovable prove must be rejected");
+        let elaborations: Vec<&str> = errors
+            .iter()
+            .flat_map(|e| e.elaboration.iter().map(|s| s.as_str()))
+            .collect();
+        assert!(
+            !elaborations.iter().any(|e| e.contains("NOT a build failure")),
+            "prove failures ARE build failures -- elaboration must not claim otherwise; got: {:?}",
+            elaborations
+        );
+        assert!(
+            elaborations.iter().any(|e| e.contains("compile-time assertion")),
+            "expected the real proof_failed() elaboration describing prove's compile-time semantics; got: {:?}",
             elaborations
         );
     }

@@ -33886,7 +33886,7 @@ fn verify_pure_body(
                         Diagnostic::new(
                             index.span,
                             format!(
-                                "{} cannot mutate '{}[i] = â€¦' (indexed write is a side effect)",
+                                "{} cannot mutate '{}[i] = …' (indexed write is a side effect)",
                                 context, name
                             ),
                         )
@@ -36380,15 +36380,13 @@ fn try_smt_prove(
                 Some(ctr) => format!("proof failed: SMT counterexample [{}]", ctr),
                 None => "proof failed: SMT solver found a counterexample (the expression is not universally true under the function's preconditions)".to_string(),
             };
-            // Use a generic predicate label for the elaboration â€”
+            // Use a generic predicate label for the elaboration —
             // the SMT counterexample is more useful than re-pretty-
             // printing the expression here.
             diagnostics.push(
                 Diagnostic::new(prove_expr.span, detail)
                     .with_elaboration(
-                        crate::diagnostic_elaborations::assert_not_proven(
-                            "this prove",
-                        ),
+                        crate::diagnostic_elaborations::proof_failed(),
                     ),
             );
         }
@@ -36398,12 +36396,12 @@ fn try_smt_prove(
                 "cannot prove expression: SMT solver returned 'unknown' (try strengthening the preconditions or simplifying the claim)",
             )
             .with_elaboration(
-                crate::diagnostic_elaborations::assert_not_proven("this prove"),
+                crate::diagnostic_elaborations::proof_failed(),
             ),
         ),
         Verdict::SkippedUnsupported(reason) => {
             // The most common cause is an inline call to a function
-            // that has no `ensures` clause â€” the verifier has nothing
+            // that has no `ensures` clause — the verifier has nothing
             // to assume about its return value. Surface the actionable
             // fix in that case.
             let hint = if reason.starts_with("function call") {

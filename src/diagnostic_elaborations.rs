@@ -491,29 +491,6 @@ pub fn assign_to_immutable(name: &str) -> Vec<String> {
     ]
 }
 
-/// `assert <p>;` — SMT couldn't discharge.
-pub fn assert_not_proven(predicate: &str) -> Vec<String> {
-    vec![
-        format!(
-            "The SMT solver couldn't prove `{}` at this point — \
-             so the compiler emits a runtime check that fires \
-             abort() if the assert ever fails at runtime.",
-            predicate,
-        ),
-        "Note: this is NOT a build failure — the program still \
-         compiles. It's a hint that you could prove this \
-         statically by strengthening the surrounding `requires` \
-         / `ensures` / `invariant` clauses, eliminating the \
-         runtime check entirely."
-            .to_string(),
-        "Run with `VANIC_SMT_DEBUG=1` to see exactly which \
-         sub-goal the solver couldn't discharge. Common fix: \
-         add a `requires` clause on the enclosing function \
-         that captures the missing fact."
-            .to_string(),
-    ]
-}
-
 /// Index out of bounds — SMT can't prove.
 pub fn index_oob_not_proven(name: &str) -> Vec<String> {
     vec![
@@ -1323,7 +1300,8 @@ pub fn proof_failed() -> Vec<String> {
          preconditions. Ensure the expression can be true under the preconditions. \
          If you need to prove something conditional, add the missing precondition to \
          `requires`, or break the proof into smaller steps with intermediate `assert` \
-         statements."
+         statements. Run with `VANIC_SMT_DEBUG=1` to see exactly which sub-goal the \
+         solver couldn't discharge."
             .to_string(),
     ]
 }
