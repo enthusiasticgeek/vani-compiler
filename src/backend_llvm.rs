@@ -6958,7 +6958,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 } else {
                     let _wake = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 129, i32 0x7fffffff, i8* null, i8* null, i32 0)\n",
+                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 129, i32 2147483647, i8* null, i8* null, i32 0)\n",
                         _wake, sys_futex_for_host(), gen_p
                     ));
                 }

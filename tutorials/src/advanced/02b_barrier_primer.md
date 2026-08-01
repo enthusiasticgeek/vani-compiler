@@ -119,7 +119,7 @@ intent "Barrier primer -- two-phase parallel work.";
 fn phase_one(id: i64, b: mut ref Barrier) -> i64 {
   // Simulate work -- in a real program this would be computation.
   print "thread", id, "finished phase 1";
-  let is_last: bool = barrier_wait(mut ref b);
+  let is_last: bool = barrier_wait(b);   // b is already `mut ref Barrier` here
   if is_last {
     print "All threads at barrier -- starting phase 2";
   }
@@ -150,6 +150,14 @@ thread 3 starting phase 2
 thread 1 starting phase 2
 thread 2 starting phase 2
 ```
+
+(Verified against the real compiler on both backends -- the barrier
+semantics hold exactly: every "finished phase 1" line precedes "All
+threads at barrier," and every "starting phase 2" line follows it,
+on every run. The exact byte layout above can differ run to run, and
+individual lines can even interleave mid-line, since `print` calls
+from different threads aren't synchronized against each other --
+only `barrier_wait` itself is.)
 
 ## When to use Barrier vs alternatives
 

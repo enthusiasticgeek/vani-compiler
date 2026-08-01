@@ -48889,6 +48889,47 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    /// BUG found auditing 02b_barrier_primer.md (tutorial-track audit,
+    /// 2026-08-01): the LLVM backend's `barrier_wait` "last thread"
+    /// path (the one that wakes every waiter) baked the literal text
+    /// `i32 0x7fffffff` directly into the emitted `@syscall` call's
+    /// FUTEX_WAKE count argument -- LLVM's textual IR only accepts hex
+    /// literals for floating-point constants (with an exact required
+    /// digit count for the type), never for plain integers, so this is
+    /// syntactically INVALID IR. `lli` rejected it outright ("floating
+    /// point constant invalid for type") on 100% of programs that ever
+    /// reach the last-thread branch -- which is every real use of
+    /// `Barrier`, since some thread is always last. The adjacent
+    /// `condvar_notify_all` code two hundred lines up got the identical
+    /// "wake up to INT_MAX waiters" value right by interpolating a Rust
+    /// `i64` (`{}`, which `Display`s as decimal) instead of splicing
+    /// hex text into the format string literally -- `barrier_wait`
+    /// didn't follow that pattern. Fixed by using the same decimal
+    /// literal (`2147483647`) directly in the format string. A
+    /// `barrier_new(1)` program forces the very first (and only)
+    /// `barrier_wait` call to take the last-thread/wake-all branch, so
+    /// this doesn't need multiple threads to reach the buggy code path.
+    #[test]
+    fn barrier_wait_llvm_wake_uses_decimal_not_hex_literal() {
+        let source = r#"
+            fn main() -> i64 {
+              let b: Barrier = barrier_new(1);
+              let is_last: bool = barrier_wait(mut ref b);
+              if is_last { return 0; }
+              return 0 - 1;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("single-thread barrier must compile on LLVM");
+        assert!(
+            !ll.contains("0x7fffffff"),
+            "LLVM IR must not contain a raw hex integer literal (invalid IR syntax for i32 constants):\n{ll}"
+        );
+        assert!(
+            ll.contains("i32 2147483647"),
+            "expected the FUTEX_WAKE count as a decimal literal in LLVM IR:\n{ll}"
+        );
+    }
+
     // RwLock<T> — C backend emits per-T structs + helpers
     #[test]
     fn rwlock_i64_emits_parametric_bundle() {

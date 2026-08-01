@@ -4047,4 +4047,70 @@ verifying the four fixes above against their tutorial worked examples
   to `let _ = await(..);`) or a real bare-statement-await parser
   feature whenever the tutorial audit reaches this file.
 
+## LLVM backend bug found continuing the advanced tutorial-track audit (added+fixed 2026-08-01)
+
+- [x] **BUG-50. `barrier_wait`'s "last thread" wake path crashed the
+  LLVM backend on `lli` with "floating point constant invalid for
+  type" — 100% reproducible on every program that ever reaches the
+  last-arriving thread's branch, i.e. every real use of `Barrier`
+  (some thread is always last).** Found auditing
+  `tutorials/src/advanced/02b_barrier_primer.md`'s worked example
+  against the real compiler (LLVM backend; the C backend ran fine).
+  Root cause: `backend_llvm.rs`'s barrier-wake codegen (in the
+  `barrier_wait` match arm, the `else` branch for non-Win32 hosts)
+  spliced the literal text `i32 0x7fffffff` directly into the
+  generated `@syscall(...)` call's FUTEX_WAKE count argument — LLVM's
+  textual IR only accepts hex literals for floating-point constants
+  (with an exact required digit count per type); plain integer
+  constants must be decimal. `lli` rejected the IR outright. The
+  adjacent `condvar_notify_all` codegen a couple hundred lines up
+  handles the identical "wake up to `INT_MAX` waiters" value
+  correctly by interpolating a Rust `i64` (`{}`, which `Display`s as
+  decimal) instead of splicing hex text into the format string
+  literally — `barrier_wait`'s codegen just didn't follow that
+  pattern. **Fixed**: replaced the literal `0x7fffffff` in the format
+  string with the decimal `2147483647`. Grepped the rest of
+  `backend_llvm.rs` for the same "raw hex text baked into an emitted
+  IR string" shape — no other occurrence found; this was an isolated
+  bug, not the systemic "parallel dispatch function" class this
+  project has hit many times before.
+  Regression tests: `barrier_wait_llvm_wake_uses_decimal_not_hex_literal`
+  (`src/lib.rs`) checks the generated LLVM IR text directly (a
+  `barrier_new(1)` program forces the only `barrier_wait` call to
+  take the last-thread/wake-all branch, so no multi-threading is
+  needed to reach the buggy code path) — asserts no `0x7fffffff`
+  substring and the correct decimal literal is present.
+  `barrier_two_threads_rendezvous_correctly_on_both_backends`
+  (`tests/run_end_to_end.rs`) is the real proof: two real OS threads
+  (one via `task fn(args)` expression-form spawn, one the main
+  thread) race to a 2-participant barrier and each reports whether it
+  was the last to arrive; asserts EXACTLY one of them saw `true` —
+  this is the kind of thing a compile-only check can't catch (a
+  logic bug could make both or neither see `true` while still
+  producing syntactically valid, `lli`-acceptable IR). Full `cargo
+  test --release --workspace` clean (2602 passed, 0 failed) after
+  this fix.
+  Also found and fixed in the same doc during this audit (docs-only,
+  no compiler bugs): the worked example's `phase_one(id, b: mut ref
+  Barrier)` called `barrier_wait(mut ref b)` — double-ref'ing a
+  parameter that is already `mut ref Barrier`, the same double-ref
+  mistake class as a prior session's `barrier_wait`/`stage_one` bug
+  (see [[project_vani_compiler_status]]'s BUG-21 Path B section) —
+  fixed to `barrier_wait(b)`. Also fixed doc bugs in
+  `02a_parallelism_primer.md` (missing `;` after `reduce sum with +`;
+  undocumented `pure fn` requirement for `parallel for` body calls;
+  the `task`/`join` example wrapped I/O in an ordinary non-`pure`
+  helper function, which is unconditionally rejected — `task { ... }`
+  block bodies enforce the same purity rules as `parallel for`
+  bodies, with only DIRECT calls to builtin I/O primitives exempted,
+  confirmed by testing) and `01_async.md` (the `select { await ... }`
+  example called a bare `async fn`, which returns `Future<T>` and is
+  rejected — `select` polls a raw i64-returning nb-style call
+  directly, unrelated to `Future`/`await()` despite the shared
+  keyword; also a false claim that `try` works inside `async fn`
+  bodies, confirmed rejected unconditionally since `async fn`'s
+  return type desugars to `Future<R>` before `try`'s checker ever
+  sees it) and `01a_async_primer.md` (bare-statement `await(...)`,
+  which never parses, plus a call to an undefined `process` fn).
+
 ---

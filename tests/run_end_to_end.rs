@@ -5063,3 +5063,65 @@ fn main() -> i64 { return 0; }
         "tag-only match on payloaded variant should compile; stderr: {stderr}"
     );
 }
+
+// Found auditing tutorials/src/advanced/02b_barrier_primer.md (2026-08-01):
+// the LLVM backend's barrier_wait "last thread" wake path emitted a raw
+// hex integer literal (`i32 0x7fffffff`) directly into the generated
+// LLVM IR text for a @syscall FUTEX_WAKE argument -- invalid IR syntax
+// for an integer constant (hex is float-only in LLVM's textual IR), so
+// `lli` rejected it on 100% of programs that ever reach the last-thread
+// branch, i.e. every real use of Barrier (some thread is always last).
+// A compile-only check (src/lib.rs's IR-text assertion) can confirm the
+// bad literal is gone, but only a real `lli`-executed multi-thread
+// rendezvous proves the fix actually WORKS at runtime, not just parses --
+// this mirrors two threads racing to a barrier, both proceeding past it,
+// and the barrier's own "is_last" signal firing exactly once.
+#[test]
+fn barrier_two_threads_rendezvous_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "barrier_two_thread_rendezvous",
+        r#"
+fn phase_one(id: i64, b: mut ref Barrier) -> i64 {
+  let is_last: bool = barrier_wait(b);
+  if is_last { return 1; }
+  return 0;
+}
+
+fn main() -> i64 {
+  let b: Barrier = barrier_new(2);
+  let t1: Task<i64> = task phase_one(1, mut ref b);
+  let last_count: i64 = phase_one(2, mut ref b);
+  let t1_result: i64 = join t1;
+  print "sum of is_last flags (must be exactly 1):", last_count + t1_result;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "sum of is_last flags (must be exactly 1): 1\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "barrier rendezvous produced the wrong is_last accounting for {:?} -- \
+             exactly one of the two threads must see is_last == true",
+            backend_args
+        );
+    }
+}
