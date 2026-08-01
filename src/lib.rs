@@ -51425,5 +51425,41 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG found auditing tutorials/src/advanced/06_smt_debug.md
+    /// (2026-08-01): the compiler's own "proof failed" diagnostic hint
+    /// (`diagnostic_elaborations.rs`) told users to set
+    /// `INTENT_TRACE_SMT=1` to see the SMT trace -- but that env var
+    /// is never actually checked anywhere in the source (confirmed:
+    /// setting it produces byte-identical output to setting nothing at
+    /// all). The REAL env var, confirmed working
+    /// (`smt.rs::smt_debug_enabled`, which the tutorial doc already
+    /// named correctly), is `VANIC_SMT_DEBUG` (plus the legacy alias
+    /// `INTENTC_SMT_DEBUG`). Fixed the hint text to match.
+    #[test]
+    fn unprovable_prove_hint_names_the_real_smt_debug_env_var() {
+        let source = r#"
+            fn foo(x: i64, b: i64) -> i64 {
+              prove x - b >= 0;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unprovable prove must be rejected");
+        let elaborations: Vec<&str> = errors
+            .iter()
+            .flat_map(|e| e.elaboration.iter().map(|s| s.as_str()))
+            .collect();
+        assert!(
+            elaborations.iter().any(|e| e.contains("VANIC_SMT_DEBUG=1")),
+            "expected the hint to name the real VANIC_SMT_DEBUG env var; got: {:?}",
+            elaborations
+        );
+        assert!(
+            !elaborations.iter().any(|e| e.contains("INTENT_TRACE_SMT")),
+            "hint must not reference the dead INTENT_TRACE_SMT env var; got: {:?}",
+            elaborations
+        );
+    }
+
 }
 

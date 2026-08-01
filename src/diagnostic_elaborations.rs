@@ -227,7 +227,7 @@ pub fn smt_requires_failed(fn_name: &str) -> Vec<String> {
              at the call site so the solver sees the fact \
              locally, (b) strengthen the surrounding `requires` \
              clauses to carry the fact down, or (c) verify with \
-             `INTENT_TRACE_SMT=1` to see exactly which sub-goal \
+             `VANIC_SMT_DEBUG=1` to see exactly which sub-goal \
              the solver couldn't discharge.",
         ),
     ]
@@ -506,7 +506,7 @@ pub fn assert_not_proven(predicate: &str) -> Vec<String> {
          / `ensures` / `invariant` clauses, eliminating the \
          runtime check entirely."
             .to_string(),
-        "Run with `INTENT_TRACE_SMT=1` to see exactly which \
+        "Run with `VANIC_SMT_DEBUG=1` to see exactly which \
          sub-goal the solver couldn't discharge. Common fix: \
          add a `requires` clause on the enclosing function \
          that captures the missing fact."

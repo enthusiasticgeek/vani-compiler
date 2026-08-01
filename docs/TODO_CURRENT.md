@@ -4381,4 +4381,30 @@ verifying the four fixes above against their tutorial worked examples
   plain `ref`). Full `cargo test --release --workspace` clean (2615
   passed, 0 failed) after all three fixes.
 
+## Bug found auditing 06_smt_debug.md (added+fixed 2026-08-01)
+
+- [x] **BUG-60. The compiler's own "proof failed" diagnostic hint told
+  users to set `INTENT_TRACE_SMT=1` for a full SMT trace — an env var
+  that is never actually checked anywhere in the source, confirmed by
+  testing (setting it produces byte-identical output to setting
+  nothing at all).** Found cross-checking `06_smt_debug.md`'s
+  documented `VANIC_SMT_DEBUG=1` env var against the compiler's own
+  in-diagnostic hint text — they didn't match, and only one of the two
+  actually does anything (`smt.rs::smt_debug_enabled` checks
+  `VANIC_SMT_DEBUG` plus the legacy alias `INTENTC_SMT_DEBUG`; the
+  tutorial doc already had the right name). Fixed the two hint sites
+  in `diagnostic_elaborations.rs` to say `VANIC_SMT_DEBUG=1`. Also
+  confirmed (not a bug, a real and useful distinction the doc gets
+  right): `prove` hard-rejects the build on an unprovable predicate
+  (exit 1) despite its own message text saying "NOT a build failure"
+  (that text describes the underlying runtime-check fallback
+  mechanism, not the CLI's pass/fail outcome); a bare `assert` with
+  the same unprovable predicate does NOT reject — it silently keeps a
+  runtime check with no diagnostic at all. This is exactly the
+  "prove is always compile-time, no fallback to runtime" distinction
+  `06_smt_debug.md`'s "Tactics for hard proofs" section describes.
+  Added a regression test asserting the hint names the real env var
+  and never the dead one. Full `cargo test --release --workspace`
+  clean (2616 passed, 0 failed) after this fix.
+
 ---
