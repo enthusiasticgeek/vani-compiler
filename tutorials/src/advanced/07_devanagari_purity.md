@@ -107,10 +107,16 @@ These work without you doing anything special:
 | Sinhala | Sinhala |
 | Perso-Arabic (RTL) | Urdu, Sindhi, Punjabi-Shahmukhi, Persian, Pashto (Phase 12.x) |
 
-**21 dialects across 11 scripts** as of Phase 12.5 (2026-06-07).
-Within Perso-Arabic, two distinct numeral blocks are wired --
-Eastern Arabic-Indic ٠..٩ (Urdu/Sindhi/Shahmukhi) and Persian
-۰..۹ (Persian/Pashto).
+**22 dialects across 12 scripts** as of Phase 12.5 (2026-06-07)
+-- confirmed by counting the table above against the real
+`DialectLang`/`Script` enums in `src/lexer.rs` (an earlier version
+of this page undercounted both by one). This table is scoped to
+the Devanagari-adjacent family this chapter covers; the compiler
+supports far more dialects/scripts overall (`README.md`'s Tier
+tables and `TODO.md`'s current-status line have the full,
+continuously-growing count). Within Perso-Arabic, two distinct
+numeral blocks are wired -- Eastern Arabic-Indic ٠..٩
+(Urdu/Sindhi/Shahmukhi) and Persian ۰..۹ (Persian/Pashto).
 
 ## Natural-everyday vs. formal-tatsama keywords
 
