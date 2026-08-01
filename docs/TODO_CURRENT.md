@@ -3851,7 +3851,7 @@ verifying the four fixes above against their tutorial worked examples
   '='"), confirmed directly. All examples verified end-to-end on
   both backends after the fix; `mdbook build` clean.
 
-- [ ] **BUG-46 (found, NOT fixed — deep checker/monomorphization
+- [x] **BUG-46 (found, fixed 2026-08-01 — deep checker/monomorphization
   machinery, high risk to touch under time pressure). ANY
   constructor call (`EnumName.Variant(...)`) for a built-in generic
   enum (`Result<T, E>`, and confirmed ALSO `Option<T>`) breaks — on
@@ -3909,6 +3909,28 @@ verifying the four fixes above against their tutorial worked examples
   instantiation" pass that keys off name alone instead of a
   (name, call-site) pair, so a second registration for the same
   name clobbers the first's resolution state.
+  ✅ Fixed 2026-08-01, in the "fix documented TODO bugs" pass.
+  The real root cause was narrower and safer to fix than the
+  above guess suggested: `resolve_enum_name`'s "exactly one
+  candidate in the whole program" heuristic (a deliberate,
+  documented v1 restriction, closure #281) is fine on its own —
+  the actual gap is that construction never used the CONTEXT
+  already available at a `return`/`let`-with-annotation site (the
+  enclosing function's own return type, or the let's own
+  annotation) to disambiguate, even though that context
+  unambiguously names the concrete instantiation. Fixed with a new
+  `resolve_bare_enum_ctors_in_stmt` step in
+  `monomorphize_type_decls_in_program` that rewrites a bare
+  `EnumName.Variant(...)` receiver to the already-monomorphized
+  target name at exactly those two positions (return, let with
+  annotation) — deliberately narrow, so anything else (e.g. a
+  constructor passed directly as a function-call argument) keeps
+  the exact pre-existing behavior, confirmed by testing. New
+  tests: 3 checker-level (`src/lib.rs`) plus a real end-to-end
+  test (`tests/run_end_to_end.rs`) asserting correct runtime
+  values on both backends, not just successful compilation. Full
+  `cargo test --release --workspace`: 13/13 test binaries clean,
+  0 failed. Commit `fec2e1c`.
 
 - [x] **BUG-47 (found, fixed 2026-08-01 — C-backend-only type-emission bug).
   A function parameter typed `ref HashMap<OwnedStr, V>` gets the
