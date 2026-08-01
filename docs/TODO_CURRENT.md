@@ -3302,7 +3302,7 @@ verifying the four fixes above against their tutorial worked examples
   the real expression-form `task`/`Task<R>`/`join`/`guard_get`/
   `guard_set` APIs throughout.
 
-- [ ] **BUG-38 (found, NOT fixed — internal compiler error, not a
+- [x] **BUG-38 (found, fixed 2026-08-01 — internal compiler error, not a
   clean rejection). `clone_at()` on a `Vec<Box<dyn Iface>>` element
   panics the compiler itself** (`internal error: entered unreachable
   code: clone_at on element type Box(Object("Observer")) not yet
@@ -3329,6 +3329,27 @@ verifying the four fixes above against their tutorial worked examples
   `dyn Iface` — so it doesn't block real code), and turning it into
   a clean checker-time rejection is a small but separate fix from
   BUG-37's double-free; logged here rather than bundled in.
+  **✅ Fixed 2026-08-01**, in the "fix documented TODO bugs" pass.
+  Turned out to be a bigger deal than the ICE alone suggested:
+  confirmed by direct testing that the C backend doesn't panic for
+  the same `Vec<Box<T>>` input (ANY `Box<T>`, not just `Box<dyn
+  Iface>` — also reproduced with plain `Box<i64>`) but instead
+  **silently double-frees at runtime** (`free(): double free
+  detected in tcache 2`) — a real memory-safety bug the original
+  report never surfaced, since it only looked at the LLVM side.
+  Fixed with the checker-time rejection this entry already
+  recommended: `check_clone_at_builtin` (checker.rs) now rejects any
+  `clone_at` element type that isn't one of the types its codegen
+  actually supports (Copy, `Vec<T>`, `OwnedStr`, struct, enum,
+  tuple) — covering `Box<T>` and, by the same reasoning, any other
+  affine type (`Mutex<T>`, `HashMap<K,V>`, etc.) nested in a `Vec`,
+  not just the originally-reported `Box<dyn Iface>` shape. New
+  tests: 2 checker-level (`Box<i64>` and `Box<dyn Iface>`) in
+  `src/lib.rs`, plus a real end-to-end test in
+  `tests/run_end_to_end.rs` that runs both backends via the actual
+  CLI and asserts neither a Rust panic nor a double-free occurs.
+  Full `cargo test --release --workspace`: 13/13 test binaries
+  clean, 0 failed. Commit `0a74b62`.
 
 - [x] **BUG-37. LLVM backend: `clone_at()` on a `Vec<Struct>` element
   double-freed when the struct had a nested non-Copy `Vec<T>` field
@@ -3889,7 +3910,7 @@ verifying the four fixes above against their tutorial worked examples
   (name, call-site) pair, so a second registration for the same
   name clobbers the first's resolution state.
 
-- [ ] **BUG-47 (found, NOT fixed — C-backend-only type-emission bug).
+- [x] **BUG-47 (found, fixed 2026-08-01 — C-backend-only type-emission bug).
   A function parameter typed `ref HashMap<OwnedStr, V>` gets the
   WRONG hardcoded C struct type in its emitted C signature
   (`intent_hashmap_<K2>_<V2>` from some OTHER HashMap instantiation
@@ -3927,15 +3948,32 @@ verifying the four fixes above against their tutorial worked examples
   the body and call sites correctly use the parameter's real type.
   Confirmed specific to HashMap-as-parameter — the same
   `HashMap<OwnedStr, i64>` type used entirely within one function
-  (no parameter passing) works fine on both backends. **Not fixed
-  this session** — logged and worked around in the
-  `10c_error_patterns_primer.md` fix (uses `HashMap<i64, i64>`
-  instead, sidestepping the bug entirely for that doc's example).
-  Whoever picks this up next: look at the C backend's function
-  signature emission for `ref HashMap<K,V>` params (likely in
-  `backend_c.rs` or `ssa_backend_c.rs`, wherever parameter types are
-  stringified to their monomorphized C struct name) versus how the
-  same resolution is done correctly for the body/call sites.
+  (no parameter passing) works fine on both backends.
+  **✅ Fixed 2026-08-01**, in the "fix documented TODO bugs" pass.
+  Root cause matched this entry's own hint exactly, but in
+  `backend_c.rs`'s `format_declarator` (not `ssa_backend_c.rs`):
+  its bare/`Ref`/`RefMut` match arms had every one of the
+  BUG-22-class parametric types (`Mutex`, `Guard`, `RwLock`,
+  `ReadGuard`, `WriteGuard`) explicitly handled, but no
+  `Type::HashMap` arm at all in any of the three — so it fell
+  through to `c_leaf_type`'s hardcoded `intent_hashmap_i64_i64`
+  fallback, exactly the same missing-arm shape BUG-22 fixed for
+  the other five types (HashMap just wasn't parametric yet when
+  that fix landed). `c_type_name` (used for `let`/return-type
+  spelling) already had the correct `hashmap_prefix_from_kv`-based
+  arm, which is why the body/call sites were always right and only
+  the parameter declarator was wrong. Fixed by adding the same
+  `Type::HashMap(k, v) => hashmap_prefix_from_kv(k, v)`-based arm
+  to all three of `format_declarator`'s matches (bare, `Ref`,
+  `RefMut`) — also confirmed the bug applied to bare-by-value and
+  `mut ref` parameters too, not just `ref`, none of which the
+  original report tested. New tests: a checker-level string-content
+  test (`src/lib.rs`) and a real end-to-end `cc`-invoking test
+  (`tests/run_end_to_end.rs`) reproducing the exact cross-
+  contamination trigger (a second `HashMap<i64, i64>` instantiation
+  alongside the `HashMap<OwnedStr, i64>` parameter). Full
+  `cargo test --release --workspace`: 2620 lib tests + 98
+  end-to-end tests, 0 failed. Commit `ccbf771`.
 
 ---
 
