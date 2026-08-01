@@ -5441,6 +5441,65 @@ fn main() -> i64 {
 // path). Only a real `cc` invocation proves the fix -- a
 // `compile_to_c` string-contains check (also added, in src/lib.rs) can't
 // tell you the file as a whole actually compiles.
+// BUG-38, found in an earlier tutorial audit and fixed here
+// (2026-08-01): `clone_at()` on a `Vec<Box<T>>` element reached
+// codegen with no checker-time rejection. Confirmed by testing:
+// tree-LLVM panicked the COMPILER ITSELF (`internal error: entered
+// unreachable code`), and the C backend was worse -- it compiled
+// clean and then silently double-freed at runtime (`free(): double
+// free detected in tcache 2`). Only a real CLI invocation on both
+// backends can prove neither failure mode still happens -- a
+// compile-only test can't observe a runtime double-free or a Rust
+// panic backtrace.
+#[test]
+fn clone_at_on_vec_of_box_is_rejected_cleanly_not_a_panic_or_double_free() {
+    let src = write_tmp_vani(
+        "clone_at_vec_of_box_clean_rejection",
+        r#"
+fn main() -> i64 {
+  let b1: Box<i64> = box(1);
+  let xs: Vec<Box<i64>> = vec(b1);
+  let c: Box<i64> = clone_at(xs, 0);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            !output.status.success(),
+            "clone_at(Vec<Box<i64>>, 0) must be rejected at compile time, not silently accepted; {:?}",
+            backend_args
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("clone_at() does not support element type"),
+            "expected the clean clone_at rejection diagnostic for {:?}, got stderr: {}",
+            backend_args,
+            stderr
+        );
+        assert!(
+            !stderr.contains("panicked") && !stderr.contains("unreachable code"),
+            "must not be a Rust panic/ICE for {:?}, got stderr: {}",
+            backend_args,
+            stderr
+        );
+        assert!(
+            !stderr.contains("double free") && !output.status.code().map(|c| c < 0).unwrap_or(false),
+            "must not reach codegen and double-free for {:?}, got stderr: {}",
+            backend_args,
+            stderr
+        );
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(

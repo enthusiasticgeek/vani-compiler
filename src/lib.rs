@@ -4078,6 +4078,64 @@ mod tests {
         compile(source).expect("clone_at(Vec<OwnedStr>) should compile");
     }
 
+    /// BUG-38 (found in an earlier tutorial audit, fixed here
+    /// 2026-08-01): `clone_at()` on a `Vec<Box<T>>` element (ANY T,
+    /// not just `Box<dyn Iface>` -- confirmed with both `Box<i64>`
+    /// and `Box<dyn Iface>`) had no checker-time rejection, so it
+    /// reached codegen for both backends: tree-LLVM panicked the
+    /// compiler itself (`internal error: entered unreachable code:
+    /// clone_at on element type ... not yet supported in
+    /// tree-LLVM`), and the C backend was actually WORSE -- it
+    /// silently double-freed at runtime (`free(): double free
+    /// detected in tcache 2`, confirmed by testing) instead of
+    /// erroring at all. Added a checker-time rejection in
+    /// `check_clone_at_builtin` for any element type that isn't one
+    /// of the types clone_at's codegen actually supports (Copy,
+    /// Vec<T>, OwnedStr, struct, enum, tuple).
+    #[test]
+    fn clone_at_on_vec_of_box_is_a_clean_diagnostic_not_a_panic() {
+        let source = r#"
+            fn main() -> i64 {
+              let b1: Box<i64> = box(1);
+              let xs: Vec<Box<i64>> = vec(b1);
+              let c: Box<i64> = clone_at(xs, 0);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("clone_at on Vec<Box<T>> must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("clone_at() does not support element type")),
+            "expected a clean clone_at rejection diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn clone_at_on_vec_of_box_dyn_iface_is_a_clean_diagnostic_not_a_panic() {
+        let source = r#"
+            struct Dog { }
+            interface Speak {
+              fn say(self: Dog) -> i64;
+            }
+            implement Speak for Dog {
+              fn say(self: Dog) -> i64 { return 1; }
+            }
+            fn main() -> i64 {
+              let d: Dog = Dog { };
+              let b: Box<dyn Speak> = box(d as dyn Speak);
+              let xs: Vec<Box<dyn Speak>> = vec(b);
+              let c: Box<dyn Speak> = clone_at(xs, 0);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("clone_at on Vec<Box<dyn Iface>> must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("clone_at() does not support element type")),
+            "expected a clean clone_at rejection diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn clone_vec_struct_with_heap_field_deep_copies() {
         // Closure #153: `clone(Vec<Struct{heap-field}>)` was

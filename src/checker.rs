@@ -32105,6 +32105,55 @@ fn check_clone_at_builtin(
             return CheckedExpr::fallback_integer(span);
         }
     };
+    // BUG-38 fix: the tree-LLVM `clone_at` codegen only has deep-
+    // clone dispatch for Copy element types, `Vec<T>`, `OwnedStr`,
+    // `Struct`, `Enum`, and `Tuple` -- anything else (confirmed via
+    // direct testing: `Box<i64>`, `Box<dyn Iface>`, and by the same
+    // reasoning any other affine element type such as `Mutex<T>`/
+    // `HashMap<K,V>`/etc nested in a `Vec`) hits an `unreachable!()`
+    // panic in the compiler itself (`internal error: entered
+    // unreachable code: clone_at on element type ... not yet
+    // supported in tree-LLVM`) instead of a clean diagnostic. The C
+    // backend doesn't panic for the same input, but is actually
+    // WORSE: confirmed via direct testing, it silently double-frees
+    // at runtime (`free(): double free detected in tcache 2`) for
+    // the identical `Vec<Box<T>>` case -- so this checker-time
+    // rejection closes a real (if rare) memory-safety hole on the C
+    // backend, not just an LLVM crash. Reject up front rather than
+    // let either backend's codegen see an element type it can't
+    // safely deep-clone.
+    if !element_type.is_copy()
+        && !matches!(
+            element_type,
+            Type::Vec(_) | Type::OwnedStr | Type::Struct(_) | Type::Enum(_) | Type::Tuple(_)
+        )
+    {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            format!(
+                "clone_at() does not support element type {} -- v1 can deep-clone \
+                 Copy types, Vec<T>, OwnedStr, structs, enums, and tuples, but not \
+                 {} (an owning, non-Copy type with no clone_at codegen support yet)",
+                element_type, element_type
+            ),
+        ).with_elaboration(vec![
+            "clone_at(xs, i) needs to produce a fresh, independently-owned copy \
+             of element i -- for types like Box<T> that own a heap allocation, \
+             a naive copy would alias the same allocation and double-free it."
+                .to_string(),
+            "This is a real gap, not a deliberate restriction: the element types \
+             clone_at() DOES support (Copy types, Vec<T>, OwnedStr, structs, \
+             enums, tuples) each have dedicated deep-clone codegen; other owning \
+             types (Box<T>, Mutex<T>, HashMap<K,V>, etc.) don't yet."
+                .to_string(),
+            "Workaround: for a Vec<Box<dyn Iface>>-style shape specifically, use \
+             an unboxed Vec<dyn Iface> instead (a `dyn Iface` value is itself a \
+             Copy fat pointer, so direct indexing works with no clone_at needed \
+             at all)."
+                .to_string(),
+        ]));
+        return CheckedExpr::fallback_integer(span);
+    }
     let index = check_expr(&args[1], env, signatures, diagnostics);
     if !index.ty().is_integer() {
         diagnostics.push(Diagnostic::new(
