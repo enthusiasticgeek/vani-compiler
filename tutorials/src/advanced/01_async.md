@@ -90,10 +90,18 @@ await cancellable(7, tok)  = -1
   Thread it through async functions and check `.cancelled` at
   natural breakpoints.
 - **The `try` keyword sugar** ([Intermediate Sec.10](../intermediate/10_result_try.md))
-  is enabled *inside async fn bodies* in v1 (Arc 8 v3.1 Phase
-  2.4). For Result-returning async fns, you can write `let v:
-  i64 = try maybe_fetch();` and the compiler inserts the
-  short-circuit on `Err`.
+  is **NOT usable inside `async fn` bodies in v1** -- confirmed
+  by testing, contrary to an earlier version of this page. `try`
+  requires the *enclosing* function's return type to literally be
+  a two-variant enum, but `async fn foo() -> Option<i64>`
+  desugars its return type to `Future<Option<i64>>` before `try`'s
+  checker ever sees it, so it's rejected outright ("`try` requires
+  the enclosing function's return type to be an enum; got
+  `Future<Option<i64>>`") regardless of what `R` is. Use an
+  explicit `match` inside async fn bodies instead (the same
+  manual pattern the compiler's own diagnostic suggests:
+  `match opt { Opt.Some(v) then v, Opt.None then return Opt.None
+  };`) until this integration lands.
 
 ## The real thing: suspend points over I/O
 
@@ -163,40 +171,76 @@ async fn maybe_fetch(use_cache: bool, key: i64) -> i64 {
 }
 ```
 
-## Selecting over multiple futures: `select { await }`
+## Selecting over multiple non-blocking polls: `select { await }`
 
-When you have two or more async operations and want to proceed
-with whichever finishes first, use `select`:
+When you have two or more non-blocking operations and want to
+proceed with whichever is ready first, use `select`. **This is
+NOT `select` over `async fn`/`Future<T>` values** -- despite the
+`await` keyword in its syntax, `select`'s arms poll a raw
+i64-returning nb-style call directly (the same family as
+`tcp_recv_nb`/`tcp_accept_nb`/`epoll_wait_one`'s `-2` = WOULDBLOCK
+convention, or a Task's generated `__poll_<fn>` if the async fn
+has a real suspend point -- see "The real thing" above). A plain
+`async fn` call like `fast(10)` returns `Future<i64>`, which
+`select` rejects outright ("select arm poll expression must be
+i64, got Future__i64") -- there is no synchronous-Future
+integration with `select` in v1.
 
 ```vani
-async fn fast(n: i64) -> i64 { return n + 1; }
-async fn slow(n: i64) -> i64 { return n + 100; }
-
 fn main() -> i64 {
+  let server1: i64 = tcp_listen(0);
+  let _ = tcp_set_nonblocking(server1);
+  let server2: i64 = tcp_listen(0);
+  let _ = tcp_set_nonblocking(server2);
+  let port2: i64 = tcp_socket_port(server2);
+
+  // Connects to server2 only -- server2's branch should win the race.
+  task client {
+    let _ = sleep_ms(20);
+    let c: i64 = tcp_connect_local(port2);
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
   select {
-    await fast(10) then r1 {
-      print "fast finished:", r1;
+    await tcp_accept_nb(server1) then c1 {
+      print "server1 accepted first";
     }
-    await slow(10) then r2 {
-      print "slow finished:", r2;
+    await tcp_accept_nb(server2) then c2 {
+      print "server2 accepted first, fd > 0:", c2 > 0;
     }
   }
+
+  join client;
+  let _ = tcp_close(server1);
+  let _ = tcp_close(server2);
   return 0;
 }
 ```
 
-`select` desugars to a `while true` loop with one
-`if poll_rN != -2` arm per branch. Each branch polls its
-future; the first one that is `Ready` (not the `-2` sentinel
-for `Pending`) runs its body and exits the loop. Remaining
-branches are abandoned -- their futures are not driven to
-completion.
+Output:
+
+```
+server2 accepted first, fd > 0: true
+```
+
+`select` desugars to a `while true` loop that calls EVERY arm's
+poll expression once per iteration (source order), checking each
+result against the `-2` WOULDBLOCK sentinel; the first arm whose
+call returns something other than `-2` runs its body and breaks
+out. Because it's a plain spin loop (no `epoll_wait_one` between
+rounds), it busy-polls the CPU until something is ready -- fine
+for a short race like the example above, but pair it with your
+own `epoll_wait_one`-based backoff if you're selecting over a
+long-lived wait. Remaining branches are simply not polled again
+once one wins; if they wrap a `Task`, that Task is left mid-flight.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 **Key constraints in v1**:
-- All `await` expressions inside `select` must call `async fn`s
-  that return the same type.
+- Every poll expression inside `select` must independently type as
+  `i64` -- a raw nb call, or a Task's `__poll_<fn>`, not a bare
+  `async fn` call.
 - Branches are polled in source order; there is no randomized
   fairness. If the first branch is always ready, the others
   never run.

@@ -136,13 +136,22 @@ After the await, code that ran before the await is "earlier
 in the state machine"; code after is "later".
 
 ```vani
+fn process(req: i64) -> i64 {
+  return req * 2;
+}
+
 async fn handler(fd: i64) -> i64 {
-  let req: i64 = await(io_recv_async(fd, 64));   // suspend point 1
+  let req: i64 = await(io_recv_async(fd, 64));    // suspend point 1
   let resp: i64 = process(req);
-  await(io_send_async(fd, resp));                 // suspend point 2
+  let _ = await(io_send_async(fd, resp));         // suspend point 2
   return resp;
 }
 ```
+
+(`await(...)` only parses in expression position today -- as a `let`
+initializer, as above -- not as a bare statement. Discard the result
+with `let _ = ...;` when you don't need the value, as the second
+`await` does here.)
 
 The compiler splits this into three states:
 - State 0: call `io_recv_async`. If it yields Pending,
