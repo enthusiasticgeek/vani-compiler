@@ -5355,3 +5355,129 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-58/BUG-59, found auditing tutorials/src/advanced/05_simd.md
+// (2026-08-01): the chapter's own SAXPY and dot256/dot512 examples
+// crashed for real, on both backends in SAXPY's case. (58) simd_store's
+// discarded return value aliases the caller's own Vec buffer, not a
+// fresh allocation -- both backends' generic Vec-discard-free codegen
+// freed it anyway, a double-free the moment the caller's own Vec is
+// later dropped too (compile-only checks in src/lib.rs cover this half
+// via IR-text assertions; only a real execution proves the process
+// doesn't actually crash). (59) simd256_load/store and simd512_load/
+// store declared `align 32`/`align 64` in LLVM IR, but glibc's malloc
+// on x86-64 only guarantees 16-byte alignment -- undefined behavior
+// that manifested as a NON-DETERMINISTIC lli crash (same input,
+// re-run several times, intermittently aborted depending on the
+// buffer's actual runtime alignment). A single passing run proves
+// nothing for a non-deterministic bug; this test runs the vec256 case
+// repeatedly to get real confidence the fix holds.
+#[test]
+fn saxpy_f32_example_runs_without_double_free_on_both_backends() {
+    let src = write_tmp_vani(
+        "saxpy_f32_no_double_free",
+        r#"
+fn saxpy_f32(y: ref Vec<f32>, x: ref Vec<f32>, alpha: f32, n: i64) -> i64 {
+    let splat_alpha: vec128<f32> = simd_splat(alpha);
+    let i: i64 = 0;
+    while i + 4 <= n {
+        let xi: vec128<f32> = simd_load(x, i);
+        let yi: vec128<f32> = simd_load(y, i);
+        let ax: vec128<f32> = simd_mul(splat_alpha, xi);
+        let res: vec128<f32> = simd_add(yi, ax);
+        let _ = simd_store(y, i, res);
+        i = i + 4;
+    }
+    return 0;
+}
+
+fn main() -> i64 {
+    let n: i64 = 8;
+    let x: Vec<f32> = vec_fill(n, 2.0 as f32);
+    let y: Vec<f32> = vec_fill(n, 1.0 as f32);
+    let _ = saxpy_f32(ref y, ref x, 3.0 as f32, n);
+    print "y0:", y[0];
+    return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "y0: 7\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?} (a crash here likely means the \
+             simd_store double-free regressed)\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "saxpy_f32 produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn vec256_dot_product_runs_consistently_without_alignment_crash() {
+    let src = write_tmp_vani(
+        "vec256_dot_no_alignment_crash",
+        r#"
+fn dot256(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec256<f32> = simd256_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 8 <= n {
+        let ai: vec256<f32> = simd256_load(a, i);
+        let bi: vec256<f32> = simd256_load(b, i);
+        acc = simd256_add(acc, simd256_mul(ai, bi));
+        i = i + 8;
+    }
+    let s: f32 = simd256_reduce_add(acc);
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn main() -> i64 {
+    let n: i64 = 8;
+    let a: Vec<f32> = vec_fill(n, 1.0 as f32);
+    let b: Vec<f32> = vec_fill(n, 2.0 as f32);
+    print dot256(ref a, ref b, n);
+    return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    // LLVM only -- the alignment bug never affected the C backend
+    // (its `vector_size` extension has no separate alignment
+    // annotation to get wrong).
+    for run_idx in 0..12 {
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .expect("intentc run should execute");
+        assert!(
+            output.status.success(),
+            "run {run_idx}: vec256 dot product crashed (likely the align-32-on-a-16-byte-\
+             guaranteed-buffer bug regressing) -- status {:?}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout, "16\n", "run {run_idx}: wrong dot256 result");
+    }
+}

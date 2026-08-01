@@ -13778,6 +13778,34 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
             }
         },
         TypedStmt::Discard { expr } => match &expr.ty {
+                // BUG found auditing tutorials/src/advanced/05_simd.md
+                // (2026-08-01): simd_store/simd256_store/simd512_store
+                // mutate the target Vec THROUGH its ref/pointer and
+                // return a byval COPY of the struct header (same
+                // `.data` buffer pointer) purely for chaining -- it is
+                // NEVER a fresh allocation. The generic "free a
+                // discarded Vec<T> call result" path below assumed
+                // every Vec-returning call it discards owns a new
+                // buffer, so `let _ = simd_store(y, i, v);` freed
+                // `y`'s buffer immediately, then the caller's own
+                // later scope-exit drop of `y` freed the SAME pointer
+                // again -- a 100%-reproducible double-free the moment
+                // a discarded simd*_store result and its source Vec
+                // are both still live, confirmed by testing (glibc
+                // abort: "double free detected in tcache"). These
+                // three builtins' discarded result must just be
+                // evaluated for its side effect, never freed.
+            Type::Vec(_)
+                if matches!(
+                    &expr.kind,
+                    TypedExprKind::Call { name, .. }
+                        if matches!(name.as_str(), "simd_store" | "simd256_store" | "simd512_store")
+                ) =>
+            {
+                out.push_str("  (void)(");
+                out.push_str(&emit_expr(expr));
+                out.push_str(");\n");
+            }
             Type::Vec(element) => {
                 // Bind to a brace-scoped tmp so we can free the buffer. The
                 // brace-scope means consecutive `let _ = ...` don't collide.
@@ -20683,6 +20711,23 @@ fn c_type_name(ty: &Type) -> String {
                 "int32_t".to_string()
             }
         }
+        // BUG found auditing tutorials/src/advanced/05_simd.md
+        // (2026-08-01): same class as the BUG-22 fix above --
+        // Type::Vec128/Vec256/Vec512 were missing explicit arms
+        // here, so a `let v: vec128<f32> = ...;` local's declared
+        // type fell through to c_leaf_type's per-T-unaware
+        // placeholder comment (`/* vec128<T> */`), a real `cc`
+        // "undeclared identifier" error on every vec128/256/512
+        // local, even though the simd_*/simd256_*/simd512_* builtin
+        // CALLS themselves already correctly emit the real
+        // `__attribute__((vector_size(N)))` GNU vector-extension
+        // type inline. c_vec128_type/c_vec256_type/c_vec512_type
+        // already existed and were already used by those call sites
+        // -- c_type_name (the let-binding storage path) just never
+        // routed through them.
+        Type::Vec128(element) => c_vec128_type(element),
+        Type::Vec256(element) => c_vec256_type(element),
+        Type::Vec512(element) => c_vec512_type(element),
         other => c_leaf_type(other).to_string(),
     }
 }

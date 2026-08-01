@@ -499,7 +499,12 @@ intent "combined SIMD layers";
 
 #[vectorize]               // Layer 2: interleave scalar loops
 fn process(
-    out: ref Vec<f32>,
+    out: mut ref Vec<f32>,   // `mut ref`, not `ref` -- the scalar tail
+                             // below index-ASSIGNS into it directly
+                             // (`out[i] = ...`), which a plain `ref`
+                             // rejects ("borrowed immutably"); only
+                             // simd_store's own aliasing write works
+                             // through a plain `ref`.
     inp: ref Vec<f32>,
     n: i64
 ) -> i64 {
@@ -523,7 +528,7 @@ fn main() -> i64 {
     let n: i64 = 8;
     let inp: Vec<f32> = vec_fill(n, 3.0 as f32);
     let out: Vec<f32> = vec_fill(n, 0.0 as f32);
-    let _ = process(ref out, ref inp, n);
+    let _ = process(mut ref out, ref inp, n);
     return 0;
 }
 ```

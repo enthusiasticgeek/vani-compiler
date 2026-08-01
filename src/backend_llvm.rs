@@ -3984,6 +3984,23 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ));
             } else if is_scalar(&expr.ty) {
                 let _ = emit_expr(expr, ctx, out);
+            } else if matches!(
+                &expr.kind,
+                TypedExprKind::Call { name, .. }
+                    if matches!(name.as_str(), "simd_store" | "simd256_store" | "simd512_store")
+            ) {
+                // BUG found auditing tutorials/src/advanced/05_simd.md
+                // (2026-08-01): simd_store/simd256_store/simd512_store
+                // mutate the target Vec THROUGH its ref/pointer and
+                // return a byval COPY of the struct header (same
+                // `.data` buffer pointer) purely for chaining -- it is
+                // NEVER a fresh allocation. Freeing a discarded result
+                // here frees the SAME buffer the caller's own Vec still
+                // owns and will free again at scope exit -- a
+                // 100%-reproducible double-free (`lli` aborted with
+                // "double free detected in tcache"), confirmed by
+                // testing. Just evaluate for the side effect.
+                let _ = emit_expr(expr, ctx, out);
             } else if let Type::Vec(element) = &expr.ty {
                 let value = emit_expr(expr, ctx, out);
                 let s_ty = vec_struct_name(element);
@@ -11130,7 +11147,19 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return dest;
             }
             // 256-bit SIMD family — mirrors the 128-bit block above
-            // but uses vec256_lanes_and_lltype and align 32.
+            // but uses vec256_lanes_and_lltype. simd256_load/store
+            // declare `align 16`, NOT the vector's natural 32-byte
+            // alignment (see the load/store sites below) — glibc's
+            // malloc on x86-64 only guarantees 16-byte alignment, so
+            // asserting `align 32` on a load/store through a plain
+            // Vec<T> heap buffer is undefined behavior LLVM is free
+            // to exploit. Confirmed by testing: identical input,
+            // re-run several times, intermittently crashed `lli`
+            // (non-deterministic — the buffer's actual malloc
+            // alignment differs run to run). `align 16` matches what
+            // the allocator actually guarantees; LLVM emits an
+            // unaligned-safe `vmovups` instead of `vmovaps`, correct
+            // regardless of the runtime pointer's actual alignment.
             if name == "simd256_splat" {
                 let elem_ty = match &expr.ty {
                     crate::ast::Type::Vec256(e) => e.as_ref().clone(),
@@ -11193,7 +11222,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let simd_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
                 let dest = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = load {}, {}* {}, align 32\n", dest, vec_ty, vec_ty, simd_ptr));
+                out.push_str(&format!("  {} = load {}, {}* {}, align 16\n", dest, vec_ty, vec_ty, simd_ptr));
                 return dest;
             }
             if name == "simd256_store" {
@@ -11237,7 +11266,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let simd_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
-                out.push_str(&format!("  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 32\n"));
+                out.push_str(&format!("  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 16\n"));
                 return v;
             }
             if name == "simd256_add" || name == "simd256_sub" || name == "simd256_mul" {
@@ -11287,7 +11316,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return dest;
             }
             // 512-bit SIMD family — mirrors the 256-bit block above
-            // but uses vec512_lanes_and_lltype and align 64.
+            // but uses vec512_lanes_and_lltype. Same align-16 fix as
+            // the vec256 block above and for the same reason (glibc
+            // malloc's actual x86-64 guarantee, not the vector's
+            // natural 64-byte alignment).
             if name == "simd512_splat" {
                 let elem_ty = match &expr.ty {
                     crate::ast::Type::Vec512(e) => e.as_ref().clone(),
@@ -11350,7 +11382,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let simd_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
                 let dest = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = load {}, {}* {}, align 64\n", dest, vec_ty, vec_ty, simd_ptr));
+                out.push_str(&format!("  {} = load {}, {}* {}, align 16\n", dest, vec_ty, vec_ty, simd_ptr));
                 return dest;
             }
             if name == "simd512_store" {
@@ -11394,7 +11426,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let simd_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
-                out.push_str(&format!("  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 64\n"));
+                out.push_str(&format!("  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 16\n"));
                 return v;
             }
             if name == "simd512_add" || name == "simd512_sub" || name == "simd512_mul" {

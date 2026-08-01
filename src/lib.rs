@@ -51358,5 +51358,72 @@ fn main() -> i64 { return leak_check(); }
     // `vec_with_capacity_compiles_and_runs_on_both_backends` in
     // `tests/run_end_to_end.rs`.
 
+    /// BUG-57 (found auditing tutorials/src/advanced/05_simd.md,
+    /// 2026-08-01): `c_type_name` (the function `format_declarator`'s
+    /// own doc comment calls "called by emit_prototype + emit_function
+    /// for the return type and (mostly) by Let stmts for binding
+    /// storage") had no explicit arm for `Type::Vec128`/`Vec256`/
+    /// `Vec512` -- same missing-arm shape as the BUG-22 fix documented
+    /// a few tests above. A `let v: vec128<f32> = simd_splat(...);`
+    /// local's declared-type spelling fell through to `c_leaf_type`'s
+    /// per-T-unaware placeholder COMMENT (`/* vec128<T> */`), a real
+    /// `cc` "undeclared identifier" error on every vec128/256/512
+    /// local -- even though the simd_*/simd256_*/simd512_* builtin
+    /// CALLS already correctly emitted the real GNU vector-extension
+    /// type (`__attribute__((vector_size(16)))`) inline for their own
+    /// expressions. Fixed by routing through the already-existing
+    /// `c_vec128_type`/`c_vec256_type`/`c_vec512_type` helpers, which
+    /// were already used correctly by other call sites in the same
+    /// file -- `c_type_name` just never reached them.
+    #[test]
+    fn vec128_let_binding_uses_real_vector_type_not_placeholder_comment() {
+        let source = r#"
+            fn main() -> i64 {
+              let v: vec128<f32> = simd_splat(1.0 as f32);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("vec128 local must compile to C");
+        assert!(
+            !c.contains("/* vec128<T> */"),
+            "C output must not contain the vec128<T> placeholder comment:\n{c}"
+        );
+        assert!(
+            c.contains("float __attribute__((vector_size(16))) v_v"),
+            "expected the real GNU vector-extension type on the let binding:\n{c}"
+        );
+    }
+
+    /// BUG-58 (found in the same audit): `simd_store`/`simd256_store`/
+    /// `simd512_store` mutate the target `Vec<T>` THROUGH its ref/
+    /// pointer and return a byval COPY of the struct header (the SAME
+    /// `.data` buffer pointer) purely for call-chaining -- never a
+    /// fresh allocation. Both backends' generic "free a discarded
+    /// Vec<T>-returning call's result" codegen assumed every such
+    /// discard owns a new buffer, so `let _ = simd_store(y, i, v);`
+    /// freed `y`'s buffer immediately; the caller's own later
+    /// scope-exit drop of `y` then freed the SAME pointer again -- a
+    /// 100%-reproducible double-free (glibc abort: "double free
+    /// detected in tcache") confirmed by testing on BOTH backends.
+    /// Fixed by special-casing these three builtin names in each
+    /// backend's Discard-statement handling to just evaluate the call
+    /// for its side effect, never free the result.
+    #[test]
+    fn simd_store_discard_does_not_double_free_in_c() {
+        let source = r#"
+            fn write_one(y: ref Vec<f32>, x: ref Vec<f32>) -> i64 {
+              let xi: vec128<f32> = simd_load(x, 0);
+              let _ = simd_store(y, 0, xi);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("simd_store discard must compile to C");
+        assert!(
+            !c.contains("intent_vec_float__free(_intent_discard)"),
+            "C output must not free simd_store's discarded (aliased, not fresh) result:\n{c}"
+        );
+    }
+
 }
 

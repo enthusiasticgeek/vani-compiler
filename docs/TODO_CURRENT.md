@@ -4310,4 +4310,75 @@ verifying the four fixes above against their tutorial worked examples
   cover BUG-55's struct-naming half only. Full `cargo test --release
   --workspace` clean (2613 passed, 0 failed) after both fixes.
 
+## Three more bugs found continuing the 05_simd.md audit (added+fixed 2026-08-01)
+
+- [x] **BUG-57. `let v: vec128<f32> = ...;` (and `vec256`/`vec512`)
+  failed a real `cc` compile — "'v_v' undeclared" — on every local
+  variable of these types, even though the `simd_*`/`simd256_*`/
+  `simd512_*` builtin CALLS themselves already emitted correct C.**
+  Found running the chapter's own SAXPY example. Root cause: same
+  missing-arm shape as the BUG-22 fix — `c_type_name` (the function
+  used for `let`-binding storage types) had no explicit arm for
+  `Type::Vec128`/`Vec256`/`Vec512`, so it fell through to
+  `c_leaf_type`'s per-T-unaware placeholder COMMENT (`/* vec128<T>
+  */`) instead of the real GNU vector-extension type. The correct
+  helpers (`c_vec128_type`/`c_vec256_type`/`c_vec512_type`) already
+  existed and were already used correctly by the simd-builtin call
+  sites — `c_type_name` just never routed through them. Fixed by
+  adding the three explicit arms.
+- [x] **BUG-58. `simd_store`/`simd256_store`/`simd512_store` caused a
+  double-free the instant their (conventionally discarded) return
+  value and the Vec they wrote through were both still live — on
+  BOTH backends.** These three builtins mutate the target `Vec<T>`
+  THROUGH its ref/pointer and return a byval copy of the struct
+  header (the SAME `.data` buffer pointer) purely so the call can be
+  chained — never a fresh allocation. Both backends' generic "free a
+  discarded `Vec<T>`-returning call's result" codegen assumed every
+  such discard owns a new buffer, so `let _ = simd_store(y, i, v);`
+  freed `y`'s buffer immediately; the caller's own later scope-exit
+  drop of `y` then freed the identical pointer again (glibc abort:
+  "double free detected in tcache"). Fixed by special-casing these
+  three builtin names in each backend's `Discard`-statement handling
+  to just evaluate the call for its side effect, never free the
+  result.
+- [x] **BUG-59. `vec256<T>`/`vec512<T>` load/store crashed `lli`
+  NON-DETERMINISTICALLY — the identical program, re-run several
+  times with no code change, intermittently aborted.** Found
+  stress-testing `dot256`/`dot512` by hand after BUG-57/58 stopped
+  masking it (multiple back-to-back runs of the same binary
+  sometimes succeeded, sometimes crashed). Root cause:
+  `simd256_load`/`store` declared `align 32` and `simd512_load`/
+  `store` declared `align 64` in the emitted LLVM IR, asserting the
+  vector types' NATURAL alignment — but the underlying buffer always
+  comes from a plain `malloc`, and glibc's malloc on x86-64 only
+  guarantees 16-byte alignment, never 32 or 64. Declaring a stronger
+  alignment than the pointer actually has is undefined behavior LLVM
+  is free to exploit differently depending on the buffer's actual
+  runtime address, which explains the non-determinism precisely (the
+  128-bit `vec128<T>` path was already correct at `align 16`, which
+  matches malloc's real guarantee exactly — only the wider two
+  widths overclaimed). Fixed by changing all four sites (256/512 ×
+  load/store) to `align 16`, matching what the allocator actually
+  provides; LLVM emits the always-correct unaligned-safe instruction
+  (`vmovups` instead of `vmovaps` etc.) regardless of the runtime
+  pointer's actual alignment — this only forgoes an optimization,
+  never correctness. The C backend was never affected (its
+  `__attribute__((vector_size(N)))` GNU extension has no separate
+  alignment annotation to overclaim).
+  Regression tests: `vec128_let_binding_uses_real_vector_type_not_
+  placeholder_comment` and `simd_store_discard_does_not_double_free_
+  in_c` (`src/lib.rs`) cover BUG-57/58 via compile-only IR-text
+  assertions. The real proof is in `tests/run_end_to_end.rs`:
+  `saxpy_f32_example_runs_without_double_free_on_both_backends` (a
+  compile-only check can't catch a runtime double-free) and
+  `vec256_dot_product_runs_consistently_without_alignment_crash`,
+  which runs the SAME binary 12 times in a loop — a single passing
+  run proves nothing for a bug that's non-deterministic by nature.
+  Also fixed one more doc-only bug in the same file's combined-
+  layers example: `out: ref Vec<f32>` needed to be `mut ref` (the
+  scalar tail loop index-assigns into it directly, which a plain
+  `ref` rejects — only `simd_store`'s own aliasing write tolerates a
+  plain `ref`). Full `cargo test --release --workspace` clean (2615
+  passed, 0 failed) after all three fixes.
+
 ---
