@@ -109,8 +109,11 @@ fn main() -> i64 {
   print "contains 3:", b.contains(3);   // true
   print "contains 6:", b.contains(6);   // false
   print "len:", b.len();                // 4
-  print "min:", b.min();                // Option.Some(1)
-  print "max:", b.max();                // Option.Some(7)
+  // `print` can't take an Option<T> (or any enum) directly --
+  // confirmed by testing ("cannot print an enum directly") --
+  // unwrap it first.
+  print "min:", option_unwrap_or(b.min(), -1);   // 1
+  print "max:", option_unwrap_or(b.max(), -1);   // 7
 
   let _ = b.remove(3);
   print "after remove 3, len:", b.len(); // 3
@@ -186,8 +189,9 @@ fn main() -> i64 {
   print "len:", sl.len();           // 3
   print "contains 5:", sl.contains(5);    // true
   print "contains 7:", sl.contains(7);    // false
-  print "min:", sl.min();          // Option.Some(5)
-  print "max:", sl.max();          // Option.Some(20)
+  // Same as Bst above -- print can't take Option<T> directly.
+  print "min:", option_unwrap_or(sl.min(), -1);   // 5
+  print "max:", option_unwrap_or(sl.max(), -1);   // 20
   return 0;
 }
 ```
@@ -294,11 +298,13 @@ fn main() -> i64 {
   let _ = deque_push_front(mut ref d, 0);
 
   print "len:", deque_len(ref d);         // 3   [0, 1, 2]
-  print "front:", deque_peek_front(ref d); // Option.Some(0)
-  print "back:", deque_peek_back(ref d);   // Option.Some(2)
+  // Same as Bst/SkipList above -- print can't take Option<T>
+  // directly.
+  print "front:", option_unwrap_or(deque_peek_front(ref d), -1); // 0
+  print "back:", option_unwrap_or(deque_peek_back(ref d), -1);   // 2
 
   let front: Option<i64> = deque_pop_front(mut ref d);
-  print "popped front:", front;            // Option.Some(0)
+  print "popped front:", option_unwrap_or(front, -1); // 0
   print "len after pop:", deque_len(ref d); // 2
   return 0;
 }
