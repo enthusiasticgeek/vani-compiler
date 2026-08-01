@@ -103,9 +103,19 @@ After `--to arabic` from the Russian file:
 ### Inspecting the alias table
 
 ```bash
-# Print every keyword alias as a markdown table (all 57 languages)
+# Print every keyword alias as a markdown table
 python3 tools/vani_translate.py --list-keywords
 ```
+
+Confirmed by testing: the table only has columns for English, Sanskrit,
+Hindi, Marathi, and Mandarin -- `list_keywords()` in
+`tools/vani_translate.py` hardcodes those five and was never updated
+when the roster grew to 57 languages, so it does NOT show all 57 (an
+earlier version of this page claimed it did). A missing entry in one
+of those five columns prints as a bare `--`, not `(missing)`. To check
+coverage for any of the other 52 languages, read the `ALIASES` dict in
+`tools/vani_translate.py` directly, or translate a file that exercises
+the keyword you care about and inspect the output by eye.
 
 ---
 
@@ -130,8 +140,14 @@ prove n >= 0;      →    n >= 0 सिद्ध करो;
 ```
 English                              Hindi
 ──────────────────────────────────   ─────────────────────────────────
-for i from 0 to n {            →    i के लिए 0 से n तक {
+for idx from 0 to n {          →    idx के लिए 0 से n तक {
 ```
+
+(Loop variable spelled `idx`, not `i` -- confirmed by testing, `i`
+specifically collides with Swedish's spelling of the `In` keyword in
+the translator's global cross-language lookup table, silently
+mangling the identifier into `में` instead of leaving it alone. See
+"Known limitations" below.)
 
 Both directions work. Translating a Hindi-keyword file back to English
 restores `return` / `print` at the start of the line and the `for … from … to`
@@ -263,7 +279,10 @@ catch coverage gaps.
 
 ```bash
 python3 tools/vani_translate.py basics.vani --to japanese --verify
-# → round-trip ok: english -> japanese -> english (12 keyword tokens preserved)
+# → round-trip ok: english -> japanese -> english (14 keyword tokens preserved)
+# (exact count drifts as example files are edited -- verified against
+# examples/language/english/basics.vani as of 2026-08-01; what matters
+# is the "round-trip ok" message, not the specific number)
 ```
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
@@ -275,9 +294,16 @@ identifiers are not compared.
 
 ## Adding a keyword to the alias table
 
-Suppose you want to add a Korean alias for `pure` that the translator
-currently falls back to English for. Open `tools/vani_translate.py`,
-find the `Pure` entry, and add the `korean` key:
+Suppose you want to add a language alias for `pure` that the
+translator currently falls back to English for. (Korean already has
+one as of this writing -- `"korean": "순수"` -- confirmed by checking
+`ALIASES["Pure"]` directly; use `--list-keywords` for the five
+languages it covers, or grep `ALIASES` in `tools/vani_translate.py`
+for any other language, to find a genuinely-missing pair before
+following along.) Open `tools/vani_translate.py`, find the `Pure`
+entry, and add the missing language's key -- the shape is the same
+regardless of which one you're adding, so the Korean line below still
+illustrates it correctly even though it's no longer the gap itself:
 
 ```python
 "Pure": {
@@ -384,6 +410,7 @@ print(msg)
 | Multi-line string literals are not translated | Keep strings on one line |
 | Nested for-range SOV patterns: only the outermost loop is rewritten | — |
 | Ollama quality varies by model size | Use a 7B+ model; set `--llm-timeout 120` |
+| **User identifiers that happen to match another supported language's keyword spelling get silently mangled** — confirmed by testing: `i` (loop variable) collides with Swedish's spelling of `In` and becomes `में` under any target language, even though the file is English/Hindi and never mentions Swedish. Pass 1's keyword matching is deliberately global across all 57 languages (that's what makes `--from` auto-detection work at all -- see "Pass 1" above), so it can't tell a real keyword from a coincidentally-identical identifier. | Avoid single/short identifiers as loop variables (`idx`/`index` instead of `i`); `--verify` only checks the keyword token sequence, so it will NOT catch a mangled identifier -- inspect translated output by eye when it uses short names |
 
 ---
 
@@ -394,9 +421,12 @@ print(msg)
    and run `--verify` on both. Inspect the output in a Unicode-capable
    editor.
 
-2. Add one keyword entry to a language that is missing it (find gaps by
-   running `--list-keywords` and looking for `(missing)` or English
-   fallbacks). Run the round-trip test.
+2. Add one keyword entry to a language that is missing it (`--list-
+   keywords` only covers English/Sanskrit/Hindi/Marathi/Mandarin,
+   printing a bare `--` for a gap in one of those five -- for any of
+   the other 52 languages, grep `ALIASES` in `tools/vani_translate.py`
+   directly to find a `TokenKind` whose dict is missing that
+   language's key). Run the round-trip test.
 
 3. *(Advanced)* Run the translator with `--llm anthropic --translate-identifiers`
    on a file that has descriptive function names. Review whether the
