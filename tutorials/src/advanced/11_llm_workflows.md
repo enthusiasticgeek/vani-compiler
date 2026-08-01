@@ -20,9 +20,11 @@ tools and shows the write-verify-iterate loop end to end.
 Two scripts under [`tools/llm_context/`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/llm_context/):
 
 - **`bundle.py`** (Phase ML-1, 2026-06-07) -- a static Markdown
-  context bundle, ~13K tokens full, ~7K with `--no-examples`.
-  Paste it into any LLM as a system prompt and the model can
-  generate working vāṇी without any training.
+  context bundle, ~31K tokens full, ~21K with `--no-examples`
+  (confirmed by testing; the corpus has grown a lot since an
+  earlier ~13K/~7K estimate). Paste it into any LLM as a system
+  prompt and the model can generate working vāṇी without any
+  training.
 - **`mcp_server.py`** (Phase ML-2, 2026-06-07) -- exposes the
   same content as an [MCP](https://modelcontextprotocol.io/)
   server so an agent pulls just the section it needs AND can
@@ -49,9 +51,13 @@ python3 tools/llm_context/bundle.py | xclip -sel clip    # X11
 # Or save to disk for re-use
 python3 tools/llm_context/bundle.py > /tmp/vani_ctx.md
 
-# Tight-context variants:
-python3 tools/llm_context/bundle.py --no-examples        # ~7K tokens
-python3 tools/llm_context/bundle.py --no-examples --no-limits  # ~4K tokens
+# Tight-context variants (token counts confirmed by testing --
+# an earlier version of this page said ~13K/~7K/~4K; the corpus
+# has grown a lot since -- re-derive with `wc -c` / 4 if these
+# drift again):
+python3 tools/llm_context/bundle.py                            # ~126K bytes, ~31K tokens (full)
+python3 tools/llm_context/bundle.py --no-examples               # ~83K bytes, ~21K tokens
+python3 tools/llm_context/bundle.py --no-examples --no-limits  # ~19K bytes, ~5K tokens
 
 # Single section only:
 python3 tools/llm_context/bundle.py --section aliases    # keyword table only
@@ -66,7 +72,7 @@ python3 tools/llm_context/bundle.py --section patterns   # GoF catalog only
 | 2 | Keyword alias table (English <-> Sanskrit <-> Hindi <-> Marathi) | `tools/vani_translate.py::ALIASES` |
 | 3 | SOV verb-at-end statement shape table | README + bundle |
 | 4 | 22 GoF design patterns, one-line intent each | `examples/.../design_patterns/` |
-| 5 | English example corpus signatures (`intent` + `fn`) | 155 example files |
+| 5 | English example corpus signatures (`intent` + `fn`) | 165 example files (confirmed by testing; an earlier version of this page said 155) |
 | 6 | Dialect-aware error prefixes | `src/diagnostic.rs::localize_message` |
 | 7 | v1 limitations catalog (verbatim) | `docs/v1_limitations.md` |
 
@@ -80,23 +86,43 @@ drifts from reality.
 
 Paste the bundle as the first message. Then ask:
 
-> "Here's the vāṇी context. Now: write a `fn factorial(n: i64)
-> -> i64` with `requires n >= 0;` and `ensures _return >= 1;`
-> clauses, using English keywords."
+> "Here's the vāṇी context. Now: write a `fn clamp(x: i64, lo:
+> i64, hi: i64) -> i64` that clamps `x` into `[lo, hi]`, with a
+> `requires lo <= hi;` precondition and an `ensures _return >=
+> lo && _return <= hi;` postcondition, using English keywords."
 
 A capable model produces something like:
 
 <img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
-fn factorial(n: i64) -> i64
-requires n >= 0;
-ensures _return >= 1;
+fn clamp(x: i64, lo: i64, hi: i64) -> i64
+requires lo <= hi;
+ensures _return >= lo && _return <= hi;
 {
-  if n == 0 { return 1; }
-  return n * factorial(n - 1);
+  if x < lo { return lo; }
+  if x > hi { return hi; }
+  return x;
 }
 ```
+
+This is confirmed by testing (`vanic check` + `vanic run` on both
+backends, output `10` for `clamp(15, 0, 10)`) -- unlike an earlier
+version of this page, which showed a recursive `factorial` with
+`ensures _return >= 1;` as the "capable model" output. That
+factorial does NOT actually pass `vanic check`: the SMT layer
+verifies each call against the callee's *declared* contract only
+(no induction into the recursive body), so `factorial`'s own
+`ensures _return >= 1;` gives the solver nothing tighter than "some
+value >= 1" for the recursive `factorial(n - 1)` call, and `n *
+(unbounded value)` can be proven to overflow/wrap below 1 for large
+`n`. Bounding `n` (e.g. `requires n >= 0 && n <= 20;`) doesn't fix
+it either -- the solver still can't derive the needed relationship
+between `result` and `i` inside a loop-based rewrite without a much
+more precise invariant. Recursive/iterative contracts that compose
+tightly enough to verify multiplicative growth are a real edge of
+what this SMT layer can discharge -- `clamp` avoids the issue
+entirely since it has no recursion and its bounds are direct.
 
 ### Run the model's output through the compiler
 
@@ -109,24 +135,57 @@ vanic run   /tmp/out.vani
 ### Iterate
 
 Compiler diagnostics + the bundle's Sec.7 limitations catalog
-together give the model exactly the feedback it needs:
+together give the model exactly the feedback it needs. Suppose
+the model's next attempt at a helper reuses a `Vec<i64>` argument
+across two calls instead of borrowing it:
+
+```vani
+fn count(v: Vec<i64>) -> i64 {
+  return len(v) as i64;
+}
+
+fn main() {
+  let v: Vec<i64> = vec(1, 2, 3);
+  let s: i64 = count(v);
+  let t: i64 = count(v);
+  print s;
+  print t;
+}
+```
 
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
+This is the real, exact `vanic check` output for the code above
+(confirmed by running it):
+
 ```
-/tmp/out.vani:5:14: error: value 'n' was moved; cannot use after move
-  return n * factorial(n - 1);
-             ^^^^^^^^^^^^^^^^
-  help: 1. After `let other = n`, `n` is no longer usable ...
-  help: 2. vāṇी uses affine ownership: each heap-owning value ...
-  help: 3. Either (a) borrow instead of moving ...
+/tmp/out.vani:10:22: error: value 'v' was moved; cannot use after move
+  let t: i64 = count(v);
+                     ^
+/tmp/out.vani:9:22: note: 'v' was moved here
+  let s: i64 = count(v);
+                     ^
+/tmp/out.vani:10:22: note: consider borrowing with `ref v` for read-only access, or call `clone(v)` if you need both bindings to own data
+  let t: i64 = count(v);
+                     ^
+  help: 1. After `let other = v`, `v` is no longer usable -- ownership has transferred to `other`.
+  help: 2. vāṇी uses affine ownership: each heap-owning value has exactly one owner at a time. Reading after move would alias the owner, breaking the no-implicit-clone story AND opening a double-free door.
+  help: 3. Either (a) borrow instead of moving (`ref v` at the use site if a function takes `ref T`), (b) call `.clone()` explicitly if you want two copies (and see the cost at the call site), or (c) restructure so the second use happens before the move.
 ```
 
-Paste the diagnostic back into the chat. The model's next
-attempt usually fixes the issue -- the help-line elaborations
+Paste the diagnostic back into the chat. The model's next attempt
+usually fixes the issue by declaring the parameter as a borrow
+(`fn count(v: ref Vec<i64>) -> i64`) and passing `ref v` at both
+call sites -- confirmed by testing, this version compiles and runs
+on both backends, printing `3` twice. The help-line elaborations
 (see [Intermediate 10b runtime errors](../intermediate/10b_runtime_errors_primer.md))
 were explicitly designed to give LLMs and human readers the
 same actionable feedback shape.
+
+Note: `i64` and other scalar types are `Copy`, not affine -- a
+`let other = n;` on an `i64` never moves `n`. Affine ownership (and
+the "moved; cannot use after move" diagnostic) only applies to
+heap-owning types like `Vec<T>` and `OwnedStr`.
 
 ## Workflow 2 -- MCP server (agentic write-verify loop)
 
@@ -181,12 +240,12 @@ JSON shape -- point `command` at `python3` and `args[0]` at
 | `vani://aliases` | TokenKind <-> dialect spelling table |
 | `vani://sov` | SOV verb-at-end shape table |
 | `vani://patterns` | 22-pattern GoF catalog |
-| `vani://examples` | Signatures of all 155 English examples |
+| `vani://examples` | Signatures of all 165 English examples |
 | `vani://errors` | Dialect-aware error prefix table |
 | `vani://limits` | v1 limitations catalog |
 | `vani://full-bundle` | All of the above concatenated |
 
-Instead of pasting all 13K tokens upfront, the agent pulls
+Instead of pasting all ~31K tokens upfront, the agent pulls
 `vani://aliases` when (and only when) writing a Devanagari
 file. Big savings on long-running agent sessions.
 
@@ -206,8 +265,10 @@ A sample agent turn -- what happens inside one user message
 when you ask "write me a sorted vec wrapper with a binary
 search":
 
-1. Agent fetches `vani://aliases` + `vani://examples` (~1.5K
-   tokens combined, way under the 13K full bundle).
+1. Agent fetches `vani://aliases` + `vani://examples` (~12K
+   tokens combined, confirmed by testing -- still well under the
+   ~31K full bundle since it skips §6's error-prefix table and
+   §7's limitations catalog).
 2. Agent drafts a `SortedVec<i64>` wrapper with `push`,
    `find`, and `requires` / `ensures` clauses.
 3. Agent calls `vani_check` on its draft. The tool reports
@@ -255,8 +316,12 @@ plumbing, tighter loop.
 
 ## What's queued (not shipped today)
 
-The roadmap (see [TODO.md `🤖 ML model that learns vāṇी`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md))
-has two further phases that haven't started:
+The roadmap (see [`docs/archive/TODO_ARCHIVE.md` §"🤖 ML model
+that learns vāṇी"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/archive/TODO_ARCHIVE.md)
+-- confirmed by grep; an earlier version of this page linked to
+`TODO.md`, which was condensed on 2026-06-19 and no longer
+contains this section) has two further phases that haven't
+started:
 
 - **Phase ML-3** (~20-30h focused + ~$100-300 GPU credits):
   LoRA fine-tune a small open-weights model (Llama-3 8B or

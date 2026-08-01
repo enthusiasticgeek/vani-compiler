@@ -135,7 +135,7 @@ RESOURCES = [
      "22-pattern catalog with one-line intent + path to the worked example for each.",
      "patterns"),
     ("examples", "English example corpus signatures",
-     "For each of the 155 English-keyword `.vani` examples, the `intent` line + every `fn` signature.",
+     "For each of the 165 English-keyword `.vani` examples, the `intent` line + every `fn` signature.",
      "examples"),
     ("errors", "Dialect-aware error prefixes",
      "Devanagari labels + prefix translations for the highest-frequency error families.",

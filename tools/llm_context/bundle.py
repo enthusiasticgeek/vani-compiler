@@ -40,7 +40,7 @@ Usage:
 Flags:
     --section <name>     emit only one section (system | aliases |
                          sov | patterns | examples | errors | limits)
-    --no-examples        skip section 5 (cuts ~30K tokens)
+    --no-examples        skip section 5 (cuts ~11K tokens)
     --no-limits          skip section 7
 """
 
@@ -255,7 +255,7 @@ def main() -> int:
     ap.add_argument("--section", choices=list(SECTIONS), default=None,
                     help="emit only this section (default: all)")
     ap.add_argument("--no-examples", action="store_true",
-                    help="skip §5 (cuts ~30K tokens)")
+                    help="skip §5 (cuts ~11K tokens)")
     ap.add_argument("--no-limits", action="store_true",
                     help="skip §7")
     args = ap.parse_args()

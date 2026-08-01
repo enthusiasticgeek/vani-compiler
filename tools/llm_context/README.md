@@ -28,8 +28,10 @@ python3 tools/llm_context/bundle.py | xclip -sel clip  # X11
 python3 tools/llm_context/bundle.py > /tmp/vani_ctx.md
 
 # Trim heavy sections when the model has a tight context budget
-python3 tools/llm_context/bundle.py --no-examples    # cuts ~30K bytes
-python3 tools/llm_context/bundle.py --no-limits      # cuts ~10K bytes
+# (byte/token figures confirmed by testing 2026-08-01; the corpus
+# has grown a lot since this doc's original ~54K/~13K estimate)
+python3 tools/llm_context/bundle.py --no-examples    # cuts ~43K bytes
+python3 tools/llm_context/bundle.py --no-limits      # cuts ~64K bytes
 
 # Emit a single section
 python3 tools/llm_context/bundle.py --section aliases   # keyword table only
@@ -44,18 +46,21 @@ python3 tools/llm_context/bundle.py --section patterns  # GoF catalog only
 | 2 | TokenKind ↔ {english, sanskrit, hindi, marathi} alias table | `tools/vani_translate.py::ALIASES` |
 | 3 | SOV verb-at-end statement shape table | README + `bundle.py::emit_sov_table` |
 | 4 | 22 GoF design patterns, one-line intent each | `examples/language/english/design_patterns/**/*.vani` |
-| 5 | English example corpus signatures (`intent` + `fn`) | `examples/language/english/*.vani` (155 files) |
+| 5 | English example corpus signatures (`intent` + `fn`) | `examples/language/english/*.vani` (165 files) |
 | 6 | Dialect-aware error prefixes | `src/diagnostic.rs::localize_message` |
 | 7 | v1 limitations catalog | `docs/v1_limitations.md` (verbatim) |
 
-Approximate token cost (using Claude tokenization):
+Approximate token cost (chars/4 estimate; confirmed by testing
+2026-08-01 -- the corpus, especially `docs/v1_limitations.md`,
+has grown substantially since this table's original ~54K/~13K
+figures):
 
 | Bundle | Bytes | Tokens (est.) |
 |---|---|---|
-| Full (all sections) | ~54K | ~13K |
-| `--no-examples` | ~27K | ~7K |
-| `--no-examples --no-limits` | ~17K | ~4K |
-| Single `--section aliases` | ~5K | ~1.2K |
+| Full (all sections) | ~126K | ~31K |
+| `--no-examples` | ~83K | ~21K |
+| `--no-examples --no-limits` | ~19K | ~5K |
+| Single `--section aliases` | ~4.4K | ~1.1K |
 
 ## Sample workflow
 
@@ -100,7 +105,7 @@ suggesting code to the user.
 | `vani://aliases`       | TokenKind ↔ dialect spelling table |
 | `vani://sov`           | SOV verb-at-end shape table |
 | `vani://patterns`      | 22-pattern GoF catalog |
-| `vani://examples`      | Signatures of all 155 English examples |
+| `vani://examples`      | Signatures of all 165 English examples |
 | `vani://errors`        | Dialect-aware error prefix table |
 | `vani://limits`        | v1 limitations catalog |
 | `vani://full-bundle`   | All of the above concatenated |
