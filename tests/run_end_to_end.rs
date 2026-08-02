@@ -5659,6 +5659,72 @@ fn main() -> i64 {
     }
 }
 
+// BUG-45 (logged 2026-07-30, re-checked 2026-08-01 in the "fix
+// documented TODO bugs" pass): reported that a function with a
+// heap-owning `OwnedStr` parameter crashed (exit 116, both
+// backends) the instant a `try`/`?` in the same function actually
+// took its early-return path -- strongly suspected to be a missing
+// drop/cleanup for the still-in-scope `OwnedStr` parameter at the
+// synthesized early-return branch. Re-tested every bisected shape
+// from the original report directly against the real CLI (only a
+// real run can observe a runtime crash, unlike a compile-only
+// test) -- none reproduce on either backend, confirmed across
+// repeated runs. Not chased down to which of the ~14 intervening
+// checker/backend commits fixed it; this test exists to lock in
+// the now-correct behavior so a future regression is caught.
+#[test]
+fn owned_str_param_with_propagating_try_does_not_crash() {
+    let src = write_tmp_vani(
+        "owned_str_param_propagating_try_no_crash",
+        r#"
+fn maybe_half(x: i64) -> Option<i64> {
+  if x % 2 == 0 { return Option.Some(x / 2); }
+  return Option.None;
+}
+fn f(s: OwnedStr, x: i64) -> Option<i64> {
+  let a = parse_int(s)?;
+  let b = maybe_half(x)?;
+  return Option.Some(a + b);
+}
+fn main() -> i64 {
+  let r: Option<i64> = f("5" + "", 3);
+  if let Option.Some(v) = r {
+    print v;
+  } else {
+    print -1;
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        for run_idx in 0..5 {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                output.status.success(),
+                "run {run_idx}: an OwnedStr param + a later propagating try/? must not crash \
+                 for {:?}; status {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+            assert_eq!(
+                stdout, "-1\n",
+                "run {run_idx}: x=3 is odd, maybe_half's ? must propagate None for {:?}",
+                backend_args
+            );
+        }
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(

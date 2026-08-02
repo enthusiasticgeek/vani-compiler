@@ -28787,6 +28787,47 @@ fn main() -> i64 {
             .expect("three trys with intermediate let compiles");
     }
 
+    /// BUG-45 (logged 2026-07-30, checked during the "fix documented
+    /// TODO bugs" pass 2026-08-01): a function with a heap-owning
+    /// `OwnedStr` parameter was reported to crash (exit 116, both
+    /// backends) the instant a `try`/`?` in the same function
+    /// actually took its early-return path -- even when the
+    /// `OwnedStr` parameter was never read after an earlier `try`
+    /// extracted its scalar, or not used by any `try` call at all.
+    /// Re-tested every bisected repro shape from the original report
+    /// directly against the CLI (not just `compile()`, since the
+    /// original symptom was a RUNTIME crash) -- none reproduce
+    /// anymore, on either backend, across repeated runs. This is
+    /// just a compile-level sanity check pinning the shape; the real
+    /// crash-or-not verification is
+    /// `owned_str_param_with_propagating_try_does_not_crash` in
+    /// `tests/run_end_to_end.rs`. Whatever fixed this did so as a
+    /// side effect of other checker/backend work in one of the ~14
+    /// commits between when BUG-45 was logged (`d5eabe0`) and now --
+    /// not chased down to a specific commit, since the current
+    /// behavior is what matters and is now covered by a real test.
+    #[test]
+    fn owned_str_param_with_propagating_try_compiles() {
+        let source = r#"
+            fn maybe_half(x: i64) -> Option<i64> {
+              if x % 2 == 0 { return Option.Some(x / 2); }
+              return Option.None;
+            }
+            fn f(s: OwnedStr, x: i64) -> Option<i64> {
+              let a = parse_int(s)?;
+              let b = maybe_half(x)?;
+              return Option.Some(a + b);
+            }
+            fn main() -> i64 {
+              let r: Option<i64> = f("5" + "", 3);
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "OwnedStr param + two try/? calls (second one propagating None) must compile",
+        );
+    }
+
     #[test]
     fn tree_c_nested_fnptr_return_compiles() {
         // Closure #216: `fn() -> fn(T) -> R` produced
