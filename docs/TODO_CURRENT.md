@@ -3833,7 +3833,7 @@ verifying the four fixes above against their tutorial worked examples
   warning in the same file (bare `Option<T>` in an H2 heading,
   outside backticks).
 
-- [ ] **BUG-45 (found, NOT fixed — deep, sensitive language-feature
+- [x] **BUG-45 (found 2026-07-30, confirmed no longer reproducible 2026-08-01 — deep, sensitive language-feature
   machinery; high risk to touch under time pressure, matching the
   BUG-33/34/36 precedent). A function with a heap-owning parameter
   (`OwnedStr`, presumably `Vec<T>`/other affine types too) crashes
@@ -3873,6 +3873,22 @@ verifying the four fixes above against their tutorial worked examples
   return it" branch) walks the function's live affine bindings for
   a drop sequence the way the normal `return` path does, and
   whether parameters specifically are included in that walk.
+  **✅ Confirmed fixed 2026-08-01**, in the "fix documented TODO
+  bugs" pass — re-ran every bisected repro shape from this entry
+  directly against the real CLI (single try/OwnedStr, two-try where
+  the second propagates None, both `try EXPR` and `EXPR?` syntax,
+  OwnedStr param used vs. completely unused) and none crash
+  anymore, on either backend, across repeated runs. Not chased down
+  to which of the ~14 checker/backend commits between when this was
+  logged (`d5eabe0`) and now fixed it as a side effect of other
+  work (candidates worth checking first if it ever regresses:
+  BUG-37's clone_at/drop-sequence fixes, or the `try`-desugar
+  commits `1eed9ff`/`0a32b2f` in that range) -- what matters is the
+  current behavior is correct, and it's now locked in with a real
+  test (`owned_str_param_with_propagating_try_does_not_crash` in
+  `tests/run_end_to_end.rs`, 5 runs per backend) so a future
+  regression is caught immediately instead of silently
+  reintroducing this. Commit `d36db5d`.
 
 - [x] **`intermediate/10_result_try.md`'s entire premise was
   outdated: "There's no built-in `Result<T, E>` in v1 — you
