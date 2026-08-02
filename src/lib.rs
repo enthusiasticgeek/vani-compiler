@@ -52390,5 +52390,50 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-67: a factory function returning a closure that captured
+    /// a heap-owning value (here an `OwnedStr`) both FREED the
+    /// closure's env (as if it were an ordinary scope-exit drop)
+    /// AND returned the same now-dangling pointer bundle -- a real
+    /// use-after-free/double-free, confirmed crashing on
+    /// `--backend=c` (the LLVM backend's independent codegen
+    /// happened not to hit this specific ordering, but the checker-
+    /// level bug -- `info.moved` never getting set for a returned
+    /// Closure var -- is backend-agnostic). Root cause:
+    /// `consume_if_moved_var` opens with `if checked.ty().is_copy()
+    /// { return; }`, and `Type::Closure` has no explicit arm in
+    /// `Type::is_copy()` (falls through to that function's `_ =>
+    /// true` catch-all), so returning a closure never marked it
+    /// "moved" and the return-path's affine-closure-drop pass (L5)
+    /// always fired for it regardless. Fixed by explicitly
+    /// excluding the returned variable's name from that drop pass.
+    #[test]
+    fn factory_fn_returning_closure_with_owned_str_capture_does_not_double_free() {
+        let source = r#"
+            fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+              let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+              return g;
+            }
+            fn main() -> i64 {
+              let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+              say_hi(5);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("factory returning OwnedStr-capturing closure compiles to C");
+        // The bug's signature: the factory function frees the env
+        // (and the captured OwnedStr) via an unconditional `if
+        // (v_g.env) { free(...); free(...); }` block that runs even
+        // on the path that also returns that same `v_g` value.
+        // Assert the fix's shape instead: no such unconditional
+        // free of the returned closure's env inside fn_make_greeter.
+        let fn_body_start = c.find("fn_make_greeter(char* v_name) {").unwrap();
+        let fn_body = &c[fn_body_start..fn_body_start + 500.min(c.len() - fn_body_start)];
+        assert!(
+            !fn_body.contains("free((void*)__aff_env->name)") && !fn_body.contains("free((void*)__aff_env)"),
+            "fn_make_greeter must not free the env it's about to return:\n{}",
+            fn_body
+        );
+    }
+
 }
 

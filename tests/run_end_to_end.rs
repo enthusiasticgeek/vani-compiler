@@ -6713,3 +6713,58 @@ fn main() -> i64 {
         assert_eq!(stdout, "30\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// BUG-67, found writing intermediate/06a_closures_primer.md's
+// worked "factory returns a closure that captured an OwnedStr"
+// example against the real compiler: a factory function returning
+// a closure that captured a heap-owning value both freed the
+// closure's env AND returned the same now-dangling pointer bundle
+// -- a genuine use-after-free/double-free. `consume_if_moved_var`
+// never marked a returned Closure variable as moved (Type::Closure
+// has no explicit is_copy() arm, so it fell through to that
+// function's true-by-default catch-all), so the return path's
+// affine-closure-drop pass always fired regardless of whether the
+// variable was the thing being returned.
+#[test]
+fn factory_fn_returning_closure_with_owned_str_capture_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "factory_closure_owned_str_capture",
+        r#"
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+  let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+  return g;
+}
+fn main() -> i64 {
+  let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+  say_hi(5);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        for run_idx in 0..5 {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                output.status.success(),
+                "run {run_idx}: factory returning an OwnedStr-capturing closure must \
+                 not crash (double-free) for {:?}; status {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+            assert_eq!(
+                stdout, "hello, alice 5\n",
+                "run {run_idx}: for {:?}; got: {}",
+                backend_args, stdout
+            );
+        }
+    }
+}

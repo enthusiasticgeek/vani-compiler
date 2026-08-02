@@ -11312,11 +11312,39 @@ fn check_one_stmt(
                 });
             }
             // L5: drop affine closures on the return path too.
+            //
+            // BUG-67 (2026-08-02): `info.moved.is_none()` was meant to
+            // exclude the variable actually being returned (e.g. `return
+            // g;`) from this drop pass -- the same way the general
+            // `drop_names` pass above excludes it. But `consume_if_moved_
+            // var` (called above, which is what sets `.moved`) opens with
+            // `if checked.ty().is_copy() { return; }`, and `Type::Closure`
+            // has no explicit arm in `Type::is_copy()` -- it falls through
+            // to that function's catch-all `_ => true`. So EVERY closure
+            // return silently skipped the move-marking, `info.moved`
+            // stayed `None`, and this filter always fired: `return g;`
+            // both freed `g`'s heap-owning env (a captured `OwnedStr`,
+            // `Vec`, etc.) AND returned the same (now-dangling) pointer
+            // bundle -- a real, silent double-free / use-after-free,
+            // confirmed on `--backend=c` (a Copy-only capture masked it,
+            // since freeing an env with no heap fields is harmless).
+            // Fixed narrowly here (not by changing `Type::is_copy()`
+            // itself, which is load-bearing in many unrelated places)
+            // by explicitly excluding the variable that IS the return
+            // expression, mirroring what correct `.moved` tracking would
+            // have done. Found writing `intermediate/06a_closures_
+            // primer.md`'s worked "factory returns a closure that
+            // captured an OwnedStr" example against the real compiler.
+            let returned_var_name: Option<&str> = match &expr.kind {
+                ExprKind::Var(name) => Some(name.as_str()),
+                _ => None,
+            };
             let aff_drops: Vec<(String, Type)> = env
                 .all_bindings()
                 .filter(|(n, info)| {
                     matches!(info.ty, Type::Closure(_, _))
                         && info.moved.is_none()
+                        && Some(n.as_str()) != returned_var_name
                         && crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().contains_key(n.as_str()))
                 })
                 .map(|(n, info)| (n.clone(), info.ty.clone()))

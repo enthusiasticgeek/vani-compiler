@@ -4920,4 +4920,57 @@ verifying the four fixes above against their tutorial worked examples
   site). Documented here rather than silently left broken; not
   chased further today.
 
+## Bug found fixing intermediate/06a_closures_primer.md's Closure syntax examples (added+fixed 2026-08-02)
+
+- [x] **BUG-67 (found+fixed 2026-08-02 — checker-level, silent
+  use-after-free/double-free, both backends' generated code
+  affected).** Found writing this tutorial's flagship "factory
+  function returns a closure that captured a value" example
+  (`make_greeter`) against the real compiler, using the actual
+  captured value the tutorial had always shown -- an `OwnedStr`.
+  Minimal repro:
+  ```vani
+  fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+    let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+    return g;
+  }
+  fn main() -> i64 {
+    let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+    say_hi(5);
+    return 0;
+  }
+  ```
+  Crashed with `free(): double free detected in tcache 2` under
+  `--backend=c` (the LLVM backend's independently-implemented
+  codegen happened not to trip over this specific case, but the
+  underlying checker bug is backend-agnostic — see below). A
+  Copy-only capture (e.g. an `i64`) masked the bug, since freeing an
+  env struct with no heap fields is harmless — that's why the
+  Copy-only case in BUG-66's own regression test never caught this.
+  Root cause: the return-path code that decides which local
+  affine-closure bindings to drop (`return v;` shouldn't drop `v`
+  itself, only OTHER still-live locals) relies on
+  `info.moved.is_none()` to detect "is this the variable being
+  returned." That flag is set by `consume_if_moved_var`, which
+  opens with `if checked.ty().is_copy() { return; }` — and
+  `Type::Closure` has no explicit arm in `Type::is_copy()`, so it
+  falls through to that function's `_ => true` catch-all (Closure
+  is structurally a 2-pointer bundle, so treating it as Copy at the
+  TYPE level is reasonable for many purposes, just not this one).
+  So `consume_if_moved_var` always returned early for a returned
+  closure, `info.moved` never got set, and the affine-closure drop
+  pass fired for the returned variable exactly like any other
+  still-live local — freeing the env (and its captured `OwnedStr`)
+  that the SAME statement was about to return. Fixed narrowly (not
+  by changing `Type::is_copy()` itself, which is load-bearing in
+  many unrelated places across the checker and both backends) by
+  explicitly excluding the returned variable's name from the
+  affine-closure drop pass at its one call site, mirroring what
+  correct `.moved` tracking would have done.
+  New tests: 1 `src/lib.rs` (asserts the generated C no longer frees
+  the returned closure's env inside the factory function) plus 1
+  real end-to-end test (`tests/run_end_to_end.rs`, 5 runs per
+  backend matching this session's "non-deterministic-looking crash"
+  precedent) asserting the correct printed output on both backends.
+
 ---
