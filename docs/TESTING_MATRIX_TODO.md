@@ -758,10 +758,39 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x `Option`/`Result` wrapping
 
-- [ ] `Option<Array<T,N>>` / `Result<Tuple<...>, E>` -- Option/
+- [x] `Option<Array<T,N>>` / `Result<Tuple<...>, E>` -- Option/
       Result generic instantiation (BUG-46's territory) has mostly
       been tested with scalar or single-struct payloads, not
-      Array/Tuple payloads specifically.
+      Array/Tuple payloads specifically -- **found+fixed 2026-08-02,
+      BUG-80.** LLVM was correct throughout for both
+      `Option<[i64;3]>` and `Result<(i64,i64), i64>`. `Result` over a
+      Tuple payload already worked correctly on C too (Tuple's
+      match-arm binding path was already correct). `Option` over an
+      Array payload crashed the C backend specifically, two layered
+      bugs: (1) the match-arm payload-binding codegen declared its
+      local via `c_type_name(bty)`, whose `Type::Array` arm
+      deliberately spells arrays as the RETURN-POSITION wrapper
+      struct (`intent_arr_ret_<N>_<T>`) -- its own doc comment already
+      warned "the Let path passes through `format_declarator`
+      instead", but this match-arm binding (a Let-like position) was
+      still calling `c_type_name` directly; the wrapper typedef was
+      never even emitted for this position ("unknown type name"), and
+      even if it had been, `v_arr[0]` wouldn't subscript a struct
+      correctly anyway. (2) Switching to `c_element_storage` fixed the
+      type name but exposed a SECOND issue: C arrays (even through a
+      raw-array typedef) can't be copy-assigned via `=` at all
+      ("invalid initializer"). Fixed by declaring the binding as a
+      POINTER to the element type instead -- the raw array field
+      naturally array-decays to a pointer to its first element in
+      this expression context (valid C), and `v_arr[0]`/etc. in the
+      arm body keeps working unchanged. Also needed emitting the
+      `intent_arrN_T` typedef for an enum payload that's DIRECTLY
+      `Array<T,N>` (not nested inside a Tuple, which BUG-74's fix
+      already covered) -- walked `program.enums`'s payload types
+      directly through the existing array-typedef pass. New tests: 1
+      `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both backends,
+      Option<Array> Some/None AND Result<Tuple> Ok/Err all four
+      paths, hand-computed values).
 - [ ] A `Vec<Option<Struct>>` -- Option of a non-Copy struct, stored
       in a Vec (three-level: Vec -> Option -> Struct).
 

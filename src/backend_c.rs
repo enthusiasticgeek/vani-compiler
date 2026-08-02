@@ -398,6 +398,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
             emit_array_typedefs_for(elem, &mut array_typedefs_seen, &mut body);
         }
     }
+    // BUG-80: an enum payload that's DIRECTLY `Array<T,N>` (not
+    // nested inside a Tuple -- the case the `tuple_shapes` walk
+    // above covers) needs the same early array-typedef declaration.
+    // `Option<[i64; 3]>`'s match-arm payload-binding codegen
+    // declares its local as `intent_arr3_int64_t v_arr = ...;`
+    // (correct, once the sibling `c_type_name` -> `c_element_storage`
+    // fix at the match-arm call site landed), but nothing walked
+    // enum payload types directly through `emit_array_typedefs_for`
+    // -- only Vec elements and tuple-shape elements were fed in.
+    // `emit_array_typedefs_for` already recurses correctly (Array/
+    // Vec/Tuple arms), so just feed it every enum payload type
+    // directly; it's a no-op for shapes that don't contain an Array.
+    for decl in &program.enums {
+        for payload in &decl.payload_types {
+            if let Some(ty) = payload {
+                emit_array_typedefs_for(ty, &mut array_typedefs_seen, &mut body);
+            }
+        }
+    }
     let (tuple_shapes_early, tuple_shapes_late): (Vec<Vec<Type>>, Vec<Vec<Type>>) = tuple_shapes
         .iter()
         .cloned()
@@ -15769,9 +15788,48 @@ fn emit_expr(expr: &TypedExpr) -> String {
                     } else {
                         payload_access
                     };
+                    // BUG-80: `c_type_name`'s `Type::Array` arm
+                    // deliberately spells an array as the RETURN-
+                    // POSITION wrapper struct (`intent_arr_ret_<N>_<T>`,
+                    // Closure #239) -- its own doc comment says as
+                    // much: "the Let path passes through
+                    // format_declarator instead so the array
+                    // declarator form keeps working for locals."
+                    // This match-arm payload binding is exactly such
+                    // a local-binding position (not a function
+                    // return), but it was still calling `c_type_name`
+                    // directly. For `Option<[i64;3]>`, this declared
+                    // `intent_arr_ret_3_int64_t v_arr = __scr.payload;`
+                    // -- a type that was never even emitted for this
+                    // purpose ("unknown type name"), and even if it
+                    // had been, it's a WRAPPER STRUCT (`{ T data[N];
+                    // }`), not a bare array, so `v_arr[0]` wouldn't
+                    // subscript correctly either way. `c_element_storage`
+                    // is the correct choice for every OTHER payload
+                    // shape this call site sees (Tuple, Struct, Vec,
+                    // Ref/RefMut, Closure, Channel, Mutex, ...), but
+                    // Array specifically needs one more twist: C
+                    // arrays (even a raw-array TYPEDEF like
+                    // `intent_arrN_T`) can't be copy-assigned via
+                    // `=` at all ("invalid initializer") -- only
+                    // struct/scalar values can. Declare the binding
+                    // as a POINTER to the element type instead
+                    // (`int64_t* v_arr = __scr.payload;`); `__scr.
+                    // payload` (a raw array member) array-decays to
+                    // a pointer to its first element in this
+                    // expression context, which is valid C and lets
+                    // `v_arr[0]`/etc. in the arm body keep working
+                    // completely unchanged (pointer subscripting is
+                    // the same syntax as array subscripting).
+                    let binding_ty = match bty.deref() {
+                        Type::Array { element, .. } if !bty.is_any_ref() => {
+                            format!("{}*", c_element_storage(element))
+                        }
+                        _ => c_element_storage(bty),
+                    };
                     format!(
                         "{{ {} v_{} = {}; __r = ({}); }}",
-                        c_type_name(bty),
+                        binding_ty,
                         bname,
                         init,
                         body_v

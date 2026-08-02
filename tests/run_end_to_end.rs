@@ -7684,3 +7684,69 @@ fn main() -> i64 {
         assert_eq!(stdout, "6\n1\n3\n20\n20\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// BUG-80, testing-matrix sweep "Option<Array<T,N>>/Result<Tuple,E>":
+// LLVM was correct throughout; C crashed on Option<[i64;3]> specifically
+// (two layered bugs -- match-arm binding used the wrong C type spelling,
+// then C arrays can't be copy-assigned via `=` even through a typedef;
+// see docs/TODO_CURRENT.md). This test covers the full row end-to-end:
+// Option over an Array payload AND Result over a Tuple payload, both
+// Some/Ok and None/Err paths, on both backends.
+#[test]
+fn option_array_and_result_tuple_payloads_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "option_array_result_tuple",
+        r#"
+fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+  if has { return Option.Some([1, 2, 3]); }
+  return Option.None;
+}
+fn safe_div_pair(a: i64, b: i64) -> Result<(i64, i64), i64> {
+  if b == 0 { return Result.Err(0 - 1); }
+  return Result.Ok((a / b, a % b));
+}
+fn main() -> i64 {
+  let oa: Option<[i64; 3]> = maybe_arr(true);
+  let total: i64 = match oa {
+    Option.Some(arr) then arr[0] + arr[1] + arr[2],
+    Option.None then 0 - 999,
+  };
+  let on: Option<[i64; 3]> = maybe_arr(false);
+  let total2: i64 = match on {
+    Option.Some(arr) then arr[0] + arr[1] + arr[2],
+    Option.None then 0 - 999,
+  };
+  let r1: Result<(i64, i64), i64> = safe_div_pair(17, 5);
+  let s1: i64 = match r1 {
+    Result.Ok(pair) then pair.0 * 100 + pair.1,
+    Result.Err(_) then 0 - 1,
+  };
+  let r2: Result<(i64, i64), i64> = safe_div_pair(1, 0);
+  let s2: i64 = match r2 {
+    Result.Ok(pair) then pair.0 * 100 + pair.1,
+    Result.Err(e) then e,
+  };
+  print total;
+  print total2;
+  print s1;
+  print s2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // total = 1+2+3 = 6; total2 (None) = -999;
+        // s1: 17/5 = 3 rem 2 -> 3*100+2 = 302; s2 (Err(-1)) = -1
+        assert_eq!(stdout, "6\n-999\n302\n-1\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

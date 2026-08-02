@@ -42695,6 +42695,76 @@ função main() -> i64 {
     }
 
     #[test]
+    fn option_array_and_result_tuple_payloads_compile_and_match_correctly() {
+        // BUG-80, found sweeping the testing matrix's "Option<Array<T,N>>
+        // / Result<Tuple,E>" row. LLVM was correct throughout; the C
+        // backend crashed on `Option<[i64; 3]>` specifically (Result
+        // over a Tuple payload already worked -- Tuple's own match-arm
+        // binding path was already correct). Two layered bugs:
+        //
+        // 1. The match-arm payload-binding codegen declared the local
+        //    via `c_type_name(bty)`, and `c_type_name`'s `Type::Array`
+        //    arm deliberately spells an array as the RETURN-POSITION
+        //    wrapper struct (`intent_arr_ret_<N>_<T>`, Closure #239) --
+        //    its own doc comment already warned "the Let path passes
+        //    through format_declarator instead", but this match-arm
+        //    binding (a Let-like position) was still calling
+        //    `c_type_name` directly. That wrapper typedef was never
+        //    even emitted for this position ("unknown type name"), and
+        //    even if it had been, it's a struct (`{ T data[N]; }`), so
+        //    `v_arr[0]` wouldn't subscript correctly either way.
+        // 2. Switching to `c_element_storage` (the correct per-shape
+        //    helper, already used for every other payload shape here)
+        //    fixed the type NAME but exposed a second issue: C arrays
+        //    (even through a raw-array typedef) can't be copy-assigned
+        //    via `=` at all ("invalid initializer"). Fixed by declaring
+        //    the binding as a POINTER to the element type instead
+        //    (`int64_t* v_arr = __scr.payload;`) -- the raw array
+        //    member naturally decays to a pointer to its first element
+        //    in this expression context (valid C), and `v_arr[0]`/etc.
+        //    in the arm body keeps working unchanged (pointer
+        //    subscripting uses the same syntax as array subscripting).
+        //
+        // Also needed emitting the `intent_arrN_T` typedef for an enum
+        // payload that's DIRECTLY `Array<T,N>` (not nested inside a
+        // Tuple, which BUG-74's fix already covered) -- walked
+        // `program.enums`' payload types directly through the existing
+        // `emit_array_typedefs_for` pass.
+        let source = r#"
+            fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+              if has { return Option.Some([1, 2, 3]); }
+              return Option.None;
+            }
+            fn safe_div_pair(a: i64, b: i64) -> Result<(i64, i64), i64> {
+              if b == 0 { return Result.Err(0 - 1); }
+              return Result.Ok((a / b, a % b));
+            }
+            fn main() -> i64 {
+              let oa: Option<[i64; 3]> = maybe_arr(true);
+              let total: i64 = match oa {
+                Option.Some(arr) then arr[0] + arr[1] + arr[2],
+                Option.None then 0 - 999,
+              };
+              let on: Option<[i64; 3]> = maybe_arr(false);
+              let total2: i64 = match on {
+                Option.Some(arr) then arr[0] + arr[1] + arr[2],
+                Option.None then 0 - 999,
+              };
+              let r1: Result<(i64, i64), i64> = safe_div_pair(17, 5);
+              let s1: i64 = match r1 {
+                Result.Ok(pair) then pair.0 * 100 + pair.1,
+                Result.Err(_) then 0 - 1,
+              };
+              print total;
+              print total2;
+              print s1;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Option<Array<T,N>> and Result<Tuple,E> must compile and match correctly");
+    }
+
+    #[test]
     fn option_constructor_in_let_annotation_resolves_with_two_instantiations() {
         let source = r#"
             fn main() -> i64 {

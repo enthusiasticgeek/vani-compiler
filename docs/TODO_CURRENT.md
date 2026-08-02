@@ -5589,4 +5589,72 @@ verifying the four fixes above against their tutorial worked examples
   vec128 AND vec256 in the same program). Full `cargo test --release
   --workspace`: 13/13 binaries clean, 0 failed.
 
+## Bug found sweeping "Option<Array<T,N>>/Result<Tuple,E>" (found+fixed 2026-08-02)
+
+- [x] **BUG-80 (found+fixed 2026-08-02 — two layered C-backend-only
+  bugs: wrong match-arm binding type spelling, then a genuine "C
+  arrays aren't assignable" language constraint).** Found while
+  testing the testing matrix's `Option<Array<T,N>>`/`Result<Tuple,E>`
+  row. `Result<(i64,i64), i64>` already worked correctly on both
+  backends (Tuple's match-arm binding path was already correct).
+  `Option<[i64; 3]>` crashed the C backend (LLVM was correct
+  throughout):
+  ```vani
+  fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+    if has { return Option.Some([1, 2, 3]); }
+    return Option.None;
+  }
+  fn main() -> i64 {
+    let oa: Option<[i64; 3]> = maybe_arr(true);
+    let total: i64 = match oa {
+      Option.Some(arr) then arr[0] + arr[1] + arr[2],   // crashes C
+      Option.None then 0 - 999,
+    };
+    ...
+  }
+  ```
+  1. **Wrong type spelling for the match-arm local.** The codegen
+     that declares a match arm's payload binding
+     (`{TYPE} v_arr = __scr.payload;`) called `c_type_name(bty)` for
+     `TYPE`. `c_type_name`'s `Type::Array` arm deliberately spells an
+     array as the RETURN-POSITION wrapper struct
+     (`intent_arr_ret_<N>_<T>`, Closure #239) — its own doc comment
+     already says as much: "the Let path passes through
+     `format_declarator` instead so the array declarator form keeps
+     working for locals." This match-arm binding IS exactly such a
+     Let-like local-binding position, but was never routed through
+     the correct helper. Symptom: `unknown type name
+     'intent_arr_ret_3_int64_t'` (the wrapper typedef isn't even
+     emitted for this position), and even if it had been, it's a
+     struct (`{ T data[N]; }`), so `v_arr[0]` wouldn't subscript
+     correctly either way ("subscripted value is neither array nor
+     pointer nor vector").
+  2. **C arrays can't be copy-assigned (found immediately after fixing
+     #1).** Switching to `c_element_storage` (the correct per-shape
+     helper already used for every OTHER payload shape at this call
+     site — Tuple, Struct, Vec, Closure, ...) fixed the type NAME
+     (`intent_arr3_int64_t`) but exposed a second, more fundamental
+     issue: C arrays — even through a raw-array typedef alias — can't
+     be initialized via plain `=` assignment at all ("invalid
+     initializer"; this is a real C-language constraint, not a naming
+     bug). Fixed by declaring the binding as a POINTER to the element
+     type instead (`int64_t* v_arr = __scr.payload;`) — the raw array
+     struct member naturally array-decays to a pointer to its first
+     element in this expression context (valid C), and `v_arr[0]`/
+     etc. in the arm body keeps working completely unchanged (pointer
+     subscripting uses the identical syntax to array subscripting).
+  3. **Typedef-emission gap (a narrower repeat of BUG-74's class).**
+     Even with both codegen fixes, `intent_arr3_int64_t` still wasn't
+     declared anywhere in the file — BUG-74's fix walked `tuple_shapes`
+     for nested `Array`-inside-`Tuple` payloads, but an enum payload
+     that's DIRECTLY `Array<T,N>` (no Tuple wrapper) was never fed
+     into the array-typedef pass at all. Fixed by walking
+     `program.enums`'s payload types directly through the existing
+     `emit_array_typedefs_for` pass (which already recurses correctly
+     once fed the right root type).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+  backends, `Option<Array>` Some/None AND `Result<Tuple>` Ok/Err, all
+  four paths, hand-computed values). Full `cargo test --release
+  --workspace`: 13/13 binaries clean, 0 failed.
+
 ---
