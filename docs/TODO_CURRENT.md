@@ -3301,6 +3301,21 @@ verifying the four fixes above against their tutorial worked examples
   chapters (not yet audited this session) for the same "shared
   XOR mutable eliminates data races" claim — this finding likely
   has implications there too.
+  **Deliberately still not attempted 2026-08-01**, in the "fix
+  documented TODO bugs" pass that fixed BUG-33/34/38/45/46/47:
+  this is the one item on that list explicitly out of scope, for
+  the same reason logged above (a real new checker subsystem, not
+  a bug fix) — flagged to the user rather than silently skipped.
+  Did do the doc follow-up check: `advanced/02a_parallelism_primer.md`
+  (already audited earlier in the tutorial-track arc) makes its
+  "if it compiles, no data races" claim specifically about
+  CROSS-THREAD sharing, which is a different, actually-enforced
+  mechanism (task-spawn/parallel-for require Copy captures; moving
+  a value across threads without an explicit `Mutex`/`Channel`/
+  `Atomic` is rejected) — distinct from BUG-36's finding, which is
+  about a `mut ref`/`ref` aliasing the SAME binding within a
+  SINGLE thread. So that file's claim was NOT found to need a
+  correction from this finding; no doc change made.
 
 - [x] **`03b_affine_deeper_primer.md`'s "conditional moves" flagship
   example also didn't demonstrate what it claimed — fixed
