@@ -52328,5 +52328,36 @@ fn main() -> i64 { return leak_check(); }
         compile(source).expect("Channel<Msg> with an all-scalar struct payload must still compile");
     }
 
+    /// BUG-65 (tree-C): a self-inflicted regression from BUG-63's
+    /// own fix. `concurrency_element_needs_full_struct_def` (reused
+    /// by the new "early tuple bundle" partitioning) didn't
+    /// recognize `Type::Object` (a `dyn Iface` fat pointer), so
+    /// `(dyn Shape, i64)` was wrongly treated as early-eligible and
+    /// emitted before `emit_dyn_iface_typedefs` had run --
+    /// referencing `intent_dyn_Shape` before it was declared. Before
+    /// BUG-63's fix, ALL tuple bundles emitted late (comfortably
+    /// after dyn typedefs), so this exact shape never failed until
+    /// the early-emission pathway was introduced. Added `Type::
+    /// Object(_) => true` to defer it like Struct/Enum/Tuple.
+    #[test]
+    fn tuple_of_dyn_iface_compiles_to_c() {
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Shape { fn area(self: Circle) -> i64; }
+            implement Shape for Circle {
+              fn area(self: Circle) -> i64 { return self.r * self.r; }
+            }
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 5 };
+              let d: dyn Shape = c;
+              let pair: (dyn Shape, i64) = (d, 99);
+              print pair.0.area();
+              print pair.1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("(dyn Shape, i64) tuple compiles to C");
+    }
+
 }
 

@@ -195,9 +195,14 @@ since that's exactly where BUG-61 lived.
       elements. This was the most severe finding of the whole
       sweep (crashed with no warning at all, not even a compile
       error, before the fix).
-- [ ] `Vec<Task>` / storing `Task<R>` handles in a container before
-      `join`-ing them in a loop (vs. the tutorial's one-off spawn
-      pattern).
+- [x] `Vec<Task>` / storing `Task<R>` handles in a container before
+      `join`-ing them in a loop -- **checked 2026-08-02, not a
+      bug**: the checker rejects this pattern outright, cleanly and
+      identically on both backends ("Cross-block joins are not
+      supported in v1 -- the spawn and join must appear in the same
+      statement list"). A genuine v1 architectural limitation (the
+      affine task-tracker requires spawn+join in one block), not a
+      divergence bug.
 
 ### Container x dyn / closure nesting
 
@@ -209,7 +214,11 @@ since that's exactly where BUG-61 lived.
       so the struct is entirely Copy and `items[i].shape.area()`
       indexes directly with no clone_at/ref needed. Both backends
       agree and match hand-computed values.
-- [ ] `Tuple` containing a `dyn Iface` element.
+- [x] `Tuple` containing a `dyn Iface` element -- **found+fixed
+      2026-08-02, BUG-65**: a self-inflicted regression from
+      BUG-63's own fix (the new early-tuple-bundle path didn't
+      defer `dyn Iface`-containing tuples past `emit_dyn_iface_
+      typedefs`). Fixed in the same sweep.
 - [ ] `Vec<FnPtr>` (function pointers stored in a Vec, not just
       passed as a bare param/field -- `fnptr` itself is 0 e2e
       coverage per the table above, so this compounds two gaps).

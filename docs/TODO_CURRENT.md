@@ -4845,4 +4845,24 @@ verifying the four fixes above against their tutorial worked examples
   could be supported safely — noted as a genuine future feature,
   not a bug, since the current behavior (clean rejection) is sound.
 
+- [x] **BUG-65 (found+fixed 2026-08-02 — tree-C, a self-inflicted
+  regression from BUG-63's own fix, commit `9e24ce5`).** Sweeping
+  the next checklist item,
+  `Tuple<dyn Iface>`: `(dyn Shape, i64)` compiled and ran correctly
+  on LLVM but failed `--backend=c` with "unknown type name
+  `intent_dyn_Shape`". Root cause: BUG-63's new "early tuple bundle"
+  partitioning reused `concurrency_element_needs_full_struct_def` to
+  decide which tuple shapes are safe to emit right after struct
+  forward-declarations — but that function didn't recognize
+  `Type::Object` (a `dyn Iface` fat pointer), so a tuple containing
+  one was wrongly treated as early-eligible and emitted before
+  `emit_dyn_iface_typedefs` had run. Before BUG-63's fix this exact
+  shape never failed, since EVERY tuple bundle emitted at the single
+  late position (comfortably after dyn typedefs) — the bug only
+  became reachable once an early-emission path existed at all.
+  Fixed by adding `Type::Object(_) => true` to the shared
+  "needs-deferral" check, alongside Struct/Enum/Tuple.
+  New tests: 1 `src/lib.rs` + 1 real end-to-end test (both backends,
+  correct printed values).
+
 ---

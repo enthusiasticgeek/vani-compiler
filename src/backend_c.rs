@@ -480,9 +480,22 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // struct-field case -- `struct { ch: Channel<i64,4>, buf:
     // Vec<i64> }` still failed to compile under `--backend=c` with
     // "unknown type name" for the exact same underlying reason).
+    // NOTE: despite the name (kept for the Channel/Mutex/RwLock
+    // partitioning above, its original purpose), this also covers
+    // any other type whose OWN typedef must land before it's safe
+    // to reference from an "early" bundle -- not just user structs.
+    // `Type::Object` (a `dyn Iface` fat pointer) needs
+    // `emit_dyn_iface_typedefs` to have run first (see its call
+    // site below); without this arm, `tuple_shape_needs_full_
+    // struct_def` (which reuses this function) incorrectly treated
+    // `(dyn Shape, i64)` as "early-eligible" -- a regression this
+    // exact function's addition (BUG-63) introduced, since no
+    // tuple bundle was ever emitted this early before that fix.
+    // Found immediately after, sweeping `Tuple<dyn Iface>` for the
+    // same testing-matrix pass (2026-08-02).
     fn concurrency_element_needs_full_struct_def(ty: &Type) -> bool {
         match ty {
-            Type::Struct(_) | Type::Enum(_) | Type::Tuple(_) => true,
+            Type::Struct(_) | Type::Enum(_) | Type::Tuple(_) | Type::Object(_) => true,
             Type::Array { element, .. } => concurrency_element_needs_full_struct_def(element),
             _ => false,
         }

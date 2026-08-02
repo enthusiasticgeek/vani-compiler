@@ -6381,3 +6381,53 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-65: a regression introduced by BUG-63's own fix (caught in the
+// same sweep before ever shipping to a release, but still a real
+// second bug -- the early-tuple-bundle partitioning didn't account
+// for `dyn Iface` tuple elements needing `emit_dyn_iface_typedefs`
+// to run first).
+#[test]
+fn tuple_of_dyn_iface_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "tuple_of_dyn_iface",
+        r#"
+struct Circle { r: i64 }
+interface Shape { fn area(self: Circle) -> i64; }
+implement Shape for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+fn main() -> i64 {
+  let c: Circle = Circle { r: 5 };
+  let d: dyn Shape = c;
+  let pair: (dyn Shape, i64) = (d, 99);
+  print pair.0.area();
+  print pair.1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "(dyn Shape, i64) tuple must not fail to build for {:?}; status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "25\n99\n",
+            "expected area 5*5=25, then tag 99 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
