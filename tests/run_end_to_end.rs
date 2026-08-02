@@ -7600,3 +7600,87 @@ fn main() -> i64 {
         assert_eq!(stdout, "30\n21\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep, "parallel for iterating a Vec<Struct> with a
+// reduce accumulating a struct field". Checked 2026-08-02, not a bug --
+// computes correctly on both backends.
+#[test]
+fn parallel_for_reduce_over_vec_struct_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "parallel_for_vec_struct_reduce",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let pts: Vec<Pt> = vec(Pt { x: 1, y: 10 }, Pt { x: 2, y: 20 }, Pt { x: 3, y: 30 }, Pt { x: 4, y: 40 });
+  let n: i64 = len(pts) as i64;
+  let sum: i64 = 0;
+  parallel for i from 0 to n
+  reduce sum with +;
+  {
+    sum = sum + pts[i].x;
+  }
+  print sum;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-79, testing-matrix sweep "struct with both a SIMD Vec128/Vec256
+// field AND a plain Vec field": c_element_storage never had arms for
+// Type::Vec128/Vec256/Vec512, so a struct field of that type declared
+// itself with a c_leaf_type placeholder comment ("/* vec128<T> */"),
+// invalid C. Fixed; this test exercises the full row end-to-end on both
+// backends.
+#[test]
+fn struct_with_simd_and_plain_vec_fields_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_simd_and_plain_vec",
+        r#"
+struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+struct Combo2 { lane: vec256<f64>, xs: Vec<f64> }
+fn main() -> i64 {
+  let l: vec128<f64> = simd_splat(3.0 as f64);
+  let c: Combo = Combo { lane: l, xs: vec(1.0 as f64, 2.0 as f64, 3.0 as f64) };
+  let s: f64 = simd_reduce_add(c.lane);
+  let l2: vec256<f64> = simd256_splat(5.0 as f64);
+  let c2: Combo2 = Combo2 { lane: l2, xs: vec(10.0 as f64, 20.0 as f64) };
+  let s2: f64 = simd256_reduce_add(c2.lane);
+  print s;
+  print c.xs[0];
+  print len(c.xs) as i64;
+  print s2;
+  print c2.xs[1];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // simd_reduce_add(splat(3.0)) over 2 lanes = 6; xs[0]=1; len=3;
+        // simd256_reduce_add(splat(5.0)) over 4 lanes = 20; xs2[1]=20.
+        assert_eq!(stdout, "6\n1\n3\n20\n20\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

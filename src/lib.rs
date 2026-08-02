@@ -13264,6 +13264,32 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn parallel_for_reduce_over_vec_of_struct_field_compiles() {
+        // Testing-matrix sweep: "parallel for iterating a Vec<Struct>
+        // with a reduce accumulating a struct field". Checked
+        // 2026-08-02, not a bug: indexing a Vec<Pt> (Pt is Copy --
+        // scalar fields only) inside a parallel for body and
+        // reducing one of its fields with `+` compiles and computes
+        // correctly on both backends -- see the paired e2e test for
+        // the hand-computed sum.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let pts: Vec<Pt> = vec(Pt { x: 1, y: 10 }, Pt { x: 2, y: 20 }, Pt { x: 3, y: 30 }, Pt { x: 4, y: 40 });
+              let n: i64 = len(pts) as i64;
+              let sum: i64 = 0;
+              parallel for i from 0 to n
+              reduce sum with +;
+              {
+                sum = sum + pts[i].x;
+              }
+              return sum;
+            }
+        "#;
+        compile(source).expect("parallel for + reduce over a Vec<Struct> field must compile");
+    }
+
+    #[test]
     fn parallel_for_reduce_rejects_min_on_bool_variable() {
         // `min` is integer-only; a bool reduction variable with `min` must be rejected.
         let source = r#"
@@ -52679,6 +52705,62 @@ fn main() -> i64 { return leak_check(); }
         assert!(
             c.contains("float __attribute__((vector_size(16))) v_v"),
             "expected the real GNU vector-extension type on the let binding:\n{c}"
+        );
+    }
+
+    #[test]
+    fn struct_with_vec128_and_vec256_fields_alongside_plain_vec_field_compiles_to_c() {
+        // Testing-matrix sweep: "struct with both a SIMD Vec128/
+        // Vec256 field AND a plain Vec field". Found BUG-79 --
+        // unrelated to any naming collision between the two Vec
+        // families (the row's own hypothesis); `c_element_storage`
+        // (the function specifically responsible for giving structs/
+        // Vec elements/etc. their REAL per-shape C type, as opposed
+        // to `c_leaf_type`'s deliberate placeholder-comment fallback
+        // for "caller forgot to route through the real spelling")
+        // simply never had arms for `Type::Vec128`/`Vec256`/`Vec512`
+        // at all, unlike Tuple/Struct/Closure/Channel/Mutex which
+        // all already had the analogous fix applied in earlier
+        // sweeps. A struct field of `vec128<f64>` type declared
+        // itself as `/* vec128<T> */ lane;` -- not valid C. Fixed by
+        // adding the three missing arms, delegating to the
+        // already-correct `c_vec128_type`/`c_vec256_type`/
+        // `c_vec512_type` helpers (same helpers the LOCAL-variable
+        // case, tested just above, already used correctly).
+        let source = r#"
+            struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+            struct Combo2 { lane: vec256<f64>, xs: Vec<f64> }
+            fn main() -> i64 {
+              let l: vec128<f64> = simd_splat(3.0 as f64);
+              let c: Combo = Combo { lane: l, xs: vec(1.0 as f64, 2.0 as f64, 3.0 as f64) };
+              let s: f64 = simd_reduce_add(c.lane);
+              let l2: vec256<f64> = simd256_splat(5.0 as f64);
+              let c2: Combo2 = Combo2 { lane: l2, xs: vec(10.0 as f64, 20.0 as f64) };
+              let s2: f64 = simd256_reduce_add(c2.lane);
+              print s;
+              print c.xs[0];
+              print s2;
+              print c2.xs[1];
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("struct with both a SIMD field and a plain Vec field must compile to C");
+        assert!(
+            !c.contains("/* vec128<T> */") && !c.contains("/* vec256<T> */"),
+            "must not leak a c_leaf_type placeholder comment into a struct field \
+             declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("double __attribute__((vector_size(16))) lane;"),
+            "expected the real vec128 GNU vector-extension type on the struct field; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("double __attribute__((vector_size(32))) lane;"),
+            "expected the real vec256 GNU vector-extension type on the struct field; got:\n{}",
+            c
         );
     }
 

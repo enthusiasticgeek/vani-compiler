@@ -724,13 +724,37 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x `parallel for` / SIMD
 
-- [ ] `parallel for` iterating a `Vec<Struct>` (not just
+- [x] `parallel for` iterating a `Vec<Struct>` (not just
       `Vec<i64>`/`Vec<f64>`) with a `reduce` accumulating a struct
-      field.
-- [ ] A struct with both a `Vec128<f64>`/`Vec256<f64>` SIMD field
+      field -- **checked 2026-08-02, not a bug.** Indexing a
+      `Vec<Pt>` (Copy struct, scalar fields only) inside a `parallel
+      for` body and reducing one of its fields with `+` compiles and
+      computes correctly on both backends. New tests: 1 `src/lib.rs`
+      + 1 `tests/run_end_to_end.rs` (both backends).
+- [x] A struct with both a `Vec128<f64>`/`Vec256<f64>` SIMD field
       AND a plain `Vec<f64>` field in the same struct -- confirm
       the two very different Vec-family codegens (BUG-62's territory
-      for one of them) don't collide on shared helper-naming.
+      for one of them) don't collide on shared helper-naming --
+      **found+fixed 2026-08-02, BUG-79, unrelated to the row's own
+      naming-collision hypothesis.** `c_element_storage` (the
+      function specifically responsible for giving struct fields/Vec
+      elements/etc. their REAL per-shape C type, as opposed to
+      `c_leaf_type`'s deliberate placeholder-comment fallback) simply
+      never had arms for `Type::Vec128`/`Vec256`/`Vec512` at all --
+      unlike Tuple/Struct/Closure/Channel/Mutex, which all already
+      got this exact fix in earlier sweeps this session. A struct
+      field of `vec128<f64>` type declared itself as `/* vec128<T>
+      */ lane;` -- not valid C ("expected specifier-qualifier-list
+      before 'lane'"). Fixed by adding the three missing arms,
+      delegating to the already-correct `c_vec128_type`/
+      `c_vec256_type`/`c_vec512_type` helpers (the same helpers the
+      pre-existing LOCAL-variable case already used correctly). LLVM
+      backend was unaffected throughout. No actual helper-naming
+      collision found between the two Vec families once construction
+      itself worked. New tests: 1 `src/lib.rs` (placeholder-comment
+      absence + real GNU-vector-extension type assertion) + 1
+      `tests/run_end_to_end.rs` (both backends, hand-computed SIMD
+      reduce + plain Vec values).
 
 ### Container x `Option`/`Result` wrapping
 

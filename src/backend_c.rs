@@ -12610,6 +12610,17 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
             let inner_decl = format_declarator(inner, "").trim_end().to_string();
             format!("{}*", inner_decl)
         }
+        // BUG-79: same gap as Closure/Channel/Mutex above --
+        // `c_leaf_type`'s placeholder-comment fallback
+        // ("/* vec128<T> */") isn't valid C. `c_vec128_type`/
+        // `c_vec256_type`/`c_vec512_type` already exist for the
+        // real `__attribute__((vector_size(N)))` spelling; this
+        // arm was just never added here. Found sweeping a struct
+        // field of `vec128<f64>` type for the testing-matrix pass
+        // (2026-08-02).
+        Type::Vec128(elem) => c_vec128_type(elem),
+        Type::Vec256(elem) => c_vec256_type(elem),
+        Type::Vec512(elem) => c_vec512_type(elem),
         _ => c_leaf_type(ty).to_string(),
     }
 }

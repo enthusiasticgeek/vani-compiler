@@ -5553,4 +5553,40 @@ verifying the four fixes above against their tutorial worked examples
   parameter). Full `cargo test --release --workspace`: 13/13 binaries
   clean, 0 failed.
 
+## Bug found sweeping "struct with a SIMD Vec128/Vec256 field AND a plain Vec field" (found+fixed 2026-08-02)
+
+- [x] **BUG-79 (found+fixed 2026-08-02 — same "missing arm in
+  `c_element_storage`" class as several earlier fixes this session:
+  Closure, Channel, Mutex/Guard/RwLock, HashMap all got this exact
+  fix before; `vec128`/`vec256`/`vec512` never did).** Found while
+  testing the testing matrix's row about a struct holding both a
+  SIMD `vec128`/`vec256` field and a plain `Vec` field — the row's
+  own hypothesis (a helper-naming collision between the two Vec
+  families) turned out not to be the actual bug:
+  ```vani
+  struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+  ```
+  `cc` rejected the generated C: `expected specifier-qualifier-list
+  before 'lane'` — the field declared itself as `/* vec128<T> */
+  lane;`. Root cause: `c_element_storage` — the function that gives
+  struct fields, Vec elements, and similar positions their REAL
+  per-shape C type spelling, specifically so callers don't fall back
+  to `c_leaf_type`'s deliberate placeholder-comment stubs for
+  aggregate types ("hitting this arm means a caller forgot to
+  special-case X") — simply never had arms for `Type::Vec128`,
+  `Type::Vec256`, or `Type::Vec512`. The real spelling helpers
+  (`c_vec128_type`/`c_vec256_type`/`c_vec512_type`, producing the
+  GCC/Clang `__attribute__((vector_size(N)))` GNU vector-extension
+  type) already existed and were already used correctly for the
+  LOCAL-variable case (`let v: vec128<f64> = ...;`) — this was
+  purely a missing arm in the struct-field/general "element storage"
+  path, not a design gap. Fixed by adding the three missing arms.
+  LLVM backend was unaffected throughout (its own field-type lowering
+  already handled these types correctly). New tests: 1 `src/lib.rs`
+  (placeholder-comment absence + real vector-extension type
+  assertion) + 1 `tests/run_end_to_end.rs` (both backends,
+  hand-computed SIMD `reduce_add` + plain `Vec` field values,
+  vec128 AND vec256 in the same program). Full `cargo test --release
+  --workspace`: 13/13 binaries clean, 0 failed.
+
 ---
