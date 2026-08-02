@@ -5275,4 +5275,68 @@ verifying the four fixes above against their tutorial worked examples
   bug). New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
   backends).
 
+## Bug found sweeping "enum variant payload is Vec<Struct> or Tuple<Array>" (found+fixed 2026-08-02)
+
+- [x] **BUG-74 (found+fixed 2026-08-02 — three layered bugs: one
+  checker-level admission gap, two C-backend-only codegen gaps).**
+  `Vec<Struct>` as an enum payload was already fine (checked, no
+  bug). A `Tuple` containing an `Array` as an enum payload (e.g.
+  `(i64, [i64; 3])`) was not:
+
+  1. **Checker gate too conservative.** The enum-payload admission
+     check computed `payload_ty.is_copy()` for the whole `Tuple`,
+     and `Type::Array::is_copy()` returns `false` unconditionally
+     (a deliberate design choice for reasons unrelated to payload
+     safety — array-of-Copy-elements is handled via an ad-hoc
+     `array_of_copy` special case everywhere it's needed instead,
+     e.g. struct fields already have their own `[T;N] of Copy`
+     arm). So `Type::Tuple([I64, Array{I64,3}]).is_copy()` — which
+     recurses element-wise — returned `false`, and `(i64, [i64;3])`
+     was rejected with "payload type ... is not admitted in v1"
+     even though it's exactly as safe as any Copy payload (no heap
+     pointers, all stack/inline data). Fixed with a
+     `tuple_of_admitted` check that mirrors `array_of_copy` one
+     level deeper: a Tuple whose every element is either `is_copy()`
+     or itself an array-of-Copy-elements is admitted.
+  2. **C backend: typedef never emitted (found immediately after
+     relaxing the gate).** `emit_tuple_bundle`'s C emission spells
+     an `Array` element via `intent_arr3_int64_t` (the wrapped-array
+     typedef `c_element_storage` produces for aggregate contexts),
+     but `emit_array_typedefs_for` — the pass responsible for
+     actually declaring that typedef — never recursed into
+     `Type::Tuple` elements, and its one call site only fed it the
+     "Vec element" axis, never enum payloads or bare tuple shapes:
+     `cc` rejected the file with "unknown type name
+     'intent_arr3_int64_t'". Fixed by (a) adding a `Type::Tuple`
+     recursion arm to `emit_array_typedefs_for`, and (b) moving the
+     array-typedef emission pass earlier in `backend_c.rs`'s emit
+     function — before the "early tuple bundle" emission loop that
+     now needs it declared first — sharing the SAME `seen` set with
+     the original later Vec-element-only call site so neither pass
+     double-emits a shape the other already covered.
+  3. **C backend: initializer syntax (found immediately after fixing
+     #2).** Even with the typedef correctly declared, `cc` then
+     rejected the generated compound literal with "array initialized
+     from non-constant array expression" — `TypedExprKind::Tuple`'s
+     C emission called `emit_expr` uniformly for every element,
+     which for an inline `[1,2,3]` `ArrayLit` produces a CAST
+     compound literal (`((int64_t[3]){1,2,3})`) — C forbids assigning
+     that to a struct member of array type. `TypedExprKind::StructLit`
+     already had the correct special case (a bare-brace `{1,2,3}`
+     form) for exactly this situation; `Tuple`'s emission just never
+     got the matching arm. Fixed by mirroring StructLit's special
+     case.
+  Bug #3 turned out to be entirely general, not enum-specific:
+  confirmed a bare local `let x: (i64, [i64;3]) = (42, [1,2,3]);`
+  (no enum anywhere) hit the identical C-backend crash before the
+  fix — a pre-existing gap this sweep row happened to be the first
+  thing to actually exercise. All three fixes together: `Tuple<Array>`
+  enum payloads now construct, dispatch, and destructure correctly on
+  both backends; the LLVM backend was unaffected throughout (it
+  already handled this shape correctly once the checker gate
+  allowed it through). New tests: 4 `src/lib.rs` + 3
+  `tests/run_end_to_end.rs` (both backends). Full `cargo test
+  --release --workspace`: 13/13 binaries clean, 0 failed (both
+  before adding these new tests and after running them individually).
+
 ---

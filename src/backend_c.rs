@@ -268,6 +268,17 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let mut rwlock_specs: Vec<Type> = Vec::new();
     let mut tuple_seen = BTreeSet::<String>::new();
     let mut tuple_shapes: Vec<Vec<Type>> = Vec::new();
+    // BUG-74: declared up here (not down at its original call site
+    // near the Vec-element array-typedef loop) so the SAME `seen`
+    // set covers both that loop and the tuple-shape pass below --
+    // a tuple shape containing an `Array<T,N>` element (e.g. an
+    // enum payload `(i64, [i64; 3])`) needs its `intent_arrN_T`
+    // typedef emitted before `emit_tuple_bundle`'s early-tuple
+    // pass references it, which runs well before the original
+    // Vec-element loop. Using one shared `seen` set also prevents
+    // emitting the same typedef twice if the same array shape shows
+    // up on both axes.
+    let mut array_typedefs_seen = BTreeSet::<String>::new();
     for function in &program.functions {
         collect_vec_elements(&function.return_type, &mut vec_elements, &mut element_types);
         collect_channel_specs(
@@ -371,6 +382,21 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // topo loop, mirroring the Channel/Mutex/RwLock split above.
     fn tuple_shape_needs_full_struct_def(shape: &[Type]) -> bool {
         shape.iter().any(concurrency_element_needs_full_struct_def)
+    }
+    // BUG-74: any tuple element shaped `Array<T,N>` needs its
+    // `intent_arrN_T` typedef declared before `emit_tuple_bundle`
+    // references it -- do this for EVERY collected tuple shape
+    // (early or late; array typedefs have no struct/enum-body
+    // dependency of their own, so it's always safe to emit them
+    // this early) before either bundle-emission loop below runs.
+    // Found via an enum payload `(i64, [i64; 3])`, whose bundle is
+    // emitted in the "early" loop right below -- well before the
+    // original Vec-element-only array-typedef pass further down in
+    // this function ever ran.
+    for shape in &tuple_shapes {
+        for elem in shape {
+            emit_array_typedefs_for(elem, &mut array_typedefs_seen, &mut body);
+        }
     }
     let (tuple_shapes_early, tuple_shapes_late): (Vec<Vec<Type>>, Vec<Vec<Type>>) = tuple_shapes
         .iter()
@@ -1270,9 +1296,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // appears as a Vec element (a `Vec<[i64; 4]>` needs
     // `typedef int64_t intent_arr4_int64_t[4];` in scope
     // before its helper bundle). Refines #7 phase 2c. Walks
-    // only the Vec-element axis since arrays NOT inside Vecs
-    // stay inlined in their declarators.
-    let mut array_typedefs_seen = BTreeSet::<String>::new();
+    // the Vec-element axis; the tuple-element axis (BUG-74) is
+    // handled earlier in this function, sharing the same
+    // `array_typedefs_seen` set declared up there so neither pass
+    // double-emits a shape the other already covered.
     for element in &element_types {
         emit_array_typedefs_for(element, &mut array_typedefs_seen, &mut body);
     }
@@ -12661,6 +12688,19 @@ pub(crate) fn emit_array_typedefs_for(
         Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner) => {
             emit_array_typedefs_for(inner, seen, out);
         }
+        // BUG-74: a Tuple element can itself be `Array<T, N>` (e.g.
+        // an enum payload `(i64, [i64; 3])`) — `emit_tuple_bundle`'s
+        // `c_element_storage` call for that element spells it as
+        // `intent_arr3_int64_t`, assuming that typedef already
+        // exists in scope. Without recursing here, nothing ever
+        // triggers its emission for a tuple shape that's never
+        // itself a Vec element (e.g. one that only appears as an
+        // enum payload) — "unknown type name 'intent_arr3_int64_t'".
+        Type::Tuple(elements) => {
+            for e in elements {
+                emit_array_typedefs_for(e, seen, out);
+            }
+        }
         _ => {}
     }
 }
@@ -15435,12 +15475,29 @@ fn emit_expr(expr: &TypedExpr) -> String {
             // designated-initializer form. The struct typedef is
             // emitted in the preamble's `emit_tuple_bundle` pass.
             // Refines T1.1 phase 2.
+            // BUG-74: an Array-typed element with an inline `[…]`
+            // ArrayLit initializer needs the same bare-brace `{e1,
+            // e2, …}` form StructLit already uses just below --
+            // gcc rejects assigning a cast compound-literal array
+            // (`((int64_t[3]){1,2,3})`, what plain `emit_expr`
+            // produces for an ArrayLit) to a struct member of array
+            // type ("array initialized from non-constant array
+            // expression").
             let elem_tys: Vec<Type> = elements.iter().map(|e| e.ty.clone()).collect();
             let struct_name = tuple_c_struct(&elem_tys);
             let parts: Vec<String> = elements
                 .iter()
                 .enumerate()
-                .map(|(i, e)| format!("._{} = {}", i, emit_expr(e)))
+                .map(|(i, e)| {
+                    let rhs = match (&e.ty, &e.kind) {
+                        (Type::Array { .. }, TypedExprKind::ArrayLit { elements }) => {
+                            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
+                            format!("{{ {} }}", parts.join(", "))
+                        }
+                        _ => emit_expr(e),
+                    };
+                    format!("._{} = {}", i, rhs)
+                })
                 .collect();
             format!("({}){{ {} }}", struct_name, parts.join(", "))
         }

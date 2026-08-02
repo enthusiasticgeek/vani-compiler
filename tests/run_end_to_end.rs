@@ -7042,3 +7042,127 @@ fn main() -> i64 {
         assert_eq!(stdout, "300\nhello\nworld\n2\n2\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep, "enum variant payload is Vec<Struct>". Checked
+// 2026-08-02, not a bug -- construction, tag-match dispatch, and drop all
+// work correctly on both backends.
+#[test]
+fn enum_variant_payload_vec_of_struct_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "enum_payload_vec_of_struct",
+        r#"
+struct Pt { x: i64, y: i64 }
+enum Bag { Items(Vec<Pt>), Empty }
+fn build(use_items: bool) -> Bag {
+  if use_items {
+    return Bag.Items(vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }));
+  }
+  return Bag.Empty;
+}
+fn classify(b: Bag) -> i64 {
+  return match b {
+    Bag.Items then 1,
+    Bag.Empty then 0,
+  };
+}
+fn main() -> i64 {
+  let a: Bag = build(true);
+  let z: Bag = build(false);
+  print classify(a);
+  print classify(z);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "1\n0\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-74: enum variant payload is a Tuple containing an Array
+// (`(i64, [i64; 3])`). Three layered bugs found+fixed (checker admission
+// gate + two C-backend codegen gaps -- typedef ordering and array-element
+// initializer syntax); see docs/TODO_CURRENT.md for the full writeup.
+// This test also covers the payload's construction actually carrying the
+// right values by unpacking through a helper (destructure-binding a
+// non-Copy... actually Copy here, but still routed through match).
+#[test]
+fn enum_variant_payload_tuple_containing_array_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "enum_payload_tuple_array",
+        r#"
+enum Rec { Full((i64, [i64; 3])), Nothing }
+fn build(has: bool) -> Rec {
+  if has {
+    return Rec.Full((42, [1, 2, 3]));
+  }
+  return Rec.Nothing;
+}
+fn classify(r: Rec) -> i64 {
+  return match r {
+    Rec.Full then 1,
+    Rec.Nothing then 0,
+  };
+}
+fn main() -> i64 {
+  let a: Rec = build(true);
+  let z: Rec = build(false);
+  print classify(a);
+  print classify(z);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "1\n0\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-74b in isolation: a plain local Tuple<Array> binding, no enum
+// involved, confirming the C-backend initializer-syntax fix is general.
+#[test]
+fn tuple_containing_array_local_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "tuple_containing_array_local",
+        r#"
+fn main() -> i64 {
+  let x: (i64, [i64; 3]) = (42, [1, 2, 3]);
+  print x.0;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "42\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

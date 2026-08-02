@@ -509,9 +509,40 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x pattern matching / enum payload depth
 
-- [ ] An enum variant whose payload is itself a `Vec<Struct>` or a
+- [x] An enum variant whose payload is itself a `Vec<Struct>` or a
       `Tuple` containing an `Array` (multi-level payload nesting,
-      not just `enum { Variant(Vec<i64>) }`).
+      not just `enum { Variant(Vec<i64>) }`) -- **`Vec<Struct>`
+      payload checked 2026-08-02, not a bug** (construction, tag-
+      match dispatch, drop all correct on both backends, same v1
+      destructure-binding restriction `Vec<i64>` payloads already
+      document). **`Tuple<Array>` payload found+fixed 2026-08-02,
+      BUG-74 -- THREE layered bugs in sequence.** (1) Checker: the
+      enum-payload admission gate computed `payload_ty.is_copy()` for
+      the whole Tuple, and `Type::Array::is_copy()` is unconditionally
+      `false` by design (unrelated to payload safety) -- so `(i64,
+      [i64; 3])` was rejected as "not admitted in v1" even though
+      every element is stack/inline data, exactly as safe as any
+      other admitted Copy payload. Fixed with a `tuple_of_admitted`
+      check mirroring the existing `array_of_copy` special case one
+      level deeper. (2) C backend: `emit_array_typedefs_for` never
+      recursed into `Type::Tuple` elements, and its one call site
+      only walked the Vec-element axis (never enum payloads or tuple
+      elements) -- so `intent_arr3_int64_t` was referenced by the
+      tuple bundle before ever being declared ("unknown type name").
+      Fixed by adding Tuple recursion and moving the array-typedef
+      pass earlier (before early-tuple-bundle emission), sharing one
+      `seen` set with the original pass to avoid double-emission.
+      (3) C backend: even with the typedef declared,
+      `TypedExprKind::Tuple`'s C emission didn't special-case an
+      Array-typed element with an inline `ArrayLit` initializer the
+      way `StructLit` already did -- gcc rejects assigning a cast
+      compound-literal array to a struct member of array type. Fixed
+      by mirroring StructLit's existing bare-brace special case for
+      Tuple. Bug (3) is general, not enum-specific -- confirmed a
+      bare local `let x: (i64, [i64;3]) = (42, [1,2,3]);` (no enum at
+      all) hit the identical C-backend crash before the fix. New
+      tests: 4 `src/lib.rs` + 3 `tests/run_end_to_end.rs` (both
+      backends).
 - [ ] `match` over a `Vec<Enum>` where the enum has 3+ variants with
       different payload shapes (mixed Copy/non-Copy payloads in the
       same enum, iterated).

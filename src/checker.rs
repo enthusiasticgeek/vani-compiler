@@ -999,6 +999,28 @@ fn check_impl(
                     payload_ty,
                     Type::Array { element, .. } if element.is_copy()
                 );
+                // BUG-74: a Tuple payload whose elements are each
+                // either genuinely Copy OR themselves an array-of-
+                // Copy-elements (e.g. `(i64, [i64; 3])`) is exactly
+                // as safe to store/bitwise-copy inline in the tagged
+                // union as any other Copy payload -- `Type::Array`'s
+                // `is_copy()` is unconditionally `false` (by design,
+                // for reasons unrelated to payload safety), so
+                // `Type::Tuple::is_copy()`'s element-wise recursion
+                // rejects any tuple containing an array even when
+                // every element is stack/inline data with no heap
+                // pointers. Mirrors the `array_of_copy` special case
+                // one level deeper, the same way the struct-field
+                // admission check's own `[T;N] of Copy` arm already
+                // does for a bare array field.
+                fn tuple_elem_admitted(ty: &Type) -> bool {
+                    ty.is_copy()
+                        || matches!(ty, Type::Array { element, .. } if element.is_copy())
+                }
+                let tuple_of_admitted = matches!(
+                    payload_ty,
+                    Type::Tuple(elements) if elements.iter().all(tuple_elem_admitted)
+                );
                 let allowed = payload_ty.is_copy()
                     || matches!(
                         payload_ty,
@@ -1010,7 +1032,8 @@ fn check_impl(
                             | Type::Mutex(_)
                             | Type::Channel(_, _)
                     )
-                    || array_of_copy;
+                    || array_of_copy
+                    || tuple_of_admitted;
                 if !allowed {
                     diagnostics.push(Diagnostic::new(
                         decl.variants[i].name_span,

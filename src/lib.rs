@@ -51248,6 +51248,126 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn enum_variant_payload_vec_of_struct_compiles_and_dispatches() {
+        // Testing-matrix sweep: "enum variant payload is Vec<Struct>"
+        // -- multi-level payload nesting. Checked 2026-08-02, not a
+        // bug: `Vec<Pt>` as an enum payload compiles, constructs, and
+        // dispatches (tag-match without destructure-binding, same v1
+        // restriction as `Vec<i64>` payloads already document) on
+        // both backends.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            enum Bag { Items(Vec<Pt>), Empty }
+            fn build(use_items: bool) -> Bag {
+              if use_items {
+                return Bag.Items(vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }));
+              }
+              return Bag.Empty;
+            }
+            fn classify(b: Bag) -> i64 {
+              return match b {
+                Bag.Items then 1,
+                Bag.Empty then 0,
+              };
+            }
+            fn main() -> i64 {
+              let a: Bag = build(true);
+              let z: Bag = build(false);
+              print classify(a);
+              print classify(z);
+              return 0;
+            }
+        "#;
+        compile(source).expect("enum variant payload Vec<Struct> must compile and dispatch");
+    }
+
+    #[test]
+    fn enum_variant_payload_tuple_containing_array_now_admitted_and_correct() {
+        // BUG-74, found sweeping the testing matrix's "enum variant
+        // payload is ... a Tuple containing an Array" row. THREE
+        // layered bugs, found in sequence:
+        //
+        // 1. Checker: the enum-payload admission check computed
+        //    `payload_ty.is_copy()` for the whole Tuple, and
+        //    `Type::Array::is_copy()` is unconditionally `false` (by
+        //    design, unrelated to payload safety) -- so a Tuple
+        //    containing an Array (e.g. `(i64, [i64; 3])`) was
+        //    rejected as "not admitted in v1" even though every
+        //    element is stack/inline data with no heap pointers,
+        //    exactly as safe as any other Copy payload. Fixed by
+        //    adding a `tuple_of_admitted` check mirroring the
+        //    existing `array_of_copy` special case one level deeper.
+        // 2. C backend (BUG-74a): `emit_array_typedefs_for` never
+        //    recursed into `Type::Tuple` elements, and the one call
+        //    site that fed it only walked the Vec-element axis
+        //    (never enum payloads) -- so `intent_arr3_int64_t` was
+        //    referenced by the tuple bundle before ever being
+        //    declared: "unknown type name". Fixed by recursing into
+        //    Tuple elements and moving the array-typedef pass earlier
+        //    (before the early-tuple-bundle emission it now needs to
+        //    precede), sharing one `seen` set with the original
+        //    Vec-element pass.
+        // 3. C backend (BUG-74b): even with the typedef declared,
+        //    `TypedExprKind::Tuple`'s C emission didn't special-case
+        //    an Array-typed element with an inline ArrayLit
+        //    initializer the way `StructLit` already did -- gcc
+        //    rejects assigning a cast compound-literal array
+        //    (`((int64_t[3]){1,2,3})`) to a struct member of array
+        //    type. Fixed by mirroring StructLit's existing bare-brace
+        //    `{1,2,3}` special case for Tuple too. Confirmed this
+        //    last bug is general, not enum-specific: a bare local
+        //    `let x: (i64, [i64;3]) = (42, [1,2,3]);` (no enum
+        //    involved at all) hit the exact same C-backend crash.
+        let source = r#"
+            enum Rec { Full((i64, [i64; 3])), Nothing }
+            fn build(has: bool) -> Rec {
+              if has {
+                return Rec.Full((42, [1, 2, 3]));
+              }
+              return Rec.Nothing;
+            }
+            fn classify(r: Rec) -> i64 {
+              return match r {
+                Rec.Full then 1,
+                Rec.Nothing then 0,
+              };
+            }
+            fn main() -> i64 {
+              let a: Rec = build(true);
+              let z: Rec = build(false);
+              print classify(a);
+              print classify(z);
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "enum variant payload Tuple<Array> must now be admitted and compile correctly",
+        );
+    }
+
+    #[test]
+    fn tuple_containing_array_local_compiles_to_valid_c() {
+        // BUG-74b in isolation (no enum involved): a plain local
+        // binding whose type is a Tuple containing an Array element
+        // must produce valid C -- confirms the fix is general, not
+        // an enum-payload-specific patch.
+        let source = r#"
+            fn main() -> i64 {
+              let x: (i64, [i64; 3]) = (42, [1, 2, 3]);
+              print x.0;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Tuple<Array> local must compile to C");
+        assert!(
+            !c.contains("((int64_t[3]){"),
+            "array-typed tuple element must use bare-brace init, not a cast \
+             compound literal (gcc rejects that inside a struct-member \
+             initializer):\n{c}"
+        );
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";
