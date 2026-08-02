@@ -9402,6 +9402,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 // second element's store). Found sweeping
                 // `Vec<Channel<T,N>>` for the testing-matrix pass
                 // (2026-08-01).
+                // `Type::Array` added 2026-08-02 (testing-matrix
+                // sweep, `Vec<Array<Struct,N>>`): its real size is
+                // `N * sizeof(inner)`, wrong via the byte-count
+                // fallback whenever inner is itself an aggregate.
                 let needs_runtime_sizeof = matches!(
                     element.as_ref(),
                     Type::Channel(_, _)
@@ -9410,6 +9414,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         | Type::RwLock(_)
                         | Type::ReadGuard(_)
                         | Type::WriteGuard(_)
+                        | Type::Array { .. }
                 );
                 if matches!(element.as_ref(), Type::Struct(_) | Type::Tuple(_))
                     || payloaded_enum
@@ -17660,6 +17665,10 @@ fn emit_vec_let_from_literal(
     // 24-byte assumed -- corrupting the heap on the second
     // element's store). Found sweeping `Vec<Channel<T,N>>` for the
     // testing-matrix pass (2026-08-01).
+    // `Type::Array` added 2026-08-02 (testing-matrix sweep,
+    // `Vec<Array<Struct,N>>`): same reasoning as the expression-
+    // call path -- its real size is `N * sizeof(inner)`, wrong via
+    // the byte-count fallback whenever inner is an aggregate.
     let needs_runtime_sizeof = matches!(
         element,
         Type::Channel(_, _)
@@ -17668,6 +17677,7 @@ fn emit_vec_let_from_literal(
             | Type::RwLock(_)
             | Type::ReadGuard(_)
             | Type::WriteGuard(_)
+            | Type::Array { .. }
     );
     if matches!(element, Type::Struct(_) | Type::Tuple(_)) || payloaded_enum || needs_runtime_sizeof {
         // Struct/tuple/payloaded-enum element: runtime
@@ -43676,6 +43686,29 @@ pub(crate) fn vec_element_value_str(element: &Type) -> String {
 /// T1.2 + Vec<Struct> LLVM.
 pub(crate) fn vec_element_size_expr(element: &Type) -> String {
     match element {
+        // `Vec<[T; N]>`: the array-element's real size is
+        // `N * sizeof(T)`, which can differ wildly from
+        // `vec_element_byte_size`'s recursive byte-count fallback
+        // whenever T itself is an aggregate the fallback doesn't
+        // know how to size correctly (e.g. T = Struct, which
+        // `vec_element_byte_size` silently treats as 8 bytes via
+        // its final scalar-width fallback). Rather than recursing
+        // through byte-size arithmetic, ask LLVM directly via the
+        // same GEP-null trick against the array's own LLVM type
+        // `[N x T]` -- correct for any T, aggregate or scalar,
+        // with no risk of the recursive-fallback drifting out of
+        // sync again. A `Vec<[Struct;2]>` literal used to malloc
+        // half the buffer it needed (16 bytes/element instead of
+        // the real 32), corrupting the heap identically to BUG-61.
+        // Found sweeping `Vec<Array<Struct,N>>` for the
+        // testing-matrix pass (2026-08-02).
+        Type::Array { .. } => {
+            let a_ty = llvm_type_string(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                a_ty, a_ty, a_ty
+            )
+        }
         Type::Struct(name) => {
             let s_ty = format!("%Struct_{}", name);
             format!(

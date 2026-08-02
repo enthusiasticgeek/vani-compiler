@@ -12556,10 +12556,30 @@ pub(crate) fn emit_array_typedefs_for(
             emit_array_typedefs_for(element, seen, out);
             let name = array_c_typedef(ty);
             if seen.insert(name.clone()) {
+                // Route through `c_element_storage` for everything
+                // that isn't Array/Vec (handled specially above
+                // since their spelling needs the whole typedef
+                // name, not just the leaf type). `c_leaf_type`'s
+                // fallback returns bare PLACEHOLDER COMMENTS for
+                // aggregate types it can't synthesize a name for
+                // (e.g. `"/* struct */"` for any `Type::Struct`) --
+                // using it here for `Vec<[Point; 2]>` literally
+                // emitted `typedef /* struct */ intent_arr2_
+                // Struct_Point[2];`, a syntactically broken
+                // typedef that made cc infer an implicit `int`
+                // element type (`-Wimplicit-int`), then reject
+                // every real use of the array as a type mismatch.
+                // Same bug class as BUG-61's follow-ups (a
+                // `c_leaf_type` caller "forgetting to special-case"
+                // an aggregate type); `c_element_storage` already
+                // has correct arms for Struct/Enum/Tuple/Channel/
+                // Mutex/Guard/RwLock/etc. Found sweeping
+                // `Vec<Array<Struct,N>>` for the testing-matrix
+                // pass (2026-08-02).
                 let inner_spelling = match element.as_ref() {
                     Type::Array { .. } => array_c_typedef(element),
                     Type::Vec(_) => vec_c_struct(element),
-                    _ => c_leaf_type(element).to_string(),
+                    _ => c_element_storage(element),
                 };
                 out.push_str(&format!(
                     "typedef {} {}[{}];\n",
@@ -14636,12 +14656,30 @@ fn emit_for_iter(
     // `Vec<U>` aggregates via the per-type typedef alias).
     // Was emitting `"/* vec */"` for nested Vec elements.
     // Refines #7 phase 2.
-    out.push_str(&format!(
-        "    {} {} = {};\n",
-        c_element_storage(element_ty),
-        elem_local,
-        elem_access
-    ));
+    //
+    // Array elements (`Vec<[T;N]>` / `[[T;N]; K]`) can't use a
+    // plain `=` here: C forbids assigning one array to another
+    // even through a typedef alias (`intent_arrN_T v = x.data[i];`
+    // is "invalid initializer"). Declare the local bare and
+    // memcpy the slot's bytes in instead -- valid for any array
+    // element, C99-array-of-struct included. Found sweeping
+    // `Vec<[Struct;N]>` consumed via `for x in xs` for the
+    // testing-matrix pass (2026-08-02).
+    if matches!(element_ty, Type::Array { .. }) {
+        out.push_str(&format!(
+            "    {ct} {name}; memcpy({name}, {access}, sizeof({ct}));\n",
+            ct = c_element_storage(element_ty),
+            name = elem_local,
+            access = elem_access,
+        ));
+    } else {
+        out.push_str(&format!(
+            "    {} {} = {};\n",
+            c_element_storage(element_ty),
+            elem_local,
+            elem_access
+        ));
+    }
     for s in body {
         emit_stmt(s, out);
     }
@@ -16662,57 +16700,89 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // `c_leaf_type` was right for scalars but emits
             // `"/* vec */"` placeholders for nested Vecs.
             let c_element = c_element_storage(element);
-            // For Array elements: C forbids initializing one
-            // array from a compound-literal-as-rvalue (gcc:
-            // "array initialized from non-constant array
-            // expression"). The vec-emit normally turns
-            // ArrayLit args into `((int64_t[4]){...})`
-            // compound literals via `emit_expr`; for the
-            // outer brace-list of a `(intent_arr4_int64_t[N]){...}`
-            // initializer we need plain `{...}` so the outer
-            // array directly initializes from braced
-            // element-lists. Strip the cast for ArrayLit
-            // args when this is the case. Refines #7 phase 2c.
+            // For Array elements: C forbids initializing one array
+            // from another array-typed EXPRESSION at all -- not
+            // just "array initialized from non-constant array
+            // expression" for a plain compound-literal-as-rvalue,
+            // but literally any non-brace-literal array value
+            // (a named `let`-bound `[T;N]` variable, a function
+            // call returning `[T;N]`, ...). The vec-emit used to
+            // only special-case an ARGUMENT that is ITSELF an
+            // inline `ArrayLit` (`vec([1,2], [3,4])`), stripping
+            // its cast so the outer `(intent_arrN_T[K]){...}`
+            // compound literal could nest its braces directly; any
+            // OTHER array-typed argument shape (a Var, in
+            // particular) fell through to plain `emit_expr`, which
+            // just emitted the bare variable name as an
+            // initializer-list item -- invalid C for scalar/Vec
+            // elements it would merely fail to compile, but for
+            // Struct-element arrays it silently flattened the two
+            // struct FIELDS of the wrong array slot into malformed
+            // "make integer from pointer" nonsense instead of
+            // erroring cleanly. Fixed by building the whole thing
+            // uniformly via `memcpy` (works for ANY array-typed
+            // rvalue -- literal or variable -- since arrays decay
+            // to a pointer for both memcpy arguments), instead of
+            // trying to make every possible argument shape fit
+            // inside one compound-literal initializer list. Found
+            // sweeping `Vec<[Struct;N]>` built from named array
+            // variables for the testing-matrix pass (2026-08-02).
             let element_is_array = matches!(element.as_ref(), Type::Array { .. });
-            let parts: Vec<String> = args
-                .iter()
-                .map(|a| {
-                    if element_is_array {
-                        if let TypedExprKind::ArrayLit { elements } = &a.kind {
-                            let inner: Vec<String> =
-                                elements.iter().map(emit_expr).collect();
-                            return format!("{{ {} }}", inner.join(", "));
-                        }
+            if element_is_array {
+                let arg_exprs: Vec<String> = args.iter().map(emit_expr).collect();
+                let n = arg_exprs.len();
+                if n == 0 {
+                    format!("{}(0, (const {}*)0)", vec_helper(element, "from"), c_element)
+                } else {
+                    let mut stmt = format!(
+                        "({{ {ce}* _v_buf = ({ce}*)malloc({n} * sizeof({ce})); if (!_v_buf) abort();",
+                        ce = c_element,
+                        n = n,
+                    );
+                    for (i, e) in arg_exprs.iter().enumerate() {
+                        stmt.push_str(&format!(
+                            " memcpy(_v_buf[{i}], {e}, sizeof({ce}));",
+                            i = i,
+                            e = e,
+                            ce = c_element,
+                        ));
                     }
-                    emit_expr(a)
-                })
-                .collect();
-            // C99 forbids zero-length array literals, so the
-            // empty-vec case (e.g. `let xs: Vec<i64> = vec();`
-            // — #8 from STATUS.md) passes NULL through the
-            // `__from(0, NULL)` shape. The runtime helper
-            // already special-cases `n == 0` and skips the
-            // memcpy.
-            if parts.is_empty() {
-                format!(
-                    "{}(0, (const {}*)0)",
-                    vec_helper(element, "from"),
-                    c_element
-                )
+                    stmt.push_str(&format!(
+                        " {vt} _v; _v.data = _v_buf; _v.len = {n}; _v.capacity = {n}; _v; }})",
+                        vt = vec_c_struct(element),
+                        n = n,
+                    ));
+                    stmt
+                }
             } else {
-                let array_literal = format!(
-                    "({}[{}]){{ {} }}",
-                    c_element,
-                    parts.len(),
-                    parts.join(", ")
-                );
-                format!(
-                    "{}({}, (const {}*){})",
-                    vec_helper(element, "from"),
-                    parts.len(),
-                    c_element,
-                    array_literal
-                )
+                let parts: Vec<String> = args.iter().map(emit_expr).collect();
+                // C99 forbids zero-length array literals, so the
+                // empty-vec case (e.g. `let xs: Vec<i64> = vec();`
+                // — #8 from STATUS.md) passes NULL through the
+                // `__from(0, NULL)` shape. The runtime helper
+                // already special-cases `n == 0` and skips the
+                // memcpy.
+                if parts.is_empty() {
+                    format!(
+                        "{}(0, (const {}*)0)",
+                        vec_helper(element, "from"),
+                        c_element
+                    )
+                } else {
+                    let array_literal = format!(
+                        "({}[{}]){{ {} }}",
+                        c_element,
+                        parts.len(),
+                        parts.join(", ")
+                    );
+                    format!(
+                        "{}({}, (const {}*){})",
+                        vec_helper(element, "from"),
+                        parts.len(),
+                        c_element,
+                        array_literal
+                    )
+                }
             }
         }
         "vec_with_capacity" => {

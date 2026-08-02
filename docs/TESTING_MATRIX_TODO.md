@@ -212,10 +212,20 @@ since that's exactly where BUG-61 lived.
 
 ### Multi-level container nesting (no concurrency/dyn involved)
 
-- [ ] `Vec<Vec<Struct>>` (three levels: Vec of Vec of user struct --
-      exercises the topo-sort ordering logic in `backend_c.rs`
-      that BUG-61 revealed has per-feature blind spots).
-- [ ] `Array<Tuple<...>, N>` and `Vec<Array<Struct, N>>`.
+- [x] `Vec<Vec<Struct>>` (three levels: Vec of Vec of user struct) --
+      **checked 2026-08-02, not a bug**: both backends agree and
+      match hand-computed values (accessed via `clone_at`, since
+      `Vec<Struct>` elements are non-Copy).
+- [x] `Array<Tuple<...>, N>` -- **checked 2026-08-02, not a bug**:
+      `[(i64,i64); 3]` indexed directly (tuples of Copy scalars are
+      themselves Copy) works correctly on both backends.
+- [x] `Vec<Array<Struct, N>>` -- **found+fixed 2026-08-02, BUG-62**:
+      FOUR independent bugs (3 tree-C, 1 tree-LLVM), all specific to
+      a `Vec<[T;N]>` whose element `T` is non-trivial, some only
+      triggered when the array element is built from named
+      variables rather than inline literals. See TODO_CURRENT.md's
+      BUG-62 entry for the full breakdown -- this was the richest
+      single repro of the whole sweep.
 - [ ] `struct { items: Vec<(i64, OwnedStr)> }` -- struct field that's
       a Vec of tuples (three features stacked: struct, Vec, tuple).
 - [ ] `HashMap<i64, Vec<Struct>>` -- container-of-container through

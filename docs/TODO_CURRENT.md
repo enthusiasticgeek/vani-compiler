@@ -4678,4 +4678,74 @@ verifying the four fixes above against their tutorial worked examples
   `Vec<Mutex<T>>`/`Vec<RwLock<T>>` -- covered by the original BUG-61
   fix's code paths but never actually run end-to-end until now).
 
+## Bug found continuing the docs/TESTING_MATRIX_TODO.md nested-combinations sweep (added+fixed 2026-08-02)
+
+- [x] **BUG-62 (found+fixed 2026-08-02 — FOUR independent bugs, three
+  in tree-C and one in tree-LLVM, all specific to `Vec<[T; N]>`
+  where `T` is a non-trivial (Struct) type).** Found sweeping the
+  "multi-level container nesting"
+  section for `Vec<Array<Struct,N>>`. Minimal repro:
+  ```vani
+  struct Point { x: i64, y: i64 }
+  fn main() -> i64 {
+    let a1: [Point; 2] = [Point { x: 1, y: 1 }, Point { x: 2, y: 2 }];
+    let a2: [Point; 2] = [Point { x: 3, y: 3 }, Point { x: 4, y: 4 }];
+    let vs: Vec<[Point; 2]> = vec(a1, a2);
+    let total: i64 = 0;
+    for arr in vs {
+      total = total + arr[0].x + arr[0].y + arr[1].x + arr[1].y;
+    }
+    print total;
+    return 0;
+  }
+  ```
+  **tree-C, bug 1**: `array_c_typedef`'s helper for a `Vec<[T;N]>`
+  typedef's INNER element spelling fell through to `c_leaf_type` for
+  `Type::Struct`, which returns the bare placeholder comment `"/*
+  struct */"` — producing the syntactically broken `typedef /*
+  struct */ intent_arr2_Struct_Point[2];`, which made `cc` infer an
+  implicit `int` element type and reject every real use downstream.
+  Fixed by routing through `c_element_storage` (already has a real
+  `Struct` arm) instead.
+  **tree-C, bug 2**: once bug 1 was fixed, `vec(a1, a2)` itself still
+  failed: the codegen for `Vec<[T;N]>` literals only special-cased
+  an argument that is ITSELF an inline `[..]` array literal
+  (stripping its cast so it could nest inside the outer compound
+  literal's braces); any OTHER array-typed argument (a named `let`-
+  bound variable, here `a1`/`a2`) fell through to a plain `emit_expr`
+  call, emitting the bare variable name as an initializer-list item
+  — C forbids using an array-typed EXPRESSION as an initializer-list
+  item at all, which for Struct-element arrays silently produced
+  malformed flattened-field assignments (`"make integer from
+  pointer"`, `"invalid initializer"`) instead of a clean error.
+  Fixed by rebuilding the whole `Vec<[T;N]>`-literal construction
+  uniformly via `memcpy` (malloc the buffer, then `memcpy` each
+  argument's bytes into its slot) — works identically for a literal
+  or a named variable, since both decay to a pointer for memcpy.
+  **tree-C, bug 3**: the `for x in xs` consuming-iteration lowering
+  for a `Vec<[T;N]>` element also used a plain `=` to bind the loop
+  variable (`intent_arr2_Struct_Point v_arr = v_vs.data[idx];`) —
+  invalid C; arrays can't be assigned via `=` even through a typedef
+  alias. Fixed by declaring the local bare and `memcpy`-ing the
+  slot's bytes in for array-typed elements specifically.
+  **tree-LLVM, bug 4** (a genuine 4th, independent bug, same repro):
+  `vec_element_size_expr` had no arm for `Type::Array` at all, so it
+  fell through to `vec_element_byte_size`'s byte-count fallback —
+  which itself has no real understanding of `Struct` sizes either
+  (its own fallback treats any unrecognized type as 8 bytes), so
+  `[Point;2]` (32 real bytes: 2 × 2×i64) was sized at 16 bytes,
+  under-allocating the `vec()` literal's malloc'd buffer by half and
+  corrupting the heap (LLVM's own `lli` JIT crashed deep inside its
+  register-allocation/bitcode-writing passes — malformed IR, not a
+  clean runtime error). Fixed by adding a proper `Type::Array` arm
+  using the same GEP-null `sizeof` trick already used for Struct/
+  Tuple/Channel/etc, directly against the array's own LLVM type `[N
+  x T]` (correct for any T without needing recursive byte-counting),
+  and widening both `vec()`-literal call sites' "needs runtime
+  sizeof" gating to route `Type::Array` elements through it.
+  New tests: 2 `src/lib.rs` (one per tree-C sub-bug: typedef
+  placeholder, memcpy construction) plus 1 real end-to-end test
+  (`tests/run_end_to_end.rs`) asserting the correct summed value
+  (20) on both backends, closing all four sub-bugs at once.
+
 ---

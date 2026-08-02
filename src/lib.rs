@@ -52169,5 +52169,70 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-62 (tree-C, part 1): `array_c_typedef`'s helper for the
+    /// INNER element spelling of a `Vec<[T;N]>` typedef fell
+    /// through to `c_leaf_type` for Struct elements, which returns
+    /// the bare placeholder comment `"/* struct */"` -- producing
+    /// the syntactically broken `typedef /* struct */
+    /// intent_arr2_Struct_Point[2];`. Now routes through
+    /// `c_element_storage`, which has a real arm for `Struct`.
+    #[test]
+    fn vec_of_array_of_struct_emits_real_typedef_not_placeholder_comment() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let a1: [Point; 2] = [Point { x: 1, y: 1 }, Point { x: 2, y: 2 }];
+              let vs: Vec<[Point; 2]> = vec(a1);
+              print len(vs) as i64;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<[Point;2]> compiles to C");
+        assert!(
+            !c.contains("/* struct */"),
+            "must not leak the c_leaf_type placeholder comment into a typedef; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("typedef Struct_Point intent_arr2_Struct_Point[2];"),
+            "expected a real typedef aliasing Struct_Point; got:\n{}",
+            c
+        );
+    }
+
+    /// BUG-62 (tree-C, part 2): building `Vec<[T;N]>` from NAMED
+    /// array variables (not inline array literals) used a plain
+    /// `emit_expr` for each argument inside the outer compound-
+    /// literal initializer -- C forbids using an array-typed
+    /// EXPRESSION as an initializer-list item at all, so for
+    /// Struct-element arrays this silently produced malformed,
+    /// flattened field assignments instead of a clean error. Now
+    /// builds via `memcpy` uniformly, which works for any
+    /// array-typed rvalue.
+    #[test]
+    fn vec_of_array_of_struct_from_named_variables_compiles_and_computes_correctly() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let a1: [Point; 2] = [Point { x: 1, y: 1 }, Point { x: 2, y: 2 }];
+              let a2: [Point; 2] = [Point { x: 3, y: 3 }, Point { x: 4, y: 4 }];
+              let vs: Vec<[Point; 2]> = vec(a1, a2);
+              let total: i64 = 0;
+              for arr in vs {
+                total = total + arr[0].x + arr[0].y + arr[1].x + arr[1].y;
+              }
+              print total;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<[Point;2]> from named array variables compiles to C");
+        assert!(
+            c.contains("memcpy"),
+            "expected the memcpy-based construction, not a bare compound-literal \
+             initializer list; got:\n{}",
+            c
+        );
+    }
+
 }
 

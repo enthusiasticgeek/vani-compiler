@@ -6205,3 +6205,66 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-62, found sweeping "multi-level container nesting" for the
+// testing-matrix's `Vec<Array<Struct,N>>` row: THREE independent
+// bugs, all specific to a Vec whose element is a fixed-size array
+// of a non-trivial (Struct) type, assembled from named array
+// variables (not inline array literals):
+//   1. tree-C's per-shape array typedef leaked a bare `c_leaf_type`
+//      placeholder comment ("/* struct */") into the typedef body
+//      instead of the real Struct_Point name.
+//   2. tree-C's `vec(a1, a2)` literal construction used a plain
+//      compound-literal initializer list, which C forbids
+//      populating from array-typed EXPRESSIONS (only brace-literal
+//      elements are legal there) -- silently producing malformed
+//      flattened-field assignments for named array variables.
+//   3. tree-LLVM's `vec_element_byte_size` fallback (used whenever
+//      `vec_element_size_expr`'s gating didn't recognize the
+//      element as needing runtime sizeof) silently under-computed
+//      the size of `[Struct;N]` -- 8 bytes/element (its scalar
+//      fallback) instead of the real 32, corrupting the heap.
+#[test]
+fn vec_of_array_of_struct_from_named_variables_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_array_of_struct_named_vars",
+        r#"
+struct Point { x: i64, y: i64 }
+fn main() -> i64 {
+  let a1: [Point; 2] = [Point { x: 1, y: 1 }, Point { x: 2, y: 2 }];
+  let a2: [Point; 2] = [Point { x: 3, y: 3 }, Point { x: 4, y: 4 }];
+  let vs: Vec<[Point; 2]> = vec(a1, a2);
+  let total: i64 = 0;
+  for arr in vs {
+    total = total + arr[0].x + arr[0].y + arr[1].x + arr[1].y;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "Vec<[Point;2]> built from named array variables must not fail to \
+             build or crash for {:?}; status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "20\n",
+            "expected (1+1+2+2) + (3+3+4+4) = 20 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
