@@ -4009,6 +4009,17 @@ verifying the four fixes above against their tutorial worked examples
   values on both backends, not just successful compilation. Full
   `cargo test --release --workspace`: 13/13 test binaries clean,
   0 failed. Commit `fec2e1c`.
+  **Follow-up gap found+fixed same day (commit `ae33c9c`)**, while
+  updating `intermediate/10c_error_patterns_primer.md`'s own
+  worked example to use the real generic instead of its
+  hand-declared-enum workaround: the fix above only recursed into
+  `If`/`While`/`For` bodies, not `IfLet`/`WhileLet` -- so a
+  `return EnumName.Variant(...);` inside an `if let ... else if
+  let ...` chain (the single most common place a union error type
+  actually gets constructed) was still unresolved. Also found the
+  payload-less-variant shape (`Option.None`, which parses as
+  `FieldAccess` not `MethodCall`) was never handled at all, in any
+  position. Both fixed together, with matching new tests.
 
 - [x] **BUG-47 (found, fixed 2026-08-01 — C-backend-only type-emission bug).
   A function parameter typed `ref HashMap<OwnedStr, V>` gets the
