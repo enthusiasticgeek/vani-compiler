@@ -7205,14 +7205,37 @@ fn infer_concrete_type_for_call(
                 ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                 None
             }),
-            // Peel expr-level Ref/RefMut so `show(ref d)` where d: Dog
-            // resolves the T-bearing slot to Dog, then structural
-            // unification of `ref T` vs Dog gives T = Dog.
-            // Previously gated to is_v31_poll only; now enabled for all
-            // generic calls so `<T: Iface>` bounds work with ref params.
+            // Re-wrap the referent's scope type in Ref/RefMut so it
+            // accurately reflects the argument's real type (a
+            // reference), then let `unify_param_to_arg`'s own
+            // `(Ref(p), Ref(a))`/`(RefMut(p), RefMut(a))` arm peel it
+            // in lockstep with the param's declared shape. BUG-71
+            // fix: this used to return the referent's BARE type
+            // (`Dog`, not `ref Dog`) — which happened to produce the
+            // right answer by accident for a param shaped bare `ref
+            // T` (unify fails to match Ref-vs-non-Ref, falls back to
+            // "T = whole arg type" which is coincidentally already
+            // correct when there's nothing between Ref and Param),
+            // but silently inferred the WRONG type — the whole
+            // referent type instead of its element type — for any
+            // param shaped `ref Vec<T>` / `ref Box<T>` / etc., since
+            // unify_param_to_arg never got a chance to peel the inner
+            // wrapper: `show(ref d)` where d: Dog resolves the
+            // T-bearing slot to Dog, then structural unification of
+            // `ref T` vs `ref Dog` gives T = Dog; `first(ref xs)`
+            // where `xs: Vec<Pt>` and the param is `ref Vec<T>` now
+            // resolves to `ref Vec<Pt>` and correctly unifies down to
+            // T = Pt instead of T = Vec<Pt>.
             ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+                let is_mut = matches!(&arg.kind, ExprKind::RefMut { .. });
                 if let ExprKind::Var(name) = &inner.kind {
-                    scope.get(name).cloned().or_else(|| {
+                    scope.get(name).cloned().map(|ty| {
+                        if is_mut {
+                            Type::RefMut(Box::new(ty))
+                        } else {
+                            Type::Ref(Box::new(ty))
+                        }
+                    }).or_else(|| {
                         diagnostics.push(Diagnostic::new(
                             span,
                             format!(
@@ -7962,6 +7985,16 @@ fn monomorphize_type_decls_in_program(
         for stmt in f.body.iter_mut() {
             resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names);
         }
+        // BUG-46-class fix for generic STRUCTS (found later, same
+        // root cause): same rewrite, keyed off Type::Struct instead
+        // of Type::Enum.
+        let fn_return_struct = match &f.return_type {
+            Type::Struct(n) => Some(n.clone()),
+            _ => None,
+        };
+        for stmt in f.body.iter_mut() {
+            resolve_bare_struct_lits_in_stmt(stmt, fn_return_struct.as_deref(), &struct_names);
+        }
     }
     for s in program.structs.iter_mut() {
         for fld in s.fields.iter_mut() {
@@ -7993,6 +8026,13 @@ fn monomorphize_type_decls_in_program(
             };
             for stmt in method.body.iter_mut() {
                 resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
+            }
+            let method_return_struct = match &method.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
             }
         }
     }
@@ -8026,6 +8066,13 @@ fn monomorphize_type_decls_in_program(
             };
             for stmt in method.body.iter_mut() {
                 resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
+            }
+            let method_return_struct = match &method.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
             }
         }
     }
@@ -8125,6 +8172,110 @@ fn resolve_bare_enum_ctors_in_stmt(
         Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
             for s in body.iter_mut() {
                 resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Struct analog of `resolve_bare_enum_ctor_receiver`/
+/// `resolve_bare_enum_ctors_in_stmt` (BUG-46's fix) — same bug
+/// class, same fix shape, found sweeping the testing matrix's
+/// "generic struct instantiated at 2+ different T" row: once a
+/// SECOND monomorphic instantiation of the same generic struct
+/// exists anywhere in the program, `Env::resolve_struct_name`'s
+/// "exactly one candidate" fallback can no longer disambiguate a
+/// bare `Box2 { items: ... }` literal, and EVERY construction site
+/// for that struct breaks with "unknown struct type", even ones
+/// whose concrete instantiation is perfectly clear from a `let`
+/// annotation or the enclosing function's return type. `StructLit`
+/// carries its `type_name` directly (no receiver-expression
+/// indirection like an enum constructor call), so the rewrite is
+/// simpler: just overwrite `type_name` in place when it names a
+/// generic template and the enclosing `let`/`return` already tells
+/// us the concrete instantiation.
+fn resolve_bare_struct_lit_receiver(
+    expr: &mut Expr,
+    target_struct_name: &str,
+    struct_template_names: &std::collections::HashSet<String>,
+) {
+    if let ExprKind::StructLit { type_name, .. } = &mut expr.kind {
+        if struct_template_names.contains(type_name.as_str()) {
+            *type_name = target_struct_name.to_string();
+        }
+        return;
+    }
+    // `let vi: Vec<Box2<i64>> = vec(Box2 { .. }, Box2 { .. });` --
+    // the single most natural way to write "a Vec of a generic
+    // struct" (matches every other `vec(literal, literal, ...)`
+    // pattern used throughout the codebase/tutorials). The `vec(...)`
+    // builtin's every argument shares the Vec's element type, so
+    // once the LET's annotation identifies the target element as a
+    // generic-struct instantiation, recurse into each arg with the
+    // same target. Deliberately narrow to the `vec` builtin itself
+    // (not arbitrary function calls) -- same "add resolving power,
+    // never remove it" philosophy as the enum fix this mirrors.
+    if let ExprKind::Call { name, args, .. } = &mut expr.kind {
+        if name == "vec" {
+            for a in args.iter_mut() {
+                resolve_bare_struct_lit_receiver(a, target_struct_name, struct_template_names);
+            }
+        }
+    }
+}
+
+/// Struct analog of `resolve_bare_enum_ctors_in_stmt`.
+fn resolve_bare_struct_lits_in_stmt(
+    stmt: &mut Stmt,
+    fn_return_struct: Option<&str>,
+    struct_template_names: &std::collections::HashSet<String>,
+) {
+    match stmt {
+        Stmt::Let { annotation: Some(Type::Struct(target)), expr, .. } => {
+            let target = target.clone();
+            resolve_bare_struct_lit_receiver(expr, &target, struct_template_names);
+        }
+        Stmt::Let { annotation: Some(Type::Vec(elem)), expr, .. }
+            if matches!(&**elem, Type::Struct(_)) =>
+        {
+            let Type::Struct(target) = &**elem else { unreachable!() };
+            let target = target.clone();
+            resolve_bare_struct_lit_receiver(expr, &target, struct_template_names);
+        }
+        Stmt::Return { expr, .. } => {
+            if let Some(target) = fn_return_struct {
+                resolve_bare_struct_lit_receiver(expr, target, struct_template_names);
+            }
+        }
+        Stmt::If { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::IfLet { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::While { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::WhileLet { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
             }
         }
         _ => {}
@@ -8610,8 +8761,19 @@ fn type_mangle(ty: &Type) -> String {
         Type::OwnedStr => "OwnedStr".to_string(),
         Type::Struct(name) => format!("Struct_{}", name),
         Type::Enum(name) => format!("Enum_{}", name),
+        // BUG-72: `{:?}` on a Type wrapping a `Vec<Type>` (Tuple's
+        // element list, FnPtr's param list, ...) renders with `[`/`]`
+        // (Rust's derived Debug for Vec) -- these weren't in the
+        // replacement set below, so a mangled name like a generic
+        // function specialized over a Tuple T could come out
+        // containing literal `[`/`]` (e.g. `Tuple_[I64__I64]_`),
+        // which isn't a valid bare identifier in emitted LLVM IR
+        // (`@fn_first__Tuple_[I64__I64]_` -- "expected '(' in call").
+        // The C backend happened not to hit this exact path for the
+        // repro that found it, but an unescaped `[`/`]` isn't a valid
+        // bare C identifier either, so this fix applies to both.
         other => format!("{:?}", other)
-            .replace([' ', '<', '>', ',', '(', ')', '"', '{', '}', ':'], "_"),
+            .replace([' ', '<', '>', ',', '(', ')', '"', '{', '}', ':', '[', ']'], "_"),
     }
 }
 

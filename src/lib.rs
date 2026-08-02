@@ -25218,6 +25218,94 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn generic_fn_with_ref_vec_t_param_infers_element_type_not_whole_vec() {
+        // BUG-71: found sweeping the testing matrix's "generic fn
+        // first<T>(xs: ref Vec<T>) -> T monomorphized over Struct and
+        // Tuple T" row. `infer_concrete_type_for_call`'s handling of
+        // a `Ref{inner}`/`RefMut{inner}` call argument resolved the
+        // referent's BARE scope type (e.g. `Vec<i64>` for `ref
+        // nums` where `nums: Vec<i64>`) instead of re-wrapping it as
+        // `Ref(Vec<i64>)` -- so `unify_param_to_arg`, given
+        // `param_ty = Ref(Vec(Param(T)))` vs `arg_ty = Vec(I64)`
+        // (top-level shapes don't match: Ref vs Vec), always fell
+        // through to `None`, and the fallback "T = whole arg type"
+        // path bound T to `Vec<i64>` instead of `i64` -- for ANY T,
+        // not just Struct/Tuple (confirmed with a scalar-only repro
+        // first). Every call site then failed with `argument 1 to
+        // 'first__Vec_I64_' must be assignable to ref Vec<Vec<i64>>,
+        // got ref Vec<i64>`. Fixed by re-wrapping the resolved
+        // referent type in `Type::Ref`/`Type::RefMut` before
+        // unification, letting `unify_param_to_arg`'s existing
+        // `(Ref(p), Ref(a))` arm peel both the Ref AND the Vec layer
+        // in lockstep, for any T (scalar, Struct, or Tuple).
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn first<T>(xs: ref Vec<T>) -> T {
+              return xs[0];
+            }
+            fn main() -> i64 {
+              let nums: Vec<i64> = vec(10, 20, 30);
+              let n: i64 = first(ref nums);
+
+              let pts: Vec<Pt> = vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 });
+              let p: Pt = first(ref pts);
+
+              let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+              let t: (i64, i64) = first(ref tups);
+
+              print n;
+              print p.x;
+              print p.y;
+              print t.0;
+              print t.1;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "generic fn(ref Vec<T>) -> T must infer T as the element type for scalar, Struct, and Tuple T",
+        );
+    }
+
+    #[test]
+    fn type_mangle_escapes_square_brackets_from_tuple_debug_repr() {
+        // BUG-72, found in the same sweep pass as BUG-71 (fixing
+        // BUG-71 was necessary to even reach this one): `type_mangle`'s
+        // fallback arm renders `format!("{:?}", ty)` and replaces a
+        // fixed set of punctuation with `_` -- but `Type::Tuple(Vec<Type>)`'s
+        // derived Debug output uses `[`/`]` for the inner Vec (e.g.
+        // `Tuple([I64, I64])`), and `[`/`]` weren't in the replacement
+        // set. A generic fn specialized over a Tuple T (e.g.
+        // `first<T>` called with `T = (i64, i64)`) mangled to a name
+        // containing literal brackets (`first__Tuple_[I64__I64]_`),
+        // which crashed the LLVM backend at `lli` with "expected '('
+        // in call" (not a valid bare LLVM identifier). The C backend
+        // happened not to hit this in the exact repro that found it,
+        // but `[`/`]` aren't valid in a bare C identifier either.
+        let source = r#"
+            fn first<T>(xs: ref Vec<T>) -> T {
+              return xs[0];
+            }
+            fn main() -> i64 {
+              let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+              let t: (i64, i64) = first(ref tups);
+              print t.0 + t.1;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("generic fn over Tuple T must compile to C");
+        assert!(
+            c.contains("first__Tuple_"),
+            "expected the generic-over-Tuple specialization in C output:\n{c}"
+        );
+        assert!(
+            !c.contains("Tuple_["),
+            "mangled generic-over-Tuple name must not contain a literal '[' from \
+             Type::Tuple's derived Debug repr (ordinary C array-declaration syntax \
+             elsewhere in the file is fine; only the identifier itself must be clean):\n{c}"
+        );
+    }
+
     /// C backend regression: Vec<UserStruct> as a struct field
     /// (e.g. `struct Holder { items: Vec<Point> }`). Pre-existing
     /// bug fix 2026-06-06 — Vec bundle for Struct_Point referenced
@@ -51093,6 +51181,70 @@ fn main() -> i64 {
         assert!(result.is_ok(), "M6 Apply inference must succeed: {:?}", result.err());
         let c = result.unwrap();
         assert!(c.contains("fn_unbox__i64"), "should emit unbox specialisation for i64");
+    }
+
+    #[test]
+    fn generic_struct_two_instantiations_both_construct_correctly() {
+        // BUG-46-class bug for user-defined generic STRUCTS (found
+        // sweeping the testing matrix's "generic struct instantiated
+        // at 2+ different T" row). `Env::resolve_struct_name`'s
+        // "exactly one candidate in the whole program" fallback (the
+        // struct analog of the enum heuristic BUG-46 already fixed)
+        // means once a SECOND instantiation of the same generic
+        // struct exists, a bare `Box2 { items: ... }` literal can't
+        // be disambiguated and EVERY construction site for that
+        // struct broke with "unknown struct type 'Box2'" -- even
+        // though the enclosing `let`'s own annotation already names
+        // the exact concrete instantiation. Fixed the same way
+        // BUG-46 was: rewrite the bare template name to the mangled
+        // one at `let`/`return` sites where the concrete
+        // instantiation is already known from context.
+        let source = r#"
+            struct Box2<T> { items: Vec<T> }
+            fn main() -> i64 {
+              let bi: Box2<i64> = Box2 { items: vec(1, 2, 3) };
+              let bs: Box2<OwnedStr> = Box2 { items: vec("a" + "", "b" + "") };
+              let total: i64 = bi.items[0] + bi.items[1] + bi.items[2];
+              let s0: OwnedStr = clone_at(ref bs.items, 0);
+              print total;
+              print s0;
+              print len(bs.items) as i64;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "two instantiations of the same generic struct must both construct correctly",
+        );
+    }
+
+    #[test]
+    fn vec_of_generic_struct_two_monomorphizations_compiles() {
+        // Testing-matrix sweep: "Vec<GenericStruct<i64>> alongside
+        // Vec<GenericStruct<f64>>" -- compounds BUG-70's exact bug
+        // class (a second instantiation of the same generic struct)
+        // with BUG-61's territory (a container whose element is a
+        // handle/aggregate type with its own per-shape codegen).
+        // Checked 2026-08-02, not a bug: with the BUG-70 fix already
+        // in place, `Vec<Box2<i64>>` and `Vec<Box2<OwnedStr>>`
+        // (Copy and non-Copy instantiations of the same generic
+        // struct, each wrapped in its own Vec) both compile and run
+        // correctly on both backends -- see the paired e2e test.
+        let source = r#"
+            struct Box2<T> { val: T }
+            fn main() -> i64 {
+              let vi: Vec<Box2<i64>> = vec(Box2 { val: 100 }, Box2 { val: 200 });
+              let vs: Vec<Box2<OwnedStr>> = vec(Box2 { val: "hello" + "" }, Box2 { val: "world" + "" });
+              let sum_i: i64 = vi[0].val + vi[1].val;
+              let cs0: Box2<OwnedStr> = clone_at(ref vs, 0);
+              print sum_i;
+              print cs0.val;
+              print len(vi) as i64;
+              print len(vs) as i64;
+              return 0;
+            }
+        "#;
+        compile(source)
+            .expect("Vec<GenericStruct<T>> for two different T instantiations must compile");
     }
 
     #[test]

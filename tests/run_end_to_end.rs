@@ -6906,3 +6906,139 @@ fn main() -> i64 {
         assert_eq!(stdout, "3\n-1\n7\n-999\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep, "container x generics / monomorphization": a
+// user-defined generic struct `Box2<T> { items: Vec<T> }` instantiated at
+// TWO different T (i64 and OwnedStr) in the same program. Same bug class
+// as BUG-46 (built-in generic enums) but for struct construction --
+// Env::resolve_struct_name's "exactly one candidate" fallback broke every
+// Box2 { .. } construction site once a second instantiation existed
+// anywhere in the program. Fixed via resolve_bare_struct_lits_in_stmt.
+#[test]
+fn generic_struct_two_instantiations_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic_struct_two_instantiations",
+        r#"
+struct Box2<T> { items: Vec<T> }
+fn main() -> i64 {
+  let bi: Box2<i64> = Box2 { items: vec(1, 2, 3) };
+  let bs: Box2<OwnedStr> = Box2 { items: vec("a" + "", "b" + "") };
+  let total: i64 = bi.items[0] + bi.items[1] + bi.items[2];
+  let s0: OwnedStr = clone_at(ref bs.items, 0);
+  let s1: OwnedStr = clone_at(ref bs.items, 1);
+  print total;
+  print s0;
+  print s1;
+  print len(bs.items) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "6\na\nb\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "generic fn first<T>(xs: ref Vec<T>) -> T
+// monomorphized over Struct and Tuple T": found BUG-71 (generic inference
+// through `ref Vec<T>` bound T to the whole Vec instead of its element,
+// for ANY T -- not container/generics-specific in a narrow sense, but a
+// general generic-call inference bug) and BUG-72 (a generic fn specialized
+// over a Tuple T mangled its name with literal `[`/`]` from Tuple's
+// derived-Debug fallback, crashing the LLVM backend's "expected '(' in
+// call" -- C backend was unaffected by this specific repro). Both fixed;
+// this test exercises the full row end-to-end: scalar, Struct, and Tuple T
+// through the same generic fn, correct values on both backends.
+#[test]
+fn generic_fn_ref_vec_t_over_scalar_struct_tuple_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic_fn_ref_vec_t_struct_tuple",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn first<T>(xs: ref Vec<T>) -> T {
+  return xs[0];
+}
+fn main() -> i64 {
+  let nums: Vec<i64> = vec(10, 20, 30);
+  let n: i64 = first(ref nums);
+  let pts: Vec<Pt> = vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 });
+  let p: Pt = first(ref pts);
+  let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+  let t: (i64, i64) = first(ref tups);
+  print n;
+  print p.x;
+  print p.y;
+  print t.0;
+  print t.1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "10\n1\n2\n5\n6\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "container x generics": Vec<GenericStruct<i64>>
+// alongside Vec<GenericStruct<f64>> (here OwnedStr instead of f64, to also
+// cover a non-Copy instantiation) -- two different monomorphizations of
+// the same generic struct, each wrapped in its own Vec. Compounds BUG-70's
+// bug class (2+ instantiations of the same generic struct) with BUG-61's
+// territory (container-element codegen that's written per-shape). Checked
+// 2026-08-02, not a bug -- both compile and run correctly on both
+// backends.
+#[test]
+fn vec_of_generic_struct_two_monomorphizations_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_generic_struct_two_mono",
+        r#"
+struct Box2<T> { val: T }
+fn main() -> i64 {
+  let vi: Vec<Box2<i64>> = vec(Box2 { val: 100 }, Box2 { val: 200 });
+  let vs: Vec<Box2<OwnedStr>> = vec(Box2 { val: "hello" + "" }, Box2 { val: "world" + "" });
+  let sum_i: i64 = vi[0].val + vi[1].val;
+  let cs0: Box2<OwnedStr> = clone_at(ref vs, 0);
+  let cs1: Box2<OwnedStr> = clone_at(ref vs, 1);
+  print sum_i;
+  print cs0.val;
+  print cs1.val;
+  print len(vi) as i64;
+  print len(vs) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "300\nhello\nworld\n2\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

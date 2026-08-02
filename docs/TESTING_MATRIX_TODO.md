@@ -430,18 +430,82 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x generics / monomorphization
 
-- [ ] A generic struct `struct Box2<T> { items: Vec<T> }`
+- [x] A generic struct `struct Box2<T> { items: Vec<T> }`
       instantiated at 2+ different `T` in the same program (the
       exact shape that broke for the built-in `Option`/`Result`
       generics in BUG-46 -- never re-tested for a *user-defined*
-      generic struct wrapping a container).
-- [ ] A generic function `fn first<T>(xs: ref Vec<T>) -> T`
+      generic struct wrapping a container) -- **found+fixed
+      2026-08-02, BUG-46-class bug, confirmed for structs too.**
+      `Env::resolve_struct_name` (the struct analog of the enum
+      "exactly one candidate in the whole program" heuristic BUG-46
+      patched) had the identical gap: the instant a second
+      instantiation of the same generic struct exists anywhere in
+      the program, a bare `Box2 { items: ... }` literal can't be
+      disambiguated and EVERY construction site for that struct
+      breaks with "unknown struct type 'Box2'" -- confirmed via a
+      minimal repro with `Box2<i64>` + `Box2<OwnedStr>` side by side;
+      a single instantiation alone compiled fine. Fixed the same way
+      BUG-46 was fixed for enums: added
+      `resolve_bare_struct_lits_in_stmt`/
+      `resolve_bare_struct_lit_receiver`, rewriting a bare
+      `StructLit.type_name` to its already-known concrete
+      monomorphization at `let`/`return` sites (mirroring
+      `resolve_bare_enum_ctors_in_stmt` exactly, wired into the same
+      three call sites: plain functions, `implement` blocks, `methods
+      on T` blocks). Both instantiations now construct and run
+      correctly on both backends. New tests: 1 `src/lib.rs` + 1
+      `tests/run_end_to_end.rs` (both backends).
+- [x] A generic function `fn first<T>(xs: ref Vec<T>) -> T`
       monomorphized over a `Struct` T and a `Tuple` T in the same
-      program.
-- [ ] `Vec<GenericStruct<i64>>` alongside `Vec<GenericStruct<f64>>`
+      program -- **found+fixed 2026-08-02, two independent bugs
+      (BUG-71, BUG-72), both general rather than container/generics-
+      angle-specific.** BUG-71: generic inference through a `ref
+      Vec<T>` parameter bound T to the WHOLE Vec instead of its
+      element -- confirmed with a scalar-only repro FIRST (T=i64
+      alone already broken), so this was never actually about
+      Struct/Tuple specifically, just never tested for `ref Vec<T>`
+      shaped params at all (`ref T` and by-value `Vec<T>` both
+      already worked). Root cause: `infer_concrete_type_for_call`
+      resolved a `ref`/`mut ref` call argument's referent type from
+      scope but never re-wrapped it in `Type::Ref`/`RefMut`, so
+      `unify_param_to_arg`'s `(Ref(p), Ref(a))` peeling arm could
+      never match against a `Ref(Vec(Param(T)))` parameter shape and
+      silently fell back to "T = whole arg type". Fixed by re-
+      wrapping the resolved type before unification. BUG-72 (found
+      immediately after, fixing BUG-71 was needed to even reach it):
+      `type_mangle`'s Debug-based fallback didn't escape `[`/`]`, so
+      a generic fn specialized over a Tuple T (whose `Type::Tuple`
+      derived-Debug repr uses `[...]` for the element list) mangled
+      to a name with literal brackets, crashing the LLVM backend
+      ("expected '(' in call" -- not a valid identifier); C backend
+      unaffected in the exact repro that found it. Fixed by adding
+      `[`/`]` to the mangler's replacement set. Confirmed correct on
+      both backends for scalar, Struct, and Tuple T through the same
+      generic fn. New tests: 2 `src/lib.rs` + 1
+      `tests/run_end_to_end.rs` (both backends).
+- [x] `Vec<GenericStruct<i64>>` alongside `Vec<GenericStruct<f64>>`
       -- two different monomorphizations of the same generic struct
       both used as Vec elements (compounds BUG-61's exact bug class
-      with generics).
+      with generics) -- **found+fixed 2026-08-02, BUG-73, a BUG-70
+      follow-up gap.** BUG-70's fix (`resolve_bare_struct_lits_in_stmt`)
+      only rewrote a bare `StructLit` when it was the LET's own
+      top-level RHS expression -- it never recursed into a `vec(...)`
+      call's argument list. So `let vi: Vec<Box2<i64>> = vec(Box2 {
+      val: 100 }, Box2 { val: 200 });` -- the single most natural way
+      to write "a Vec of a generic struct" (matches every other
+      `vec(literal, literal, ...)` pattern used throughout this
+      codebase) -- still hit "unknown struct type 'Box2'" once a
+      second `Box2<...>` instantiation existed, exactly this row's
+      scenario. Fixed by (1) teaching `resolve_bare_struct_lit_receiver`
+      to recurse into a `vec(...)` call's arguments (every arg shares
+      the Vec's element type), and (2) adding a `Stmt::Let {
+      annotation: Some(Type::Vec(Struct(target))), .. }` match arm
+      alongside the existing bare `Type::Struct(target)` one. Both a
+      Copy (`Box2<i64>`) and non-Copy (`Box2<OwnedStr>`) instantiation,
+      each in its own `Vec`, now construct and run correctly on both
+      backends -- no BUG-61-class element-size/free-helper bug found
+      once construction itself worked. New tests: 1 `src/lib.rs` + 1
+      `tests/run_end_to_end.rs` (both backends).
 
 ### Container x pattern matching / enum payload depth
 
