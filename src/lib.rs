@@ -52276,5 +52276,57 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-64: `Channel<T,N>` accepted ANY struct/enum `T`
+    /// unconditionally, with no check that `T` is Copy.
+    /// `channel_send`/`channel_recv` copy the payload bytewise
+    /// (no move-out-of-sender or deep-clone-on-send machinery), so
+    /// a non-Copy struct payload (one owning a `Vec` field) got its
+    /// heap pointer duplicated into the channel's slot while the
+    /// checker still treated the sender's original variable as
+    /// live -- a genuine, silent double-free at runtime on both
+    /// backends (confirmed crashing before this fix), not a clean
+    /// diagnostic. Now rejected at the `channel_new()`
+    /// construction site.
+    #[test]
+    fn channel_of_non_copy_struct_is_a_clean_diagnostic_not_a_double_free() {
+        let source = r#"
+            struct Msg { id: i64, tags: Vec<i64> }
+            fn main() -> i64 {
+              let ch: Channel<Msg, 4> = channel_new();
+              let tags: Vec<i64> = vec(10, 20, 30);
+              let m: Msg = Msg { id: 7, tags: tags };
+              let _ = channel_send(ref ch, m);
+              let got: Msg = channel_recv(ref ch);
+              print got.id;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("Channel<Msg-with-Vec-field,4> must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("Copy struct/enum")),
+            "expected the Channel-element-must-be-Copy diagnostic; got: {:?}",
+            errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Confirms the fix above doesn't regress the documented-working
+    /// case: a Copy-only struct (all-scalar fields) as a Channel
+    /// payload must still compile.
+    #[test]
+    fn channel_of_copy_only_struct_still_compiles() {
+        let source = r#"
+            struct Msg { id: i64, value: i64 }
+            fn main() -> i64 {
+              let ch: Channel<Msg, 8> = channel_new();
+              let m: Msg = Msg { id: 1, value: 99 };
+              let _ = channel_send(ref ch, m);
+              let got: Msg = channel_recv(ref ch);
+              print got.id;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Channel<Msg> with an all-scalar struct payload must still compile");
+    }
+
 }
 

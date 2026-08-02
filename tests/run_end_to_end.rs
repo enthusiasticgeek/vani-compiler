@@ -6325,3 +6325,59 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-64, found sweeping "container x concurrency-handle nesting"
+// for `Channel<StructWithVecField, N>`: sending a non-Copy struct
+// (one owning a Vec field) through a Channel double-freed at
+// runtime on both backends -- `channel_send`/`channel_recv` copy
+// the payload bytewise with no move-out-of-sender or deep-clone
+// machinery, so the sender's original variable AND the received
+// value ended up as two independent owners of the same heap
+// buffer. Now cleanly rejected at compile time instead.
+#[test]
+fn channel_of_non_copy_struct_is_rejected_cleanly_on_both_backends() {
+    let src = write_tmp_vani(
+        "channel_of_non_copy_struct_rejected",
+        r#"
+struct Msg { id: i64, tags: Vec<i64> }
+fn main() -> i64 {
+  let ch: Channel<Msg, 4> = channel_new();
+  let tags: Vec<i64> = vec(10, 20, 30);
+  let m: Msg = Msg { id: 7, tags: tags };
+  let _ = channel_send(ref ch, m);
+  let got: Msg = channel_recv(ref ch);
+  print got.id;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            !output.status.success(),
+            "Channel<Msg-with-Vec-field,4> must be rejected at compile time \
+             (not crash at runtime with a double-free) for {:?}",
+            backend_args
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Copy struct/enum"),
+            "expected the Channel-element-must-be-Copy diagnostic for {:?}; \
+             got stderr: {}",
+            backend_args, stderr
+        );
+        assert!(
+            !stderr.contains("double free") && !stderr.contains("free():"),
+            "must be a clean diagnostic, not a crashed double-free, for {:?}; \
+             got stderr: {}",
+            backend_args, stderr
+        );
+    }
+}

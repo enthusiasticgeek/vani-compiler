@@ -4791,4 +4791,58 @@ verifying the four fixes above against their tutorial worked examples
   Vec-of-tuple bundle referencing it) plus 1 real end-to-end test
   (both backends, correct printed values).
 
+- [x] **BUG-64 (found+fixed 2026-08-02 — silent double-free, both
+  backends; a soundness gap, not just a codegen bug).** Found
+  sweeping "container x concurrency-handle nesting" for
+  `Channel<StructWithVecField, N>`. Minimal repro:
+  ```vani
+  struct Msg { id: i64, tags: Vec<i64> }
+  fn main() -> i64 {
+    let ch: Channel<Msg, 4> = channel_new();
+    let tags: Vec<i64> = vec(10, 20, 30);
+    let m: Msg = Msg { id: 7, tags: tags };
+    let _ = channel_send(ref ch, m);
+    let got: Msg = channel_recv(ref ch);
+    print got.id;
+    return 0;
+  }
+  ```
+  Crashed with `free(): double free detected in tcache 2` on BOTH
+  backends (LLVM: `lli` aborts; C: the compiled binary aborts) --
+  not a compile error, a runtime memory-safety crash with no
+  warning at all. Root cause: `is_supported_channel_element`
+  accepted `Type::Struct(_)`/`Type::Enum(_)` unconditionally,
+  with no check that the type is actually Copy. `channel_send`/
+  `channel_recv` copy the payload BYTEWISE into/out of the ring
+  buffer (both backends' runtime helpers) -- there is no move-
+  out-of-sender or deep-clone-on-send machinery. For a non-Copy
+  struct (one owning a `Vec`/`OwnedStr`/`Box` field), this
+  bytewise copy duplicates the heap pointer into the channel's
+  slot while the checker still treats the SENDER's original
+  variable (`m`) as live and due a normal scope-exit drop -- so
+  both `m`'s drop AND the later `got`'s drop free the SAME heap
+  buffer. The doc's own worked examples (and the pre-existing
+  passing test suite) only ever used Copy-only (all-`i64`)
+  struct payloads, so this gap was never exercised. Fixed by
+  requiring `ty.is_copy()` for a Struct/Enum Channel element (the
+  existing `is_copy()` machinery already correctly walks a
+  struct's fields via `STRUCT_NON_COPY_REGISTRY`, populated
+  during the checker's struct-validation pass, so this needed no
+  new Copy-detection logic -- just wiring `is_supported_channel_
+  element` to actually use it). Also improved the rejection
+  diagnostic to explain WHY (aliasing/double-free risk), not just
+  restate the old "must be an integer width or bool" text that
+  was already inaccurate before this fix (it never mentioned that
+  Copy structs/enums were allowed at all).
+  New tests: 2 `src/lib.rs` (the double-free repro is now cleanly
+  rejected; the pre-existing Copy-only-struct case still compiles)
+  plus 1 real end-to-end test (both backends: process exits
+  non-zero with the new diagnostic text, and — the actually
+  load-bearing assertion — stderr contains no "double free"/
+  "free():" crash text at all).
+  **Not chased further in this pass**: implementing real move-out-
+  of-sender or deep-clone-on-send semantics so non-Copy payloads
+  could be supported safely — noted as a genuine future feature,
+  not a bug, since the current behavior (clean rejection) is sound.
+
 ---

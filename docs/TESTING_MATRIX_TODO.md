@@ -184,10 +184,17 @@ since that's exactly where BUG-61 lived.
       falling through to `c_leaf_type`'s hardcoded (and wrong)
       `intent_mutex_i64`-style placeholders. Fixed with 5 new arms
       delegating to the already-correct per-type storage helpers.
-- [ ] `Channel<StructWithVecField, N>` -- a Channel whose payload
-      type is a struct that itself owns a `Vec<T>` field (payload
-      copy semantics through the ring buffer with a heap-owning
-      field inside).
+- [x] `Channel<StructWithVecField, N>` -- **found+fixed 2026-08-02,
+      BUG-64**: a genuine soundness gap, not just a codegen bug --
+      `is_supported_channel_element` accepted ANY struct/enum
+      unconditionally, with no Copy check, so a non-Copy payload's
+      heap pointer got bytewise-duplicated into the ring buffer
+      while the sender's original variable was still considered
+      live -- a real, silent double-free at runtime on BOTH
+      backends. Fixed by requiring Copy for struct/enum Channel
+      elements. This was the most severe finding of the whole
+      sweep (crashed with no warning at all, not even a compile
+      error, before the fix).
 - [ ] `Vec<Task>` / storing `Task<R>` handles in a container before
       `join`-ing them in a loop (vs. the tutorial's one-off spawn
       pattern).
@@ -233,8 +240,12 @@ since that's exactly where BUG-61 lived.
       so its bundle was never emitted, while the eagerly-emitted
       struct-field `Vec<Tuple>` bundle referenced it regardless.
       Fixed with the same early/late partition pattern as BUG-61.
-- [ ] `HashMap<i64, Vec<Struct>>` -- container-of-container through
-      a HashMap value type, not just Vec-of-Vec.
+- [x] `HashMap<i64, Vec<Struct>>` -- **checked 2026-08-02, not a
+      bug**: `hashmap_insert`/`hashmap_get` cleanly and consistently
+      reject any non-scalar `V` on both backends ("hashmap_insert()
+      supports scalar V in v1") -- matches the documented v1
+      limitation in `intermediate/14_collections.md`. Not a
+      divergence bug.
 
 ### Async / task x container nesting
 

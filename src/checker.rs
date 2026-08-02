@@ -22478,6 +22478,26 @@ fn channel_element_of(ty: &Type) -> Option<Type> {
 /// shadow trick `Atomic<bool>` uses). Struct elements map to
 /// their named LLVM struct type `%Struct_<Name>`.
 fn is_supported_channel_element(ty: &Type) -> bool {
+    // BUG-64 (2026-08-02): `Struct`/`Enum` were accepted
+    // unconditionally, with no check that the type is actually
+    // Copy. `channel_send`/`channel_recv` copy the payload
+    // bytewise into/out of the ring buffer (see `emit_channel_
+    // bundle`'s C runtime and the LLVM `ch_send_write`/`ch_recv_
+    // body` codegen) -- there is no move-out-of-sender or deep-
+    // clone-on-send machinery, so a non-Copy struct/enum payload
+    // (one owning a `Vec`/`OwnedStr`/`Box` field) gets its heap
+    // pointer bytewise duplicated into the channel's internal
+    // slot while the checker still treats the SENDER's original
+    // variable as live and droppable. Both the sender's scope-exit
+    // drop and the receiver's later drop then free the SAME heap
+    // buffer -- a real, silent double-free (confirmed crashing on
+    // both backends), not a clean diagnostic. Found sweeping
+    // `Channel<StructWithVecField, N>` for the testing-matrix pass
+    // (2026-08-02). Until move-out/deep-clone semantics for
+    // channel payloads are implemented, require Copy so the only
+    // structs/enums admitted are ones a bytewise copy is actually
+    // sound for (matches the doc's own worked examples, which are
+    // all Copy-only).
     matches!(
         ty,
         Type::I8
@@ -22489,9 +22509,7 @@ fn is_supported_channel_element(ty: &Type) -> bool {
             | Type::U32
             | Type::U64
             | Type::Bool
-            | Type::Struct(_)
-            | Type::Enum(_)
-    )
+    ) || (matches!(ty, Type::Struct(_) | Type::Enum(_)) && ty.is_copy())
 }
 
 /// Whether `n` is a power of two â‰¥ 1. The Vyukov ring buffer
@@ -32700,7 +32718,10 @@ fn coerce_checked(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
-                        "Channel element type must be an integer width or bool, got {}",
+                        "Channel element type must be an integer width, bool, or a \
+                         Copy struct/enum (no OwnedStr/Vec/Box/etc. field -- send/recv \
+                         copy the payload bytewise, which would alias and double-free \
+                         a heap-owning field), got {}",
                         tgt_elem
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
