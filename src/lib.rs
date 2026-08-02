@@ -11602,6 +11602,115 @@ mod tests {
         );
     }
 
+    /// BUG-33 (found in an earlier tutorial audit, fixed here
+    /// 2026-08-01 in the "fix documented TODO bugs" pass).
+    /// `ensures` clauses failed to resolve a `let`-bound return
+    /// value: `fn double(n) -> i64 requires n>=0; ensures _return ==
+    /// n*2; { let r = n*2; return r; }` rejected with a nonsensical
+    /// counterexample (`n=0, r=-1`), even though `return n*2;`
+    /// directly (no intermediate `let`) compiled fine with the
+    /// identical `ensures`. Root cause: `verify_ensures_at_return`
+    /// substitutes `_return` with the bare return-statement AST
+    /// (`Var("r")` for `return r;`), and `smt_facts` had no general
+    /// case recording a plain scalar `let name = expr;` as an
+    /// equality fact -- every OTHER RHS shape (call-with-ensures,
+    /// Vec-builtin, array-literal, Vec/Array rebind) already got
+    /// one. Fixed by recording a `name == expr` fact for any scalar
+    /// `let` whose RHS is a pure arithmetic/boolean shape (no Call,
+    /// so it never conflicts with the call-with-ensures case).
+    #[test]
+    fn ensures_resolves_through_let_bound_return_value() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn double(n: i64) -> i64
+            requires n >= 0;
+            ensures _return == n * 2;
+            {
+              let r: i64 = n * 2;
+              return r;
+            }
+            fn main() -> i64 { return double(5); }
+        "#;
+        compile(source).expect("ensures must resolve through the let-bound return value");
+    }
+
+    /// BUG-33 soundness check: fixing the false-negative above must
+    /// NOT turn into a false-positive -- a genuinely wrong `ensures`
+    /// clause on the identical `let`-then-`return` shape must still
+    /// be rejected.
+    #[test]
+    fn ensures_via_let_still_rejects_genuinely_wrong_claim() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn wrong(n: i64) -> i64
+            requires n >= 0;
+            ensures _return == n * 3;
+            {
+              let r: i64 = n * 2;
+              return r;
+            }
+            fn main() -> i64 { return wrong(5); }
+        "#;
+        let errors = compile(source).expect_err("ensures _return == n * 3 is false for n * 2");
+        assert!(
+            errors.iter().any(|e| e.message.contains("ensures clause does not hold")),
+            "expected the real ensures-violation diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// BUG-33 fix follow-up regression guard: the first two attempts
+    /// at this fix each broke loop-invariant preservation checking
+    /// in a different way once a pre-loop scalar `let` (now
+    /// recording a fact) was later reassigned inside the loop --
+    /// found and fixed in the SAME session as BUG-33 itself, not a
+    /// separately-numbered bug. (1) A blunt "drop any fact
+    /// mentioning the reassigned name" scrub also deleted the
+    /// `for`-loop's own bounds fact (its auto-increment substitution
+    /// counts the loop var as "reassigned"). (2) A shape-based
+    /// scrub (bare `Var(name) == expr`) collided with a user-written
+    /// invariant of the identical shape (`invariant acc == 2 * i;`)
+    /// and incorrectly deleted the invariant ASSUMPTION itself. The
+    /// final fix tags its own facts with a dedicated
+    /// `__smt_scalar_let_eq` marker Call that can't collide with
+    /// anything user-written. This test exercises exactly the
+    /// combination that broke both prior attempts: a pre-loop
+    /// scalar `let`, a loop invariant of the identical `Var == expr`
+    /// shape, and multiple reassignments per iteration.
+    #[test]
+    fn loop_invariant_preservation_unaffected_by_pre_loop_scalar_let_fact() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64
+            ensures _return >= 0;
+            {
+              let i: i64 = 0;
+              let acc: i64 = 0;
+              while i < 5
+              invariant i >= 0;
+              invariant i <= 5;
+              invariant acc == 2 * i;
+              {
+                acc = acc + 1;
+                i = i + 1;
+                acc = acc + 1;
+              }
+              prove acc == 10;
+              return acc;
+            }
+        "#;
+        compile(source).expect(
+            "loop invariant preservation must not be broken by the pre-loop \
+             `let i: i64 = 0;` / `let acc: i64 = 0;` scalar facts",
+        );
+    }
+
     #[test]
     fn invariant_becomes_post_loop_fact() {
         if !z3_available() {

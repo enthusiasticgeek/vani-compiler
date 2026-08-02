@@ -5616,6 +5616,49 @@ fn main() -> i64 {
     }
 }
 
+// BUG-33, found in an earlier tutorial audit and fixed here
+// (2026-08-01): `ensures` clauses failed to resolve a `let`-bound
+// return value. Only a real run confirms the fix produces the
+// correct runtime value on both backends, not just that the
+// SMT proof discharges.
+#[test]
+fn ensures_with_let_bound_return_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "ensures_let_bound_return_real_run",
+        r#"
+fn double(n: i64) -> i64
+requires n >= 0;
+ensures _return == n * 2;
+{
+  let r: i64 = n * 2;
+  return r;
+}
+fn main() -> i64 {
+  print double(21);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "ensures with a let-bound return value must compile and run for {:?}; stderr: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "42\n", "wrong value for {:?}", backend_args);
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(

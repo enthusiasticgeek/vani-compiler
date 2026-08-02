@@ -10761,6 +10761,11 @@ fn check_one_stmt(
             }
 
             let var_ty = checked.ty().clone();
+            // BUG-33 fix: captured here (before `var_ty` gets moved
+            // into the TypedStmt below) for the scalar-let SMT fact
+            // added further down in this match arm.
+            let let_ty_is_smt_scalar =
+                var_ty.is_integer() || var_ty.is_float() || matches!(var_ty, Type::Bool);
             // L4 (B) Phase 1 (2026-06-08): ref-typed let-bindings
             // are now accepted. See the Let-stmt annotation
             // comment above for why this is safe under v1's
@@ -10982,6 +10987,58 @@ fn check_one_stmt(
                         }
                     }
                 }
+            }
+            // BUG-33 fix: a plain scalar `let name = <arith expr>;`
+            // (no function call, no aggregate) recorded NO fact at
+            // all connecting `name` to its RHS -- so `ensures
+            // _return == n * 2;` on `let r: i64 = n * 2; return r;`
+            // substitutes `_return` with the bare `Var("r")`, and
+            // the solver, having no fact about `r`, correctly (from
+            // its own point of view) finds `r = -1` disproves the
+            // claim, even though `r` provably can't be -1. Every
+            // OTHER RHS shape already gets a fact (call-with-
+            // ensures, Vec-builtin, array-literal, Vec/Array
+            // rebind) -- this was the one common gap: ordinary
+            // scalar arithmetic. Deliberately narrow and
+            // conservatively safe: `is_smt_arithmetic_shape` only
+            // allows Var/Int/Float/Bool/Unary/Binary/Cast subtrees
+            // (no Call, so this never duplicates or conflicts with
+            // the `record_ensures_facts` case above, which is the
+            // only shape needing special call-into-callee-contract
+            // handling), and the fact itself (`name == rhs`) is
+            // true by construction -- it can only let the solver
+            // prove MORE things, never accept something unsound,
+            // since it's not asserting anything beyond what the
+            // `let` itself already means.
+            if !was_shadow
+                && let_ty_is_smt_scalar
+                && is_smt_arithmetic_shape(expr)
+            {
+                // Wrapped in the `__smt_scalar_let_eq` marker (see
+                // smt.rs's encoder arm for it) rather than a bare
+                // `Binary { op: Eq, .. }` so the loop-invariant scrub
+                // in `verify_loop_invariants_with_havoc`'s callers
+                // can unambiguously identify "this is an
+                // auto-generated fact from a let, not a user-written
+                // invariant" -- a bare Eq shape collided with
+                // invariants of the identical `name == expr` form
+                // (e.g. `invariant acc == 2 * i;`), which the naive
+                // first version of this fix incorrectly scrubbed
+                // away as if it were its own stale fact.
+                smt_facts.push(Expr {
+                    kind: ExprKind::Call {
+                        name: "__smt_scalar_let_eq".to_string(),
+                        name_span: crate::span::Span::default(),
+                        args: vec![
+                            Expr {
+                                kind: ExprKind::Var(name.clone()),
+                                span: crate::span::Span::default(),
+                            },
+                            expr.clone(),
+                        ],
+                    },
+                    span: crate::span::Span::default(),
+                });
             }
             false
         }
@@ -11670,9 +11727,27 @@ fn check_one_stmt(
             // post-body value of each modified variable.
             if !body_terminated {
                 let summary = collect_last_reassigns_with_env(body_stmts, env);
+                // BUG-33 fix follow-up: preservation must reason about
+                // an ARBITRARY state satisfying the invariant, not the
+                // specific pre-loop values of variables the body
+                // reassigns -- a stale fact like `i == 0` from `let i:
+                // i64 = 0;` before the loop (now recorded by the
+                // BUG-33 scalar-let fact) would otherwise pin `i` to
+                // its initial value even while checking whether the
+                // invariant survives an iteration, defeating the
+                // havoc entirely and letting genuinely-unsound loops
+                // through. Drop only the BUG-33 scalar-let fact shape
+                // for each reassigned variable -- NOT every fact that
+                // merely mentions it, which would also strip the
+                // loop's own legitimate condition/bounds facts.
+                let scrubbed_facts: Vec<Expr> = smt_facts
+                    .iter()
+                    .filter(|f| !summary.subs.keys().any(|reassigned| is_bug33_scalar_let_fact_for(f, reassigned)))
+                    .cloned()
+                    .collect();
                 verify_loop_invariants_with_havoc(
                     invariants,
-                    smt_facts,
+                    &scrubbed_facts,
                     env,
                     signatures,
                     "is not preserved by the loop body",
@@ -12448,9 +12523,19 @@ fn check_one_stmt(
                         span: *span,
                     },
                 );
+                // BUG-33 fix follow-up -- see the matching comment at
+                // the `while`-loop call site above for why this scrub
+                // is needed (a stale pre-loop fact about a variable
+                // the loop body reassigns must not leak into
+                // preservation-checking).
+                let scrubbed_facts: Vec<Expr> = smt_facts
+                    .iter()
+                    .filter(|f| !summary.subs.keys().any(|reassigned| is_bug33_scalar_let_fact_for(f, reassigned)))
+                    .cloned()
+                    .collect();
                 verify_loop_invariants_with_havoc(
                     invariants,
-                    smt_facts,
+                    &scrubbed_facts,
                     env,
                     signatures,
                     "is not preserved by the for-loop body",
@@ -33369,6 +33454,26 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
 
 /// At a `return expr;` site, verify each ensures clause holds by
 /// substituting `_return` with the return expression and running SMT.
+/// BUG-33 fix. Conservative whitelist of expression shapes safe to
+/// record as a `name == expr` SMT fact for a scalar `let`. Only
+/// pure-arithmetic/boolean subtrees are allowed -- no `Call` (a
+/// bare function call isn't generally SMT-encodable unless it's
+/// the callee-has-`ensures` shape `record_ensures_facts` already
+/// handles separately), no `Index`/`FieldAccess`/aggregates (this
+/// compiler's SMT layer doesn't model those; see the "encoding
+/// boundary" documented for `VANIC_SMT_DEBUG=1`).
+fn is_smt_arithmetic_shape(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Var(_) => true,
+        ExprKind::Unary { expr: e, .. } => is_smt_arithmetic_shape(e),
+        ExprKind::Binary { left, right, .. } => {
+            is_smt_arithmetic_shape(left) && is_smt_arithmetic_shape(right)
+        }
+        ExprKind::Cast { expr: e, .. } => is_smt_arithmetic_shape(e),
+        _ => false,
+    }
+}
+
 fn verify_ensures_at_return(
     function: &Function,
     return_expr: &Expr,
@@ -34442,6 +34547,36 @@ fn verify_pure_body(
 
 fn drop_facts_mentioning(smt_facts: &mut Vec<Expr>, name: &str) {
     smt_facts.retain(|f| !expr_mentions(f, name));
+}
+
+/// BUG-33 fix follow-up. Recognizes exactly the synthetic
+/// `__smt_scalar_let_eq` fact the BUG-33 scalar-`let` fix adds (see
+/// its push site and the matching `smt.rs` encoder arm) -- used to
+/// scrub ONLY those specific stale pre-loop facts before loop-
+/// invariant preservation checking, without also stripping OTHER
+/// fact shapes that legitimately mention a loop-reassigned variable
+/// (e.g. the loop condition/bounds facts the loop-checking
+/// machinery itself adds once inside the body, which preservation
+/// checking still needs). Two earlier, more naive versions of this
+/// predicate both broke real programs: (1) `expr_mentions` (any
+/// fact mentioning the name at all) also deleted the loop's own
+/// bounds fact, since `for`'s auto-increment substitution counts
+/// the loop variable itself as "reassigned"; (2) a bare
+/// `ExprKind::Binary { op: Eq, left: Var(name), .. }` shape check
+/// collided with a user-written invariant of the identical
+/// `name == expr` form (`invariant acc == 2 * i;`), incorrectly
+/// scrubbing the invariant ASSUMPTION itself out of the proof.
+/// Matching on the dedicated marker Call name sidesteps both: it's
+/// a name only the checker itself ever generates, never
+/// syntactically producible by user source.
+fn is_bug33_scalar_let_fact_for(fact: &Expr, name: &str) -> bool {
+    matches!(
+        &fact.kind,
+        ExprKind::Call { name: call_name, args, .. }
+            if call_name == "__smt_scalar_let_eq"
+                && args.len() == 2
+                && matches!(&args[0].kind, ExprKind::Var(n) if n == name)
+    )
 }
 
 /// Walk `expr` and rewrite every bare `Var(name)` (without `#N`

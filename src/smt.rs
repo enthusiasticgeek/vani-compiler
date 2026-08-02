@@ -1340,6 +1340,29 @@ fn encode_expr(
             let (base_name, _) = smt_array_name_for(base, versions);
             Ok(format!("(= {} {})", result_name, base_name))
         }
+        // BUG-33 fix. Synthetic scalar-equality marker the checker
+        // emits for a plain `let name: T = <arith-expr>;` (a
+        // structurally-tagged `name == <arith-expr>` fact). Using a
+        // dedicated Call name -- rather than a bare
+        // `ExprKind::Binary { op: Eq, .. }` -- lets the checker's
+        // loop-invariant-preservation scrub tell "this is my own
+        // auto-generated fact" apart from a user-written invariant
+        // that happens to have the identical `Var == expr` shape
+        // (e.g. `invariant acc == 2 * i;`) without needing anything
+        // beyond a name comparison. The actual SMT-LIB text is
+        // identical to what the plain Binary::Eq path already
+        // produces -- just re-dispatched through it after unwrapping.
+        ExprKind::Call { name, args, .. } if name == "__smt_scalar_let_eq" && args.len() == 2 => {
+            let eq_expr = Expr {
+                kind: ExprKind::Binary {
+                    op: BinaryOp::Eq,
+                    left: Box::new(args[0].clone()),
+                    right: Box::new(args[1].clone()),
+                },
+                span: expr.span,
+            };
+            encode_expr(&eq_expr, vars, target_int, versions)
+        }
         ExprKind::Call { name, .. } => Err(EncodeError::Unsupported(format!(
             "function call '{}' not supported in SMT v1",
             name
