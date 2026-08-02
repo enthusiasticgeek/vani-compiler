@@ -2937,7 +2937,7 @@ verifying the four fixes above against their tutorial worked examples
   missing arm for 'Option__i64.None'", matching the block's own
   claimed error in spirit.
 
-- [ ] **BUG-33 (found, NOT fixed — high value, needs careful work in
+- [x] **BUG-33 (found, fixed 2026-08-01 — high value, needed careful work in
   the SMT proof engine). `ensures` clauses fail to resolve a
   `let`-bound return value, always with the same nonsensical
   counterexample — a soundness-adjacent false-negative in a
@@ -3009,6 +3009,31 @@ verifying the four fixes above against their tutorial worked examples
   **Workaround documented in the tutorial**: return the expression
   directly (no intermediate `let`) in any function carrying an
   `ensures` clause on that return value.
+  ✅ Fixed 2026-08-01, in the "fix documented TODO bugs" pass, using
+  candidate direction (a) from this entry: `smt_facts` now records
+  a `name == expr` fact for any scalar `let` whose RHS is a pure
+  arithmetic/boolean shape (`is_smt_arithmetic_shape`). The fact is
+  true by construction, so it can only let the solver prove MORE
+  things, never accept something unsound. This DID surface the
+  "wide blast radius" risk this entry itself flagged — two real
+  regressions in loop-invariant preservation checking, found and
+  fixed in the same pass: (1) a stale pre-loop fact leaking into
+  preservation checking pinned a loop variable to its initial value
+  instead of letting it range over the havoc'd invariant-satisfying
+  states, defeating the whole point of preservation checking; (2) a
+  scrub attempt for (1) collided with a user-written invariant of
+  the identical `Var == expr` shape and deleted the invariant
+  ASSUMPTION itself. Final fix wraps the new fact in a dedicated
+  `__smt_scalar_let_eq` marker Call (mirroring the existing
+  `__smt_array_eq` pattern, with a matching smt.rs encoder arm) so
+  it can never again be confused with real user code. New tests: 3
+  checker-level (original repro, a soundness check confirming a
+  genuinely wrong `ensures` is still rejected, and a regression
+  guard for the exact combination that broke both prior attempts)
+  plus a real end-to-end test asserting the correct runtime value
+  on both backends. Full `cargo test --release --workspace`: 13/13
+  test binaries clean, 0 failed, run four times across the fix's
+  iterations. Commit `304c922`.
 
 - [x] **`beginner/09a_modules_primer.md` through `13a_big_o_primer.md`
   (rest of the beginner track) audited 2026-07-29 — one confirmed
