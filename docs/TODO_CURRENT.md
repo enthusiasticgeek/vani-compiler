@@ -5339,4 +5339,83 @@ verifying the four fixes above against their tutorial worked examples
   --release --workspace`: 13/13 binaries clean, 0 failed (both
   before adding these new tests and after running them individually).
 
+## Bug found sweeping "match over Vec<Enum> with 3+ variants, mixed Copy/non-Copy payloads" (found+fixed 2026-08-02)
+
+- [x] **BUG-75 (found+fixed 2026-08-02 — real LLVM/C backend
+  divergence, silent scalar-payload corruption, two layered root
+  causes).** Found while testing the testing matrix's "match over
+  `Vec<Enum>` with 3+ variants, mixed Copy/non-Copy payloads" row.
+  Minimal repro:
+  ```vani
+  enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+  fn main() -> i64 {
+    let items: Vec<Item> = vec(Item.Num(7), Item.Flag(true));
+    let it0: Item = clone_at(ref items, 0);   // becomes Num(0) on LLVM!
+    let it1: Item = clone_at(ref items, 1);   // becomes Flag(false) on LLVM!
+    ...
+  }
+  ```
+  C backend: correct (7, true). LLVM backend: `it0` reads as `Num(0)`,
+  `it1` reads as `Flag(false)` — every SCALAR payload silently
+  zeroed/defaulted. Isolated with a narrowing sequence: no-Vec direct
+  match (correct on both) → single clone_at, no loop (broken on
+  LLVM) → confirmed the bug is in `clone_at`'s LLVM codegen for
+  `Type::Enum` elements specifically.
+
+  **Root cause #1**: `LLVM_ENUM_PAYLOAD_REGISTRY` (populated via
+  `decl.payload_types.iter().find_map(|p| p.clone())`) stores the
+  FIRST payload type found across a enum's variants, used by
+  `clone_at`'s `heap_kind` detection (`Some(Type::OwnedStr) =>
+  Some("owned_str"), _ => None`) to decide whether the enum needs
+  deep-string-cloning. For `Item`, `Num`'s `i64` payload is declared
+  FIRST, so `payload_ty = Some(Type::I64)`, `heap_kind = None` — even
+  though `Item` genuinely has an OwnedStr-payloaded variant (`Text`).
+  `clone_at` therefore always took the "tag-only" fallback path,
+  which round-trips ONLY the tag via `insertvalue {} undef, i32 tag,
+  0` and leaves the payload's `[N x i8]` byte-buffer field `undef` —
+  discarding the payload for EVERY variant, not just the missed
+  OwnedStr one.
+
+  **Root cause #2** (found immediately after fixing #1 — the fix
+  newly reached a second, previously-dormant code path): for a
+  genuinely mixed-payload-type enum (3+ distinct payload types
+  across variants), `%Enum_<Name>`'s field 1 is declared `[N x i8]`
+  (a byte buffer sized to the largest variant, see
+  `llvm_enum_has_mixed_payloads`/`llvm_enum_payload_buffer_size`) —
+  NOT `i8*`. The pre-existing OwnedStr-deep-clone code
+  (`extractvalue`/`insertvalue` at the SSA-value level, assuming
+  field 1 was always `i8*`) had never actually been exercised for a
+  TRULY mixed enum before (bug #1 always routed around it), so its
+  type mismatch went undetected until now: `lli` rejected the IR
+  with `'%tN' defined with type '[8 x i8]' but expected 'ptr'`.
+
+  Fixed both:
+  1. Compute the OwnedStr-tag set directly from the per-variant
+     registry (`LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`, which already
+     exists and is correctly per-variant — used elsewhere for enum
+     drop dispatch) instead of the single-payload-type registry, so
+     detection is correct regardless of variant declaration order,
+     and so a scalar-payloaded tag can never be misrouted into the
+     string-clone branch (which would have reinterpreted its raw
+     bits as an `i8*` and handed that to `intent_str_concat` — an
+     out-of-bounds read/crash, worse than the original bug).
+  2. Rewrote the deep-clone-as-string path to operate entirely
+     through pointers: `alloca` a destination slot, `store` the
+     freshly-loaded source value into it whole (this alone already
+     preserves every tag's raw payload bytes, scalar or not), then —
+     only for a tag matching the OwnedStr set — `getelementptr` +
+     `bitcast` BOTH the source and destination payload fields to
+     `i8**` (using the correct field-1 type string, `[N x i8]` for a
+     mixed enum or `i8*` for a uniform one, computed the same way
+     the struct typedef itself is) and overwrite just the destination
+     with a freshly-cloned string pointer. This works for both field-1
+     representations and eliminates the SSA-value type-mismatch
+     entirely, since bitcasts operate on pointers, not aggregate
+     values.
+
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+  backends, hand-computed expected sum: `7 + 1000 + 2000 + 3000 + 0 =
+  6007` across all 4 variant shapes in one `Vec<Item>`). Full `cargo
+  test --release --workspace`: 13/13 binaries clean, 0 failed.
+
 ---

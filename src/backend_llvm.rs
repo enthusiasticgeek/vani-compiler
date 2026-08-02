@@ -9931,30 +9931,123 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     // registered) the load IS the deep
                     // clone — emit a round-trip via
                     // insertvalue.
-                    let payload_ty = LLVM_ENUM_PAYLOAD_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned());
-                    let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
+                    //
+                    // BUG-75: `LLVM_ENUM_PAYLOAD_REGISTRY` stores a
+                    // SINGLE `payload_ty` per enum — the FIRST
+                    // payload type found across variants
+                    // (`decl.payload_types.iter().find_map(...)`).
+                    // For a mixed-payload-type enum (closure #283 --
+                    // e.g. `Num(i64), Text(OwnedStr), Flag(bool)`)
+                    // where a non-OwnedStr variant happens to be
+                    // declared first, this made `heap_kind` compute
+                    // `None` even though the enum genuinely HAS an
+                    // OwnedStr-payloaded variant -- so `clone_at`
+                    // took the "tag-only" fallback below, which
+                    // discards the ENTIRE payload (round-trips only
+                    // the tag via `insertvalue ... undef, i32 tag,
+                    // 0`, leaving the `[N x i8]` payload byte-buffer
+                    // field `undef`) -- silently zeroing/corrupting
+                    // every payload, not just the missed OwnedStr
+                    // one: `Num(7)` cloned as `Num(0)`, `Flag(true)`
+                    // cloned as `Flag(false)`. The C backend was
+                    // unaffected (its enum clone path already keys
+                    // per-variant, not off one enum-wide type).
+                    // Fixed by computing `owned_str_tags` directly
+                    // from the PER-VARIANT registry
+                    // (`LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`) instead
+                    // of the single-type one -- correctly finds
+                    // Text's tag regardless of declaration order,
+                    // and (just as important) no longer treats
+                    // scalar-payloaded tags as "OwnedStr" purely
+                    // because they happened to share the enum-wide
+                    // `payload_tags` set (the old `payload_tags`
+                    // variable conflated "has ANY payload" with "has
+                    // an OwnedStr payload" -- entering the deep-
+                    // clone-as-string branch for a scalar tag would
+                    // have reinterpreted its raw i64/bool bits as an
+                    // `i8*` and handed that to `intent_str_concat`,
+                    // an out-of-bounds read/crash, not just a wrong
+                    // value).
+                    let variant_payloads: Vec<(String, Option<Type>)> =
+                        LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY
+                            .with(|r| r.borrow().get(enum_name).cloned())
+                            .unwrap_or_default();
+                    // Field 1's REAL declared type in `%Enum_<name>`:
+                    // a byte buffer `[N x i8]` for a genuinely mixed-
+                    // payload-type enum (mirrors
+                    // `llvm_enum_has_mixed_payloads`/the drop-path's
+                    // own `is_mixed` check just above in this file),
+                    // or plain `i8*` when every payloaded variant
+                    // shares one type (the pre-existing, narrower
+                    // case this code was originally written for).
+                    // Needed so the `bitcast` below names the correct
+                    // SOURCE type — using the wrong one is an LLVM
+                    // type-mismatch verifier error, not silently
+                    // wrong codegen.
+                    let is_mixed_payload = {
+                        let payloads: Vec<&Type> =
+                            variant_payloads.iter().filter_map(|(_, p)| p.as_ref()).collect();
+                        payloads.len() >= 2 && payloads[1..].iter().any(|t| *t != payloads[0])
+                    };
+                    let field1_ty = if is_mixed_payload {
+                        format!("[{} x i8]", llvm_enum_payload_buffer_size_by_name(enum_name))
+                    } else {
+                        "i8*".to_string()
+                    };
+                    // Precisely the tags whose OWN payload type is
+                    // OwnedStr — NOT the old `payload_tags` (every
+                    // tag with ANY payload), which would wrongly
+                    // route a scalar-payloaded tag (e.g. `Num(i64)`)
+                    // into the string-deep-clone branch below,
+                    // reinterpreting its raw bits as an `i8*`.
+                    let payload_tags: Vec<u32> = variant_payloads
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, (_, pty))| {
+                            matches!(pty, Some(Type::OwnedStr)).then(|| i as u32)
+                        })
+                        .collect();
                     let e_ty = format!("%Enum_{}", enum_name);
                     let slot_v = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = load {}, {}* {}\n",
                         slot_v, e_ty, e_ty, slot_p
                     ));
-                    let heap_kind = match &payload_ty {
-                        Some(Type::OwnedStr) => Some("owned_str"),
-                        _ => None,
-                    };
+                    let heap_kind = if payload_tags.is_empty() { None } else { Some("owned_str") };
                     if heap_kind == Some("owned_str") && !payload_tags.is_empty() {
+                        // BUG-75 follow-up: operate through POINTERS
+                        // (GEP + bitcast to i8**), not through
+                        // `extractvalue`/`insertvalue` on the
+                        // already-loaded SSA value. For a genuinely
+                        // mixed-payload-type enum, field 1's real
+                        // LLVM type is `[N x i8]` (a byte buffer, see
+                        // `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`'s own
+                        // doc comment) — `extractvalue`ing it and
+                        // handing the result directly to
+                        // `@intent_str_concat` (which expects `i8*`)
+                        // is a straight LLVM type mismatch ("defined
+                        // with type '[8 x i8]' but expected 'ptr'"),
+                        // caught immediately by `lli` once `heap_kind`
+                        // started correctly detecting the OwnedStr
+                        // tag (before that fix, this branch was simply
+                        // never reached for a mixed enum, which is
+                        // exactly why this second bug stayed latent).
+                        // Starting `dest_slot` from a full `store` of
+                        // `slot_v` (before any conditional payload
+                        // overwrite) also naturally preserves every
+                        // OTHER tag's raw payload bytes untouched —
+                        // no separate "tag-only" reconstruction path
+                        // needed.
                         let tag_v = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = extractvalue {} {}, 0\n",
                             tag_v, e_ty, slot_v
                         ));
-                        let payload_v = ctx.fresh_tmp();
+                        let dest_slot = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = alloca {}\n", dest_slot, e_ty));
                         out.push_str(&format!(
-                            "  {} = extractvalue {} {}, 1\n",
-                            payload_v, e_ty, slot_v
+                            "  store {} {}, {}* {}\n",
+                            e_ty, slot_v, e_ty, dest_slot
                         ));
                         let mut prev = "i1 false".to_string();
                         for t in &payload_tags {
@@ -9972,13 +10065,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         }
                         let cond = prev.trim_start_matches("i1 ").to_string();
                         let pay_lbl = ctx.fresh_label("cat_enum_pay");
-                        let tag_lbl = ctx.fresh_label("cat_enum_tag");
                         let join_lbl = ctx.fresh_label("cat_enum_join");
                         out.push_str(&format!(
                             "  br i1 {}, label %{}, label %{}\n",
-                            cond, pay_lbl, tag_lbl
+                            cond, pay_lbl, join_lbl
                         ));
                         out.push_str(&format!("{}:\n", pay_lbl));
+                        let src_pf_p = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            src_pf_p, e_ty, e_ty, slot_p
+                        ));
+                        let src_pf_i8pp = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast {}* {} to i8**\n",
+                            src_pf_i8pp, field1_ty, src_pf_p
+                        ));
+                        let payload_v = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load i8*, i8** {}\n",
+                            payload_v, src_pf_i8pp
+                        ));
                         let empty_p = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = getelementptr [1 x i8], [1 x i8]* @.empty_str_clone, i64 0, i64 0\n",
@@ -9989,23 +10096,25 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             "  {} = call i8* @intent_str_concat(i8* {}, i32 0, i8* {}, i32 0)\n",
                             cloned_payload, payload_v, empty_p
                         ));
-                        let new_enum_p1 = ctx.fresh_tmp();
+                        let dst_pf_p = ctx.fresh_tmp();
                         out.push_str(&format!(
-                            "  {} = insertvalue {} undef, i32 {}, 0\n",
-                            new_enum_p1, e_ty, tag_v
+                            "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            dst_pf_p, e_ty, e_ty, dest_slot
                         ));
-                        let new_enum_p2 = ctx.fresh_tmp();
+                        let dst_pf_i8pp = ctx.fresh_tmp();
                         out.push_str(&format!(
-                            "  {} = insertvalue {} {}, i8* {}, 1\n",
-                            new_enum_p2, e_ty, new_enum_p1, cloned_payload
+                            "  {} = bitcast {}* {} to i8**\n",
+                            dst_pf_i8pp, field1_ty, dst_pf_p
                         ));
-                        out.push_str(&format!("  br label %{}\n", join_lbl));
-                        out.push_str(&format!("{}:\n", tag_lbl));
+                        out.push_str(&format!(
+                            "  store i8* {}, i8** {}\n",
+                            cloned_payload, dst_pf_i8pp
+                        ));
                         out.push_str(&format!("  br label %{}\n", join_lbl));
                         out.push_str(&format!("{}:\n", join_lbl));
                         out.push_str(&format!(
-                            "  {} = phi {} [ {}, %{} ], [ {}, %{} ]\n",
-                            dest, e_ty, new_enum_p2, pay_lbl, slot_v, tag_lbl
+                            "  {} = load {}, {}* {}\n",
+                            dest, e_ty, e_ty, dest_slot
                         ));
                         ctx.current_block = join_lbl;
                     } else {

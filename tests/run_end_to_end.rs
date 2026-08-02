@@ -7166,3 +7166,61 @@ fn main() -> i64 {
         assert_eq!(stdout, "42\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// BUG-75, found sweeping "match over Vec<Enum> with 3+ variants, mixed
+// Copy/non-Copy payloads": clone_at on a mixed-payload-type enum element
+// silently corrupted every scalar payload on LLVM (two layered bugs --
+// wrong OwnedStr-tag detection, then an LLVM type mismatch once that
+// detection was fixed; see docs/TODO_CURRENT.md). This test iterates a
+// Vec<Item> with 5 elements across 4 variant shapes (i64, OwnedStr, bool,
+// no-payload), clone_at-ing each and matching, hand-computed expected sum.
+#[test]
+fn match_over_vec_enum_mixed_payloads_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "match_vec_enum_mixed_payloads",
+        r#"
+enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+fn describe(it: Item) -> i64 {
+  return match it {
+    Item.Num(n) then n,
+    Item.Text then 1000,
+    Item.Flag(b) then if b { 2000 } else { 3000 },
+    Item.Nothing then 0,
+  };
+}
+fn main() -> i64 {
+  let items: Vec<Item> = vec(
+    Item.Num(7),
+    Item.Text("hello" + ""),
+    Item.Flag(true),
+    Item.Flag(false),
+    Item.Nothing,
+  );
+  let total: i64 = 0;
+  let i: i64 = 0;
+  let n: i64 = len(items) as i64;
+  while i < n {
+    let it: Item = clone_at(ref items, i);
+    total = total + describe(it);
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // 7 (Num) + 1000 (Text) + 2000 (Flag true) + 3000 (Flag false) + 0 (Nothing) = 6007
+        assert_eq!(stdout, "6007\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

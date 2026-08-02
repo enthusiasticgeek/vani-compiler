@@ -543,9 +543,36 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
       all) hit the identical C-backend crash before the fix. New
       tests: 4 `src/lib.rs` + 3 `tests/run_end_to_end.rs` (both
       backends).
-- [ ] `match` over a `Vec<Enum>` where the enum has 3+ variants with
+- [x] `match` over a `Vec<Enum>` where the enum has 3+ variants with
       different payload shapes (mixed Copy/non-Copy payloads in the
-      same enum, iterated).
+      same enum, iterated) -- **found+fixed 2026-08-02, BUG-75, a
+      real backend DIVERGENCE (not just an LLVM-only crash).**
+      `clone_at` on a `Vec<Enum>` element -- where the enum has 3+
+      variants spanning genuinely different payload types (`Num(i64)`,
+      `Text(OwnedStr)`, `Flag(bool)`, `Nothing`) -- silently corrupted
+      every SCALAR payload on the LLVM backend: `Num(7)` cloned as
+      `Num(0)`, `Flag(true)` cloned as `Flag(false)`. C was correct
+      throughout. Two layered root causes: (1)
+      `LLVM_ENUM_PAYLOAD_REGISTRY` stored the FIRST payload type found
+      across variants (not "does any variant have OwnedStr"), so when
+      a scalar-payloaded variant was declared before the OwnedStr one,
+      `clone_at`'s OwnedStr-deep-clone detection missed it entirely
+      and fell back to a "tag-only" path that discarded the payload
+      for EVERY variant, not just the missed one. (2) Fixing #1
+      newly reached a second, previously-dormant bug: for a genuinely
+      mixed-payload-type enum the payload field's real LLVM type is a
+      byte buffer `[N x i8]`, not `i8*` -- the pre-existing deep-
+      clone-as-string code assumed `i8*` and hit a straight LLVM type
+      mismatch the instant it was actually exercised. Fixed by (1)
+      computing the OwnedStr-tag set from the per-variant payload
+      registry instead of the single-type one, and (2) rewriting the
+      deep-clone path to operate through pointers (GEP + bitcast to
+      `i8**`) instead of SSA-value extract/insert -- works for both
+      the uniform-`i8*` and mixed-`[N x i8]` representations and
+      naturally preserves every other tag's raw payload bytes. New
+      tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+      backends, hand-computed expected sum across all 4 variant
+      shapes).
 - [ ] Nested `if let` destructuring two levels deep where the OUTER
       binding is a Vec element (`if let Option.Some(Result.Ok(v)) =
       clone_at(ref xs, i)` style) -- combines BUG-46's enum-ctor

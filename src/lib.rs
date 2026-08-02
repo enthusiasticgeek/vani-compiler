@@ -41942,6 +41942,71 @@ função main() -> i64 {
     }
 
     #[test]
+    fn clone_at_mixed_payload_enum_preserves_scalar_and_string_payloads() {
+        // BUG-75, found sweeping the testing matrix's "match over
+        // Vec<Enum> with 3+ variants, mixed Copy/non-Copy payloads"
+        // row -- a real LLVM/C backend DIVERGENCE, not just an
+        // LLVM-only crash: `clone_at` on a `Vec<Enum>` element, where
+        // the enum has 3+ variants with genuinely different payload
+        // TYPES (i64, OwnedStr, bool), silently corrupted every
+        // scalar payload on the LLVM backend -- `Num(7)` cloned as
+        // `Num(0)`, `Flag(true)` cloned as `Flag(false)`. The C
+        // backend was unaffected.
+        //
+        // Root cause #1: `LLVM_ENUM_PAYLOAD_REGISTRY` stored a
+        // single `payload_ty` per enum -- the FIRST payload type
+        // found across variants -- so when a non-OwnedStr variant
+        // happened to be declared before the OwnedStr one,
+        // `clone_at`'s `heap_kind` detection missed the OwnedStr
+        // payload entirely and took a "tag-only" fallback that
+        // discarded the WHOLE payload for every variant (not just
+        // the missed OwnedStr one), round-tripping through
+        // `insertvalue undef, tag, 0` and leaving the payload byte-
+        // buffer field `undef`.
+        //
+        // Root cause #2 (found immediately after fixing #1 -- fixing
+        // the detection newly reached a second, previously-dormant
+        // bug): for a genuinely mixed-payload-type enum, field 1's
+        // real LLVM type is a byte buffer `[N x i8]`, not `i8*` --
+        // the pre-existing deep-clone-as-string code
+        // (`extractvalue`/`insertvalue` at the SSA-value level)
+        // assumed field 1 was always `i8*`, an LLVM type mismatch
+        // ("defined with type '[8 x i8]' but expected 'ptr'") the
+        // instant that branch was actually reached. Fixed by
+        // rewriting the deep-clone path to operate through pointers
+        // (GEP + bitcast to `i8**`) instead of SSA-value
+        // extract/insert, which works correctly for both the
+        // uniform-`i8*` and mixed-`[N x i8]` field-1 representations
+        // and naturally preserves every OTHER tag's raw payload
+        // bytes (no separate "tag-only" reconstruction needed --
+        // `dest_slot` starts as a full store of the loaded source
+        // value).
+        let source = r#"
+            enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+            fn describe(it: Item) -> i64 {
+              return match it {
+                Item.Num(n) then n,
+                Item.Text then 1000,
+                Item.Flag(b) then if b { 2000 } else { 3000 },
+                Item.Nothing then 0,
+              };
+            }
+            fn main() -> i64 {
+              let items: Vec<Item> = vec(Item.Num(7), Item.Text("hello" + ""), Item.Flag(true), Item.Flag(false), Item.Nothing);
+              let it0: Item = clone_at(ref items, 0);
+              let it1: Item = clone_at(ref items, 1);
+              let it2: Item = clone_at(ref items, 2);
+              let it3: Item = clone_at(ref items, 3);
+              let it4: Item = clone_at(ref items, 4);
+              let total: i64 = describe(it0) + describe(it1) + describe(it2) + describe(it3) + describe(it4);
+              print total;
+              return 0;
+            }
+        "#;
+        compile(source).expect("clone_at over a mixed-payload-type enum Vec element must compile");
+    }
+
+    #[test]
     fn try_vec_returns_result_vec_on_llvm_backend() {
         let source = r#"
             fn main() -> i64 {
