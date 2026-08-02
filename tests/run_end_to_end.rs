@@ -6054,3 +6054,154 @@ fn main() -> i64 {
     let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
     assert_eq!(stdout, "2\n", "expected len(chans) == 2; got: {}", stdout);
 }
+
+/// BUG-61 follow-up #1, found sweeping struct-field concurrency-
+/// handle + Vec-field combinations for the testing-matrix's new
+/// "container x concurrency-handle nesting" section: a struct field
+/// of type `Channel<T,N>` sitting alongside a `Vec<T>` field hit
+/// the identical typedef-ordering failure as the bare-Vec-of-
+/// Channel case (BUG-61 proper), just one level up -- the channel
+/// struct wasn't declared before the OWNING struct's own typedef.
+#[test]
+fn struct_field_channel_alongside_vec_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_field_channel_alongside_vec",
+        r#"
+struct Worker { ch: Channel<i64, 4>, buf: Vec<i64> }
+fn main() -> i64 {
+  let ch: Channel<i64, 4> = channel_new();
+  let buf: Vec<i64> = vec(1, 2, 3);
+  let w: Worker = Worker { ch: ch, buf: buf };
+  let _ = channel_send(ref w.ch, 55);
+  let v: i64 = channel_recv(ref w.ch);
+  print v;
+  print w.buf[0] + w.buf[1] + w.buf[2];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "struct {{ Channel field, Vec field }} must not fail to build for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "55\n6\n",
+            "expected channel roundtrip 55, then buf sum 1+2+3=6 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+/// BUG-61 follow-up #2: same shape, but with a `Mutex<T>` field
+/// instead of `Channel<T,N>` -- exercises `c_element_storage`'s
+/// missing Mutex/Guard/RwLock/ReadGuard/WriteGuard arms specifically
+/// (a different code path from the Channel case, since Channel
+/// already had a `c_element_storage` arm before this pass -- only
+/// its EMISSION ORDER was broken; Mutex/Guard/RwLock had neither
+/// the right NAME nor emission order until this fix).
+#[test]
+fn struct_field_mutex_alongside_vec_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_field_mutex_alongside_vec",
+        r#"
+struct Counter { m: Mutex<i64>, history: Vec<i64> }
+fn main() -> i64 {
+  let m: Mutex<i64> = mutex_new(10);
+  let history: Vec<i64> = vec(1, 2);
+  let c: Counter = Counter { m: m, history: history };
+  let g: Guard<i64> = mutex_lock(ref c.m);
+  print guard_get(ref g);
+  print c.history[0] + c.history[1];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "struct {{ Mutex field, Vec field }} must not fail to build for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "10\n3\n",
+            "expected mutex value 10, then history sum 1+2=3 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+/// Vec<Mutex<T>> / Vec<RwLock<T>> specifically -- BUG-61's fix
+/// covered these types in the same size/ordering code paths as
+/// Channel, but only Channel itself was run end-to-end to confirm.
+/// Closes that gap directly.
+#[test]
+fn vec_of_mutex_and_vec_of_rwlock_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_mutex_and_rwlock",
+        r#"
+fn main() -> i64 {
+  let m1: Mutex<i64> = mutex_new(1);
+  let m2: Mutex<i64> = mutex_new(2);
+  let mutexes: Vec<Mutex<i64>> = vec(m1, m2);
+  let g: Guard<i64> = mutex_lock(mut ref mutexes[0]);
+  print guard_get(ref g);
+
+  let r1: RwLock<i64> = rwlock_new(100);
+  let locks: Vec<RwLock<i64>> = vec(r1);
+  let rg = rwlock_read(mut ref locks[0]);
+  print read_guard_get(ref rg);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "Vec<Mutex<i64>> / Vec<RwLock<i64>> must not crash for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n100\n",
+            "expected mutexes[0]==1, then locks[0]==100 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}

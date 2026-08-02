@@ -87,13 +87,23 @@ row gets a real `.vani` snippet run through `vanic run <f>` and
 `vanic run <f> --backend=c`, output/exit-code compared against hand-
 computed expected values, not just "does it compile."
 
-1. `dyn Iface` dispatch, `Vec<dyn Iface>` -- **0 e2e coverage**,
-   despite being a documented v1-limitations-prone area
-   (intermediate/05_dyn.md, advanced/05_vtables.md).
-2. `Channel<T,N>` send/recv, including the documented
-   `Vec<Channel<T,N>>` LLVM-forces-tree / C-uses-SSA split above --
-   **0 e2e coverage** and the two backends are known to take
-   genuinely different codegen paths for it.
+1. ~~`dyn Iface` dispatch, `Vec<dyn Iface>`~~ -- **done 2026-08-01**:
+   swept struct-field `dyn Iface` (two different Iface types on one
+   struct, the historical L8 shape), `ref dyn Shape` params, and a
+   3-way heterogeneous `Vec<dyn Shape>`. Both backends agree and
+   match hand-computed values. No bug found; not yet promoted to a
+   permanent e2e test (still 0 in the coverage table above) --
+   worth adding one from this sweep's repro rather than leaving the
+   subsystem at 0 permanent coverage.
+2. ~~`Channel<T,N>` send/recv, including `Vec<Channel<T,N>>`~~ --
+   **done 2026-08-01, found BUG-61**: bare scalar/struct-payload
+   Channel send/recv was fine on both backends, but
+   `Vec<Channel<T,N>>` accessed via `mut ref chans[i]` crashed LLVM
+   (heap corruption -- hardcoded 24-byte/element malloc size vs. the
+   real 80-byte struct) and failed to compile under C (channel
+   struct typedef referenced before declaration). Fixed in commit
+   `8551cac` with 5 new tests (2 lib.rs, 3 e2e) closing the e2e gap
+   this row used to describe as 0.
 3. Function pointers (`fnptr`, `06c_fnptr_primer.md`) as values,
    params, and struct fields -- **0 e2e coverage**.
 4. Iterator-style Vec builtins (`vec_map`/`vec_fold`/`vec_filter`/
@@ -113,6 +123,117 @@ computed expected values, not just "does it compile."
    documented per-backend SSA gap in the table above) -- confirm
    the tree-C fallback produces correct values, not just that it
    compiles.
+
+## Nested / multi-level combinations (added 2026-08-02)
+
+BUG-61 (item 2 above) wasn't a bug in `Channel<T,N>` alone, or in
+`Vec<T>` alone -- it only existed at their *intersection*
+(`Vec<Channel<T,N>>`). Every bug found and fixed in this file and in
+`TODO_CURRENT.md` before this point was found by testing ONE feature
+at a time; almost none of them tested two-or-three-feature nesting
+deliberately. That's a real, systematic blind spot: per-backend
+codegen for a container (`Vec`/`Array`/`Tuple`/`Struct`) frequently
+special-cases "the element is a scalar" vs. "the element is a
+Struct/Tuple/payloaded-enum" (see `vec_element_size_expr`'s own
+match arms) and simply forgets any OTHER aggregate/handle-shaped
+element type exists -- exactly the class of gap BUG-61 was. This
+section tracks that axis explicitly: basic containers (Vec, Array,
+Tuple, Struct fields) nested around intermediate/advanced handle
+types (Channel, Mutex, RwLock, Atomic, Task, dyn Iface, closures),
+and multi-level nesting of the containers themselves.
+
+**Sweep method**: same as above (real `.vani` snippet, run through
+both `--backend` values, output/exit-code checked against hand-
+computed values) -- but each row is a *pairing*, not a single
+feature. Prioritize pairings where one side is a "container whose
+element-size/type-name logic is written per-shape" (Vec, Channel,
+Array, struct fields) and the other is a handle/aggregate type,
+since that's exactly where BUG-61 lived.
+
+### Container x concurrency-handle nesting
+
+- [x] `Tuple` containing a `Channel<T,N>` element (e.g.
+      `(Channel<i64,4>, i64)`) -- **checked 2026-08-02, not a bug**:
+      `ref pair.0` / `mut ref pair.0` (borrowing a TUPLE field, as
+      opposed to a struct field) is cleanly and consistently
+      rejected on both backends ("'ref' can only borrow a named
+      variable or a struct field") -- a real v1 syntax gap
+      (tuple-field ref targets aren't supported at all yet, unlike
+      the diagnostic's own example text which only mentions struct
+      fields), but NOT a backend-divergence bug since both backends
+      agree. Not chased further; belongs in `docs/v1_limitations.md`
+      as a language gap, not this bug-hunting file.
+- [x] `struct { ch: Channel<T,N>, buf: Vec<i64> }` -- **found+fixed
+      2026-08-02, BUG-61 follow-up #1**: identical "unknown type
+      name" failure as bare `Vec<Channel<T,N>>`, one level up (the
+      channel struct wasn't declared before the OWNING struct's own
+      typedef). Fixed by emitting scalar-element channel/mutex/
+      rwlock bundles right after struct forward declarations,
+      before any struct body (including one with a Channel field).
+- [x] `Array<Channel<T,N>, K>` (fixed-size array, not `Vec`) --
+      **checked 2026-08-02, not a bug**: `mut ref arr[i]` on a
+      `[Channel<i64,4>; 2]` is cleanly and consistently rejected on
+      both backends ("requires 'arr' to be a Vec... got
+      [Channel<i64,4>; 2]") -- index-borrow builtins are Vec-only in
+      v1, arrays aren't supported as their target at all. Both
+      backends agree; not a divergence bug.
+- [x] `Vec<Mutex<T>>` / `Vec<RwLock<T>>` specifically -- **found+
+      fixed 2026-08-02, BUG-61 follow-up #2**: NOT the same bug as
+      Channel -- `c_element_storage` (struct-field declarators) had
+      no arms at all for Mutex/Guard/RwLock/ReadGuard/WriteGuard,
+      falling through to `c_leaf_type`'s hardcoded (and wrong)
+      `intent_mutex_i64`-style placeholders. Fixed with 5 new arms
+      delegating to the already-correct per-type storage helpers.
+- [ ] `Channel<StructWithVecField, N>` -- a Channel whose payload
+      type is a struct that itself owns a `Vec<T>` field (payload
+      copy semantics through the ring buffer with a heap-owning
+      field inside).
+- [ ] `Vec<Task>` / storing `Task<R>` handles in a container before
+      `join`-ing them in a loop (vs. the tutorial's one-off spawn
+      pattern).
+
+### Container x dyn / closure nesting
+
+- [x] `struct { shape: dyn Shape, tag: i64 }` inside a `Vec<...>`
+      (a Vec of structs that themselves hold a `dyn Iface` field --
+      two levels of indirection: Vec -> struct -> fat pointer) --
+      **checked 2026-08-02, not a bug**: `dyn Iface`'s fat pointer
+      is Copy (two plain pointers, no owned allocation of its own),
+      so the struct is entirely Copy and `items[i].shape.area()`
+      indexes directly with no clone_at/ref needed. Both backends
+      agree and match hand-computed values.
+- [ ] `Tuple` containing a `dyn Iface` element.
+- [ ] `Vec<FnPtr>` (function pointers stored in a Vec, not just
+      passed as a bare param/field -- `fnptr` itself is 0 e2e
+      coverage per the table above, so this compounds two gaps).
+- [ ] Closure capturing a `Vec<T>` or `Channel<T,N>` by move,
+      stored in a struct field, called later (closures + affine
+      capture + container nesting together).
+
+### Multi-level container nesting (no concurrency/dyn involved)
+
+- [ ] `Vec<Vec<Struct>>` (three levels: Vec of Vec of user struct --
+      exercises the topo-sort ordering logic in `backend_c.rs`
+      that BUG-61 revealed has per-feature blind spots).
+- [ ] `Array<Tuple<...>, N>` and `Vec<Array<Struct, N>>`.
+- [ ] `struct { items: Vec<(i64, OwnedStr)> }` -- struct field that's
+      a Vec of tuples (three features stacked: struct, Vec, tuple).
+- [ ] `HashMap<i64, Vec<Struct>>` -- container-of-container through
+      a HashMap value type, not just Vec-of-Vec.
+
+### Async / task x container nesting
+
+- [ ] `async fn` returning a `Struct` or `Vec<T>` (not just a
+      scalar `Future<R>` -- the tutorial's examples are scalar-R
+      only).
+- [ ] `Barrier` combined with a `Vec<Mutex<T>>` shared-state pattern
+      (barrier + per-thread-indexed mutex vec, the natural
+      "N workers each own one slot" shape).
+
+Cross off each row with the commit that added its e2e test (bug or
+no bug found -- a clean pairing still earns a permanent regression
+test, since it's exactly the kind of coverage that was missing
+before BUG-61 was found).
 
 ## Non-goals for this pass
 

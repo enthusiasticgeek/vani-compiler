@@ -4632,4 +4632,50 @@ verifying the four fixes above against their tutorial worked examples
   `Vec<Channel<T,N>>` worked example itself as a new automated sweep
   case so this class of bug can't silently regress.
 
+  **Follow-up #1, found+fixed same day (2026-08-02)**, sweeping the
+  new "container x concurrency-handle nesting" section added to
+  `docs/TESTING_MATRIX_TODO.md`: a struct FIELD of type
+  `Channel<T,N>` sitting alongside a `Vec<T>` field --
+  `struct Worker { ch: Channel<i64,4>, buf: Vec<i64> }` -- hit the
+  identical "unknown type name" failure as bare `Vec<Channel<T,N>>`
+  under `--backend=c`, one level up: the channel bundle was emitted
+  (per the fix above) right before the `element_types` Vec-bundle
+  loop, which is itself AFTER the unified struct topo loop -- too
+  late for a struct field that needs the channel struct at the
+  struct's OWN declaration. Fixed by partitioning `channel_specs`/
+  `mutex_specs`/`rwlock_specs` into "element needs no full struct
+  body" (the overwhelmingly common case -- `Channel<i64,N>`, etc.)
+  and "element needs a full struct/enum/tuple body" (e.g.
+  `Channel<UserStruct,N>`) groups: the former now emits right after
+  struct FORWARD declarations (before any struct BODY, including
+  one with a Channel field), the latter still emits after the
+  unified topo loop (since it needs full struct bodies itself). The
+  shared futex-primitives emission was correspondingly guarded
+  against double-emission across the two call sites.
+
+  **Follow-up #2, found+fixed same day (2026-08-02)**, same sweep:
+  `struct Counter { m: Mutex<i64>, history: Vec<i64> }` failed
+  differently -- not an ordering bug, a NAMING bug. `c_element_
+  storage` (the function struct-field declarators route through)
+  had explicit arms for `Channel`/`Atomic`/`Vec`/`Struct`/etc. but
+  NONE for `Mutex`/`Guard`/`RwLock`/`ReadGuard`/`WriteGuard`, so
+  those fell through to `c_leaf_type`'s hardcoded placeholder
+  spellings (`intent_mutex_i64`, `intent_guard_i64`,
+  `intent_rwlock_i64`) -- names that don't match the REAL
+  `element_tag`-based bundle names (`intent_mutex_int64_t` etc.) and
+  were never actually emitted anywhere, so cc rejected the field
+  declaration outright. Same bug class as the historical BUG-22/
+  BUG-47/closures #208/#209 (a `c_leaf_type` caller "forgetting to
+  special-case" a parametric handle type) -- just never closed for
+  these five types in this specific function. Fixed by adding the
+  five missing arms, delegating to the already-correct
+  `c_mutex_storage`/`c_guard_storage`/`c_rwlock_storage`/
+  `c_read_guard_storage`/`c_write_guard_storage` helpers (which
+  existed and were already correct -- just unused by this caller).
+
+  Both follow-ups: new tests added to `src/lib.rs` (2) and
+  `tests/run_end_to_end.rs` (3, the third specifically confirming
+  `Vec<Mutex<T>>`/`Vec<RwLock<T>>` -- covered by the original BUG-61
+  fix's code paths but never actually run end-to-end until now).
+
 ---

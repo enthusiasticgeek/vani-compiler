@@ -406,6 +406,59 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !program.structs.is_empty() {
         body.push('\n');
     }
+    // Channel<T,N>/Mutex<T>/RwLock<T> bundles whose element type
+    // has NO struct/enum/tuple dependency (the overwhelmingly
+    // common case: `Channel<i64,N>`, `Mutex<i64>`, etc.) can be
+    // emitted right here -- before struct BODIES exist, only their
+    // forward declarations above, which is all a scalar-element
+    // bundle ever needs. This has to run this early so a struct
+    // FIELD of type `Channel<T,N>` (e.g. `struct Worker { ch:
+    // Channel<i64,4>, buf: Vec<i64> }`) can reference the channel
+    // struct's full typedef at the worker struct's OWN declaration
+    // site, further down in the unified topo loop below. Element
+    // types that DO need a full struct/enum/tuple body (e.g.
+    // `Channel<UserStruct, N>`) are deferred to the later call site
+    // (search `emit_concurrency_type_bundles` further down), which
+    // runs after the unified topo loop has fully defined every
+    // struct. Found sweeping struct-field Channel/Vec combinations
+    // for the testing-matrix pass (2026-08-02), as a follow-up to
+    // BUG-61 (which only fixed the Vec-element case, not the
+    // struct-field case -- `struct { ch: Channel<i64,4>, buf:
+    // Vec<i64> }` still failed to compile under `--backend=c` with
+    // "unknown type name" for the exact same underlying reason).
+    fn concurrency_element_needs_full_struct_def(ty: &Type) -> bool {
+        match ty {
+            Type::Struct(_) | Type::Enum(_) | Type::Tuple(_) => true,
+            Type::Array { element, .. } => concurrency_element_needs_full_struct_def(element),
+            _ => false,
+        }
+    }
+    let (channel_specs_early, channel_specs_late): (Vec<_>, Vec<_>) = channel_specs
+        .iter()
+        .cloned()
+        .partition(|(element, _)| !concurrency_element_needs_full_struct_def(element));
+    let (mutex_specs_early, mutex_specs_late): (Vec<_>, Vec<_>) = mutex_specs
+        .iter()
+        .cloned()
+        .partition(|element| !concurrency_element_needs_full_struct_def(element));
+    let (rwlock_specs_early, rwlock_specs_late): (Vec<_>, Vec<_>) = rwlock_specs
+        .iter()
+        .cloned()
+        .partition(|element| !concurrency_element_needs_full_struct_def(element));
+    // The shared futex/WaitOnAddress primitives (`emit_intent_mutex_
+    // primitives_c`) have no dependency on any user type -- safe to
+    // emit at this earliest point whenever ANY mutex/rwlock spec
+    // exists anywhere in the program (early OR late-deferred), so
+    // decide it here once from the FULL (unpartitioned) spec lists
+    // and never emit it again at the later call site below.
+    let emit_primitives_early = !mutex_specs.is_empty() || !rwlock_specs.is_empty();
+    emit_concurrency_type_bundles(
+        &mut body,
+        &channel_specs_early,
+        &mutex_specs_early,
+        &rwlock_specs_early,
+        emit_primitives_early,
+    );
     // 2026-06-09: also defer pre-emit when the enum's payload
     // requires the FULL struct definition (i.e. payload is a
     // by-value struct / enum / tuple / array). For by-pointer
@@ -1120,15 +1173,19 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !tuple_shapes.is_empty() {
         body.push('\n');
     }
-    // Channel<T, N> / Mutex<T> / RwLock<T> storage bundles must
-    // land here -- AFTER every user struct is fully defined
-    // (the unified struct+enum+tuple topo loop above already
-    // completed, so `Channel<UserStruct>`'s by-value ring-buffer
-    // slots can size the struct) but BEFORE the `element_types`
-    // Vec-bundle loop below. A `Vec<Channel<T, N>>`'s typedef
-    // spells its `data` field as `intent_channel_<T>_<N>*`, which
-    // C requires to already be a known typedef at the point of
-    // use (unlike `struct Foo*`, a bare typedef name isn't
+    // The REMAINING Channel<T,N>/Mutex<T>/RwLock<T> bundles -- ones
+    // whose element type needs a full struct/enum/tuple body (e.g.
+    // `Channel<UserStruct, N>`) -- land here, AFTER every user
+    // struct is fully defined (the unified struct+enum+tuple topo
+    // loop above already completed) but BEFORE the `element_types`
+    // Vec-bundle loop below. Scalar-element bundles were already
+    // emitted much earlier (right after struct forward
+    // declarations; see `channel_specs_early` above) so struct
+    // FIELDS of a scalar-element Channel/Mutex/RwLock type can
+    // reference them too. A `Vec<Channel<T, N>>`'s typedef spells
+    // its `data` field as `intent_channel_<T>_<N>*`, which C
+    // requires to already be a known typedef at the point of use
+    // (unlike `struct Foo*`, a bare typedef name isn't
     // forward-declarable). This used to run much later, inside
     // `emit_concurrency_runtime_helpers` at the bottom of `emit_c`
     // (after prototypes/bodies, for its condvar/task/barrier
@@ -1141,7 +1198,15 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // genuinely needs the generated prototypes/bodies text) stays
     // at its original late call site; only the type-bundle emit
     // moves here.
-    emit_concurrency_type_bundles(&mut body, &channel_specs, &mutex_specs, &rwlock_specs);
+    // Primitives already emitted (or correctly not needed) at the
+    // early call site above -- never emit them a second time here.
+    emit_concurrency_type_bundles(
+        &mut body,
+        &channel_specs_late,
+        &mutex_specs_late,
+        &rwlock_specs_late,
+        false,
+    );
     // Per-shape array typedefs for any `Array<T, N>` that
     // appears as a Vec element (a `Vec<[i64; 4]>` needs
     // `typedef int64_t intent_arr4_int64_t[4];` in scope
@@ -7578,11 +7643,12 @@ fn emit_concurrency_type_bundles(
     channel_specs: &[(Type, u64)],
     mutex_specs: &[Type],
     rwlock_specs: &[Type],
+    emit_primitives: bool,
 ) {
     for (element, capacity) in channel_specs {
         emit_channel_bundle(element, *capacity, out);
     }
-    if !mutex_specs.is_empty() || !rwlock_specs.is_empty() {
+    if emit_primitives {
         emit_intent_mutex_primitives_c(out);
     }
     for element in mutex_specs {
@@ -12359,6 +12425,26 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
         // `intent_channel_int64_t_4_new()` return type and cc
         // rejects with "incompatible types".
         Type::Channel(element, capacity) => c_channel_storage(element, *capacity),
+        // Same class of gap as Channel/Atomic above, for the
+        // remaining four concurrency handle types: the
+        // c_leaf_type fallback returns the HARDCODED
+        // `intent_mutex_i64`/`intent_guard_i64`/`intent_rwlock_i64`
+        // spellings for ANY element width, which is only ever
+        // correct by coincidence for `<i64>`. A struct field like
+        // `struct Counter { m: Mutex<i64>, history: Vec<i64> }`
+        // declared its `m` field as `intent_mutex_i64` -- a name
+        // that was never actually emitted anywhere (the real
+        // bundle is `intent_mutex_int64_t`, per `c_mutex_storage`'s
+        // `element_tag`-based naming) -- so cc rejected the whole
+        // file with "unknown type name". Found sweeping
+        // struct-field Mutex/Vec combinations for the
+        // testing-matrix pass (2026-08-02), as a second follow-up
+        // to BUG-61.
+        Type::Mutex(element) => c_mutex_storage(element),
+        Type::Guard(element) => c_guard_storage(element),
+        Type::RwLock(element) => c_rwlock_storage(element),
+        Type::ReadGuard(element) => c_read_guard_storage(element),
+        Type::WriteGuard(element) => c_write_guard_storage(element),
         // Closure #209: same shape for `Atomic<T>`. The
         // c_leaf_type fallback returns `_Atomic int64_t`
         // for any Atomic; an `Atomic<u32>` struct field

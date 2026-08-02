@@ -52099,5 +52099,75 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-61 follow-up #1 (tree-C): a struct FIELD of type
+    /// `Channel<T,N>` -- not just a Vec element -- needs the
+    /// channel struct declared before the struct's OWN typedef.
+    /// `struct Worker { ch: Channel<i64,4>, buf: Vec<i64> }` used
+    /// to fail identically to the bare-Vec case ("unknown type
+    /// name") because the channel bundle was still emitted after
+    /// the unified struct topo loop. Scalar-element channel/mutex/
+    /// rwlock bundles now emit right after struct forward
+    /// declarations, before struct BODIES (including this one)
+    /// land.
+    #[test]
+    fn struct_field_channel_alongside_vec_field_compiles_to_c() {
+        let source = r#"
+            struct Worker { ch: Channel<i64, 4>, buf: Vec<i64> }
+            fn main() -> i64 {
+              let ch: Channel<i64, 4> = channel_new();
+              let buf: Vec<i64> = vec(1, 2, 3);
+              let w: Worker = Worker { ch: ch, buf: buf };
+              let _ = channel_send(ref w.ch, 55);
+              let v: i64 = channel_recv(ref w.ch);
+              print v;
+              print w.buf[0] + w.buf[1] + w.buf[2];
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("struct { Channel field, Vec field } compiles to C");
+        assert!(
+            c.find("} intent_channel_int64_t_4;").unwrap()
+                < c.find("struct Struct_Worker {").unwrap(),
+            "channel struct must be declared before Struct_Worker's body:\n{}",
+            c
+        );
+    }
+
+    /// BUG-61 follow-up #2 (tree-C): `c_element_storage` -- the
+    /// function struct-field declarators route through -- had NO
+    /// arms for Mutex/Guard/RwLock/ReadGuard/WriteGuard, so it fell
+    /// through to `c_leaf_type`'s HARDCODED `intent_mutex_i64` /
+    /// `intent_guard_i64` / `intent_rwlock_i64` placeholders
+    /// (correct only by coincidence for literal `<i64>` -- and even
+    /// then the real bundle name is `intent_mutex_int64_t`, not
+    /// `intent_mutex_i64`, so it was ALWAYS wrong). A struct field
+    /// `m: Mutex<i64>` declared itself as a type that was never
+    /// actually emitted anywhere, so cc rejected the file outright.
+    /// Added explicit arms delegating to the already-correct
+    /// `c_mutex_storage`/`c_guard_storage`/`c_rwlock_storage`/
+    /// `c_read_guard_storage`/`c_write_guard_storage` helpers.
+    #[test]
+    fn struct_field_mutex_alongside_vec_field_compiles_to_c() {
+        let source = r#"
+            struct Counter { m: Mutex<i64>, history: Vec<i64> }
+            fn main() -> i64 {
+              let m: Mutex<i64> = mutex_new(10);
+              let history: Vec<i64> = vec(1, 2);
+              let c: Counter = Counter { m: m, history: history };
+              let g: Guard<i64> = mutex_lock(ref c.m);
+              print guard_get(ref g);
+              print c.history[0] + c.history[1];
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("struct { Mutex field, Vec field } compiles to C");
+        assert!(
+            c.contains("intent_mutex_int64_t m;"),
+            "Counter's `m` field must use the real intent_mutex_int64_t \
+             spelling, not the stale hardcoded intent_mutex_i64; got:\n{}",
+            c
+        );
+    }
+
 }
 
