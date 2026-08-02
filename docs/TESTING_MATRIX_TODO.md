@@ -296,6 +296,123 @@ no bug found -- a clean pairing still earns a permanent regression
 test, since it's exactly the kind of coverage that was missing
 before BUG-61 was found).
 
+## Container operations x intermediate/advanced feature nesting (added 2026-08-02)
+
+The section above swept containers (Vec/Array/Tuple/Struct) against
+*concurrency handles and dyn/closures*. BUG-61 through BUG-67 all
+lived at exactly those intersections. This section is the same idea
+applied to a DIFFERENT, so-far-unswept axis: containers (Vec, Array,
+Tuple, Struct, **Enum** -- the previous pass barely touched Enum
+payloads) crossed with the *rest* of the intermediate/advanced
+feature surface -- SMT contracts, generics/monomorphization, pattern
+matching depth, FFI, affine edge cases, Big-O annotations,
+`parallel for`, SIMD, `Option`/`Result` wrapping. None of these
+pairings were part of the sweep that found BUG-61-67, and the same
+root-cause pattern (a per-shape codegen helper with an arm for the
+common case but not this one; or ordering between two independently-
+emitted pieces) is exactly as likely to recur here.
+
+**Sweep method**: unchanged from above -- real `.vani` snippet, run
+through both `--backend` values, output/exit-code checked against
+hand-computed values. Prioritize pairings where a container's
+element/field is itself something with its own emission machinery
+(a generic instantiation, an enum payload, an FFI-boundary type),
+mirroring exactly why `Vec<Channel<T,N>>` broke.
+
+### Container x SMT contracts
+
+- [ ] `requires`/`ensures` referencing a `Vec<T>` parameter's
+      contents (e.g. `requires v[0] > 0;`) combined with a `Struct`
+      or `Tuple` element type, not just scalar `i64` elements.
+- [ ] `invariant` in a loop that mutates a `Vec<Struct>` element
+      in place (via `mut ref vec[i]`-style access) -- the
+      loop-invariant-preservation machinery (BUG-33's territory)
+      has only been exercised with scalar loop state so far.
+- [ ] `ensures` on a function returning `Option<Vec<T>>` or
+      `Result<Struct, E>` -- contract checking through an enum
+      wrapper around a container return type.
+
+### Container x generics / monomorphization
+
+- [ ] A generic struct `struct Box2<T> { items: Vec<T> }`
+      instantiated at 2+ different `T` in the same program (the
+      exact shape that broke for the built-in `Option`/`Result`
+      generics in BUG-46 -- never re-tested for a *user-defined*
+      generic struct wrapping a container).
+- [ ] A generic function `fn first<T>(xs: ref Vec<T>) -> T`
+      monomorphized over a `Struct` T and a `Tuple` T in the same
+      program.
+- [ ] `Vec<GenericStruct<i64>>` alongside `Vec<GenericStruct<f64>>`
+      -- two different monomorphizations of the same generic struct
+      both used as Vec elements (compounds BUG-61's exact bug class
+      with generics).
+
+### Container x pattern matching / enum payload depth
+
+- [ ] An enum variant whose payload is itself a `Vec<Struct>` or a
+      `Tuple` containing an `Array` (multi-level payload nesting,
+      not just `enum { Variant(Vec<i64>) }`).
+- [ ] `match` over a `Vec<Enum>` where the enum has 3+ variants with
+      different payload shapes (mixed Copy/non-Copy payloads in the
+      same enum, iterated).
+- [ ] Nested `if let` destructuring two levels deep where the OUTER
+      binding is a Vec element (`if let Option.Some(Result.Ok(v)) =
+      clone_at(ref xs, i)` style) -- combines BUG-46's enum-ctor
+      resolution area with container indexing.
+
+### Container x FFI / extern boundary
+
+- [ ] `extern "C" fn` taking or returning a `Struct` BY VALUE
+      (not just scalars/`Str`/`ref T` -- the FFI tutorials only show
+      scalar marshaling).
+- [ ] A `#[no_mangle]` exported function whose signature includes a
+      `Tuple` or fixed-size `Array` parameter (BUG-44's `#[no_mangle]`
+      + SSA-gating fix was scalar-only; never re-tested with an
+      aggregate param).
+
+### Container x affine ownership edge cases
+
+- [ ] Partial move out of a struct field that's itself a `Vec<T>`,
+      followed by `clone_at` on a DIFFERENT field of the same
+      struct instance (interaction between partial-move tracking
+      and `clone_at`'s own non-copy-element restrictions).
+- [ ] `clone_at` chained three levels deep:
+      `clone_at(ref outer, i)` where `outer: Vec<Vec<Struct>>`,
+      then `clone_at` again on the result.
+- [ ] A struct with BOTH a `Vec<T>` field and an `OwnedStr` field,
+      partially moved (one field taken, the other read), then
+      dropped -- confirm no leak/double-free on the un-moved field.
+
+### Container x Big-O / complexity annotations
+
+- [ ] A `#[complexity(...)]`-annotated function (or whatever the
+      real attribute syntax is -- check `13a_big_o_primer.md`) whose
+      body operates on `Vec<Struct>`/`Array<Tuple,N>`, not just
+      `Vec<i64>` -- confirm the complexity analysis doesn't
+      misclassify or crash on non-scalar element types.
+
+### Container x `parallel for` / SIMD
+
+- [ ] `parallel for` iterating a `Vec<Struct>` (not just
+      `Vec<i64>`/`Vec<f64>`) with a `reduce` accumulating a struct
+      field.
+- [ ] A struct with both a `Vec128<f64>`/`Vec256<f64>` SIMD field
+      AND a plain `Vec<f64>` field in the same struct -- confirm
+      the two very different Vec-family codegens (BUG-62's territory
+      for one of them) don't collide on shared helper-naming.
+
+### Container x `Option`/`Result` wrapping
+
+- [ ] `Option<Array<T,N>>` / `Result<Tuple<...>, E>` -- Option/
+      Result generic instantiation (BUG-46's territory) has mostly
+      been tested with scalar or single-struct payloads, not
+      Array/Tuple payloads specifically.
+- [ ] A `Vec<Option<Struct>>` -- Option of a non-Copy struct, stored
+      in a Vec (three-level: Vec -> Option -> Struct).
+
+Cross off each row the same way as the section above: bug or no bug,
+add a permanent regression test and note the outcome inline.
+
 ## Non-goals for this pass
 
 - Re-testing SMT/`ensures`/`try`/affine -- already well covered
