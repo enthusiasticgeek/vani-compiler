@@ -70,7 +70,7 @@ A closure can.
 ```vani
 fn make_counter() -> ??? {
   let start: i64 = 0;
-  let inc = |x: i64| start + x;
+  let inc = fn(x: i64) -> i64 { return start + x; };
                   // ^ this closure CAPTURES `start`
                   // even though `start` is local to make_counter
   return inc;
@@ -131,15 +131,25 @@ transformation that handles closures. The compiler does this
 under the hood; you don't write any of it. But understanding
 it helps the mental model.
 
-When you write:
+When you write (confirmed by testing, both backends -- note the
+two-step shape: bind the closure expression to a `let` first,
+*then* `return` the name. Returning `fn(...) {...}` directly
+inline, without the intermediate `let`, doesn't get lifted --
+the compiler's capture-detection is keyed on exactly this
+`let NAME = fn(...) {...}` pattern):
 
 ```vani
-fn make_greeter(name: OwnedStr) -> Closure {
-  return |x: i64| print "hello,", name, x;
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+  let greet = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+  return greet;
 }
 ```
 
-The compiler internally rewrites it to something like:
+The compiler internally rewrites it to something like (illustrative
+pseudocode for intuition -- `Closure { call: ..., env_ptr: ... }`
+struct-literal syntax isn't real, constructible user syntax; `Closure`
+is a builtin two-pointer type, not a user struct you can build a
+literal of):
 
 ```vani
 // Step 1: lift the closure body into a top-level function
@@ -153,7 +163,7 @@ struct Env_0 { name: OwnedStr }
 
 // Step 3: make_greeter builds the env + bundles it with the
 // fn pointer
-fn make_greeter(name: OwnedStr) -> Closure {
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
   let env: Env_0 = Env_0 { name: name };  // heap-allocated
   return Closure { call: __anon_fn_0, env_ptr: ref env };
 }
@@ -170,28 +180,51 @@ source -- the compiler handles it.
 
 ```vani
 let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
-let doubled: Vec<i64> = vec_map(xs, |x| x * 2);
+let doubled: Vec<i64> = vec_map(ref xs, |x| x * 2);
 ```
 
-`vec_map` is a higher-order function -- it takes a function (or
-closure) and applies it to each element. The closure `|x| x * 2`
-is a tiny anonymous function with no captures.
+`vec_map` is a higher-order function -- it takes a function and
+applies it to each element. The `|x| x * 2` shorthand is a tiny
+anonymous function with no captures.
 
-When you add captures:
+**A real v1 restriction worth knowing here**: `vec_map` (and the
+other `vec_*` iterator builtins: `vec_filter`, `vec_fold`, ...)
+specifically require a plain `fn(T) -> R` function pointer for
+their callback argument -- confirmed by testing: passing a
+`Closure(T) -> R` (a capturing closure) is rejected with "mapper
+must be `fn(i64) -> i64`, got Closure(i64) -> i64". The `|x| ...`
+shorthand always produces a plain `fn`, never a `Closure` (it can't
+capture anything, which is exactly why it fits here), so this isn't
+a limitation you'll usually notice -- but it does mean you can't
+close over a local value directly inside a `vec_map` call the way
+the closure sections above and below this one do:
 
 ```vani
+// This does NOT work -- vec_map's callback can't capture:
+// let factor: i64 = 10;
+// let scaled: Vec<i64> = vec_map(ref xs, |x| x * factor);  // rejected
+
+// Call the capturing closure yourself instead -- a plain loop:
 let factor: i64 = 10;
-let scaled: Vec<i64> = vec_map(xs, |x| x * factor);
-                                       // ^ captures `factor`
+let scale = fn(x: i64) -> i64 { return x * factor; };
+let scaled: Vec<i64> = vec();
+let i: i64 = 0;
+while i < (len(xs) as i64) {
+  push(mut ref scaled, scale(xs[i]));
+  i = i + 1;
+}
 ```
 
-The closure now carries `factor` as part of its environment.
+The closure `scale` still carries `factor` as part of its
+environment -- it's just called directly rather than handed to
+`vec_map`.
 
 ### 2. As returned values (factory patterns)
 
 ```vani
-fn make_validator(min: i64, max: i64) -> Closure {
-  return |x| min <= x && x <= max;
+fn make_validator(min: i64, max: i64) -> Closure(i64) -> bool {
+  let in_range = fn(x: i64) -> bool { return min <= x && x <= max; };
+  return in_range;
 }
 ```
 
@@ -202,8 +235,8 @@ number is in the 0-100 range. The min/max are baked in.
 
 ```vani
 struct EventHandler {
-  on_click: Closure,
-  on_hover: Closure,
+  on_click: Closure(i64) -> i64,
+  on_hover: Closure(i64) -> i64,
 }
 ```
 
@@ -255,13 +288,16 @@ A common over-use: turning a 3-line function body into a
 closure when a regular function would do.
 
 ```vani
-// Overkill -- name it.
-let add: Closure = |a, b| a + b;
-let r = add(3, 5);
+// Overkill -- name it. (`|a, b| a + b` has no captures, so its
+// real type is the plain function-pointer `fn(i64, i64) -> i64`,
+// not `Closure(i64, i64) -> i64` -- there's no implicit
+// fn-to-Closure coercion, confirmed by testing.)
+let add: fn(i64, i64) -> i64 = |a, b| a + b;
+let r: i64 = add(3, 5);
 
 // Better.
-fn add(a: i64, b: i64) -> i64 { return a + b; }
-let r = add(3, 5);
+fn add2(a: i64, b: i64) -> i64 { return a + b; }
+let r2: i64 = add2(3, 5);
 ```
 
 Closures are for cases where:
