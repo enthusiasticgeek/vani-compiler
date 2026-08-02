@@ -573,10 +573,35 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
       tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
       backends, hand-computed expected sum across all 4 variant
       shapes).
-- [ ] Nested `if let` destructuring two levels deep where the OUTER
+- [x] Nested `if let` destructuring two levels deep where the OUTER
       binding is a Vec element (`if let Option.Some(Result.Ok(v)) =
       clone_at(ref xs, i)` style) -- combines BUG-46's enum-ctor
-      resolution area with container indexing.
+      resolution area with container indexing -- **checked+fixed
+      2026-08-02.** A genuinely nested pattern
+      (`Option.Some(Result.Ok(v))` in one `if let`) is cleanly
+      rejected at PARSE time ("expected ')' (pattern binding close)")
+      on both backends, matching the already-documented v1 limitation
+      (`intermediate/02_enums_payloads.md`: "No nested patterns...
+      flatten with two match levels"). Not a divergence bug -- the
+      parser rejects it before any backend split happens. The
+      flattened two-level form (two separate `if let` statements, per
+      that doc's own guidance) combined with the outer binding coming
+      from a `Vec<Option<UserEnum>>` element via `clone_at` found
+      **BUG-76**, but the minimal repro turned out to have NOTHING to
+      do with Vec/clone_at/if-let nesting: `let z: Option<MyResult> =
+      Option.None;` alone (`MyResult` a user-defined payloaded enum)
+      already crashed the LLVM backend. Same bug class as BUG-29
+      (`Str`) / BUG-35 (`Box<T>`/raw pointers), documented right next
+      to this fix in the source: the payload-less `None` variant's
+      zero-value placeholder (for the sibling `Some(T)` variant's
+      payload type) is built from a per-type match that was simply
+      missing an arm for `Type::Enum(_)`, falling through to the
+      default `"0"` -- invalid LLVM IR for an aggregate type
+      ("integer constant must have integer type"). Fixed by adding
+      `Type::Enum(_)` to the existing `zeroinitializer` arm alongside
+      Vec/Tuple/Struct/Array/Task/Mutex/Channel. New tests: 1
+      `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both backends, full
+      flattened-nesting scenario).
 
 ### Container x FFI / extern boundary
 

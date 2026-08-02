@@ -7224,3 +7224,64 @@ fn main() -> i64 {
         assert_eq!(stdout, "6007\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep, "nested if let 2 levels deep on a Vec element":
+// a genuinely nested pattern (`if let Option.Some(Result.Ok(v)) = ...`) is
+// cleanly rejected at parse time on both backends -- a real, documented
+// v1 limitation ("no nested patterns", intermediate/02_enums_payloads.md),
+// not a divergence bug. The flattened two-level form (two separate if-let
+// statements, per that doc's own "flatten with two match levels"
+// guidance) combined with an outer binding sourced from a Vec element via
+// clone_at found BUG-76: `Option<UserEnum>.None`'s zero-value placeholder
+// crashed the LLVM backend (see docs/TODO_CURRENT.md) -- nothing to do
+// with Vec/clone_at/if-let nesting specifically, just the first repro in
+// this sweep that happened to construct an Option<T> where T is a
+// user-defined enum. Fixed; this test covers the full flattened-nesting
+// scenario end-to-end.
+#[test]
+fn flattened_nested_if_let_on_vec_element_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "flattened_nested_iflet_vec_element",
+        r#"
+enum MyResult { Ok(i64), Err(i64) }
+fn main() -> i64 {
+  let xs: Vec<Option<MyResult>> = vec(
+    Option.Some(MyResult.Ok(7)),
+    Option.Some(MyResult.Err(0 - 1)),
+    Option.None,
+  );
+  let i: i64 = 0;
+  let n: i64 = len(xs) as i64;
+  let total: i64 = 0;
+  while i < n {
+    let outer: Option<MyResult> = clone_at(ref xs, i);
+    if let Option.Some(inner) = outer {
+      if let MyResult.Ok(v) = inner {
+        total = total + v;
+      }
+      if let MyResult.Err(e) = inner {
+        total = total + (0 - e) * 100;
+      }
+    }
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // 7 (Ok(7)) + 1*100 (Err(-1)) = 107
+        assert_eq!(stdout, "107\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

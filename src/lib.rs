@@ -42490,6 +42490,36 @@ função main() -> i64 {
     }
 
     #[test]
+    fn option_none_zero_placeholder_supports_enum_payload_type() {
+        // BUG-76, found sweeping the testing matrix's "nested if let
+        // 2 levels deep on a Vec element" row -- minimal repro turned
+        // out to have nothing to do with Vec/clone_at/nested if-let
+        // at all: `let z: Option<MyResult> = Option.None;` alone
+        // (MyResult a user-defined payloaded enum) crashed the LLVM
+        // backend. Same bug class as BUG-29 (Str) / BUG-35
+        // (Box<T>/raw pointers): building the payload-less `None`
+        // variant's zero-value placeholder for the OTHER variant's
+        // payload type (`Some(T)`'s `T`) has a per-type match that
+        // was simply missing an arm for `Type::Enum(_)`, falling
+        // through to the `_ => "0"` default -- invalid LLVM IR
+        // (`insertvalue %Enum_Option__MyResult %t, %Enum_MyResult 0,
+        // 1`, "integer constant must have integer type") since an
+        // enum-typed placeholder needs `zeroinitializer`, not a bare
+        // `0`. Fixed by adding `Type::Enum(_)` to the
+        // `zeroinitializer` arm alongside Vec/Tuple/Struct/Array/
+        // Task/Mutex/Channel.
+        let source = r#"
+            enum MyResult { Ok(i64), Err(i64) }
+            fn main() -> i64 {
+              let z: Option<MyResult> = Option.None;
+              print "built";
+              return 0;
+            }
+        "#;
+        compile(source).expect("Option<Enum>.None must compile (enum zero-placeholder)");
+    }
+
+    #[test]
     fn option_constructor_in_let_annotation_resolves_with_two_instantiations() {
         let source = r#"
             fn main() -> i64 {

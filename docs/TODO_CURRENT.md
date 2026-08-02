@@ -5418,4 +5418,46 @@ verifying the four fixes above against their tutorial worked examples
   6007` across all 4 variant shapes in one `Vec<Item>`). Full `cargo
   test --release --workspace`: 13/13 binaries clean, 0 failed.
 
+## Bug found sweeping "nested if let 2 levels deep on a Vec element" (found+fixed 2026-08-02)
+
+- [x] **BUG-76 (found+fixed 2026-08-02 — same bug class as BUG-29/
+  BUG-35, LLVM-only, `Type::Enum` payload never covered).** Found
+  while testing the testing matrix's "nested if let 2 levels deep on
+  a Vec element" row. A genuinely nested pattern (`if let
+  Option.Some(Result.Ok(v)) = ...`) is cleanly rejected at PARSE
+  time on both backends, matching the already-documented v1 "no
+  nested patterns" limitation — not a bug. Testing the flattened
+  two-level form (the doc's own suggested workaround) combined with
+  `clone_at` sourcing the outer binding from a `Vec<Option<UserEnum>>`
+  found BUG-76, but the minimal repro had nothing to do with any of
+  that:
+  ```vani
+  enum MyResult { Ok(i64), Err(i64) }
+  fn main() -> i64 {
+    let z: Option<MyResult> = Option.None;   // crashes LLVM
+    return 0;
+  }
+  ```
+  Crashed `lli` with `insertvalue %Enum_Option__MyResult %t,
+  %Enum_MyResult 0, 1` — "integer constant must have integer type".
+  Root cause: constructing a payload-less variant (`None`) of an
+  enum whose SIBLING variant carries a payload (`Some(T)`) needs a
+  correctly-typed LLVM zero-value placeholder for that unused
+  payload slot — a per-`T`-type match already existed for exactly
+  this purpose (with two prior fixes documented right there in the
+  source: BUG-29 added `Str`, BUG-35 added `Box<T>`/raw pointers,
+  both found the same way — a payload-less sibling variant of an
+  enum whose OTHER variant carries that type crashed with this exact
+  message), but `Type::Enum(_)` was never added to the
+  `zeroinitializer` arm (alongside `Vec`/`Tuple`/`Struct`/`Array`/
+  `Task`/`Mutex`/`Channel`), so it fell through to the numeric-only
+  default (`"0"`) — invalid IR for an aggregate type. This is
+  exactly the "not tested for this specific payload type yet"
+  pattern BUG-29/35 already both hit, just never re-swept for `T` =
+  a user-defined enum until now. Fixed by adding `Type::Enum(_)` to
+  the existing `zeroinitializer` arm. New tests: 1 `src/lib.rs` + 1
+  `tests/run_end_to_end.rs` (both backends, the full flattened-
+  nesting scenario this row was actually testing). Full `cargo test
+  --release --workspace`: 13/13 binaries clean, 0 failed.
+
 ---

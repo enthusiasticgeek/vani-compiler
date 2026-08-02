@@ -17048,9 +17048,21 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 // Aggregate payloads use `zeroinitializer`
                 // for the all-zero placeholder when the
                 // variant has no user-provided payload.
+                // BUG-76 (2026-08-02): `Type::Enum(_)` was missing
+                // from this list -- same bug class as BUG-29/BUG-35
+                // just above (a payload-less sibling variant's zero
+                // placeholder needs the right LLVM zero-value form
+                // for the OTHER variant's payload type). Found via
+                // `Option<MyResult>.None` where `MyResult` is a
+                // user-defined payloaded enum: fell through to the
+                // `_ => "0"` default, producing invalid IR
+                // (`insertvalue %Enum_Option__MyResult %t, %Enum_MyResult
+                // 0, 1` -- "integer constant must have integer type"),
+                // identical symptom to BUG-29/BUG-35.
                 Type::Vec(_)
                 | Type::Tuple(_)
                 | Type::Struct(_)
+                | Type::Enum(_)
                 | Type::Array { .. }
                 | Type::Task
                 | Type::Mutex(_)
