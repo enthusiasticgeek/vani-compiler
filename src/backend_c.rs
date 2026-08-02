@@ -21183,7 +21183,26 @@ fn channel_inner_from_ref(ty: &Type) -> (Type, u64) {
 fn format_declarator(ty: &Type, name: &str) -> String {
     match ty {
         Type::Array { element, length } => {
-            format!("{} {}[{}]", c_leaf_type(element), name, length)
+            // BUG-78: `c_leaf_type` is a LEAF-only spelling table --
+            // for Tuple/Struct/Vec/Channel/Mutex/etc. it deliberately
+            // returns a placeholder comment ("/* tuple */", "/*
+            // struct */", ...), documented there as "a caller forgot
+            // to special-case this and needs to route through the
+            // real per-shape name instead". `c_element_storage`
+            // already has the correct per-shape arms (used
+            // elsewhere for exactly this purpose, e.g. tuple/struct
+            // fields and `emit_array_typedefs_for`'s inner spelling)
+            // but this array-parameter/local declarator was still
+            // using the leaf-only table directly -- a function
+            // parameter shaped `[(i64, i64); 5]` (Array of Tuple)
+            // declared itself as `/* tuple */ v_arr[5]`, not a valid
+            // C type, so gcc rejected the whole file ("unknown type
+            // name 'v_arr'"). Found sweeping the testing-matrix's
+            // Big-O row (`Array<Tuple,N>` as a function parameter),
+            // but the bug itself has nothing to do with Big-O --
+            // ANY function taking `[Tuple; N]`/`[Struct; N]`/etc. by
+            // value hit this.
+            format!("{} {}[{}]", c_element_storage(element), name, length)
         }
         Type::Vec(element) => format!("{} {}", vec_c_struct(element), name),
         Type::Tuple(elements) => format!("{} {}", tuple_c_struct(elements), name),
@@ -21231,7 +21250,10 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             }
         },
         Type::Ref(inner) => match &**inner {
-            Type::Array { element, .. } => format!("const {}* {}", c_leaf_type(element), name),
+            // BUG-78 (ref side): same `c_leaf_type` leaf-only-table
+            // bug as the bare `Type::Array` arm above, for `ref
+            // [Tuple; N]` / `ref [Struct; N]` params.
+            Type::Array { element, .. } => format!("const {}* {}", c_element_storage(element), name),
             Type::Vec(element) => format!("const {}* {}", vec_c_struct(element), name),
             // `&Atomic<T>` drops the `const` qualifier: atomic
             // operations always conceptually mutate the cell;
@@ -21291,7 +21313,8 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             other => format!("const {}* {}", c_leaf_type(other), name),
         },
         Type::RefMut(inner) => match &**inner {
-            Type::Array { element, .. } => format!("{}* {}", c_leaf_type(element), name),
+            // BUG-78 (mut ref side): same fix as the `ref`/bare arms.
+            Type::Array { element, .. } => format!("{}* {}", c_element_storage(element), name),
             Type::Vec(element) => format!("{}* {}", vec_c_struct(element), name),
             Type::Atomic(element) => format!("{}* {}", c_atomic_storage(element), name),
             Type::Channel(element, capacity) => {

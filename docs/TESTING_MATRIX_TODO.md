@@ -634,31 +634,93 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
       shape assertion) + 1 `tests/run_end_to_end.rs` (both backends,
       real `--link-with` C shim, `vanic build` for LLVM + `vanic run
       --backend=c` for C).
-- [ ] A `#[no_mangle]` exported function whose signature includes a
+- [x] A `#[no_mangle]` exported function whose signature includes a
       `Tuple` or fixed-size `Array` parameter (BUG-44's `#[no_mangle]`
       + SSA-gating fix was scalar-only; never re-tested with an
-      aggregate param).
+      aggregate param) -- **checked 2026-08-02, not a bug.** A
+      `#[no_mangle]` fn taking a `(i64, i64)` Tuple and one taking a
+      `[i64; 4]` Array both keep their bare symbol name (`sum_pair`/
+      `sum_arr`, not `fn_sum_pair`/`fn_sum_arr`) on both backends
+      (confirmed directly in the emitted IR/C) and compute correct
+      values. New tests: 1 `src/lib.rs` (bare-symbol assertion on
+      both backends' emitted output) + 1 `tests/run_end_to_end.rs`
+      (both backends, real runtime values).
 
 ### Container x affine ownership edge cases
 
-- [ ] Partial move out of a struct field that's itself a `Vec<T>`,
+- [x] Partial move out of a struct field that's itself a `Vec<T>`,
       followed by `clone_at` on a DIFFERENT field of the same
       struct instance (interaction between partial-move tracking
-      and `clone_at`'s own non-copy-element restrictions).
-- [ ] `clone_at` chained three levels deep:
+      and `clone_at`'s own non-copy-element restrictions) --
+      **checked 2026-08-02, not a bug.** Moving `h.xs` (a `Vec<i64>`
+      field) out leaves `h.ys` (a `Vec<OwnedStr>` field) fully
+      usable; `clone_at` on it computes correctly on both backends,
+      with no double-free at scope exit (the moved-out field is
+      correctly skipped by Drop, confirmed by the pre-existing
+      `partial_move_field_extract_compiles` test's own C-output
+      assertion). Reading `h.xs` again after the move is still
+      correctly rejected ("field 'h.xs' was moved; cannot use after
+      move"), confirming the tracking is real, not just permissive.
+      New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+      backends).
+- [x] `clone_at` chained three levels deep:
       `clone_at(ref outer, i)` where `outer: Vec<Vec<Struct>>`,
-      then `clone_at` again on the result.
-- [ ] A struct with BOTH a `Vec<T>` field and an `OwnedStr` field,
+      then `clone_at` again on the result -- **checked 2026-08-02,
+      not a bug.** Both clone_at calls compute correctly on both
+      backends, and `outer`'s own length stays unaffected by cloning
+      out of it (confirms no aliasing between `outer`/`middle`). New
+      tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+      backends).
+- [x] A struct with BOTH a `Vec<T>` field and an `OwnedStr` field,
       partially moved (one field taken, the other read), then
-      dropped -- confirm no leak/double-free on the un-moved field.
+      dropped -- confirm no leak/double-free on the un-moved field --
+      **checked 2026-08-02, not a bug, verified with `valgrind
+      --leak-check=full` (not just correct output).** Runs correctly
+      on both backends; separately built native binaries from this
+      exact program and ran them under valgrind memcheck: **0
+      leaks, 0 errors, balanced alloc/free counts on both backends**
+      (LLVM: 2 allocs/2 frees; C: 3 allocs/3 frees -- different
+      internal representation, same "everything freed exactly once"
+      outcome). This is the strongest verification method used in
+      this sweep so far -- direct confirmation, not just inferred
+      from correct printed values. New tests: 1 `src/lib.rs` + 1
+      `tests/run_end_to_end.rs` (both backends; the valgrind run
+      itself was a one-time manual check, not wired into CI).
 
 ### Container x Big-O / complexity annotations
 
-- [ ] A `#[complexity(...)]`-annotated function (or whatever the
+- [x] A `#[complexity(...)]`-annotated function (or whatever the
       real attribute syntax is -- check `13a_big_o_primer.md`) whose
       body operates on `Vec<Struct>`/`Array<Tuple,N>`, not just
       `Vec<i64>` -- confirm the complexity analysis doesn't
-      misclassify or crash on non-scalar element types.
+      misclassify or crash on non-scalar element types --
+      **checked+fixed 2026-08-02.** There's no `#[complexity(...)]`
+      attribute in v1 -- `--big-o` is a whole-program `vanic check`
+      flag, no per-function opt-in needed. The `--big-o` analyzer
+      itself correctly classifies loops over `Vec<Struct>` (O(n) for
+      a single loop, O(n²) for nested loops over the same Vec) with
+      no crash or misclassification -- not a bug. But testing
+      `Array<Tuple,N>` as a function PARAMETER (the natural way to
+      write a Big-O-relevant helper taking a fixed-size aggregate
+      array) found **BUG-78**, entirely unrelated to Big-O: ANY
+      function taking `[Tuple; N]` or `[Struct; N]` BY VALUE crashed
+      the C backend. `format_declarator`'s `Type::Array` arm (and its
+      `ref`/`mut ref` siblings) called `c_leaf_type(element)`
+      directly -- `c_leaf_type` is a LEAF-only spelling table that
+      deliberately returns a placeholder comment ("/* tuple */", "/*
+      struct */") for aggregate element types, documented there as
+      "a caller forgot to route through the real per-shape name" (the
+      same class of gap `c_element_storage` exists specifically to
+      close, and which other declarator paths already use correctly).
+      `fn sum_array_tuple(arr: [(i64, i64); 5])` declared itself as
+      `/* tuple */ v_arr[5]` -- not valid C, "unknown type name
+      'v_arr'". Fixed by routing all three arms (bare `Type::Array`,
+      `Type::Ref(Array)`, `Type::RefMut(Array)`) through
+      `c_element_storage` instead. LLVM backend was unaffected
+      throughout. New tests: 1 `src/lib.rs` (placeholder-comment
+      absence + real type-name assertion) + 1
+      `tests/run_end_to_end.rs` (both backends, hand-computed sums
+      over both an `Array<Tuple>` and an `Array<Struct>` parameter).
 
 ### Container x `parallel for` / SIMD
 

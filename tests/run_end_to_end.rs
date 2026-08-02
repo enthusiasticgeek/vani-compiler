@@ -7388,3 +7388,215 @@ fn main() -> i64 {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// Testing-matrix sweep, "#[no_mangle] fn with a Tuple/Array parameter".
+// BUG-44's fix was only verified with scalar params. Checked 2026-08-02,
+// not a bug: both a Tuple-typed and an Array-typed parameter on a
+// no_mangle fn compute correctly on both backends.
+#[test]
+fn no_mangle_fn_with_tuple_and_array_params_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "no_mangle_tuple_array_params",
+        r#"
+#[no_mangle]
+fn sum_pair(p: (i64, i64)) -> i64 { return p.0 + p.1; }
+#[no_mangle]
+fn sum_arr(a: [i64; 4]) -> i64 { return a[0] + a[1] + a[2] + a[3]; }
+fn main() -> i64 {
+  print sum_pair((10, 20));
+  print sum_arr([1, 2, 3, 4]);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "30\n10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "partial move out of a Vec<T> struct field,
+// followed by clone_at on a DIFFERENT field of the same struct instance".
+// Checked 2026-08-02, not a bug -- both operations compute correctly and
+// no double-free/corruption on scope exit (the moved-out field isn't
+// freed twice) on either backend.
+#[test]
+fn partial_move_then_clone_at_different_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "partial_move_then_clone_at",
+        r#"
+struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+fn main() -> i64 {
+  let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "", "b" + "", "c" + "") };
+  let moved_xs: Vec<i64> = h.xs;
+  let sum: i64 = moved_xs[0] + moved_xs[1] + moved_xs[2];
+  let s0: OwnedStr = clone_at(ref h.ys, 0);
+  let s1: OwnedStr = clone_at(ref h.ys, 1);
+  print sum;
+  print s0;
+  print s1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "6\na\nb\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "clone_at chained three levels deep": clone_at
+// on a Vec<Vec<Struct>>, then clone_at again on the result. Checked
+// 2026-08-02, not a bug -- both levels compute correctly and outer stays
+// untouched (independent of the clone) on both backends.
+#[test]
+fn clone_at_chained_three_levels_deep_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "clone_at_chained_three_levels",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let outer: Vec<Vec<Pt>> = vec(
+    vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }),
+    vec(Pt { x: 5, y: 6 }, Pt { x: 7, y: 8 }, Pt { x: 9, y: 10 }),
+  );
+  let middle: Vec<Pt> = clone_at(ref outer, 1);
+  let inner: Pt = clone_at(ref middle, 2);
+  print inner.x;
+  print inner.y;
+  print len(middle) as i64;
+  print len(outer) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "9\n10\n3\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "struct with both a Vec<T> field and an OwnedStr
+// field, partially moved (one field taken, the other read), then
+// dropped". Checked 2026-08-02, not a bug -- runs correctly on both
+// backends. Separately confirmed via `valgrind --leak-check=full` against
+// native binaries built from this exact program: 0 leaks, balanced
+// alloc/free counts on both backends (not re-run under valgrind in CI --
+// this test covers the correctness half; the memory-safety half was a
+// one-time manual verification recorded in docs/TODO_CURRENT.md).
+#[test]
+fn struct_vec_and_owned_str_fields_partial_move_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_vec_owned_str_partial_move",
+        r#"
+struct Rec { xs: Vec<i64>, name: OwnedStr }
+fn main() -> i64 {
+  let r: Rec = Rec { xs: vec(1, 2, 3), name: "widget" + "" };
+  let taken: Vec<i64> = r.xs;
+  print r.name;
+  print taken[0] + taken[1] + taken[2];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "widget\n6\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-78, found sweeping the testing-matrix's Big-O row (a
+// `#[complexity(...)]`-annotated -- actually just plain, since v1's
+// `--big-o` flag needs no attribute -- fn operating on `Vec<Struct>`/
+// `Array<Tuple,N>`, not just `Vec<i64>`). The --big-o analyzer itself
+// correctly classified Vec<Struct> loops (O(n)/O(n^2)) with no crash --
+// not a bug. But a function taking `Array<Tuple,N>` (or `Array<Struct,N>`)
+// BY VALUE as a parameter crashed the C backend entirely unrelated to
+// Big-O: format_declarator's Array arm used a leaf-only type spelling
+// table instead of the correct per-shape one. This test exercises the
+// real bug end-to-end.
+#[test]
+fn array_of_tuple_and_struct_fn_params_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "array_of_tuple_struct_params",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 5 {
+    total = total + arr[i].0 + arr[i].1;
+    i = i + 1;
+  }
+  return total;
+}
+fn sum_array_struct(arr: [Pt; 3]) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 3 {
+    total = total + arr[i].x + arr[i].y;
+    i = i + 1;
+  }
+  return total;
+}
+fn main() -> i64 {
+  let a: [(i64, i64); 5] = [(1,1),(2,2),(3,3),(4,4),(5,5)];
+  let b: [Pt; 3] = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }];
+  print sum_array_tuple(a);
+  print sum_array_struct(b);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // sum_array_tuple: (1+1)+(2+2)+(3+3)+(4+4)+(5+5) = 30
+        // sum_array_struct: (1+2)+(3+4)+(5+6) = 21
+        assert_eq!(stdout, "30\n21\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

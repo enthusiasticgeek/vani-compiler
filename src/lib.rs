@@ -1274,6 +1274,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clone_at_chained_three_levels_deep_on_vec_of_vec_of_struct() {
+        // Testing-matrix sweep: "clone_at chained three levels deep"
+        // -- clone_at(ref outer, i) where outer: Vec<Vec<Struct>>,
+        // then clone_at again on the result. Checked 2026-08-02, not
+        // a bug: both clone_at calls compute correctly and outer/
+        // middle stay independent (outer's own length is unaffected
+        // by cloning out of it) on both backends -- see the paired
+        // e2e test for hand-computed runtime values.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let outer: Vec<Vec<Pt>> = vec(
+                vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }),
+                vec(Pt { x: 5, y: 6 }, Pt { x: 7, y: 8 }, Pt { x: 9, y: 10 }),
+              );
+              let middle: Vec<Pt> = clone_at(ref outer, 1);
+              let inner: Pt = clone_at(ref middle, 2);
+              print inner.x;
+              print inner.y;
+              print len(middle) as i64;
+              print len(outer) as i64;
+              return 0;
+            }
+        "#;
+        compile(source).expect("three-level-deep chained clone_at must compile");
+    }
+
     // Closure #291: arrays now accept `clone_at(ref xs, i)`
     // alongside Vec. The C backend lowers it to `xs[i]`
     // (with a deep-clone for Vec elements). LLVM lowers via
@@ -9157,6 +9185,80 @@ mod tests {
         assert!(
             !c.contains("intent_vec_int64_t__free(v_b.contents)"),
             "should NOT emit free for moved-out field b.contents:\n{c}"
+        );
+    }
+
+    #[test]
+    fn partial_move_of_vec_field_then_clone_at_on_different_field_compiles() {
+        // Testing-matrix sweep: "partial move out of a Vec<T> struct
+        // field, followed by clone_at on a DIFFERENT field of the
+        // same struct instance" -- interaction between partial-move
+        // tracking and clone_at's own non-Copy-element restrictions.
+        // Checked 2026-08-02, not a bug: moving `h.xs` out (a
+        // Vec<i64> field) leaves `h.ys` (a Vec<OwnedStr> field)
+        // fully usable, and clone_at on it works correctly. Using
+        // `h.xs` again after the move is still correctly rejected
+        // (confirms tracking is real, not just permissive).
+        let source = r#"
+            struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+            fn main() -> i64 {
+              let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "", "b" + "") };
+              let moved_xs: Vec<i64> = h.xs;
+              let sum: i64 = moved_xs[0] + moved_xs[1] + moved_xs[2];
+              let s0: OwnedStr = clone_at(ref h.ys, 0);
+              print sum;
+              print s0;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "clone_at on an unmoved struct field must compile after a sibling field was partial-moved",
+        );
+
+        let bad_source = r#"
+            struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+            fn main() -> i64 {
+              let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "") };
+              let moved_xs: Vec<i64> = h.xs;
+              print len(h.xs) as i64;
+              return 0;
+            }
+        "#;
+        let errs = compile(bad_source).expect_err("reading a moved field again must be rejected");
+        assert!(
+            errs.iter().any(|e| e.message.contains("was moved")),
+            "expected a use-after-move diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn struct_with_vec_and_owned_str_fields_partial_move_and_read_compiles() {
+        // Testing-matrix sweep: "struct with BOTH a Vec<T> field and
+        // an OwnedStr field, partially moved (one field taken, the
+        // other read), then dropped -- confirm no leak/double-free
+        // on the un-moved field." Checked 2026-08-02, not a bug --
+        // this compiles cleanly, and (checked manually outside this
+        // test suite, since it needs a real process, not just a
+        // compile-time check) `valgrind --leak-check=full` against
+        // native binaries built from this exact program reports 0
+        // leaks and a balanced alloc/free count on BOTH backends
+        // (LLVM: 2 allocs/2 frees; C: 3 allocs/3 frees -- different
+        // internal representation, same "everything freed exactly
+        // once" outcome). See docs/TESTING_MATRIX_TODO.md for the
+        // full writeup.
+        let source = r#"
+            struct Rec { xs: Vec<i64>, name: OwnedStr }
+            fn main() -> i64 {
+              let r: Rec = Rec { xs: vec(1, 2, 3), name: "widget" + "" };
+              let taken: Vec<i64> = r.xs;
+              print r.name;
+              print taken[0] + taken[1] + taken[2];
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "partial move of a Vec field + read of a sibling OwnedStr field, then drop, must compile",
         );
     }
 
@@ -50611,6 +50713,49 @@ fn main() -> i64 { return Reset_Handler(); }
     }
 
     #[test]
+    fn no_mangle_fn_with_tuple_and_array_params_emits_bare_names_both_backends() {
+        // Testing-matrix sweep: "#[no_mangle] fn with a Tuple/Array
+        // parameter" -- BUG-44's fix (forcing the tree backend for
+        // any #[no_mangle] function, since the SSA fast path never
+        // implemented bare-symbol emission at all) was only verified
+        // with scalar params. Checked 2026-08-02, not a bug: a
+        // no_mangle fn taking a `(i64, i64)` tuple and one taking a
+        // `[i64; 4]` array both keep their bare symbol name (not
+        // `fn_sum_pair`/`fn_sum_arr`) and compute correctly on both
+        // backends -- see the paired e2e test for runtime values.
+        let src = r#"
+intent "no_mangle tuple/array params";
+#[no_mangle]
+fn sum_pair(p: (i64, i64)) -> i64 { return p.0 + p.1; }
+#[no_mangle]
+fn sum_arr(a: [i64; 4]) -> i64 { return a[0] + a[1] + a[2] + a[3]; }
+fn main() -> i64 {
+  print sum_pair((10, 20));
+  print sum_arr([1, 2, 3, 4]);
+  return 0;
+}
+"#;
+        let c = compile_to_c(src).expect("no_mangle with Tuple/Array params must compile to C");
+        assert!(
+            c.contains("sum_pair(") && !c.contains("fn_sum_pair"),
+            "expected bare symbol 'sum_pair' (not 'fn_sum_pair') in C output:\n{c}"
+        );
+        assert!(
+            c.contains("sum_arr(") && !c.contains("fn_sum_arr"),
+            "expected bare symbol 'sum_arr' (not 'fn_sum_arr') in C output:\n{c}"
+        );
+        let ll = compile_to_llvm(src).expect("no_mangle with Tuple/Array params must compile to LLVM");
+        assert!(
+            ll.contains("@sum_pair(") && !ll.contains("@fn_sum_pair"),
+            "expected bare symbol '@sum_pair' (not '@fn_sum_pair') in LLVM output"
+        );
+        assert!(
+            ll.contains("@sum_arr(") && !ll.contains("@fn_sum_arr"),
+            "expected bare symbol '@sum_arr' (not '@fn_sum_arr') in LLVM output"
+        );
+    }
+
+    #[test]
     fn link_section_emits_attribute_in_c() {
         let src = r#"
 intent "link_section";
@@ -52825,6 +52970,62 @@ fn main() -> i64 { return leak_check(); }
         assert!(
             c.contains("typedef Struct_Point intent_arr2_Struct_Point[2];"),
             "expected a real typedef aliasing Struct_Point; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn array_of_tuple_or_struct_fn_param_emits_real_type_not_placeholder() {
+        // BUG-78, found sweeping the testing matrix's Big-O row
+        // (`Array<Tuple,N>` as a function parameter) -- unrelated to
+        // Big-O itself, a general C-backend declarator bug: ANY
+        // function taking `[Tuple; N]` or `[Struct; N]` BY VALUE (a
+        // param or plain local, not just inside a Vec) hit it.
+        // `format_declarator`'s `Type::Array` arm called
+        // `c_leaf_type(element)` directly -- `c_leaf_type` is
+        // documented as a LEAF-only spelling table that deliberately
+        // returns a placeholder comment ("/* tuple */", "/* struct
+        // */") for aggregate types, expecting callers to route
+        // through `c_element_storage` instead (which already has the
+        // correct per-shape arms, used elsewhere for exactly this).
+        // `fn sum_array_tuple(arr: [(i64, i64); 5])` declared itself
+        // as `/* tuple */ v_arr[5]` -- not valid C, "unknown type
+        // name 'v_arr'". Fixed in three places: the bare `Type::Array`
+        // arm, and the `ref`/`mut ref` Array arms (same bug, same
+        // fix) in `format_declarator`.
+        let source = r#"
+            fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+              return arr[0].0;
+            }
+            struct Pt { x: i64, y: i64 }
+            fn sum_array_struct(arr: [Pt; 3]) -> i64 {
+              return arr[0].x;
+            }
+            fn main() -> i64 {
+              let a: [(i64, i64); 5] = [(1,1),(2,2),(3,3),(4,4),(5,5)];
+              let b: [Pt; 3] = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }];
+              print sum_array_tuple(a);
+              print sum_array_struct(b);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Array<Tuple,N>/Array<Struct,N> fn params must compile to C");
+        assert!(
+            !c.contains("/* tuple */") && !c.contains("/* struct */"),
+            "must not leak a c_leaf_type placeholder comment into a function \
+             parameter declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("sum_array_tuple(intent_tuple_int64_t_int64_t v_arr[5])") || c.contains("sum_array_tuple(intent_tuple_int64_t_int64_t v_arr[5]"),
+            "expected the real tuple bundle struct name in the array parameter \
+             declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("sum_array_struct(Struct_Pt v_arr[3])") || c.contains("sum_array_struct(Struct_Pt v_arr[3]"),
+            "expected the real Struct_Pt name in the array parameter \
+             declarator; got:\n{}",
             c
         );
     }

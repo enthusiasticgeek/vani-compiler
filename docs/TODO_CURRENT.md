@@ -5512,4 +5512,45 @@ verifying the four fixes above against their tutorial worked examples
   `3+4`). Full `cargo test --release --workspace`: 13/13 binaries
   clean, 0 failed.
 
+## Bug found sweeping "#[complexity(...)] fn on Vec<Struct>/Array<Tuple,N>" (found+fixed 2026-08-02)
+
+- [x] **BUG-78 (found+fixed 2026-08-02 — C-backend-only declarator
+  bug, same class as BUG-61's many follow-ups: a caller of
+  `c_leaf_type` that should have routed through `c_element_storage`
+  instead).** Found while testing the testing matrix's Big-O row —
+  the `--big-o` analyzer itself handled `Vec<Struct>` loops correctly
+  (not a bug), but writing a natural Big-O-relevant helper taking a
+  fixed-size `Array<Tuple,N>` parameter crashed the C backend
+  entirely unrelated to Big-O:
+  ```vani
+  fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+    return arr[0].0;
+  }
+  ```
+  `cc` rejected the generated C: `unknown type name 'v_arr'` — the
+  emitted parameter declaration was `/* tuple */ v_arr[5]`. Root
+  cause: `format_declarator`'s `Type::Array { element, length }` arm
+  called `c_leaf_type(element)` to spell the element type — but
+  `c_leaf_type` is documented as a LEAF-only spelling table:
+  Tuple/Struct/Vec/Channel/Mutex/etc. all deliberately return a
+  placeholder comment there ("hitting this arm means a caller forgot
+  to special-case X"), with `c_element_storage` existing specifically
+  to give the correct per-shape spelling for exactly these types (and
+  already used correctly elsewhere — struct/tuple fields, `Vec`
+  bundle element storage, `emit_array_typedefs_for`'s inner spelling).
+  The array-parameter/local declarator path was simply never updated
+  to route through it. Same bug also present (found by inspection,
+  same fix) in the sibling `Type::Ref(Array)` / `Type::RefMut(Array)`
+  arms of the same function, for `ref [Tuple;N]` / `mut ref
+  [Struct;N]` parameters. Fixed by changing all three arms to call
+  `c_element_storage(element)` instead of `c_leaf_type(element)`.
+  LLVM backend was unaffected throughout (its own array-parameter
+  lowering already spells element types correctly). New tests: 1
+  `src/lib.rs` (asserts no placeholder comment leaks into the
+  declarator, and the real `intent_tuple_...`/`Struct_...` names
+  appear) + 1 `tests/run_end_to_end.rs` (both backends, hand-computed
+  sums over both an `Array<Tuple,N>` and an `Array<Struct,N>`
+  parameter). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed.
+
 ---
