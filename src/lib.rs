@@ -52016,5 +52016,88 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-61 (tree-LLVM half): `vec(ch_a, ch_b)` building a
+    /// `Vec<Channel<i64,4>>` used to under-allocate its malloc'd
+    /// buffer at a flat, hardcoded 24 bytes/element (the
+    /// `vec_element_byte_size` fallback) instead of the real
+    /// `Channel<i64,4>` struct's 80-byte size (`{ [4 x i64], [4 x
+    /// i64], i64, i64 }`), corrupting the heap. Both `vec()`-literal
+    /// lowering sites now route Channel/Mutex/Guard/RwLock/
+    /// ReadGuard/WriteGuard elements through the same runtime
+    /// GEP-null `vec_element_size_expr` used for Struct/Tuple/
+    /// payloaded-enum elements. Assert the emitted IR computes the
+    /// buffer size via a runtime `mul` against the real struct's
+    /// sizeof, not a hardcoded 48 (= 2 * the old wrong 24).
+    #[test]
+    fn vec_of_channel_llvm_uses_runtime_sizeof_not_hardcoded_24_bytes() {
+        let source = r#"
+            fn main() -> i64 {
+              let ch_a: Channel<i64, 4> = channel_new();
+              let ch_b: Channel<i64, 4> = channel_new();
+              let chans: Vec<Channel<i64, 4>> = vec(ch_a, ch_b);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Vec<Channel<i64,4>> literal compiles to LLVM");
+        assert!(
+            !ll.contains("call i8* @malloc(i64 48)"),
+            "must not use the old hardcoded (2 * 24-byte-fallback) size; got:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("mul i64 2,")
+                && ll.contains("getelementptr (%intent_channel_int64_t_4"),
+            "expected a runtime `mul i64 2, <sizeof(Channel<i64,4>)>` via the \
+             GEP-null trick against the real channel struct; got:\n{}",
+            ll
+        );
+    }
+
+    /// BUG-61 (tree-C half): `Vec<Channel<T,N>>`'s bundle typedef
+    /// (`intent_vec_channel_int64_t_4`) spells its `data` field as
+    /// `intent_channel_int64_t_4*`, which requires that name to
+    /// already be a declared typedef -- but `emit_c` used to emit
+    /// the Channel struct itself (via `emit_concurrency_runtime_
+    /// helpers`) only after prototypes+function bodies, well after
+    /// the Vec bundle. `emit_concurrency_type_bundles` now runs
+    /// right after user structs are fully defined, before the Vec
+    /// bundle loop. Assert the channel typedef's byte offset in the
+    /// emitted C precedes the Vec-of-channel typedef's.
+    #[test]
+    fn vec_of_channel_c_emits_channel_struct_before_vec_bundle_references_it() {
+        let source = r#"
+            fn main() -> i64 {
+              let ch_a: Channel<i64, 4> = channel_new();
+              let ch_b: Channel<i64, 4> = channel_new();
+              let chans: Vec<Channel<i64, 4>> = vec(ch_a, ch_b);
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < 2 {
+                let _ = channel_send(mut ref chans[i], (i + 1) * 10);
+                let v: i64 = channel_recv(mut ref chans[i]);
+                total = total + v;
+                i = i + 1;
+              }
+              print total;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<Channel<i64,4>> with mut-ref indexing compiles to C");
+        let channel_typedef_at = c
+            .find("} intent_channel_int64_t_4;")
+            .unwrap_or_else(|| panic!("no intent_channel_int64_t_4 typedef found in:\n{}", c));
+        let vec_bundle_at = c
+            .find("intent_channel_int64_t_4* __restrict__ data")
+            .unwrap_or_else(|| panic!("no intent_vec_channel_int64_t_4 bundle typedef found in:\n{}", c));
+        assert!(
+            channel_typedef_at < vec_bundle_at,
+            "the intent_channel_int64_t_4 struct must be fully declared \
+             (offset {}) before the Vec-of-channel bundle references it \
+             by name (offset {})",
+            channel_typedef_at,
+            vec_bundle_at
+        );
+    }
+
 }
 

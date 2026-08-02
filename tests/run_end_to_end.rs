@@ -5902,3 +5902,155 @@ fn main() -> i64 {
         assert_eq!(stdout, "16\n", "run {run_idx}: wrong dot256 result");
     }
 }
+
+// BUG-61, found running the docs/TESTING_MATRIX_TODO.md priority
+// sweep (Channel<T,N> had zero end-to-end coverage): `Vec<Channel<
+// T,N>>` accessed via `mut ref chans[i]` crashed the LLVM backend
+// with heap corruption (a flat, hardcoded 24-byte-per-element
+// malloc size instead of the real 80-byte Channel<i64,4> struct
+// size) and failed to even compile under the C backend (the
+// generated C referenced the `intent_channel_int64_t_4` struct
+// typedef before it was declared). Fixed in both `backend_llvm.rs`
+// (real GEP-null sizeof for Channel/Mutex/Guard/RwLock/ReadGuard/
+// WriteGuard Vec elements) and `backend_c.rs` (channel/mutex/
+// rwlock bundles now emitted before the Vec-bundle loop that
+// references them by name).
+#[test]
+fn vec_of_channel_send_recv_via_mut_ref_index_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_channel_mut_ref_index",
+        r#"
+fn main() -> i64 {
+  let ch_a: Channel<i64, 4> = channel_new();
+  let ch_b: Channel<i64, 4> = channel_new();
+  let chans: Vec<Channel<i64, 4>> = vec(ch_a, ch_b);
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 2 {
+    let _ = channel_send(mut ref chans[i], (i + 1) * 10);
+    let v: i64 = channel_recv(mut ref chans[i]);
+    total = total + v;
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "Vec<Channel<i64,4>> mut-ref-index send/recv must not crash for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "30\n",
+            "expected 10 + 20 = 30 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+/// Same shape as above but growing the Vec past its initial
+/// capacity via `push` before indexing -- exercises the realloc
+/// path, not just the initial `vec()`-literal malloc.
+#[test]
+fn vec_of_channel_push_growth_then_send_recv_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_channel_push_growth",
+        r#"
+fn main() -> i64 {
+  let ch_a: Channel<i64, 4> = channel_new();
+  let chans: Vec<Channel<i64, 4>> = vec(ch_a);
+  let ch_b: Channel<i64, 4> = channel_new();
+  push(mut ref chans, ch_b);
+  let ch_c: Channel<i64, 4> = channel_new();
+  push(mut ref chans, ch_c);
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 3 {
+    let _ = channel_send(mut ref chans[i], (i + 1) * 100);
+    let v: i64 = channel_recv(mut ref chans[i]);
+    total = total + v;
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "Vec<Channel<i64,4>> push-growth then send/recv must not crash for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "600\n",
+            "expected 100 + 200 + 300 = 600 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+/// Minimal SSA-C-path variant of the same bug: a `Vec<Channel<T,N>>`
+/// that never uses `mut ref vec[i]` (so it's SSA-eligible on the C
+/// side, per `main.rs`'s `ssa_path_supports` -- Channel/Mutex/
+/// RwLock/Atomic route through SSA on both backends) still hit the
+/// identical typedef-ordering bug in `ssa_backend_c.rs` (a separate
+/// copy of the same collect-then-emit logic as tree-C's `emit_c`).
+/// Only needs to compile+run without crashing; the interesting
+/// assertion is the exit code, not the (unused) value.
+#[test]
+fn vec_of_channel_construct_only_compiles_via_ssa_c_path() {
+    let src = write_tmp_vani(
+        "vec_of_channel_ssa_c_construct_only",
+        r#"
+fn main() -> i64 {
+  let ch_a: Channel<i64, 4> = channel_new();
+  let ch_b: Channel<i64, 4> = channel_new();
+  let chans: Vec<Channel<i64, 4>> = vec(ch_a, ch_b);
+  print len(chans);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run --backend=c should execute");
+    assert!(
+        output.status.success(),
+        "SSA-C-eligible Vec<Channel<i64,4>> construction must compile+run; \
+         status {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "2\n", "expected len(chans) == 2; got: {}", stdout);
+}

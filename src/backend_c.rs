@@ -1120,6 +1120,28 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !tuple_shapes.is_empty() {
         body.push('\n');
     }
+    // Channel<T, N> / Mutex<T> / RwLock<T> storage bundles must
+    // land here -- AFTER every user struct is fully defined
+    // (the unified struct+enum+tuple topo loop above already
+    // completed, so `Channel<UserStruct>`'s by-value ring-buffer
+    // slots can size the struct) but BEFORE the `element_types`
+    // Vec-bundle loop below. A `Vec<Channel<T, N>>`'s typedef
+    // spells its `data` field as `intent_channel_<T>_<N>*`, which
+    // C requires to already be a known typedef at the point of
+    // use (unlike `struct Foo*`, a bare typedef name isn't
+    // forward-declarable). This used to run much later, inside
+    // `emit_concurrency_runtime_helpers` at the bottom of `emit_c`
+    // (after prototypes/bodies, for its condvar/task/barrier
+    // text-scan gating) -- which left `Vec<Channel<T,N>>` (or
+    // Vec<Mutex<T>>/Vec<RwLock<T>>) referencing an undeclared
+    // type name, so cc failed with "unknown type name" cascading
+    // into "expected 'const int *'" argument mismatches. Found
+    // sweeping `Vec<Channel<T,N>>` for the testing-matrix pass
+    // (2026-08-01). The condvar/task/barrier detection (which
+    // genuinely needs the generated prototypes/bodies text) stays
+    // at its original late call site; only the type-bundle emit
+    // moves here.
+    emit_concurrency_type_bundles(&mut body, &channel_specs, &mutex_specs, &rwlock_specs);
     // Per-shape array typedefs for any `Array<T, N>` that
     // appears as a Vec element (a `Vec<[i64; 4]>` needs
     // `typedef int64_t intent_arr4_int64_t[4];` in scope
@@ -1510,19 +1532,22 @@ pub fn emit_c(program: &TypedProgram) -> String {
         function_bodies.push('\n');
     }
 
-    // The concurrency bundle's own gating (`needs_condvar` /
-    // `needs_tasks` / `needs_barrier`, via `.contains(...)` on
-    // literal runtime-symbol substrings) needs to see actual usage
-    // sites -- those only exist in `prototypes` (a fn param typed
-    // `ref Condvar` etc) and `function_bodies` (everything else),
-    // neither of which has landed in `body` yet at this point. Pass
-    // their concatenation for gating purposes only; the bundle's
-    // OUTPUT still goes directly into `body`, ahead of both.
+    // The condvar/task/barrier runtime helpers' own gating
+    // (`needs_condvar` / `needs_tasks` / `needs_barrier`, via
+    // `.contains(...)` on literal runtime-symbol substrings) needs
+    // to see actual usage sites -- those only exist in `prototypes`
+    // (a fn param typed `ref Condvar` etc) and `function_bodies`
+    // (everything else), neither of which has landed in `body` yet
+    // at this point. Pass their concatenation for gating purposes
+    // only; the helpers' OUTPUT still goes directly into `body`,
+    // ahead of both. (The Channel/Mutex/RwLock type bundles
+    // themselves were already emitted earlier by
+    // `emit_concurrency_type_bundles` -- see that call site's
+    // comment for why they can't wait until here.)
     let concurrency_usage_text = format!("{}{}", prototypes, function_bodies);
-    emit_concurrency_runtime_helpers(
+    emit_concurrency_runtime_extras(
         &mut body,
         &concurrency_usage_text,
-        &channel_specs,
         &mutex_specs,
         &rwlock_specs,
     );
@@ -7536,10 +7561,49 @@ fn emit_channel_bundle(element: &Type, capacity: u64, out: &mut String) {
     ));
 }
 
-fn emit_concurrency_runtime_helpers(
+/// Channel<T,N> / Mutex<T> / RwLock<T> storage bundles -- the
+/// part of the old `emit_concurrency_runtime_helpers` that has no
+/// dependency on generated-code text-scanning (`channel_specs` /
+/// `mutex_specs` / `rwlock_specs` are AST-derived, not scanned).
+/// Split out so it can run right after user structs are fully
+/// defined but well before prototypes/bodies exist -- see the
+/// call site in `emit_c` for why. `emit_intent_mutex_primitives_c`
+/// (the shared futex/WaitOnAddress helpers) is emitted here too
+/// whenever a mutex or rwlock bundle is present; `emit_concurrency_
+/// runtime_extras` below emits it too (idempotently gated) for the
+/// condvar/barrier-only case where neither mutex nor rwlock specs
+/// exist yet at this point.
+fn emit_concurrency_type_bundles(
+    out: &mut String,
+    channel_specs: &[(Type, u64)],
+    mutex_specs: &[Type],
+    rwlock_specs: &[Type],
+) {
+    for (element, capacity) in channel_specs {
+        emit_channel_bundle(element, *capacity, out);
+    }
+    if !mutex_specs.is_empty() || !rwlock_specs.is_empty() {
+        emit_intent_mutex_primitives_c(out);
+    }
+    for element in mutex_specs {
+        emit_mutex_bundle(element, out);
+    }
+    for element in rwlock_specs {
+        emit_rwlock_bundle(element, out);
+    }
+}
+
+/// Condvar/task/barrier runtime helpers -- the half of the old
+/// `emit_concurrency_runtime_helpers` that genuinely needs to
+/// text-scan the generated prototypes+bodies (there's no AST-level
+/// "specs" list for these the way there is for Channel/Mutex/
+/// RwLock). Runs at the original late call site. Guards against
+/// double-emitting the shared futex primitives when
+/// `emit_concurrency_type_bundles` already emitted them for a
+/// mutex/rwlock spec.
+fn emit_concurrency_runtime_extras(
     out: &mut String,
     body: &str,
-    channel_specs: &[(Type, u64)],
     mutex_specs: &[Type],
     rwlock_specs: &[Type],
 ) {
@@ -7550,28 +7614,15 @@ fn emit_concurrency_runtime_helpers(
             "typedef struct { intent_thread_t thread; void* ctx; } intent_task_handle;\n\n",
         );
     }
-    for (element, capacity) in channel_specs {
-        emit_channel_bundle(element, *capacity, out);
-    }
-    // Emit the shared futex/WaitOnAddress primitives once if any
-    // mutex, rwlock, condvar, or barrier is needed.
-    let needs_futex_primitives = !mutex_specs.is_empty()
-        || !rwlock_specs.is_empty()
-        || needs_condvar
-        || body.contains("intent_barrier");
-    if needs_futex_primitives {
+    let needs_barrier = body.contains("intent_barrier");
+    let futex_primitives_already_emitted =
+        !mutex_specs.is_empty() || !rwlock_specs.is_empty();
+    if (needs_condvar || needs_barrier) && !futex_primitives_already_emitted {
         emit_intent_mutex_primitives_c(out);
-    }
-    for element in mutex_specs {
-        emit_mutex_bundle(element, out);
-    }
-    for element in rwlock_specs {
-        emit_rwlock_bundle(element, out);
     }
     if needs_condvar {
         emit_intent_condvar_helpers_c(out);
     }
-    let needs_barrier = body.contains("intent_barrier");
     if needs_barrier {
         emit_intent_barrier_helpers_c(out);
     }

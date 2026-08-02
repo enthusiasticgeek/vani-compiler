@@ -4556,4 +4556,80 @@ verifying the four fixes above against their tutorial worked examples
   and never the dead one. Full `cargo test --release --workspace`
   clean (2616 passed, 0 failed) after this fix.
 
+## Bug found sweeping docs/TESTING_MATRIX_TODO.md's priority list (added+fixed 2026-08-01)
+
+- [x] **BUG-61 (found+fixed 2026-08-01 — two independent under-allocation
+  /ordering bugs, one per backend, both specific to `Vec<Channel<T,N>>`
+  — and by extension `Vec<Mutex<T>>`/`Vec<RwLock<T>>`).**
+  Found running the feature x backend testing-matrix sweep (see
+  `docs/TESTING_MATRIX_TODO.md`, priority item 2: `Channel<T,N>` had
+  zero end-to-end coverage). Minimal repro:
+  ```vani
+  fn main() -> i64 {
+    let ch_a: Channel<i64, 4> = channel_new();
+    let ch_b: Channel<i64, 4> = channel_new();
+    let chans: Vec<Channel<i64, 4>> = vec(ch_a, ch_b);
+    let i: i64 = 0;
+    let total: i64 = 0;
+    while i < 2 {
+      let _ = channel_send(mut ref chans[i], (i + 1) * 10);
+      let v: i64 = channel_recv(mut ref chans[i]);
+      total = total + v;
+      i = i + 1;
+    }
+    print "total =", total;
+    return 0;
+  }
+  ```
+  **LLVM backend**: crashed with heap corruption (`free(): invalid
+  next size (fast)` / `munmap_chunk(): invalid pointer`, sometimes
+  inside LLVM's own JIT linker rather than user code). Root cause:
+  both `vec()`-literal lowering sites (the generic expr-level handler
+  and the dedicated `emit_vec_let_from_literal` for `let x: Vec<T> =
+  vec(...)`) only routed element size through the correct runtime
+  GEP-null `sizeof` trick (`vec_element_size_expr`) for `Struct`/
+  `Tuple`/payloaded-`Enum` elements; every other element type fell
+  through to `vec_element_byte_size`'s flat, **hardcoded 24-byte**
+  hand-wave for `Channel`/`Mutex`/`Guard` (comment: "Vecs of these
+  aren't allowed by the checker today so this is defensive" — false;
+  the checker allows it and main.rs's SSA gating explicitly
+  special-cases `Vec<Channel|Atomic>`). A `Channel<i64,4>`'s real
+  LLVM struct is 80 bytes (`{ [4 x i64], [4 x i64], i64, i64 }`), so
+  the 2-element buffer was malloc'd at 48 bytes instead of 160,
+  corrupting the heap on the second element's store. Fixed by adding
+  proper `vec_element_size_expr` arms for `Channel`/`Mutex`/`Guard`/
+  `RwLock`/`ReadGuard`/`WriteGuard` (same GEP-null trick, using each
+  type's existing `llvm_*_struct` name helper) and extending both
+  `vec()`-literal call sites' struct/tuple/enum gating to also route
+  these six types through it.
+  **C backend** (SSA-C path is gated away from `mut ref vec[i]`
+  shapes, so this exercised tree-C): `cc` failed outright —
+  `error: unknown type name 'intent_channel_int64_t_4'` cascading
+  into `expected 'const int *'` argument mismatches throughout the
+  generated Vec-of-Channel helper functions. Root cause: tree-C's
+  `emit_c` emitted the `Vec<Channel<T,N>>` bundle (whose typedef
+  spells its `data` field as `intent_channel_<T>_<N>*`) from the
+  `element_types` loop, but only emitted the `intent_channel_<T>_<N>`
+  struct itself much later, inside `emit_concurrency_runtime_helpers`
+  — after prototypes and function bodies, for its condvar/task/
+  barrier text-scan gating — so the Vec bundle referenced a type name
+  C hadn't seen yet. Fixed by splitting that function into
+  `emit_concurrency_type_bundles` (Channel/Mutex/RwLock — no
+  text-scan dependency, AST-derived specs only) which now runs right
+  after every user struct is fully defined but before the
+  `element_types` Vec-bundle loop, and `emit_concurrency_runtime_
+  extras` (Condvar/Task/Barrier — genuinely needs the scanned text)
+  which stays at the original late call site. The equivalent
+  ordering bug in `ssa_backend_c.rs` (reachable when a `Vec<Channel<
+  T,N>>` program doesn't use `mut ref vec[i]`, so takes the SSA-C
+  path) was fixed the same way, reordering its channel-spec
+  collection+emission before its Vec-bundle emission.
+  New tests: `src/lib.rs` compile-time tests for all three symptoms
+  (LLVM under-allocation, C ordering in tree-C, C ordering in
+  SSA-C) plus a real end-to-end test (`tests/run_end_to_end.rs`)
+  asserting the correct summed value on both backends, including a
+  push-growth-beyond-initial-capacity variant. Also added the
+  `Vec<Channel<T,N>>` worked example itself as a new automated sweep
+  case so this class of bug can't silently regress.
+
 ---

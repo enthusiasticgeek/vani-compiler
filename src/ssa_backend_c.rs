@@ -70,6 +70,43 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str(
         "typedef struct { intent_thread_t thread; void* ctx; } intent_task_handle;\n\n",
     );
+    // Walk the module for `Type::Channel(T, N)` specs and emit
+    // one per-(T, N) runtime bundle (struct + new / send / recv
+    // helpers) per unique pair. Reuses tree-C's
+    // `emit_channel_bundle_pub` so the runtime stays in
+    // lock-step. This MUST run before the Vec-bundle pass below:
+    // `Vec<Channel<T, N>>`'s typedef references the channel
+    // storage struct (`intent_channel_<T>_<N>`) by name as its
+    // `data` pointer element type, and C requires that name to
+    // already be a known typedef at the point of use (unlike a
+    // `struct Foo*` forward reference, a bare typedef name isn't
+    // resolvable until its `typedef` line has been seen). Emitting
+    // the Vec bundle first left `intent_channel_<T>_<N>` totally
+    // undeclared at that point, so cc reported "unknown type
+    // name" and (via GCC's int-fallback recovery for unknown
+    // type names) a cascade of "expected 'const int *'" mismatches
+    // in every generated Vec helper signature. Found sweeping
+    // `Vec<Channel<T,N>>` for the testing-matrix pass (2026-08-01).
+    let mut chan_seen: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut chan_specs: Vec<(Type, u64)> = Vec::new();
+    for f in &module.functions {
+        for (_, ty, _) in &f.params {
+            collect_channel_specs_in_ty(ty, &mut chan_seen, &mut chan_specs);
+        }
+        collect_channel_specs_in_ty(&f.return_type, &mut chan_seen, &mut chan_specs);
+        for block in &f.blocks {
+            for (_, ty) in &block.params {
+                collect_channel_specs_in_ty(ty, &mut chan_seen, &mut chan_specs);
+            }
+            for instr in &block.instructions {
+                collect_channel_specs_in_ty(&instr.ty, &mut chan_seen, &mut chan_specs);
+            }
+        }
+    }
+    for (element, capacity) in &chan_specs {
+        crate::backend_c::emit_channel_bundle_pub(element, *capacity, &mut out);
+    }
     // Walk every block's instructions for Vec result types,
     // collect unique element types, and emit one
     // `intent_vec_<T>` runtime bundle (struct + helpers) per
@@ -94,31 +131,6 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     }
     for element in &vec_elements {
         crate::backend_c::emit_vec_bundle(element, &mut out);
-    }
-    // Walk the module for `Type::Channel(T, N)` specs and
-    // emit one per-(T, N) runtime bundle (struct + new /
-    // send / recv helpers) per unique pair. Reuses
-    // tree-C's `emit_channel_bundle_pub` so the runtime
-    // stays in lock-step.
-    let mut chan_seen: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    let mut chan_specs: Vec<(Type, u64)> = Vec::new();
-    for f in &module.functions {
-        for (_, ty, _) in &f.params {
-            collect_channel_specs_in_ty(ty, &mut chan_seen, &mut chan_specs);
-        }
-        collect_channel_specs_in_ty(&f.return_type, &mut chan_seen, &mut chan_specs);
-        for block in &f.blocks {
-            for (_, ty) in &block.params {
-                collect_channel_specs_in_ty(ty, &mut chan_seen, &mut chan_specs);
-            }
-            for instr in &block.instructions {
-                collect_channel_specs_in_ty(&instr.ty, &mut chan_seen, &mut chan_specs);
-            }
-        }
-    }
-    for (element, capacity) in &chan_specs {
-        crate::backend_c::emit_channel_bundle_pub(element, *capacity, &mut out);
     }
     // Emit forward declarations of every user function so
     // task outlines (which may call them) can see the

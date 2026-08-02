@@ -9389,8 +9389,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let raw = ctx.fresh_tmp();
                 let payloaded_enum = matches!(element.as_ref(), Type::Enum(name)
                     if LLVM_ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(name)));
+                // Channel<T,N>/Mutex<T>/Guard<T>/RwLock<T>/ReadGuard<T>/
+                // WriteGuard<T> are named structs whose real byte size
+                // depends on T (and, for Channel, N) -- same as Struct/
+                // Tuple/payloaded-enum above, and must route through
+                // `vec_element_size_expr`'s runtime GEP-null sizeof, not
+                // the `vec_element_byte_size` compile-time-constant
+                // fallback below (which returns a flat 24 regardless of
+                // the real layout -- for a `Channel<i64,4>`, whose real
+                // struct is 80 bytes, that under-allocated the `vec(...)`
+                // literal's malloc'd buffer, corrupting the heap on the
+                // second element's store). Found sweeping
+                // `Vec<Channel<T,N>>` for the testing-matrix pass
+                // (2026-08-01).
+                let needs_runtime_sizeof = matches!(
+                    element.as_ref(),
+                    Type::Channel(_, _)
+                        | Type::Mutex(_)
+                        | Type::Guard(_)
+                        | Type::RwLock(_)
+                        | Type::ReadGuard(_)
+                        | Type::WriteGuard(_)
+                );
                 if matches!(element.as_ref(), Type::Struct(_) | Type::Tuple(_))
                     || payloaded_enum
+                    || needs_runtime_sizeof
                 {
                     let size_expr = vec_element_size_expr(element);
                     let bytes_v = ctx.fresh_tmp();
@@ -17627,7 +17650,26 @@ fn emit_vec_let_from_literal(
     let raw = ctx.fresh_tmp();
     let payloaded_enum = matches!(element, Type::Enum(name)
         if LLVM_ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(name)));
-    if matches!(element, Type::Struct(_) | Type::Tuple(_)) || payloaded_enum {
+    // Same runtime-sizeof requirement as the generic `vec()`
+    // expression-call path above -- Channel<T,N>/Mutex<T>/
+    // Guard<T>/RwLock<T>/ReadGuard<T>/WriteGuard<T> elements need
+    // `vec_element_size_expr`'s GEP-null sizeof, not the flat
+    // 24-byte `vec_element_byte_size` fallback below (which
+    // under-allocated a `let chans: Vec<Channel<i64,4>> =
+    // vec(ch_a, ch_b);` literal's buffer -- 80-byte real struct vs.
+    // 24-byte assumed -- corrupting the heap on the second
+    // element's store). Found sweeping `Vec<Channel<T,N>>` for the
+    // testing-matrix pass (2026-08-01).
+    let needs_runtime_sizeof = matches!(
+        element,
+        Type::Channel(_, _)
+            | Type::Mutex(_)
+            | Type::Guard(_)
+            | Type::RwLock(_)
+            | Type::ReadGuard(_)
+            | Type::WriteGuard(_)
+    );
+    if matches!(element, Type::Struct(_) | Type::Tuple(_)) || payloaded_enum || needs_runtime_sizeof {
         // Struct/tuple/payloaded-enum element: runtime
         // sizeof via GEP-null trick. T1.2 + Vec<Struct>
         // LLVM. Closure #151 added the payloaded-enum
@@ -43672,6 +43714,64 @@ pub(crate) fn vec_element_size_expr(element: &Type) -> String {
                 format!("{}", vec_element_byte_size(element))
             }
         }
+        // `Channel<T, N>` / `Mutex<T>` / `Guard<T>` / `RwLock<T>` /
+        // `ReadGuard<T>` / `WriteGuard<T>` are named LLVM struct
+        // types whose real size depends on T (and, for Channel,
+        // N) — same GEP-null sizeof trick as Struct/Tuple/Enum
+        // above. `vec_element_byte_size`'s hardcoded 24-byte
+        // fallback (originally justified by "Vecs of these aren't
+        // allowed by the checker today") was wrong: `Vec<Channel<
+        // T,N>>` IS allowed (main.rs's SSA gating explicitly
+        // special-cases it), and the real struct
+        // (`%intent_channel_int64_t_4`: two `[N x i64]` arrays +
+        // two `i64` counters) is far larger than 24 bytes for any
+        // nontrivial N. Using 24 under-allocated the Vec's malloc
+        // buffer, corrupting the heap on the second element's
+        // store (`free(): invalid pointer` at scope exit). Found
+        // sweeping `Vec<Channel<T,N>>` for the testing-matrix pass
+        // (2026-08-01).
+        Type::Channel(element, capacity) => {
+            let s_ty = llvm_channel_struct(element, *capacity);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
+        Type::Mutex(element) => {
+            let s_ty = llvm_mutex_struct(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
+        Type::Guard(element) => {
+            let s_ty = llvm_guard_struct(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
+        Type::RwLock(element) => {
+            let s_ty = llvm_rwlock_struct(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
+        Type::ReadGuard(element) => {
+            let s_ty = llvm_read_guard_struct(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
+        Type::WriteGuard(element) => {
+            let s_ty = llvm_write_guard_struct(element);
+            format!(
+                "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+                s_ty, s_ty, s_ty
+            )
+        }
         _ => format!("{}", vec_element_byte_size(element)),
     }
 }
@@ -43686,11 +43786,16 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
             vec_element_byte_size(inner) * length
         }
         Type::Task => 16,
-        // Channel / Mutex / Guard / Atomic are pointer-or-
-        // struct shaped; conservatively pick 24 to cover
-        // the worst case. Vecs of these aren't allowed by
-        // the checker today so this is defensive.
-        Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) => 24,
+        // Channel / Mutex / Guard / RwLock / ReadGuard /
+        // WriteGuard route through `vec_element_size_expr`'s
+        // exact GEP-null sizeof above in every call site that
+        // matters (vec literal / push / etc. all call that
+        // function, not this byte-count fallback directly). This
+        // arm only exists so any stray direct caller of
+        // `vec_element_byte_size` gets a size in the right
+        // ballpark rather than the 8-byte scalar default.
+        Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_)
+        | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) => 24,
         Type::Atomic(inner) => vec_element_byte_size(inner),
         // Vtables Phase 4b: `dyn Iface` is a fat pointer
         // (vtable pointer + data pointer) — 16 bytes.
