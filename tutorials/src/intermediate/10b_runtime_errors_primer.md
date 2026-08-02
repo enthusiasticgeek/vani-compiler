@@ -300,16 +300,13 @@ Three things to notice:
 2. The function's own return type is `Option<...>`, so the
    propagated absence is already the right shape -- no
    re-wrapping needed.
-3. **A real, confirmed v1 gap worth knowing before you lean on
-   this**: a function with a heap-owning (`OwnedStr`, `Vec<T>`,
-   ...) PARAMETER, combined with a `?`/`try` that actually takes
-   the early-return path inside that same function, crashes
-   (confirmed both backends, unrelated to whether the parameter
-   is even used by the `try`/`?` call). Keep functions that use
-   `?`/`try` to scalar (`i64`/`f64`/`bool`) parameters only;
-   parse/extract any `OwnedStr` input with `if let` *before*
-   calling into a `?`-using helper, the way the worked example in
-   [Intermediate 10](10_result_try.md) does.
+3. A function with a heap-owning (`OwnedStr`, `Vec<T>`, ...)
+   parameter, combined with a `?`/`try` that actually takes the
+   early-return path inside that same function, works fine --
+   confirmed by testing, on both backends, including when the
+   heap-owning parameter is never touched by the `?`/`try` call
+   itself. (An earlier version of this page documented a real
+   crash here, fixed 2026-08-01.)
 
 Once `Result<T, E>` support lands, the equivalent
 `Result`-returning chain (`parse_int`-style parsing, a lookup,
@@ -518,10 +515,6 @@ fn main() -> i64 {
   let _ = flush_stdout();
   let line: OwnedStr = stdin_read_line();
 
-  // Extract `n` BEFORE calling into any `?`/`try`-using
-  // function -- see the callout in the previous section for
-  // why an OwnedStr parameter can't safely sit alongside a
-  // `?`/`try` that early-returns in the same function today.
   let parsed: Option<i64> = parse_int(line);
   let n: i64 = 0;
   if let Option.None = parsed {

@@ -14,54 +14,58 @@ The most common real-world complication: a function calls several
 sub-functions that each return a *different* error type.
 
 ```vani
-fn read_config(path: Str) -> IoResult    { ... }
-fn parse_value(s: Str)    -> ParseResult { ... }
+fn read_config(path: Str) -> Result<i64, i64> { ... }
+fn parse_value(s: Str)    -> Result<i64, i64> { ... }
 ```
 
 `Result<T, E>` is a built-in generic (see [Sec.10](10_result_try.md)),
 but a single instantiation can only carry one concrete `E`. When two
 sub-functions fail with genuinely different error shapes, wrap them
 in a **union error enum** that names every error kind the caller
-might receive, and have each sub-function return its own small
-Ok/Err enum rather than `Result<T, E>` directly -- this also sidesteps
-a current compiler limitation (constructing more than one distinct
-`Result<T, E>`/`Option<T>` instantiation in the same program can break;
-see the note at the end of this pattern):
+might receive, and have `load` translate each sub-function's error
+into the right variant on the way through:
 
 ```vani
-enum IoResult    { Ok(i64), Err(i64) }
-enum ParseResult { Ok(i64), Err(i64) }
-
-fn read_config(path: Str) -> IoResult    { return IoResult.Ok(1); }
-fn parse_value(s: Str)    -> ParseResult { return ParseResult.Ok(2); }
+fn read_config(path: Str) -> Result<i64, i64> { return Result.Ok(1); }
+fn parse_value(s: Str)    -> Result<i64, i64> { return Result.Ok(2); }
 
 enum ConfigError {
-  Io(i64),      // wraps IoResult's payload
-  Parse(i64),   // wraps ParseResult's payload
+  Io(i64),      // wraps read_config's error payload
+  Parse(i64),   // wraps parse_value's error payload
 }
 
 fn load(path: Str) -> Result<i64, ConfigError> {
   // Step 1: call read_config, convert its error to ConfigError::Io
   let raw: i64 = 0;
-  let step1: IoResult = read_config(path);
-  if let IoResult.Ok(v) = step1 {
+  let step1: Result<i64, i64> = read_config(path);
+  if let Result.Ok(v) = step1 {
     raw = v;
-  } else if let IoResult.Err(e) = step1 {
+  } else if let Result.Err(e) = step1 {
     return Result.Err(ConfigError.Io(e));
   }
 
   // Step 2: call parse_value, convert its error to ConfigError::Parse
   let value: i64 = 0;
-  let step2: ParseResult = parse_value(path);
-  if let ParseResult.Ok(v) = step2 {
+  let step2: Result<i64, i64> = parse_value(path);
+  if let Result.Ok(v) = step2 {
     value = v;
-  } else if let ParseResult.Err(e) = step2 {
+  } else if let Result.Err(e) = step2 {
     return Result.Err(ConfigError.Parse(e));
   }
 
   return Result.Ok(raw + value);
 }
 ```
+
+This is confirmed by testing on both backends (fixed 2026-08-01; an
+earlier version of this page avoided using `Result<T, E>` for
+`read_config`/`parse_value` directly -- routing through hand-declared
+`IoResult`/`ParseResult` enums instead -- to work around a real
+compiler bug where constructing 2+ different instantiations of the
+same built-in generic enum anywhere in a program broke every
+constructor call site for it. `read_config`'s `Result<i64, i64>` and
+`load`'s `Result<i64, ConfigError>` are two different instantiations
+of the same generic, exactly the shape that used to break).
 
 The caller unwraps the outer `Result` and then the inner `ConfigError`
 with nested `if let` / `else if let` chains -- a single pattern can't
@@ -83,15 +87,6 @@ fn main() -> i64 {
   return 0;
 }
 ```
-
-> **Compiler limitation**: constructing two *different* instantiations
-> of the same built-in generic enum (e.g. both `Result<i64, i64>` and
-> `Result<i64, ConfigError>`, or `Option<i64>` alongside `Option<OwnedStr>`)
-> anywhere in one program currently breaks every constructor call site
-> for that generic. Pattern *matching* on an already-typed value is
-> unaffected -- only *construction* breaks. Until this is fixed, keep
-> sub-function results in their own small hand-declared enums (as
-> above) and reserve `Result<T, E>` for a single outermost boundary.
 
 ### Naming the union enum
 
@@ -218,11 +213,10 @@ reporting with a message.
 
 > **Note**: `HashMap<Str, V>` (a borrowed key) is rejected -- use
 > `HashMap<OwnedStr, V>` or a scalar key type like `i64` (as above).
-> Separately, passing `ref HashMap<OwnedStr, V>` as a function
-> parameter currently miscompiles under `--backend=c` (the LLVM
-> backend handles it correctly); if you need an owned-string key
-> passed by reference into a function, test on the C backend first
-> or keep the map access inside the same function.
+> Passing `ref HashMap<OwnedStr, V>` as a function parameter works
+> fine on both backends -- confirmed by testing (fixed 2026-08-01;
+> an earlier version of this page warned it miscompiled under
+> `--backend=c`).
 
 ---
 
