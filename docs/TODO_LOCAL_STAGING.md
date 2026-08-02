@@ -40,3 +40,30 @@ Repro: `tools/localfuzz/findings/20260802-180614-run-crash-1a1740134e/repro.vani
 }
 ```
 
+
+---
+
+### Candidate: 20260802-194717-backend-divergence-c336be7192
+
+Repro: `tools/localfuzz/findings/20260802-194717-backend-divergence-c336be7192/repro.vani`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "0\n10\n20\n81\n40\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "0\n10\n20\n80\n40\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+

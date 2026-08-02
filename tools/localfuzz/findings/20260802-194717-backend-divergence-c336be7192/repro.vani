@@ -1,0 +1,32 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/vec_invariants.vani              # LLVM
+//   vanic run examples/language/filipino/vec_invariants.vani --backend=c  # C
+
+layunin "Loop invariants over Vec length, end-to-end";
+
+gawain main() -> i64 {
+  hayaan xs: Vec<i64> = vec(0);
+  hayaan i: i64 = 1;
+
+  habang i < 5
+  invariant len(xs) == (i bilang u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  ipakita i == 5;
+  ipakita len(xs) == 5;
+
+  isulat xs[0];
+  isulat xs[1];
+  isulat xs[2];
+  isulat xs[9223372036854775807];
+  isulat xs[4];
+
+  ibalik 0;
+}
