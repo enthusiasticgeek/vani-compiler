@@ -33451,10 +33451,25 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
                 .map(|(n, e)| (n.clone(), substitute_expr(e, subs)))
                 .collect(),
         },
-        ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
-            object: Box::new(substitute_expr(object, subs)),
-            field: field.clone(),
-        },
+        ExprKind::FieldAccess { object, field } => {
+            // A `name.field` read composes with a `walk_for_reassigns`
+            // entry for a `FieldAssign` on that same field (keyed
+            // `"name__field"`, matching the synthetic-var naming
+            // convention `rewrite_struct_field_accesses` uses) — lets
+            // loop-invariant preservation see a struct field mutated
+            // via `p.x = …;` inside the loop body, not just plain
+            // variable reassignment.
+            if let ExprKind::Var(name) = &object.kind {
+                let synth = format!("{}__{}", name, field);
+                if let Some(replacement) = subs.get(&synth) {
+                    return replacement.clone();
+                }
+            }
+            ExprKind::FieldAccess {
+                object: Box::new(substitute_expr(object, subs)),
+                field: field.clone(),
+            }
+        }
         ExprKind::Match { scrutinee, arms } => ExprKind::Match {
             scrutinee: Box::new(substitute_expr(scrutinee, subs)),
             arms: arms
@@ -33594,11 +33609,36 @@ fn verify_ensures_at_return(
                         ),
                 );
             }
-            Verdict::Unknown | Verdict::Unavailable | Verdict::SkippedUnsupported(_) => {
-                // Fall back to constant-true check for the substituted ensures.
-                // If the user's claim is trivially provable by constant
-                // folding on the substituted expression, accept it.
-            }
+            Verdict::Unknown => diagnostics.push(
+                Diagnostic::new(
+                    ens.span,
+                    format!(
+                        "cannot verify 'ensures' clause: SMT returned 'unknown' (function '{}')",
+                        function.name
+                    ),
+                )
+                .with_related(return_expr.span, "return is here")
+                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
+            ),
+            Verdict::SkippedUnsupported(reason) => diagnostics.push(
+                Diagnostic::new(
+                    ens.span,
+                    format!(
+                        "cannot verify 'ensures' clause: {} (uses features outside the SMT v1 encoder, function '{}')",
+                        reason, function.name
+                    ),
+                )
+                .with_related(return_expr.span, "return is here")
+                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
+            ),
+            Verdict::Unavailable => diagnostics.push(
+                Diagnostic::new(
+                    ens.span,
+                    "cannot verify 'ensures' clause: no SMT solver available (install z3)",
+                )
+                .with_related(return_expr.span, "return is here")
+                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
+            ),
         }
     }
 }
@@ -34959,6 +34999,21 @@ fn walk_for_reassigns(
                 // case #5 was about.
                 let rewritten = substitute_expr(expr, out);
                 out.insert(name.clone(), rewritten);
+            }
+            Stmt::FieldAssign { object, field, value, .. } => {
+                // `p.x = expr;` on a struct-typed binding: same
+                // composition rule as plain `Assign`, keyed by the
+                // synthetic `p__x` name so `substitute_expr`'s
+                // FieldAccess arm (which checks for a `name__field`
+                // key) picks it up. v1 restricts the place to a bare
+                // `Var` (or a borrow of one); anything else isn't a
+                // loop-mutated binding this map can talk about, so
+                // it's skipped exactly like an unresolvable nested-
+                // loop mutation is elsewhere in this function.
+                if let ExprKind::Var(base) = &object.kind {
+                    let rewritten = substitute_expr(value, out);
+                    out.insert(format!("{}__{}", base, field), rewritten);
+                }
             }
             Stmt::Let { name, expr, .. } => {
                 // A shadow-let inside the loop body is also a
@@ -36475,18 +36530,24 @@ fn rewrite_method_calls_to_calls(
 }
 
 /// Rewrite `FieldAccess { object: Var(name), field }` to
-/// `Var("<name>__<field>")` whenever `name` was initialized with a
-/// struct literal whose field types are integer / bool. The
-/// surrounding caller (`prove_with_calls_extra`) declares synthetic
-/// SMT vars for these and asserts `<name>__<field> == <field-expr>`.
-/// Lets the SMT encoder discharge `prove p.x == 5` instead of
-/// bailing with "structs not supported in SMT v1".
+/// `Var("<name>__<field>")` whenever `name` is bound to a struct
+/// (by value or by `ref`/`mut ref`) and `field` has an integer/bool/
+/// float type. Covers both a local initialized with a struct literal
+/// (`struct_literal_fields` — the surrounding caller asserts
+/// `<name>__<field> == <field-expr>`) AND a plain struct-typed
+/// parameter or other binding with no known literal value (the
+/// surrounding caller declares `<name>__<field>` as a free/opaque
+/// SMT constant instead, so `requires`/`ensures` clauses about its
+/// fields can still be related to each other, just not to a concrete
+/// value). Lets the SMT encoder discharge `prove p.x == 5` or
+/// `ensures _return >= r.lo` instead of unconditionally bailing with
+/// "structs not supported in SMT v1".
 fn rewrite_struct_field_accesses(expr: &Expr, env: &Env) -> Expr {
     let new_kind = match &expr.kind {
         ExprKind::FieldAccess { object, field } => {
             if let ExprKind::Var(name) = &object.kind {
                 if let Some(info) = env.lookup(name) {
-                    if info.struct_literal_fields.is_some() {
+                    if struct_field_is_smt_modeled(info, field, env) {
                         return Expr {
                             kind: ExprKind::Var(format!("{}__{}", name, field)),
                             span: expr.span,
@@ -36529,6 +36590,20 @@ fn rewrite_struct_field_accesses(expr: &Expr, env: &Env) -> Expr {
         other => other.clone(),
     };
     Expr { kind: new_kind, span: expr.span }
+}
+
+/// True when `field` is a scalar (integer/bool/float) field of the
+/// struct type `info` is bound to (by value or by reference) — i.e.
+/// a `<name>__<field>` synthetic SMT var can stand in for it, either
+/// tied to a known literal value (`struct_literal_fields`) or left
+/// as a free/opaque constant. See `rewrite_struct_field_accesses`.
+fn struct_field_is_smt_modeled(info: &VarInfo, field: &str, env: &Env) -> bool {
+    let Type::Struct(struct_name) = info.ty.deref() else { return false };
+    let Some(struct_info) = env.lookup_struct(struct_name) else { return false };
+    struct_info
+        .fields
+        .iter()
+        .any(|(fname, fty)| fname == field && (fty.is_integer() || fty.is_float() || matches!(fty, Type::Bool)))
 }
 
 fn substitute_literal_vec_indices(expr: &Expr, env: &Env) -> Expr {
@@ -36633,6 +36708,8 @@ fn prove_with_calls_extra(
     // env.lookup_struct(struct_name).
     let mut field_vars: Vec<(String, Type)> = Vec::new();
     let mut field_facts: Vec<Expr> = Vec::new();
+    let mut modeled_struct_fields: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     for (name, info) in env.all_bindings() {
         let Some(field_inits) = &info.struct_literal_fields else { continue };
         let struct_name = match &info.ty {
@@ -36647,12 +36724,13 @@ fn prove_with_calls_extra(
             .collect();
         for (field_name, field_expr) in field_inits {
             let Some(field_ty) = field_type_map.get(field_name.as_str()) else { continue };
-            // Only model fields with integer / bool types for v1.
-            if !field_ty.is_integer() && !matches!(field_ty, Type::Bool) {
+            // Only model fields with integer / bool / float types for v1.
+            if !field_ty.is_integer() && !matches!(field_ty, Type::Bool) && !field_ty.is_float() {
                 continue;
             }
             let synth_name = format!("{}__{}", name, field_name);
             field_vars.push((synth_name.clone(), (*field_ty).clone()));
+            modeled_struct_fields.insert((name.clone(), field_name.clone()));
             // Synthesize `synth == field_expr`.
             let eq = Expr {
                 kind: ExprKind::Binary {
@@ -36666,6 +36744,30 @@ fn prove_with_calls_extra(
                 span: field_expr.span,
             };
             field_facts.push(eq);
+        }
+    }
+    // Struct-typed bindings with no known literal value (a plain
+    // parameter, a `ref`/`mut ref` to one, or a local assigned from
+    // something other than a struct literal) still get a per-field
+    // SMT var declared for each scalar field — left as a free/opaque
+    // constant with no defining equality, so `requires`/`ensures`
+    // clauses can relate fields to each other (e.g. `r.lo <= r.hi`)
+    // instead of unconditionally bailing with "structs not supported
+    // in SMT v1", even though no concrete field value is known here.
+    for (name, info) in env.all_bindings() {
+        let struct_name = match info.ty.deref() {
+            Type::Struct(n) => n.clone(),
+            _ => continue,
+        };
+        let Some(struct_info) = env.lookup_struct(&struct_name) else { continue };
+        for (field_name, field_ty) in &struct_info.fields {
+            if modeled_struct_fields.contains(&(name.clone(), field_name.clone())) {
+                continue;
+            }
+            if !field_ty.is_integer() && !matches!(field_ty, Type::Bool) && !field_ty.is_float() {
+                continue;
+            }
+            field_vars.push((format!("{}__{}", name, field_name), field_ty.clone()));
         }
     }
     vars.extend(field_vars);

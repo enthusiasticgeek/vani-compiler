@@ -321,16 +321,112 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x SMT contracts
 
-- [ ] `requires`/`ensures` referencing a `Vec<T>` parameter's
+- [x] `requires`/`ensures` referencing a `Vec<T>` parameter's
       contents (e.g. `requires v[0] > 0;`) combined with a `Struct`
-      or `Tuple` element type, not just scalar `i64` elements.
-- [ ] `invariant` in a loop that mutates a `Vec<Struct>` element
+      or `Tuple` element type, not just scalar `i64` elements --
+      **found+fixed 2026-08-02, BUG-68 -- a much more severe silent
+      soundness gap than the row title suggests.** `Vec<Struct>`
+      element field access (`pts[0].x`) in a contract is genuinely
+      unsupported (array theory only models scalar elements) and now
+      correctly REJECTS with a clear diagnostic -- but investigating
+      why it wasn't already rejected uncovered the real bug:
+      `verify_ensures_at_return` treated ANY `ensures` clause the SMT
+      encoder couldn't fully encode (`Verdict::Unknown` /
+      `Unavailable` / `SkippedUnsupported`) as silently PROVEN, with
+      zero diagnostic -- the comment above the empty match arm even
+      described a "fall back to constant-true check" that was never
+      implemented. Every sibling contract-verification path (`prove`,
+      loop invariants) already hard-errors on the same verdicts; only
+      return-site `ensures` had this hole. Worse, this wasn't
+      Vec-specific: it affected the general case of a bare struct
+      parameter's field in `ensures`/`requires`/`prove`, since the
+      existing struct-field synthetic-SMT-var machinery only covered
+      locals initialized from a struct literal, never parameters --
+      so `examples/edge_cases/mix_smt_struct_field.vani` and
+      `mix_smt_pure_struct_ref.vani`'s ensures clauses (referencing a
+      `ref R` param's fields) had *never* actually been checked by
+      the solver despite reading as "verified" examples. Fixed two
+      ways: (1) extended the struct-field-to-SMT-var rewrite so ANY
+      struct-typed binding (parameter, `ref`/`mut ref`, or non-
+      literal local) gets a free/opaque per-field SMT constant
+      declared, not just literal-initialized locals -- this makes
+      `ref` struct param field access in contracts *genuinely*
+      verifiable, not just gracefully rejected; (2) made
+      `verify_ensures_at_return` push a real diagnostic on
+      Unknown/Unavailable/SkippedUnsupported, mirroring the loop-
+      invariant path. Re-running the solver on the now-real
+      `mix_smt_pure_struct_ref.vani` example immediately caught an
+      actual latent bug in that example's own contract (`r.hi - r.lo`
+      can overflow i64 for extreme `lo`/`hi`, violating `_return >=
+      0`) that had been silently rubber-stamped before -- fixed by
+      adding overflow-bounding `requires` clauses, the same pattern
+      `12a_smt_primer.md` already teaches. `Vec<Struct>`/`Tuple`
+      element-field access in contracts remains a real, cleanly-
+      rejected v1 gap (not modeled by array theory) -- confirmed
+      consistent on both backends since SMT verification runs before
+      backend selection. New tests: 4 `src/lib.rs` (silent-accept
+      regression, true-case discharge, Vec<Struct>-rejected-not-
+      silent, plus the pre-existing struct-literal tests re-verified
+      clean).
+- [x] `invariant` in a loop that mutates a `Vec<Struct>` element
       in place (via `mut ref vec[i]`-style access) -- the
       loop-invariant-preservation machinery (BUG-33's territory)
-      has only been exercised with scalar loop state so far.
-- [ ] `ensures` on a function returning `Option<Vec<T>>` or
+      has only been exercised with scalar loop state so far --
+      **checked+fixed 2026-08-02, BUG-68 follow-up.** In-place
+      `Vec<Struct>` element mutation via `mut ref cs[i]` alongside a
+      scalar-only loop invariant compiles and runs correctly on both
+      backends (new e2e test) -- an invariant that tries to
+      reference the mutated element's field directly (`invariant
+      cs[0].n >= 0;`) is cleanly rejected on both backends
+      ("structs not supported in SMT v1"), same as the row above:
+      array theory doesn't model struct/tuple elements, not a
+      divergence bug. But testing the "scalar loop state" half of
+      this row's own premise against a plain (non-Vec) struct-typed
+      accumulator surfaced a real second bug: `walk_for_reassigns`
+      (builds the body-entry→body-end substitution map for
+      preservation checking) only recognized `Stmt::Assign`/
+      `Stmt::Let`, never `Stmt::FieldAssign` -- so `invariant
+      acc.total == i * 10;` with `acc.total = acc.total + 10;` in
+      the body was incorrectly reported as "not preserved," because
+      the substitution map had no entry for the mutated field and
+      the solver fell back to the struct-literal's original value.
+      Fixed by teaching `walk_for_reassigns` to record a
+      `"name__field"`-keyed substitution for `FieldAssign` (mirroring
+      the synthetic-var naming from the BUG-68 fix above) and
+      teaching `substitute_expr`'s `FieldAccess` arm to consult that
+      key. Confirmed both directions: the true invariant now
+      verifies, and a deliberately false one (`i * 999` instead of
+      `i * 10`) is still correctly rejected. New tests: 2
+      `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both backends).
+- [x] `ensures` on a function returning `Option<Vec<T>>` or
       `Result<Struct, E>` -- contract checking through an enum
-      wrapper around a container return type.
+      wrapper around a container return type -- **checked+fixed
+      2026-08-02.** An `ensures` clause that tries to inspect the
+      returned enum's shape (`ensures option_is_some(_return);`
+      doesn't even type-check -- the `option_*` combinator builtins
+      are hardcoded `Option<i64>`/`Option<f64>` only, a real, separate
+      v1 restriction unrelated to this row; a `match _return { ... }`
+      form type-checks but hits "method calls not supported in SMT
+      v1" -- cleanly rejected thanks to the BUG-68 fix above, not
+      silently accepted) is a genuine, cleanly-rejected v1 gap
+      (enum-variant patterns aren't SMT-modeled, per the SMT encoder's
+      own existing comments). NOT a divergence bug. But testing the
+      row's actual container/runtime angle (no SMT contract on the
+      enum payload, just `Option<Vec<T>>`/`Result<Struct,E>` used for
+      real) found **BUG-69**, unrelated to Option/Result/generics
+      entirely: `vec_fill` called anywhere textually AFTER a plain
+      `if` statement in the same function crashed the LLVM backend
+      with "PHI node entries do not match predecessors!" --
+      `TypedStmt::If`'s tree emitter never updated `ctx.current_block`
+      to the merge/cont block (every other multi-block construct
+      already did), so `vec_fill`'s hand-rolled SSA fill loop (the one
+      builtin that reads `ctx.current_block` to name its own loop
+      phi's predecessor) wired itself to a stale block name. Fixed by
+      setting `ctx.current_block = cont_lbl` after the if. C backend
+      unaffected (no phi/SSA bookkeeping there). New tests: 1
+      `src/lib.rs` (textual phi-predecessor assertion) + 1
+      `tests/run_end_to_end.rs` (both backends, the actual
+      Option<Vec<T>>/Result<Struct,E> scenario end-to-end).
 
 ### Container x generics / monomorphization
 

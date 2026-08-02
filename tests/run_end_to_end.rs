@@ -6768,3 +6768,141 @@ fn main() -> i64 {
         }
     }
 }
+
+// Testing-matrix sweep, "container x SMT contracts": a `while` loop with
+// a (scalar-only) `invariant` clause, whose body mutates a `Vec<Struct>`
+// element in place via `mut ref vec[i]`. Vec<Struct> element field access
+// itself isn't SMT-modeled (array theory only covers scalar elements --
+// confirmed separately as a cleanly-rejected v1 limitation, not a bug),
+// but this combination -- a real invariant alongside real in-place struct
+// mutation through a container -- had 0 direct e2e coverage before this
+// sweep. See BUG-68 in docs/TODO_CURRENT.md for the actual bug this sweep
+// row led to (a silent ensures-verification gap, plus a loop-invariant
+// preservation gap for FieldAssign-mutated struct fields -- both fixed;
+// this test is the "container in the loop, not just scalar loop state"
+// half of that finding).
+#[test]
+fn loop_invariant_with_vec_of_struct_mutated_in_place_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "invariant_vec_struct_mutate",
+        r#"
+struct Counter { n: i64 }
+fn main() -> i64 {
+  let cs: Vec<Counter> = vec(Counter { n: 0 }, Counter { n: 0 }, Counter { n: 0 }, Counter { n: 0 }, Counter { n: 0 });
+  let i: i64 = 0;
+  while i < 5
+  invariant i >= 0;
+  invariant i <= 5;
+  {
+    let c: mut ref Counter = mut ref cs[i];
+    c.n = i * 10;
+    i = i + 1;
+  }
+  prove i == 5;
+  let j: i64 = 0;
+  let sum: i64 = 0;
+  while j < 5 {
+    sum = sum + cs[j].n;
+    j = j + 1;
+  }
+  print sum;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "100\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-69, found sweeping "ensures on a function returning Option<Vec<T>>
+// or Result<Struct, E>": unrelated to the SMT/generics angle the sweep row
+// was about, this is a general LLVM backend crash -- `TypedStmt::If`'s
+// tree emitter never updated `ctx.current_block` to the merge/cont block
+// after the if (every other multi-block construct did), so `vec_fill`'s
+// hand-rolled SSA loop -- the one builtin that reads `ctx.current_block`
+// to name its phi's entry-edge predecessor -- wired its phi to a stale
+// block whenever it was textually preceded by ANY plain `if` in the same
+// function: "PHI node entries do not match predecessors!" at the LLVM
+// verifier. Nothing to do with Option/Result/generics; just the first
+// real program in this sweep that happened to call `vec_fill` after an
+// `if`. The C backend was unaffected (no phi/SSA-block bookkeeping).
+// Fixed by setting `ctx.current_block = cont_lbl` after the if. This test
+// covers the actual sweep-row scenario end-to-end: Option<Vec<T>> and
+// Result<Struct, E> return types, `vec_fill` called after an `if`,
+// correct runtime values on both backends.
+#[test]
+fn option_vec_and_result_struct_with_vec_fill_after_if_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "option_vec_result_struct_vecfill_after_if",
+        r#"
+struct Pt { x: i64, y: i64 }
+enum MyErr { BadInput }
+fn maybe_make(n: i64) -> Option<Vec<i64>> {
+  if n < 0 {
+    return Option.None;
+  }
+  let xs: Vec<i64> = vec_fill(n, 7);
+  return Option.Some(xs);
+}
+fn make_pt(x: i64, y: i64) -> Result<Pt, MyErr>
+requires x >= 0;
+{
+  if x == 0 {
+    return Result.Err(MyErr.BadInput);
+  }
+  return Result.Ok(Pt { x: x, y: y });
+}
+fn main() -> i64 {
+  let r1: Option<Vec<i64>> = maybe_make(3);
+  let v1: i64 = match r1 {
+    Option.Some(xs) then len(xs) as i64,
+    Option.None then -1,
+  };
+  print v1;
+  let r2: Option<Vec<i64>> = maybe_make(0 - 1);
+  let v2: i64 = match r2 {
+    Option.Some(xs) then len(xs) as i64,
+    Option.None then -1,
+  };
+  print v2;
+  let pr1: Result<Pt, MyErr> = make_pt(3, 4);
+  let s1: i64 = match pr1 {
+    Result.Ok(p) then p.x + p.y,
+    Result.Err(_) then -999,
+  };
+  print s1;
+  let pr2: Result<Pt, MyErr> = make_pt(0, 0);
+  let s2: i64 = match pr2 {
+    Result.Ok(p) then p.x + p.y,
+    Result.Err(_) then -999,
+  };
+  print s2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "3\n-1\n7\n-999\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}

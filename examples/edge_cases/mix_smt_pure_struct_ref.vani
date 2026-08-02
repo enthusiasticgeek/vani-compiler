@@ -1,7 +1,12 @@
 // SMT + STRT + REF: pure fn with struct ref param; ensures provable from requires.
+// The extra bounds on lo/hi (rather than just `lo <= hi`) keep `hi - lo`
+// from overflowing i64 -- without them the SMT solver correctly finds a
+// counterexample near the i64 extremes where the subtraction wraps negative.
 struct R { lo: i64, hi: i64 }
 pure fn width(r: ref R) -> i64
 requires r.lo <= r.hi;
+requires r.lo > (0 - 1000000);
+requires r.hi < 1000000;
 ensures _return >= 0;
 {
   return r.hi - r.lo;

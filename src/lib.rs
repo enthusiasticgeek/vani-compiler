@@ -11292,6 +11292,106 @@ mod tests {
     }
 
     #[test]
+    fn ensures_on_struct_ref_param_field_now_actually_verified() {
+        // BUG-68 sweep item: before the fix, `verify_ensures_at_return`
+        // silently treated ANY ensures clause the SMT encoder couldn't
+        // fully handle (Verdict::SkippedUnsupported/Unknown/Unavailable)
+        // as proven, with zero diagnostic. A `ref R` struct parameter's
+        // field access (`r.hi`) always hit exactly this path (the
+        // struct-field synthetic-var machinery only covered locals
+        // initialized from a struct literal, never parameters), so a
+        // deliberately FALSE ensures clause like this one compiled clean.
+        // Now that struct-typed bindings get a per-field opaque SMT var
+        // regardless of whether they're literal-initialized, this is
+        // genuinely encoded and genuinely disproven.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            struct R { lo: i64, hi: i64 }
+            fn pick_wrong(r: ref R) -> i64
+            requires r.lo <= r.hi;
+            ensures _return > r.hi;
+            {
+              return r.lo;
+            }
+            fn main() -> i64 {
+              let r: R = R { lo: 0, hi: 10 };
+              return pick_wrong(ref r);
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("_return > r.hi is false when _return == r.lo <= r.hi");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("ensures clause does not hold")),
+            "expected ensures-violation diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn ensures_on_struct_ref_param_field_discharges_when_true() {
+        // Companion to the above: a genuinely TRUE ensures clause over a
+        // `ref` struct parameter's fields (not just a literal-bound
+        // local) now discharges via the same opaque-field-var modeling,
+        // instead of being silently rubber-stamped without ever being
+        // checked.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            struct R { lo: i64, hi: i64 }
+            fn pick(r: ref R) -> i64
+            requires r.lo <= r.hi;
+            ensures _return >= r.lo;
+            ensures _return <= r.hi;
+            {
+              return r.lo;
+            }
+            fn main() -> i64 {
+              let r: R = R { lo: 3, hi: 10 };
+              return pick(ref r);
+            }
+        "#;
+        compile(source).expect("ensures over ref struct param fields should discharge");
+    }
+
+    #[test]
+    fn ensures_on_vec_of_struct_element_field_is_rejected_not_silently_accepted() {
+        // Sweep item: `requires`/`ensures` referencing a `Vec<Struct>`
+        // parameter's element field (`pts[0].x` -- FieldAccess over an
+        // Index, not a bare Var) still isn't modeled by the SMT array
+        // theory (which only covers scalar Vec/Array elements). Confirm
+        // this now surfaces as a clear compile error instead of being
+        // silently treated as proven.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn first_x(pts: Vec<Pt>) -> i64
+            requires len(pts) >= 1;
+            ensures _return == pts[0].x;
+            {
+              return pts[0].x;
+            }
+            fn main() -> i64 {
+              let pts: Vec<Pt> = vec(Pt { x: 7, y: 1 });
+              return first_x(pts);
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("Vec<Struct> element field access in ensures is unencodable");
+        assert!(
+            errors.iter().any(|e| e.message.contains("cannot verify 'ensures' clause")),
+            "expected an explicit unverifiable-ensures diagnostic (not silent success), got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn callers_get_ensures_facts_about_let_results() {
         if !z3_available() {
             return;
@@ -11418,6 +11518,78 @@ mod tests {
         "#;
 
         compile_to_c(source).expect("invariant should verify and feed prove");
+    }
+
+    #[test]
+    fn loop_invariant_over_struct_field_mutated_via_field_assign_preserves() {
+        // BUG-68 follow-up sweep item: a loop invariant referencing a
+        // struct-typed local's field (`acc.total`), where the field is
+        // mutated in the loop body via `acc.total = acc.total + 10;`
+        // (a `Stmt::FieldAssign`, not a plain `Stmt::Assign`). Before
+        // this fix, `walk_for_reassigns` (which builds the body-entry
+        // -> body-end substitution map for the preservation check)
+        // only handled `Stmt::Assign`/`Stmt::Let`, so the field
+        // mutation was invisible to it -- `acc.total` in the
+        // substituted post-body goal still resolved to the ORIGINAL
+        // struct-literal value (0), and a genuinely-preserved
+        // invariant (`acc.total == i * 10`) was incorrectly reported
+        // as "not preserved by the loop body".
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            struct Acc { total: i64 }
+            fn main() -> i64 {
+              let acc: Acc = Acc { total: 0 };
+              let i: i64 = 0;
+              while i < 5
+              invariant acc.total == i * 10;
+              invariant i >= 0;
+              invariant i <= 5;
+              {
+                acc.total = acc.total + 10;
+                i = i + 1;
+              }
+              prove acc.total == 50;
+              return acc.total;
+            }
+        "#;
+        compile(source).expect(
+            "invariant over a FieldAssign-mutated struct field should be preserved and provable",
+        );
+    }
+
+    #[test]
+    fn loop_invariant_over_struct_field_still_catches_genuinely_false_claim() {
+        // Companion soundness check for the fix above: confirm the new
+        // FieldAssign-aware substitution doesn't accidentally make a
+        // genuinely FALSE invariant pass.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            struct Acc { total: i64 }
+            fn main() -> i64 {
+              let acc: Acc = Acc { total: 0 };
+              let i: i64 = 0;
+              while i < 5
+              invariant acc.total == i * 999;
+              invariant i >= 0;
+              invariant i <= 5;
+              {
+                acc.total = acc.total + 10;
+                i = i + 1;
+              }
+              return acc.total;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("acc.total == i * 999 is not preserved by += 10 each iteration");
+        assert!(
+            errors.iter().any(|e| e.message.contains("not preserved by the loop body")),
+            "expected a loop-invariant-preservation diagnostic, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -51837,6 +52009,49 @@ fn main() -> i64 { return leak_check(); }
         assert!(
             c.contains("intent_vec_int64_t v_a"),
             "expected the real intent_vec_int64_t struct name:\n{c}"
+        );
+    }
+
+    #[test]
+    fn vec_fill_phi_predecessor_tracks_current_block_after_a_prior_if() {
+        // BUG-69: `TypedStmt::If`'s LLVM emitter never updated
+        // `ctx.current_block` to the merge/cont block after the if
+        // (every other multi-block construct -- while, match, etc. --
+        // already did). `vec_fill`'s hand-rolled SSA fill loop is the
+        // one builtin that reads `ctx.current_block` to name its loop
+        // phi's entry-edge predecessor, so any `vec_fill` call textually
+        // AFTER a plain `if` in the same function got a phi wired to a
+        // stale block name (whatever was current before the `if`, e.g.
+        // "entry") instead of the real predecessor (the if's own "cont"
+        // block) -- an invalid-IR crash at the LLVM verifier
+        // ("PHI node entries do not match predecessors!"), not caught by
+        // `compile_to_llvm` itself (no `if`/`else` before this test's
+        // own repro would let a `%entry` predecessor slip through
+        // undetected, so this test asserts the phi's first incoming
+        // block is the if's `cont` label, not `entry`).
+        let source = r#"
+            fn f(n: i64) -> Vec<i64> {
+              let y: i64 = 0;
+              if n < 0 {
+                y = 1;
+              }
+              let xs: Vec<i64> = vec_fill(n, 7);
+              return xs;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = f(3);
+              return len(xs) as i64;
+            }
+        "#;
+        let ir = compile_to_llvm(source).expect("vec_fill after an if must compile to LLVM");
+        let phi_line = ir
+            .lines()
+            .find(|l| l.contains("phi i64 [0, %") && l.contains("vfill_body"))
+            .unwrap_or_else(|| panic!("expected vec_fill's loop phi in the emitted IR:\n{ir}"));
+        assert!(
+            !phi_line.contains("[0, %entry]"),
+            "vec_fill's phi should NOT be wired to the stale 'entry' block \
+             after an intervening if-statement; got: {phi_line}\nfull IR:\n{ir}"
         );
     }
 

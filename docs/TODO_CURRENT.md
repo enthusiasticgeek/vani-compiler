@@ -4973,4 +4973,149 @@ verifying the four fixes above against their tutorial worked examples
   backend matching this session's "non-deterministic-looking crash"
   precedent) asserting the correct printed output on both backends.
 
+## Bug found sweeping container x SMT contracts (added+fixed 2026-08-02)
+
+- [x] **BUG-68 (found+fixed 2026-08-02 — silent soundness gap, no
+  diagnostic at all, checker-level).** Found while testing
+  `docs/TESTING_MATRIX_TODO.md`'s "`requires`/`ensures` referencing a
+  `Vec<Struct>` element" row. `verify_ensures_at_return` (the
+  return-site `ensures`-clause checker) treated ANY `ensures` clause
+  the SMT encoder couldn't fully encode
+  (`Verdict::Unknown`/`Unavailable`/`SkippedUnsupported`) as silently
+  PROVEN — the code was a bare `{}` match arm with a comment
+  describing a "fall back to constant-true check" that was never
+  actually implemented. A deliberately FALSE `ensures` clause over a
+  `ref` struct parameter's field (`ensures _return > r.hi;` on a
+  function that returns `r.lo`) compiled clean with `vanic check`
+  reporting `ok`. Every sibling contract-verification path (`prove`
+  statements, loop invariants, both of which already push a real
+  diagnostic on the same three verdicts) was NOT affected — only
+  this one return-site `ensures` path had the hole. Root cause of
+  *why* this was so easy to hit: the struct-field-to-SMT synthetic-
+  var machinery (`p.x` → `Var("p__x")`) only ever covered a local
+  bound to a struct LITERAL (`struct_literal_fields`); a plain
+  struct-typed parameter (or a `ref`/`mut ref` to one) always hit the
+  unconditional `FieldAccess` bail in `smt.rs`'s encoder
+  ("structs not supported in SMT v1"), so ANY contract referencing a
+  struct parameter's field — not just a `Vec<Struct>` element's field
+  — silently fell into the unverified/accepted hole. Confirmed this
+  wasn't hypothetical: `examples/edge_cases/mix_smt_struct_field.vani`
+  and `mix_smt_pure_struct_ref.vani`, both pre-existing example files
+  whose comments claim "ensures provable from requires," had NEVER
+  actually been checked by the solver.
+  Fixed two ways: (1) generalized the struct-field rewrite/declare
+  machinery so ANY struct-typed binding — not just a literal-init
+  local — gets a per-field SMT constant declared: literal-bound
+  fields get the existing `name__field == literal-expr` equality
+  fact, everything else (parameters, `ref`/`mut ref`, non-literal
+  locals) gets a free/opaque constant with no defining equality, so
+  `requires`/`ensures` can still relate fields to each other (e.g.
+  `r.lo <= r.hi`) even with no concrete value known. This makes `ref`
+  struct parameter field access in contracts *genuinely* verifiable
+  now, not just gracefully rejected. (2) `verify_ensures_at_return`
+  now pushes a real diagnostic ("cannot verify 'ensures' clause: ...")
+  on Unknown/Unavailable/SkippedUnsupported, mirroring the pre-existing
+  loop-invariant path exactly — closing the silent-accept hole for
+  whatever's still genuinely unencodable (e.g. `Vec<Struct>` element
+  field access via `Index`, which array theory still doesn't model —
+  correctly and cleanly rejected now instead of silently passing).
+  **Bonus finding**: re-running the now-real solver against
+  `mix_smt_pure_struct_ref.vani` immediately caught an actual latent
+  bug in that example's own contract — `r.hi - r.lo` can overflow
+  i64 for extreme `lo`/`hi` values (counterexample:
+  `r.lo = -9223372032559808512, r.hi = 9223372036854775806`),
+  violating its `ensures _return >= 0;` — previously rubber-stamped
+  as "verified," now fixed with overflow-bounding `requires` clauses
+  (the same pattern `12a_smt_primer.md` already teaches for exactly
+  this reason). New tests: 4 `src/lib.rs` (silent-accept regression
+  now rejected, true-case discharges via the new opaque-field
+  modeling, `Vec<Struct>` element access still cleanly rejected with
+  an explicit diagnostic, plus the pre-existing struct-literal
+  `prove` tests re-verified clean — 134/134 SMT/ensures/struct-field-
+  filtered `src/lib.rs` tests passed before and after).
+  **Follow-up gap found+fixed same day**, testing the testing-
+  matrix's next row (`invariant` in a loop mutating a `Vec<Struct>`
+  element): a plain (non-Vec) struct-typed loop accumulator whose
+  field is mutated via `acc.total = acc.total + 10;` inside the loop
+  body — the exact kind of "scalar loop state" case the row assumed
+  was already covered — had its `invariant acc.total == i * 10;`
+  incorrectly rejected as "not preserved by the loop body", because
+  `walk_for_reassigns` (the loop-body-mutation summarizer that
+  builds the preservation check's entry→exit substitution map) only
+  handled `Stmt::Assign`/`Stmt::Let`, never `Stmt::FieldAssign` — so
+  the field mutation was invisible to it and the solver kept using
+  the field's original struct-literal value for the post-body state.
+  Fixed by having `walk_for_reassigns` record a `"name__field"`-
+  keyed substitution entry for `FieldAssign` (same synthetic-name
+  convention as the BUG-68 fix above) and teaching `substitute_expr`'s
+  `FieldAccess` arm to consult it. Confirmed both directions: the
+  true invariant now discharges, and a deliberately false one is
+  still correctly rejected (not a soundness regression in the other
+  direction). `Vec<Struct>` element mutation via `mut ref cs[i]`
+  alongside a scalar-only invariant compiles and runs correctly on
+  both backends (new e2e test); an invariant that tries to reference
+  the mutated Vec element's field directly is still cleanly rejected
+  (array theory doesn't model struct elements — real v1 limitation,
+  not a divergence bug). New tests: 2 `src/lib.rs` + 1
+  `tests/run_end_to_end.rs` (both backends) — 204/204 SMT/ensures/
+  struct-field/invariant-filtered `src/lib.rs` tests passed before
+  and after.
+
+## Bug found sweeping "ensures on Option<Vec<T>>/Result<Struct,E> return" (found+fixed 2026-08-02)
+
+- [x] **BUG-69 (found+fixed 2026-08-02 — LLVM backend, invalid-IR
+  crash, unrelated to what the sweep row was actually testing).**
+  Found while testing the testing matrix's "`ensures` on a function
+  returning `Option<Vec<T>>` or `Result<Struct, E>`" row. The SMT
+  side of that row turned out to be a clean, already-covered-by-
+  BUG-68's-fix rejection (enum-variant patterns aren't modeled by
+  the SMT encoder — `ensures match _return { Option.Some(_) then
+  true, ... };` correctly errors "method calls not supported in SMT
+  v1" instead of silently passing). But exercising the row's
+  *runtime* half — `Option<Vec<T>>`/`Result<Struct, E>` actually
+  used, no SMT contract on the payload — crashed the LLVM backend
+  entirely unrelated to Option/Result: `vec_fill` called anywhere
+  textually AFTER a plain `if` statement in the SAME function
+  produced `PHI node entries do not match predecessors!` at the LLVM
+  verifier. Minimal repro (no Option/Result/generics involved at
+  all):
+  ```vani
+  fn f(n: i64) -> Vec<i64> {
+    let y: i64 = 0;
+    if n < 0 { y = 1; }
+    let xs: Vec<i64> = vec_fill(n, 7);
+    return xs;
+  }
+  ```
+  Root cause: `backend_llvm.rs`'s `emit_stmt` for `TypedStmt::If`
+  never updated `ctx.current_block` after emitting the if's
+  then/else/cont blocks — every OTHER multi-block construct in the
+  tree emitter (`while`, `match`, `if let`, ...) already does this
+  (confirmed by grep: ~25 other call sites assign
+  `ctx.current_block` after their own block emission; plain `If` was
+  the one exception). `vec_fill`'s fill loop is the one builtin that
+  hand-rolls a raw SSA phi loop and reads `ctx.current_block` to name
+  its loop-entry phi's predecessor (`{} = phi i64 [0, %{entry_blk}],
+  [{}, %{body_lbl}]`) — everything else in the tree emitter uses
+  alloca+load/store for locals, so nothing else actually depended on
+  `ctx.current_block` being accurate, which is why this went
+  undetected: `vec_fill` is only ever exercised as the first
+  statement of a function in existing tutorials/benchmarks (e.g. the
+  SIMD chapter's dot-product examples), where `ctx.current_block` is
+  still correctly "entry" by coincidence. The instant `vec_fill`
+  follows ANY prior `if`, the phi's declared predecessor (whatever
+  `ctx.current_block` was before the if — stale) diverges from the
+  real CFG predecessor (the if's own `cont` block) — invalid IR, LLVM
+  verifier rejects it, `lli`/`llc` refuses to run it.
+  Fixed by adding `ctx.current_block = cont_lbl;` after the if's
+  block emission in `backend_llvm.rs`'s `TypedStmt::If` arm (in the
+  same place `ctx.terminated` is already updated). C backend
+  unaffected — its `if` codegen uses real C control flow, no
+  SSA-phi/block-identity bookkeeping to go stale. New tests: 1
+  `src/lib.rs` (asserts the emitted IR's `vec_fill` phi predecessor
+  is not the stale `entry` block after an intervening if) + 1
+  `tests/run_end_to_end.rs` (both backends, the actual
+  `Option<Vec<T>>`/`Result<Struct, E>` + `vec_fill`-after-`if`
+  scenario this bug was found in, correct output on both).
+
 ---

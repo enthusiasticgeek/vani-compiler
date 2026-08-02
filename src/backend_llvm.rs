@@ -2945,6 +2945,17 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx.terminated = false;
                 out.push_str(&format!("{}:\n", cont_lbl));
             }
+            // BUG-69: `ctx.current_block` must track `cont_lbl` after this
+            // point (unreachable's `unreachable` still gives the block a
+            // real name in case anything downstream looks it up) -- any
+            // later PHI-based codegen in the SAME function (e.g.
+            // `vec_fill`'s hand-rolled SSA loop, which reads
+            // `ctx.current_block` to name its entry-edge predecessor)
+            // would otherwise wire its phi to whatever block was current
+            // BEFORE this `if`, producing a phi whose declared
+            // predecessors don't match the real CFG ("PHI node entries do
+            // not match predecessors!" at the LLVM verifier).
+            ctx.current_block = cont_lbl;
         }
         TypedStmt::Drop { name, ty, moved_fields } => {
             // L2 Phase 2 (2026-06-07): Box<T> scope-exit drop.
