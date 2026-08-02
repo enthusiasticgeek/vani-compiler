@@ -52359,5 +52359,36 @@ fn main() -> i64 { return leak_check(); }
         compile_to_c(source).expect("(dyn Shape, i64) tuple compiles to C");
     }
 
+    /// BUG-66 (tree-C): a struct FIELD of `Closure(args) -> ret`
+    /// type -- the pattern `intermediate/06a_closures_primer.md`'s
+    /// "Stored in data structures" section documents -- referenced
+    /// the `intent_closure_<args>_<ret>` fat-pointer typedef before
+    /// it was declared ("unknown type name"). The typedef emission
+    /// used to live entirely after the unified struct topo loop
+    /// (alongside the trampoline/constructor functions, which
+    /// genuinely need full env-struct bodies); split out just the
+    /// typedef half to emit early, mirroring BUG-61/63's fix shape.
+    #[test]
+    fn struct_field_closure_with_copy_only_capture_compiles_and_runs_correctly() {
+        let source = r#"
+            struct Handler { cb: Closure(i64) -> i64 }
+            fn main() -> i64 {
+              let base: i64 = 100;
+              let cb = fn(extra: i64) -> i64 { return base + extra; };
+              let h: Handler = Handler { cb: cb };
+              let f: Closure(i64) -> i64 = h.cb;
+              print f(5);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("struct { Closure field } compiles to C");
+        assert!(
+            c.find("intent_closure_i64_i64;").unwrap()
+                < c.find("struct Struct_Handler {").unwrap(),
+            "closure typedef must precede Struct_Handler's body:\n{}",
+            c
+        );
+    }
+
 }
 

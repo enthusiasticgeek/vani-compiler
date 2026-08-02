@@ -104,8 +104,12 @@ computed expected values, not just "does it compile."
    struct typedef referenced before declaration). Fixed in commit
    `8551cac` with 5 new tests (2 lib.rs, 3 e2e) closing the e2e gap
    this row used to describe as 0.
-3. Function pointers (`fnptr`, `06c_fnptr_primer.md`) as values,
-   params, and struct fields -- **0 e2e coverage**.
+3. ~~Function pointers (`fnptr`, `06c_fnptr_primer.md`) as values,
+   params, and struct fields~~ -- **done 2026-08-02, not a bug**:
+   `Vec<fn(i64)->i64>`, a struct field of fn-pointer type, and
+   indirect calls through a local re-bound from a struct field all
+   compute correctly on both backends. Fn pointers are Copy, so no
+   affine-ownership interaction to trip over. Closes the 0-e2e gap.
 4. Iterator-style Vec builtins (`vec_map`/`vec_fold`/`vec_filter`/
    `vec_zip_with`/...) chained together -- **1 e2e hit** despite
    heavy tutorial use (06b_iterators_primer.md, 15_math_rng.md).
@@ -219,12 +223,19 @@ since that's exactly where BUG-61 lived.
       BUG-63's own fix (the new early-tuple-bundle path didn't
       defer `dyn Iface`-containing tuples past `emit_dyn_iface_
       typedefs`). Fixed in the same sweep.
-- [ ] `Vec<FnPtr>` (function pointers stored in a Vec, not just
-      passed as a bare param/field -- `fnptr` itself is 0 e2e
-      coverage per the table above, so this compounds two gaps).
-- [ ] Closure capturing a `Vec<T>` or `Channel<T,N>` by move,
-      stored in a struct field, called later (closures + affine
-      capture + container nesting together).
+- [x] `Vec<FnPtr>` -- **checked 2026-08-02, not a bug**: correct on
+      both backends. See priority item 3 above.
+- [x] Closure capturing a `Vec<T>` by move, stored in a struct
+      field, called later -- **split finding, 2026-08-02, BUG-66**:
+      the Copy-only-capture case (found broken as a byproduct --
+      typedef-ordering, same shape as BUG-61/63) is now fixed and
+      fully correct on both backends. The actual "capture a `Vec<T>`
+      by move" case is a DEEPER, unfixed gap: crashes on both
+      backends (LLVM: unsized-type IR rejection; C: double-free) --
+      an affine-ownership problem, not a codegen-ordering one.
+      Documented as a known gap in TODO_CURRENT.md's BUG-66 entry,
+      not chased further this pass (would need checker-level
+      rejection, mirroring BUG-64's Channel-Copy-requirement fix).
 
 ### Multi-level container nesting (no concurrency/dyn involved)
 

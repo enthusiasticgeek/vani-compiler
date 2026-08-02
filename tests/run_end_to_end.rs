@@ -6431,3 +6431,55 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-66, found sweeping "closure capturing a Vec/Channel by move,
+// stored in a struct field, called later": a struct field of
+// Closure type referenced its typedef before it was declared under
+// --backend=c. Fixed by splitting the typedef emission (no
+// struct-body dependency) from the trampoline/constructor emission
+// (genuinely needs full env-struct bodies) the same way BUG-61/63
+// split Channel/Tuple bundle emission. This test covers the
+// Copy-only-capture case, which is now fully correct end-to-end;
+// see docs/TODO_CURRENT.md's BUG-66 entry for the separate,
+// deliberately-deferred heap-capture gap this sweep also found.
+#[test]
+fn struct_field_closure_with_copy_only_capture_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_field_closure_copy_capture",
+        r#"
+struct Handler { cb: Closure(i64) -> i64 }
+fn main() -> i64 {
+  let base: i64 = 100;
+  let cb = fn(extra: i64) -> i64 { return base + extra; };
+  let h: Handler = Handler { cb: cb };
+  let f: Closure(i64) -> i64 = h.cb;
+  print f(5);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "struct {{ Closure field }} with Copy-only capture must not fail to build \
+             for {:?}; status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "105\n",
+            "expected 100 + 5 = 105 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}

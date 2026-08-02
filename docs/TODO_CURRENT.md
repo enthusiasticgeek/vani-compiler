@@ -4865,4 +4865,59 @@ verifying the four fixes above against their tutorial worked examples
   New tests: 1 `src/lib.rs` + 1 real end-to-end test (both backends,
   correct printed values).
 
+- [x] **BUG-66 (found+fixed 2026-08-02 — tree-C; PARTIALLY fixed,
+  see the deferred gap below).** Found sweeping "closure capturing
+  a Vec/Channel by move, stored in a struct field, called later" --
+  the pattern `intermediate/06a_closures_primer.md`'s "Stored in
+  data structures" section documents. Minimal repro (Copy-only
+  capture):
+  ```vani
+  struct Handler { cb: Closure(i64) -> i64 }
+  fn main() -> i64 {
+    let base: i64 = 100;
+    let cb = fn(extra: i64) -> i64 { return base + extra; };
+    let h: Handler = Handler { cb: cb };
+    let f: Closure(i64) -> i64 = h.cb;
+    print f(5);
+    return 0;
+  }
+  ```
+  Ran correctly on LLVM. Under `--backend=c`, `cc` failed: "unknown
+  type name `intent_closure_i64_i64`". Same root-cause SHAPE as
+  BUG-61/63: the closure fat-pointer struct typedef (`{ uint64_t
+  env; R (*call)(uint64_t, args); }` -- no dependency on any user
+  struct's full body) was emitted much later, bundled together with
+  the trampoline/constructor functions (which genuinely DO need
+  full env-struct bodies, since they dereference captured fields)
+  — after the unified struct topo loop had already emitted
+  `Struct_Handler`'s body referencing the not-yet-declared typedef.
+  Fixed by splitting the typedef-only half out to emit early (right
+  after `emit_dyn_iface_typedefs`, alongside the Channel/Mutex/
+  RwLock/Tuple early-emission blocks), leaving the trampoline/
+  constructor half at its original late position.
+  New tests: 1 `src/lib.rs` (typedef-before-struct-body ordering) +
+  1 real end-to-end test (both backends, correct computed value) --
+  both specifically for the Copy-only-capture case, which is now
+  fully correct end-to-end.
+  **Deferred gap found in the same sweep, NOT fixed**: the SAME
+  pattern with a HEAP-owning capture (e.g. `let data: Vec<i64> =
+  vec(1,2,3,4); let cb = fn(extra: i64) -> i64 { return data[0] +
+  extra; };` moved into a struct field) crashes on BOTH backends --
+  LLVM: `lli` rejects the emitted IR ("base element of getelementptr
+  must be sized" -- the synthesized env struct is referenced as an
+  opaque/unsized type at the point the closure is stored into and
+  read back from the struct field); C: `free(): double free detected
+  in tcache 2` at runtime. This is a materially different, deeper
+  problem than the typedef-ordering bug above -- it's an affine-
+  ownership/lifetime gap in how a closure's heap-owning env
+  interacts with being moved across a struct-field boundary, not a
+  missing typedef. The compiler already tracks which closures have
+  an affine (non-Copy) env (`CLOSURE_AFF_ENV_SET`), which is a
+  plausible foundation for a future clean-rejection fix (mirroring
+  BUG-64's Channel-Copy-requirement pattern) -- not attempted in
+  this pass given the scope (would need the CHECKER, not just
+  codegen, to reject the pattern at the struct-field assignment
+  site). Documented here rather than silently left broken; not
+  chased further today.
+
 ---
