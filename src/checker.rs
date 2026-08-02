@@ -7722,6 +7722,29 @@ fn monomorphize_type_decls_in_program(
             Stmt::ForIter { body, .. } => {
                 for s in body { walk_stmt_kids(s, f); }
             }
+            // BUG-34 fix: `if let`/`while let` were missing from
+            // this walker entirely (fell through to the catch-all
+            // `_ => {}` below), so a builtin call like
+            // `parse_int(...)` sitting ONLY inside an if-let/
+            // while-let scrutinee (`if let Option.Some(v) =
+            // parse_int(s) { ... }`) never triggered the
+            // `Option<i64>` auto-register pre-pass above -- even
+            // though the exact same call inside a `match`
+            // scrutinee (`walk_expr_kids` already handles
+            // `ExprKind::Match`) DID register it, since `Stmt::Let
+            // { expr: <the match> }` walked into the match fine.
+            // The scrutinee, PLUS both branches' nested statements
+            // (matching every other control-flow arm here), all
+            // need walking.
+            Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+                f(scrutinee);
+                for s in then_body { walk_stmt_kids(s, f); }
+                for s in else_body { walk_stmt_kids(s, f); }
+            }
+            Stmt::WhileLet { scrutinee, body, .. } => {
+                f(scrutinee);
+                for s in body { walk_stmt_kids(s, f); }
+            }
             // 2026-06-10: walk into `unsafe(reason = "...") { ... }`
             // blocks too. Without this, `bptr_get` / `pool_get`
             // calls inside an unsafe block didn't trigger the

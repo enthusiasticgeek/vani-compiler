@@ -41953,6 +41953,60 @@ função main() -> i64 {
         );
     }
 
+    /// BUG-34 (found in an earlier tutorial audit, fixed here
+    /// 2026-08-01): `if let`/`while let` rejected a direct call to
+    /// a function returning the builtin generic `Option<T>` as
+    /// their scrutinee -- `if let Option.Some(v) = parse_int("42")
+    /// { ... }` failed with `enum 'Option__i64' not declared`, even
+    /// though the IDENTICAL call as a `match` scrutinee (`match
+    /// parse_int("42") { Option.Some(n) then n, ... }`) worked
+    /// fine. Root cause, found by instrumenting both paths and
+    /// comparing `env.enums`'s actual contents at the failure
+    /// point: `walk_stmt_kids` (checker.rs, the pre-pass that
+    /// auto-registers `Option<T>` for builtins like `parse_int`/
+    /// `find`/`pool_get` that return it even with no type
+    /// annotation anywhere) had `Stmt::If`/`Stmt::While`/`Stmt::For`/
+    /// `Stmt::ForIter`/`Stmt::UnsafeBlock` arms but no
+    /// `Stmt::IfLet`/`Stmt::WhileLet` arms at all -- they silently
+    /// fell through to the catch-all `_ => {}`, so a `parse_int(...)`
+    /// call sitting ONLY inside an if-let/while-let scrutinee was
+    /// never discovered, and `Option__i64` never got generated for
+    /// that program. `match`'s scrutinee didn't have this problem
+    /// because `Stmt::Let { expr: <the match> }` walks fine, and
+    /// `walk_expr_kids` already had a correct `ExprKind::Match` arm
+    /// that recurses into the scrutinee. Fixed by adding the two
+    /// missing arms to `walk_stmt_kids`, walking the scrutinee plus
+    /// both branches' nested statements exactly like the existing
+    /// `If`/`While` arms do.
+    #[test]
+    fn if_let_resolves_builtin_option_returning_call_scrutinee() {
+        let source = r#"
+            fn main() -> i64 {
+              if let Option.Some(v) = parse_int("42") { return v; }
+              return -1;
+            }
+        "#;
+        compile(source).expect(
+            "if-let with a parse_int(...) scrutinee must resolve Option__i64",
+        );
+    }
+
+    #[test]
+    fn while_let_resolves_builtin_option_returning_call_scrutinee() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              while let Option.Some(v) = find(ref xs, 2) {
+                return v;
+              }
+              return -1;
+            }
+        "#;
+        compile(source).expect(
+            "while-let with a find(...) scrutinee must resolve Option__i64",
+        );
+    }
+
     #[test]
     fn generic_enum_with_mismatched_arg_count_rejected() {
         let source = r#"

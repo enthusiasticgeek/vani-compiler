@@ -5564,6 +5564,58 @@ fn main() -> i64 {
     }
 }
 
+// BUG-34, found in an earlier tutorial audit and fixed here
+// (2026-08-01): `if let`/`while let` rejected a direct call to a
+// builtin-Option<T>-returning function (parse_int, find, ...) as
+// their scrutinee, with "enum 'Option__i64' not declared" -- even
+// though the identical call worked fine as a `match` scrutinee.
+// Only a real run proves both control-flow forms now produce the
+// correct value, not just that they compile.
+#[test]
+fn if_let_and_while_let_with_builtin_option_scrutinee_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "if_while_let_option_scrutinee_real_run",
+        r#"
+fn main() -> i64 {
+  if let Option.Some(v) = parse_int("42") {
+    print v;
+  } else {
+    print -1;
+  }
+  let xs: Vec<i64> = vec(1, 2, 3);
+  while let Option.Some(v) = find(ref xs, 2) {
+    print v;
+    break;
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "if-let/while-let with a builtin Option<T>-returning scrutinee must compile and \
+             run for {:?}; stderr: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\n1\n",
+            "wrong values for {:?} -- expected parse_int(\"42\")'s Some(42) then find's index 1",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(
