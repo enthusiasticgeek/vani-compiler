@@ -269,12 +269,27 @@ since that's exactly where BUG-61 lived.
 
 ### Async / task x container nesting
 
-- [ ] `async fn` returning a `Struct` or `Vec<T>` (not just a
-      scalar `Future<R>` -- the tutorial's examples are scalar-R
-      only).
-- [ ] `Barrier` combined with a `Vec<Mutex<T>>` shared-state pattern
-      (barrier + per-thread-indexed mutex vec, the natural
-      "N workers each own one slot" shape).
+- [x] `async fn` returning a `Struct` or `Vec<T>` -- **checked
+      2026-08-02, not a bug**: both a Copy struct return and a
+      `Vec<i64>` return through `Future<R>` compute correctly on
+      both backends, for the no-suspend-point (synchronous desugar)
+      case my repro exercised. `advanced/01_async.md`'s roadmap
+      table's "Future<R> for scalar R... [queued for] v3.1" line
+      turns out to describe the REAL multi-block suspend-point
+      state machine specifically, not the v1 synchronous-desugar
+      path -- not re-tested with an actual `.await` mid-body given
+      this file's own "Non-goals" section already excludes deep
+      async/await re-litigation.
+- [x] `Barrier` combined with a `Vec<Mutex<T>>` shared-state pattern
+      -- **checked 2026-08-02, not a bug**: three tasks (main +2
+      spawned) each lock their own indexed `mutexes[i]` slot, set a
+      value, then `barrier_wait`; a deterministic post-join summed
+      check (not print-ordering, which is inherently racy across
+      threads) confirms the correct total on both backends.
+
+This closes every row in this section -- see the header note above
+for the summary and the one real deferred gap (BUG-66's heap-
+capturing closure case).
 
 Cross off each row with the commit that added its e2e test (bug or
 no bug found -- a clean pairing still earns a permanent regression

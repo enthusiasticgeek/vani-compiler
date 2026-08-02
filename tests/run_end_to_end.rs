@@ -6483,3 +6483,233 @@ fn main() -> i64 {
         );
     }
 }
+
+// The remaining rows below are "swept, no bug found" pairings from
+// docs/TESTING_MATRIX_TODO.md's nested-combinations sections --
+// promoted to permanent regression tests per that file's own
+// process note ("a clean pairing still earns a permanent regression
+// test, since it's exactly the kind of coverage that was missing
+// before BUG-61 was found").
+
+#[test]
+fn dyn_iface_struct_field_and_heterogeneous_vec_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "dyn_iface_struct_field_and_vec",
+        r#"
+struct Circle { r: i64 }
+struct Square { side: i64 }
+struct Triangle { base: i64, height: i64 }
+interface Shape { fn area(self: Circle) -> i64; }
+interface Named { fn label(self: Circle) -> i64; }
+implement Shape for Circle { fn area(self: Circle) -> i64 { return self.r * self.r; } }
+implement Shape for Square { fn area(self: Square) -> i64 { return self.side * self.side; } }
+implement Shape for Triangle { fn area(self: Triangle) -> i64 { return self.base * self.height / 2; } }
+implement Named for Circle { fn label(self: Circle) -> i64 { return 1; } }
+implement Named for Square { fn label(self: Square) -> i64 { return 2; } }
+struct Widget { shape: dyn Shape, name: dyn Named }
+fn area_via_ref(d: ref dyn Shape) -> i64 { return d.area(); }
+fn main() -> i64 {
+  let c: Circle = Circle { r: 3 };
+  let s: Square = Square { side: 5 };
+  let w: Widget = Widget { shape: c, name: s };
+  print w.shape.area();
+  print w.name.label();
+  let sref: dyn Shape = c;
+  print area_via_ref(ref sref);
+  let mixed: Vec<dyn Shape> = vec(Circle { r: 2 }, Square { side: 4 }, Triangle { base: 6, height: 4 });
+  let total: i64 = 0;
+  for sh in mixed { total = total + sh.area(); }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "9\n2\n9\n32\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn fnptr_in_vec_and_struct_field_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "fnptr_vec_and_struct_field",
+        r#"
+fn add1(x: i64) -> i64 { return x + 1; }
+fn double(x: i64) -> i64 { return x * 2; }
+fn square(x: i64) -> i64 { return x * x; }
+struct Op { f: fn(i64) -> i64, label: i64 }
+fn apply(op: Op, x: i64) -> i64 {
+  let f: fn(i64) -> i64 = op.f;
+  return f(x);
+}
+fn main() -> i64 {
+  let fns: Vec<fn(i64) -> i64> = vec(add1, double, square);
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 3 {
+    let f: fn(i64) -> i64 = fns[i];
+    total = total + f(5);
+    i = i + 1;
+  }
+  let op: Op = Op { f: add1, label: 1 };
+  print total;
+  print apply(op, 10);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "41\n11\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn vec_of_vec_of_struct_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_vec_of_struct",
+        r#"
+struct Point { x: i64, y: i64 }
+fn main() -> i64 {
+  let row1: Vec<Point> = vec(Point { x: 1, y: 2 }, Point { x: 3, y: 4 });
+  let row2: Vec<Point> = vec(Point { x: 5, y: 6 });
+  let grid: Vec<Vec<Point>> = vec(row1, row2);
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 2 {
+    let row: Vec<Point> = clone_at(ref grid, i);
+    let j: i64 = 0;
+    while j < (len(row) as i64) {
+      total = total + row[j].x + row[j].y;
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "21\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn async_fn_returning_struct_and_vec_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "async_fn_returning_struct_and_vec",
+        r#"
+struct Point { x: i64, y: i64 }
+async fn make_point(n: i64) -> Point {
+  return Point { x: n, y: n * 2 };
+}
+async fn make_vec(n: i64) -> Vec<i64> {
+  return vec(n, n * 2, n * 3);
+}
+fn main() -> i64 {
+  let fp: Future<Point> = make_point(5);
+  if let Future.Ready(p) = fp {
+    print p.x;
+    print p.y;
+  }
+  let fv: Future<Vec<i64>> = make_vec(5);
+  if let Future.Ready(v) = fv {
+    print v[0] + v[1] + v[2];
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "5\n10\n30\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn barrier_with_vec_of_mutex_shared_state_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "barrier_with_vec_of_mutex",
+        r#"
+fn worker(id: i64, m: mut ref Mutex<i64>, b: mut ref Barrier) -> i64 {
+  let g: Guard<i64> = mutex_lock(m);
+  let _ = guard_set(ref g, id * 10);
+  let _ = barrier_wait(b);
+  return 0;
+}
+fn main() -> i64 {
+  let m0: Mutex<i64> = mutex_new(0);
+  let m1: Mutex<i64> = mutex_new(0);
+  let m2: Mutex<i64> = mutex_new(0);
+  let mutexes: Vec<Mutex<i64>> = vec(m0, m1, m2);
+  let b: Barrier = barrier_new(3);
+  let t1: Task<i64> = task worker(1, mut ref mutexes[1], mut ref b);
+  let t2: Task<i64> = task worker(2, mut ref mutexes[2], mut ref b);
+  let _ = worker(0, mut ref mutexes[0], mut ref b);
+  let _ = join t1;
+  let _ = join t2;
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 3 {
+    let g: Guard<i64> = mutex_lock(mut ref mutexes[i]);
+    total = total + guard_get(ref g);
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "30\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
