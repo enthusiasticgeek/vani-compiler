@@ -3047,7 +3047,7 @@ verifying the four fixes above against their tutorial worked examples
   rejection + arena-index tree + Color/brightness challenge)
   verified correct end-to-end.
 
-- [ ] **BUG-34 (found, NOT fixed — real compiler bug, root cause
+- [x] **BUG-34 (found, fixed 2026-08-01 — real compiler bug, root cause
   identified but the fix touches generic-enum monomorphization
   timing). `if let`/`while let` reject a direct call to a function
   returning the builtin generic `Option<T>` (or presumably
@@ -3099,6 +3099,28 @@ verifying the four fixes above against their tutorial worked examples
   example (a real, verified, zero-cost workaround — not a
   compromise, since a hand-rolled enum is often clearer in tutorial
   code anyway).
+  ✅ Fixed 2026-08-01, in the "fix documented TODO bugs" pass. The
+  real root cause was different from this entry's own guess (which
+  suspected monomorphization ORDERING): instrumented both the
+  if-let and match code paths directly and compared `env.enums`'s
+  actual contents at the failure point. Found `walk_stmt_kids`
+  (checker.rs) — the statement walker the `Option<T>`
+  auto-registration pre-pass uses to find builtins like `parse_int`/
+  `find`/`pool_get` that return `Option<T>` even with no explicit
+  type annotation anywhere — had `If`/`While`/`For`/`ForIter`/
+  `UnsafeBlock` arms but was simply MISSING `IfLet`/`WhileLet`
+  arms entirely, silently falling through to the catch-all `_ =>
+  {}`. `match` never hit this because `Stmt::Let { expr: <match> }`
+  walks fine on its own, and `walk_expr_kids` already handles
+  `ExprKind::Match` correctly. Fixed by adding the two missing arms
+  (walking the scrutinee plus both branches, matching the shape of
+  the existing `If`/`While` arms) — this was a self-contained,
+  low-risk missing-arm fix, not the "shared, sensitive
+  infrastructure" this entry originally feared touching. New
+  tests: 2 checker-level (`src/lib.rs`) plus a real end-to-end test
+  (`tests/run_end_to_end.rs`) asserting correct runtime output on
+  both backends. Full `cargo test --release --workspace`: 13/13
+  test binaries clean, 0 failed. Commit `2ffbd85`.
 
 - [x] **`intermediate/02b_match_enhancements.md` — the single most
   broken file found this entire tutorial-audit arc: at least 9
