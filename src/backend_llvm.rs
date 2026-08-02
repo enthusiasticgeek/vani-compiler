@@ -16425,6 +16425,46 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 symbol,
                 arg_strs.join(", ")
             ));
+            // BUG-77: the call above correctly uses the System V
+            // x86-64 packed-register LOWERED type (`ret_ll`, e.g.
+            // `i64`) for the `call` instruction itself, matching
+            // cc's actual ABI -- but `dest` is therefore still in
+            // that lowered form, not the real `%Struct_X` type
+            // `expr.ty` says this expression has. Every OTHER
+            // consumer of `emit_expr`'s return value (a `let`
+            // binding's `store`, a further struct-field read, ...)
+            // assumes the returned SSA value's type matches
+            // `expr.ty` exactly, and blindly stores/uses it as
+            // `%Struct_X` -- an LLVM type mismatch ("defined with
+            // type 'i64' but expected '%Struct_Point'"), since the
+            // param-passing side of this same ABI lowering (just
+            // above) already had the matching un-lower step but the
+            // return side never did. Fixed by spilling the lowered
+            // value to an alloca, bitcasting to the real struct
+            // pointer type, and loading -- the mirror image of the
+            // param-passing lowering above.
+            if is_extern {
+                if let Some(lowered) = llvm_ffi_struct_lowered_ty(&expr.ty) {
+                    let struct_ty = llvm_type_string(&expr.ty);
+                    let spill = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = alloca {}\n", spill, lowered));
+                    out.push_str(&format!(
+                        "  store {} {}, {}* {}\n",
+                        lowered, dest, lowered, spill
+                    ));
+                    let cast_ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast {}* {} to {}*\n",
+                        cast_ptr, lowered, spill, struct_ty
+                    ));
+                    let unlowered = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        unlowered, struct_ty, struct_ty, cast_ptr
+                    ));
+                    return unlowered;
+                }
+            }
             dest
             } // close the `else` from the `__intent_atomic_` branch
         }

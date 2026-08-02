@@ -605,9 +605,35 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
 
 ### Container x FFI / extern boundary
 
-- [ ] `extern "C" fn` taking or returning a `Struct` BY VALUE
+- [x] `extern "C" fn` taking or returning a `Struct` BY VALUE
       (not just scalars/`Str`/`ref T` -- the FFI tutorials only show
-      scalar marshaling).
+      scalar marshaling) -- **found+fixed 2026-08-02, BUG-77.** A
+      small struct passed BY VALUE as a PARAMETER to a real, linked
+      extern C function already worked correctly on both backends
+      (Closure #288's System V x86-64 ABI lowering: bitcast to a
+      packed-register form at the call site). A small struct
+      RETURNED by value from such a function crashed the LLVM
+      backend the instant it was actually CALLED (declaring it alone
+      was fine -- confirmed via the pre-existing
+      `extern_small_struct_lowers_to_packed_integer_in_llvm` test,
+      which only exercised the param side): `'%tN' defined with type
+      'i64' but expected '%Struct_Point'`. Root cause: the `call`
+      instruction correctly used the lowered return type (`i64`) to
+      match the real C ABI, but the resulting SSA value was then
+      handed to every downstream consumer (a `let` binding's
+      `store`, a field read, ...) as if it already had the real
+      `%Struct_X` type -- the param-passing side had a matching
+      "lower before the call" step; the return side never got the
+      mirror-image "un-lower after the call" step. C backend was
+      unaffected throughout. Fixed by spilling the lowered value to
+      an alloca, bitcasting to the real struct pointer type, and
+      loading, right after the call returns. Confirmed against a
+      REAL linked C shim (both directions: a function taking a
+      struct by value AND one returning one) on both backends, not
+      just a compile-only check. New tests: 1 `src/lib.rs` (LLVM IR
+      shape assertion) + 1 `tests/run_end_to_end.rs` (both backends,
+      real `--link-with` C shim, `vanic build` for LLVM + `vanic run
+      --backend=c` for C).
 - [ ] A `#[no_mangle]` exported function whose signature includes a
       `Tuple` or fixed-size `Array` parameter (BUG-44's `#[no_mangle]`
       + SSA-gating fix was scalar-only; never re-tested with an

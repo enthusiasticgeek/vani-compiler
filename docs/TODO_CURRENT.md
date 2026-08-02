@@ -5460,4 +5460,56 @@ verifying the four fixes above against their tutorial worked examples
   nesting scenario this row was actually testing). Full `cargo test
   --release --workspace`: 13/13 binaries clean, 0 failed.
 
+## Bug found sweeping "extern C fn taking/returning a Struct BY VALUE" (found+fixed 2026-08-02)
+
+- [x] **BUG-77 (found+fixed 2026-08-02 — LLVM-only, System V x86-64
+  ABI lowering missing its mirror-image step on the return side).**
+  Found while testing the testing matrix's "`extern \"C\" fn` taking
+  or returning a Struct BY VALUE" row against a REAL linked C
+  function (not just a compile-only declaration check — the existing
+  test suite already covered that half). A small struct passed BY
+  VALUE as a parameter worked correctly (Closure #288's ABI
+  lowering). A small struct RETURNED by value crashed the LLVM
+  backend the instant the function was actually called:
+  ```vani
+  struct Point { x: i32, y: i32 }
+  extern "C" fn make_point(x: i32, y: i32) -> Point;
+  fn main() -> i64 {
+    let p: Point = make_point(3 as i32, 4 as i32);   // crashes LLVM
+    ...
+  }
+  ```
+  `llc`/`opt` rejected the IR: `'%t2' defined with type 'i64' but
+  expected '%Struct_Point'`. Root cause: the call-site codegen
+  correctly used the ABI-lowered return type (`i64`, matching cc's
+  actual System V x86-64 calling convention for a small all-integer
+  struct) for the `call` instruction itself — but the resulting SSA
+  value was then returned to every downstream consumer (a `let`
+  binding's `store`, a struct-field read, ...) unchanged, as if it
+  already had the real `%Struct_Point` type. The param-passing side
+  of this SAME ABI-lowering feature already had the matching "lower
+  the value before the call" step (spill to alloca, bitcast to the
+  lowered pointer type, load); the return side simply never got the
+  mirror-image "un-lower the value after the call" step. C backend
+  was unaffected throughout — its own ABI handling is per-value, not
+  keyed to this LLVM-specific lowered-type SSA representation.
+  Fixed by adding exactly that missing mirror step right after the
+  `call` instruction: spill the lowered SSA value to an alloca,
+  bitcast the pointer to the real struct type, and load — producing
+  a correctly-typed struct value for every downstream use, the same
+  way the param-passing side already does it in reverse.
+  Confirmed against a REAL linked C shim (`vanic build --link-with`
+  for LLVM, `vanic run --backend=c --link-with` for C) exercising
+  BOTH directions in one program (a function taking a struct by
+  value feeding into one returning a struct by value) — not just a
+  compile-only check, which is what let this bug hide behind the
+  pre-existing test suite's coverage gap (that suite only ever
+  compiled a struct-returning extern declaration, never actually
+  called one against a real linked symbol). New tests: 1
+  `src/lib.rs` (LLVM IR shape assertion: the un-lowering bitcast
+  sequence appears after the call) + 1 `tests/run_end_to_end.rs`
+  (both backends, real linked C shim, correct runtime value `7` =
+  `3+4`). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed.
+
 ---

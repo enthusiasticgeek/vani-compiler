@@ -41607,6 +41607,53 @@ função main() -> i64 {
     }
 
     #[test]
+    fn extern_c_fn_returning_small_struct_unlowers_at_call_site_in_llvm() {
+        // BUG-77, found sweeping the testing matrix's "extern C fn
+        // taking/returning a Struct BY VALUE" row. The System V
+        // x86-64 ABI-lowering param-passing side (Closure #288,
+        // tested just above by
+        // `extern_small_struct_lowers_to_packed_integer_in_llvm`)
+        // correctly bitcasts a struct-by-value ARGUMENT to its
+        // packed-register lowered form (`i64`) before the call. The
+        // RETURN side never got the mirror-image fix: the `call`
+        // instruction correctly used the lowered return type, but
+        // the SSA value it produced was then handed straight to
+        // every downstream consumer (a `let` binding's `store`, a
+        // struct-field read, ...) as if it were already the real
+        // `%Struct_X` type -- an LLVM type mismatch the instant a
+        // struct-RETURNING extern fn was actually called (not just
+        // declared): `'%tN' defined with type 'i64' but expected
+        // '%Struct_Point'`. Fixed by mirroring the param-passing
+        // lowering in reverse right after the call: spill the
+        // lowered SSA value to an alloca, bitcast to the real struct
+        // pointer type, and load.
+        let source = r#"
+            struct Point { x: i32, y: i32 }
+            extern "C" fn make_point(x: i32, y: i32) -> Point;
+            fn main() -> i64 {
+              let p: Point = make_point(3 as i32, 4 as i32);
+              return (p.x + p.y) as i64;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("extern fn returning a small struct by value must compile to valid LLVM IR");
+        // The call itself uses the lowered i64 return type...
+        assert!(
+            ll.contains("call i64 @make_point("),
+            "expected the call site to use the lowered i64 return type, got:\n{}",
+            ll
+        );
+        // ...and the result gets un-lowered back to %Struct_Point
+        // via a bitcast before any consumer touches it as a struct.
+        assert!(
+            ll.contains("bitcast i64*") && ll.contains("to %Struct_Point*"),
+            "expected a bitcast from the lowered i64 form back to \
+             %Struct_Point* after the call, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn extern_vec_param_rejected() {
         let source = r#"
             extern "C" fn takes_vec(xs: Vec<i32>) -> i32;

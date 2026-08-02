@@ -7285,3 +7285,106 @@ fn main() -> i64 {
         assert_eq!(stdout, "107\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// BUG-77, testing-matrix sweep "extern C fn taking/returning a Struct BY
+// VALUE": a real, linked C function that TAKES a small struct by value
+// already worked on both backends (Closure #288's ABI lowering), but one
+// that RETURNS a small struct by value crashed the LLVM backend the
+// instant it was actually called (not just declared) -- the ABI-lowered
+// call result (`i64`) was handed to callers as if it were already the
+// real `%Struct_X` type, an LLVM type mismatch. C backend was unaffected.
+// Exercises both directions (param AND return) against a real linked C
+// shim on both backends.
+#[test]
+fn extern_c_struct_by_value_param_and_return_runs_correctly_on_both_backends() {
+    use std::fs;
+    let src = write_tmp_vani(
+        "extern_struct_by_value",
+        r#"
+struct Point { x: i32, y: i32 }
+extern "C" fn make_point(x: i32, y: i32) -> Point;
+extern "C" fn point_sum(p: Point) -> i32;
+fn main() -> i64 {
+  let p: Point = make_point(3 as i32, 4 as i32);
+  let s: i32 = point_sum(p);
+  print s as i64;
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\n\
+         typedef struct { int32_t x; int32_t y; } Point;\n\
+         Point make_point(int32_t x, int32_t y) { Point p; p.x = x; p.y = y; return p; }\n\
+         int32_t point_sum(Point p) { return p.x + p.y; }\n",
+    )
+    .expect("write shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    // LLVM backend: `vanic build` (AOT, always LLVM) + `--link-with` + `-lm`
+    // (the generated runtime helpers pull in libm symbols that `cc` only
+    // resolves when linked explicitly here, per the FFI tutorial's own
+    // `--link-with=m` guidance).
+    let llvm_bin = dir.join("prog_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "LLVM backend output mismatch"
+    );
+
+    // C backend: `vanic run --backend=c --link-with` (JIT-equivalent via
+    // gcc, no separate build step needed for the C path).
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
