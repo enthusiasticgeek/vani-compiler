@@ -13,3 +13,30 @@ proper BUG-N writeup) only after a human or frontier-model session has:
 3. Confirmed it isn't already-known/expected behavior.
 
 ---
+
+---
+
+### Candidate: 20260802-180614-run-crash-1a1740134e
+
+Repro: `tools/localfuzz/findings/20260802-180614-run-crash-1a1740134e/repro.vani`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
