@@ -42089,6 +42089,81 @@ função main() -> i64 {
         );
     }
 
+    /// BUG-46 follow-up gap, found via the `intermediate/
+    /// 10c_error_patterns_primer.md` tutorial's own worked example
+    /// (a `Result<T,E>` union-error pattern that was previously
+    /// routed around the BUG-46 limitation with hand-declared
+    /// enums) once BUG-46 itself was fixed and the tutorial's
+    /// "compiler limitation" callout needed re-checking against the
+    /// ACTUAL pattern it was warning about, not just the isolated
+    /// repro. The initial `resolve_bare_enum_ctors_in_stmt` fix
+    /// only recursed into `If`/`While`/`For` bodies -- not `IfLet`/
+    /// `WhileLet` -- so a `return EnumName.Variant(...);` inside an
+    /// `if let ... else if let ...` chain (the single most common
+    /// place a union error type actually gets constructed) was
+    /// still unresolved. Also found the payload-less-variant shape
+    /// (`Option.None`, which parses as `FieldAccess`, not
+    /// `MethodCall`) was never handled by the resolver at all, in
+    /// any position. Both fixed in the same follow-up pass.
+    #[test]
+    fn enum_constructor_resolves_inside_if_let_else_chain_with_two_instantiations() {
+        let source = r#"
+            struct ConfigError { code: i64 }
+
+            fn read_config(ok: bool) -> Result<i64, i64> {
+              if ok { return Result.Ok(1); }
+              return Result.Err(9);
+            }
+            fn parse_value(ok: bool) -> Result<i64, i64> {
+              if ok { return Result.Ok(2); }
+              return Result.Err(8);
+            }
+            fn load(a_ok: bool, b_ok: bool) -> Result<i64, ConfigError> {
+              let raw: i64 = 0;
+              let step1: Result<i64, i64> = read_config(a_ok);
+              if let Result.Ok(v) = step1 {
+                raw = v;
+              } else if let Result.Err(e) = step1 {
+                return Result.Err(ConfigError { code: e });
+              }
+              let value: i64 = 0;
+              let step2: Result<i64, i64> = parse_value(b_ok);
+              if let Result.Ok(v) = step2 {
+                value = v;
+              } else if let Result.Err(e) = step2 {
+                return Result.Err(ConfigError { code: e });
+              }
+              return Result.Ok(raw + value);
+            }
+            fn main() -> i64 {
+              let outcome: Result<i64, ConfigError> = load(true, true);
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "enum constructor inside an if-let/else-if-let chain must resolve",
+        );
+    }
+
+    #[test]
+    fn payload_less_variant_resolves_with_two_instantiations() {
+        let source = r#"
+            fn f(x: i64) -> Option<i64> {
+              if x < 0 { return Option.None; }
+              return Option.Some(x);
+            }
+            fn g() -> Option<OwnedStr> { return Option.Some("x" + ""); }
+            fn main() -> i64 {
+              let a: Option<i64> = f(-1);
+              let b: Option<OwnedStr> = g();
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "payload-less Option.None must resolve alongside a second Option<T> instantiation",
+        );
+    }
+
     #[test]
     fn option_constructor_in_let_annotation_resolves_with_two_instantiations() {
         let source = r#"

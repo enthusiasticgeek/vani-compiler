@@ -5725,6 +5725,84 @@ fn main() -> i64 {
     }
 }
 
+// BUG-46 follow-up gap, found via tutorials/src/intermediate/
+// 10c_error_patterns_primer.md's own worked example once BUG-46
+// itself was fixed: `resolve_bare_enum_ctors_in_stmt`'s initial fix
+// didn't recurse into `if let`/`while let` bodies, so a `return
+// EnumName.Variant(...);` inside an `if let ... else if let ...`
+// chain -- the single most common place a union error type
+// actually gets constructed -- was still unresolved once 2+
+// instantiations of the same generic enum existed. Fixed in the
+// same follow-up pass as the payload-less-variant (`Option.None`)
+// gap. Only a real run proves the CORRECT runtime values, not just
+// that the file compiles.
+#[test]
+fn enum_constructor_in_if_let_chain_produces_correct_values_on_both_backends() {
+    let src = write_tmp_vani(
+        "enum_ctor_in_if_let_chain_real_run",
+        r#"
+struct ConfigError { code: i64 }
+
+fn read_config(ok: bool) -> Result<i64, i64> {
+  if ok { return Result.Ok(1); }
+  return Result.Err(9);
+}
+fn parse_value(ok: bool) -> Result<i64, i64> {
+  if ok { return Result.Ok(2); }
+  return Result.Err(8);
+}
+fn load(a_ok: bool, b_ok: bool) -> Result<i64, ConfigError> {
+  let raw: i64 = 0;
+  let step1: Result<i64, i64> = read_config(a_ok);
+  if let Result.Ok(v) = step1 {
+    raw = v;
+  } else if let Result.Err(e) = step1 {
+    return Result.Err(ConfigError { code: e });
+  }
+  let value: i64 = 0;
+  let step2: Result<i64, i64> = parse_value(b_ok);
+  if let Result.Ok(v) = step2 {
+    value = v;
+  } else if let Result.Err(e) = step2 {
+    return Result.Err(ConfigError { code: e });
+  }
+  return Result.Ok(raw + value);
+}
+fn main() -> i64 {
+  let ok_outcome: Result<i64, ConfigError> = load(true, true);
+  if let Result.Ok(v) = ok_outcome { print v; }
+
+  let err_outcome: Result<i64, ConfigError> = load(false, true);
+  if let Result.Err(e) = err_outcome { print e.code; }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "enum constructor inside an if-let/else-if-let chain, with 2 Result<i64,i64>/\
+             Result<i64,ConfigError> instantiations, must compile and run for {:?}; stderr: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "3\n9\n",
+            "expected load(true,true)'s Ok(1+2=3) then load(false,true)'s Err(9) for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn hashmap_owned_str_param_compiles_and_runs_with_real_cc() {
     let src = write_tmp_vani(

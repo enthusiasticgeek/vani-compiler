@@ -8043,26 +8043,44 @@ fn monomorphize_type_decls_in_program(
 /// (call arguments, bare expression statements, etc.) exactly as
 /// before, so this can only ADD resolving power, never take any
 /// away.
+///
+/// Handles both constructor shapes: `MethodCall { receiver:
+/// Var(name), .. }` for a payloaded variant (`Option.Some(x)`) and
+/// bare `FieldAccess { object: Var(name), .. }` for a payload-less
+/// one (`Option.None`) -- found missing by testing after the
+/// initial fix landed: a payload-less variant parses as
+/// `FieldAccess`, not `MethodCall`, and was silently left
+/// unresolved.
 fn resolve_bare_enum_ctor_receiver(
     expr: &mut Expr,
     target_enum_name: &str,
     enum_template_names: &std::collections::HashSet<String>,
 ) {
-    if let ExprKind::MethodCall { receiver, .. } = &mut expr.kind {
-        if let ExprKind::Var(name) = &mut receiver.kind {
-            if enum_template_names.contains(name.as_str()) {
-                *name = target_enum_name.to_string();
-            }
+    let receiver = match &mut expr.kind {
+        ExprKind::MethodCall { receiver, .. } => receiver,
+        ExprKind::FieldAccess { object, .. } => object,
+        _ => return,
+    };
+    if let ExprKind::Var(name) = &mut receiver.kind {
+        if enum_template_names.contains(name.as_str()) {
+            *name = target_enum_name.to_string();
         }
     }
 }
 
-/// Walks a statement (recursing into `if`/`while`/`for` bodies)
-/// applying `resolve_bare_enum_ctor_receiver` to `return`
-/// expressions (against `fn_return_enum`, the enclosing function's
-/// already-monomorphized return type) and `let` expressions
-/// (against that same `let`'s own already-monomorphized
+/// Walks a statement (recursing into `if`/`if let`/`while`/
+/// `while let`/`for` bodies) applying `resolve_bare_enum_ctor_receiver`
+/// to `return` expressions (against `fn_return_enum`, the enclosing
+/// function's already-monomorphized return type) and `let`
+/// expressions (against that same `let`'s own already-monomorphized
 /// annotation, if any).
+///
+/// `IfLet`/`WhileLet` recursion was missing from the initial fix --
+/// found by testing a `return EnumName.Variant(...);` inside an
+/// `if let`/`else` branch (the single most common place a union
+/// error type actually gets constructed: `if let Result.Ok(v) = ...
+/// { .. } else if let Result.Err(e) = ... { return Result.Err(...);
+/// }`), which was silently left unresolved.
 fn resolve_bare_enum_ctors_in_stmt(
     stmt: &mut Stmt,
     fn_return_enum: Option<&str>,
@@ -8086,7 +8104,20 @@ fn resolve_bare_enum_ctors_in_stmt(
                 resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
             }
         }
+        Stmt::IfLet { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
         Stmt::While { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+            }
+        }
+        Stmt::WhileLet { body, .. } => {
             for s in body.iter_mut() {
                 resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
             }
