@@ -4748,4 +4748,47 @@ verifying the four fixes above against their tutorial worked examples
   (`tests/run_end_to_end.rs`) asserting the correct summed value
   (20) on both backends, closing all four sub-bugs at once.
 
+- [x] **BUG-63 (found+fixed 2026-08-02 — tree-C only).** Found
+  continuing the same sweep, item `struct { items: Vec<(i64,
+  OwnedStr)> }`. Minimal repro:
+  ```vani
+  struct Bag { items: Vec<(i64, OwnedStr)> }
+  fn main() -> i64 {
+    let items: Vec<(i64, OwnedStr)> = vec((1, "a" + ""), (2, "b" + ""));
+    let bag: Bag = Bag { items: items };
+    let pair: (i64, OwnedStr) = clone_at(ref bag.items, 0);
+    let (num, s) = pair;
+    print num;
+    print s;
+    return 0;
+  }
+  ```
+  Runs correctly on LLVM. Under `--backend=c`, `cc` fails: "unknown
+  type name `intent_tuple_int64_t_owned_str`". Root cause: a Tuple
+  shape that ONLY ever appears inside a struct field (never in a
+  function signature or body) was never fed into tree-C's
+  `tuple_shapes` collection at all -- only function-level walks
+  existed, mirroring the Vec-element collection but never extended
+  to structs/enums the way that one was. Meanwhile the struct-field
+  `Vec<(i64, OwnedStr)>` bundle WAS emitted (eagerly, by the "no
+  user-struct dependency" fast path — `vec_element_has_user_struct`
+  didn't recognize `Type::Tuple` at all, so it never deferred),
+  referencing the tuple struct's name regardless of it never being
+  declared anywhere in the file. Same root-cause SHAPE as BUG-61's
+  struct-field follow-up, different type (Tuple, not Channel/Mutex/
+  RwLock). Fixed by (1) collecting tuple shapes from struct fields
+  and enum payloads too, and (2) partitioning them the same way as
+  BUG-61's channel/mutex/rwlock specs: shapes whose OWN elements
+  need no full struct/enum/tuple body (the common case — scalars,
+  `OwnedStr`, refs) emit early, right where the early struct-field
+  Vec-bundle pass needs them; shapes that DO need one (e.g.
+  `(Point, i64)`) stay deferred to the existing later position.
+  `vec_element_has_user_struct` now defers a Tuple element only
+  when that specific tuple shape needs a full struct body — tuples
+  that don't are safe to leave un-deferred since their bundle now
+  exists early.
+  New tests: 1 `src/lib.rs` (asserts the tuple typedef precedes the
+  Vec-of-tuple bundle referencing it) plus 1 real end-to-end test
+  (both backends, correct printed values).
+
 ---

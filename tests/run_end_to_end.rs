@@ -6268,3 +6268,60 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-63, found continuing the "multi-level container nesting" sweep
+// item `struct { items: Vec<(i64, OwnedStr)> }`: a Tuple shape that
+// ONLY ever appears inside a struct field (never in a function
+// signature/body) was never collected into tree-C's `tuple_shapes`
+// at all, so its bundle was never emitted anywhere -- while the
+// struct-field Vec<Tuple> bundle (wrongly treated as needing no
+// deferral, since `vec_element_has_user_struct` didn't recognize
+// Tuple) referenced the missing type by name regardless.
+#[test]
+fn struct_field_vec_of_tuple_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_field_vec_of_tuple",
+        r#"
+struct Bag { items: Vec<(i64, OwnedStr)> }
+fn main() -> i64 {
+  let items: Vec<(i64, OwnedStr)> = vec((1, "a" + ""), (2, "b" + ""));
+  let bag: Bag = Bag { items: items };
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 2 {
+    let pair: (i64, OwnedStr) = clone_at(ref bag.items, i);
+    let (num, s) = pair;
+    total = total + num;
+    print s;
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "struct {{ Vec<(i64,OwnedStr)> field }} must not fail to build for {:?}; \
+             status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "a\nb\n3\n",
+            "expected \"a\", \"b\", then total 1+2=3 for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}

@@ -226,8 +226,13 @@ since that's exactly where BUG-61 lived.
       variables rather than inline literals. See TODO_CURRENT.md's
       BUG-62 entry for the full breakdown -- this was the richest
       single repro of the whole sweep.
-- [ ] `struct { items: Vec<(i64, OwnedStr)> }` -- struct field that's
-      a Vec of tuples (three features stacked: struct, Vec, tuple).
+- [x] `struct { items: Vec<(i64, OwnedStr)> }` -- **found+fixed
+      2026-08-02, BUG-63**: tree-C only. A Tuple shape that ONLY
+      ever appears inside a struct field was never collected into
+      `tuple_shapes` at all (only function signatures/bodies were),
+      so its bundle was never emitted, while the eagerly-emitted
+      struct-field `Vec<Tuple>` bundle referenced it regardless.
+      Fixed with the same early/late partition pattern as BUG-61.
 - [ ] `HashMap<i64, Vec<Struct>>` -- container-of-container through
       a HashMap value type, not just Vec-of-Vec.
 

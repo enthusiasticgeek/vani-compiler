@@ -323,6 +323,31 @@ pub fn emit_c(program: &TypedProgram) -> String {
             }
         }
     }
+    // BUG-63 (2026-08-02): struct fields / enum payloads can also
+    // reference a Tuple type directly, or (more commonly) a
+    // `Vec<Tuple<...>>` -- neither `collect_tuple_shapes` at the
+    // top of this function (which only walks function signatures/
+    // bodies) nor any other pass previously fed struct/enum field
+    // types into `tuple_shapes` at all, so a tuple shape that ONLY
+    // ever appeared inside a struct field was never collected, and
+    // its bundle never emitted anywhere -- `struct Bag { items:
+    // Vec<(i64, OwnedStr)> }` referenced `intent_tuple_int64_t_
+    // owned_str` in the eagerly-emitted `Vec<Tuple>` bundle (see
+    // `vec_element_has_user_struct` below) with no typedef for it
+    // ever landing in the file at all. Collect here, same as the
+    // struct-field Vec-element pass above.
+    for decl in &program.structs {
+        for (_, fty) in &decl.fields {
+            collect_tuple_shapes(fty, &mut tuple_seen, &mut tuple_shapes);
+        }
+    }
+    for decl in &program.enums {
+        for payload in &decl.payload_types {
+            if let Some(ty) = payload {
+                collect_tuple_shapes(ty, &mut tuple_seen, &mut tuple_shapes);
+            }
+        }
+    }
     // Vec-bundle emit is now SPLIT into two phases (2026-06-06):
     //   1. Vec<primitive> bundles (no user-struct deps) emit HERE,
     //      same position as before. Enums + structs further below
@@ -335,6 +360,30 @@ pub fn emit_c(program: &TypedProgram) -> String {
     //      emitted BEFORE Struct_Point's typedef. The unified
     //      interleaving fixes this without breaking enums-with-
     //      Vec<primitive>-payload (closure #118).
+    // BUG-63: a Tuple shape whose OWN elements are all scalar/
+    // OwnedStr/Ref (no Struct/Enum/nested-Tuple by value) has no
+    // struct-body dependency at all, and its bundle is emitted
+    // EARLY below (before this function's early Vec-bundle pass
+    // runs) -- so a struct-field `Vec<(i64, OwnedStr)>` can safely
+    // take the fast early path too, same as `Vec<i64>`. Only a
+    // tuple shape that DOES need a full struct/enum/tuple body
+    // (e.g. `(Point, i64)`) still needs deferral to the unified
+    // topo loop, mirroring the Channel/Mutex/RwLock split above.
+    fn tuple_shape_needs_full_struct_def(shape: &[Type]) -> bool {
+        shape.iter().any(concurrency_element_needs_full_struct_def)
+    }
+    let (tuple_shapes_early, tuple_shapes_late): (Vec<Vec<Type>>, Vec<Vec<Type>>) = tuple_shapes
+        .iter()
+        .cloned()
+        .partition(|shape| !tuple_shape_needs_full_struct_def(shape));
+    let mut emitted_tuple_bundles: BTreeSet<String> = BTreeSet::new();
+    for shape in &tuple_shapes_early {
+        emit_tuple_bundle(shape, &mut body);
+        emitted_tuple_bundles.insert(tuple_c_struct(shape));
+    }
+    if !tuple_shapes_early.is_empty() {
+        body.push('\n');
+    }
     fn vec_element_has_user_struct(ty: &Type) -> bool {
         match ty {
             Type::Struct(_) => true,
@@ -345,6 +394,11 @@ pub fn emit_c(program: &TypedProgram) -> String {
             // the unified topo loop (which runs after the dyn
             // typedefs land). Closes L8.
             Type::Object(_) => true,
+            // BUG-63: only defer a Tuple element if IT needs a
+            // full struct/enum/tuple body -- otherwise its bundle
+            // was already emitted early just above, right where
+            // this function's own caller needs it.
+            Type::Tuple(elements) => tuple_shape_needs_full_struct_def(elements),
             Type::Vec(inner)
             | Type::Array { element: inner, .. } => vec_element_has_user_struct(inner),
             _ => false,
@@ -1167,10 +1221,19 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // struct. Inner-first dedup keeps nested tuples (when
     // we lift the Copy-only restriction later) ordered
     // correctly. T1.1.
+    //
+    // Skip any shape already emitted by the early pass above
+    // (BUG-63) -- re-emitting it here would be a duplicate
+    // `typedef` and a `cc` redeclaration error.
+    let mut any_tuple_emitted_here = false;
     for shape in &tuple_shapes {
+        if emitted_tuple_bundles.contains(&tuple_c_struct(shape)) {
+            continue;
+        }
         emit_tuple_bundle(shape, &mut body);
+        any_tuple_emitted_here = true;
     }
-    if !tuple_shapes.is_empty() {
+    if any_tuple_emitted_here {
         body.push('\n');
     }
     // The REMAINING Channel<T,N>/Mutex<T>/RwLock<T> bundles -- ones

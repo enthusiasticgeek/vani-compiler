@@ -52234,5 +52234,47 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// BUG-63 (tree-C): a Tuple shape that ONLY ever appears inside
+    /// a struct field (e.g. `struct Bag { items: Vec<(i64,
+    /// OwnedStr)> }`) was never fed into `tuple_shapes` at all --
+    /// only function signatures/bodies were collected -- so its
+    /// bundle was never emitted anywhere, while the struct-field
+    /// `Vec<Tuple>` bundle (emitted eagerly by the "primitive"
+    /// fast path, since `vec_element_has_user_struct` didn't
+    /// recognize Tuple) referenced it by name regardless. Fixed by
+    /// collecting tuple shapes from struct fields / enum payloads
+    /// too, and emitting "early-eligible" ones (no Struct/Enum/
+    /// Tuple-by-value dependency of their own) right where the
+    /// early Vec-bundle pass needs them.
+    #[test]
+    fn struct_field_vec_of_tuple_compiles_to_c() {
+        let source = r#"
+            struct Bag { items: Vec<(i64, OwnedStr)> }
+            fn main() -> i64 {
+              let items: Vec<(i64, OwnedStr)> = vec((1, "a" + ""), (2, "b" + ""));
+              let bag: Bag = Bag { items: items };
+              let pair: (i64, OwnedStr) = clone_at(ref bag.items, 0);
+              let (num, s) = pair;
+              print num;
+              print s;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("struct { Vec<(i64,OwnedStr)> field } compiles to C");
+        let tuple_typedef_at = c
+            .find("intent_tuple_int64_t_owned_str;")
+            .unwrap_or_else(|| panic!("no intent_tuple_int64_t_owned_str typedef found in:\n{}", c));
+        let vec_bundle_at = c
+            .find("intent_tuple_int64_t_owned_str* __restrict__ data")
+            .unwrap_or_else(|| panic!("no intent_vec_..._owned_str bundle typedef found in:\n{}", c));
+        assert!(
+            tuple_typedef_at < vec_bundle_at,
+            "the tuple struct must be fully declared (offset {}) before the \
+             Vec-of-tuple bundle references it by name (offset {})",
+            tuple_typedef_at,
+            vec_bundle_at
+        );
+    }
+
 }
 
