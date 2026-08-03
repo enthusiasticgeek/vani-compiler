@@ -186,3 +186,11 @@ Found a bug in the vani-compiler project's local staging log where running the `
 To investigate further, I'll need to run the example with different backends (LLVM and C) to see if the issue persists and identify any potential root causes such as handling of non-blocking sockets, asynchronous functions, or state management in the desugaring phase.
 
 Expected outcome: Identify and fix the bug causing the crash on the C backend while ensuring that the example runs successfully with both LLVM and C backends.
+
+---
+
+### Candidate: 20260803-110707-run-crash-3f94aefdee
+
+Repro: `tools/localfuzz/findings/20260803-110707-run-crash-3f94aefdee/repro.vani`
+
+STATUS: needs human/frontier root-cause review.
