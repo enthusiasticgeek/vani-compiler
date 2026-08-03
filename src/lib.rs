@@ -10075,6 +10075,230 @@ mod tests {
         compile_to_llvm(source).expect("LLVM backend accepts ref let-binding");
     }
 
+    // BUG-36 (2026-08-02): the "single mutable borrow" exclusivity
+    // rule ("`ref` can multiply, `mut ref` must be exclusive") was
+    // documented but never enforced by the checker at all -- only the
+    // affine MOVE rule was checked. `let r: mut ref Vec<i64> = mut ref
+    // xs; push(r, 4); print xs[0];` compiled and ran cleanly on both
+    // backends with no diagnostic. Fixed with a deliberately narrow,
+    // lexical (not full non-lexical-lifetime), NAMED-`let`-binding-
+    // scoped check: `find_live_mut_borrow_of`/`find_live_borrow_of`
+    // scan all open scopes for a live `Ref`/`RefMut`-typed binding
+    // whose `ref_aliases` (pre-existing L4 machinery) names the
+    // binding being accessed/re-borrowed. See the doc comment on
+    // `find_live_mut_borrow_of` in checker.rs for the full design
+    // rationale and the deliberately-accepted gaps.
+
+    #[test]
+    fn bug36_mut_ref_read_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              print xs[0];
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("reading xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_mut_ref_write_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              set(mut ref xs, 0, 99);
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("writing to xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already borrowed mutably by 'r'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_scalar_mut_ref_read_while_borrowed_rejected() {
+        // The exclusivity check isn't Vec-specific -- a mutably
+        // borrowed scalar local must be rejected the same way.
+        let source = r#"
+            fn main() -> i64 {
+              let ys: i64 = 6;
+              let r: mut ref i64 = mut ref ys;
+              return ys;
+            }
+        "#;
+        let err = compile(source).expect_err("reading ys while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic for a scalar target, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_index_assign_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              xs[0] = 99;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("direct index-assign to xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot index-assign to 'xs'") && combined.contains("mutably"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_second_mut_ref_while_shared_ref_live_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: ref Vec<i64> = ref xs;
+              let r2: mut ref Vec<i64> = mut ref xs;
+              push(r2, 4);
+              return r1[0];
+            }
+        "#;
+        let err = compile(source).expect_err("taking mut ref while a shared ref is live must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already borrowed as shared by 'r1'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_shared_ref_while_mut_ref_live_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: mut ref Vec<i64> = mut ref xs;
+              push(r1, 4);
+              let r2: ref Vec<i64> = ref xs;
+              return r2[0];
+            }
+        "#;
+        let err = compile(source).expect_err("taking a shared ref while a mut ref is live must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already mutably borrowed by 'r1'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_inline_mut_ref_call_arg_not_tracked_still_accepted() {
+        // The documented, deliberately-unenforced shape: an inline
+        // `foo(mut ref xs)` call argument is never stored in a named
+        // binding, so per the tutorials' own "borrow ends when the
+        // call returns" model it must NOT be flagged -- this is not a
+        // gap in the fix, it's the intended scope boundary.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              push(mut ref xs, 4);
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("inline mut-ref call argument must not be tracked as a named borrow");
+    }
+
+    #[test]
+    fn bug36_multiple_named_shared_refs_coexist_accepted() {
+        // "ref can multiply": two named shared-ref bindings of the
+        // same source must NOT conflict with each other. (Uses
+        // `print` + intermediate `let`s rather than `return
+        // r1[0] + r2[0]` -- the latter trips a separate, pre-existing
+        // and unrelated L4 escape-check quirk that conservatively
+        // walks `Index`/`Binary` return expressions for ref aliases
+        // regardless of the computed result's own type; not a BUG-36
+        // regression, just a test-shape pitfall to avoid here.)
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: ref Vec<i64> = ref xs;
+              let r2: ref Vec<i64> = ref xs;
+              print r1[0];
+              print r2[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("two coexisting named shared refs of the same source must be accepted");
+    }
+
+    #[test]
+    fn bug36_mut_ref_scope_ended_before_later_access_accepted() {
+        // The borrow is scoped to `r`'s own enclosing block -- once
+        // that block exits, `xs` must be freely accessible again.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              if true {
+                let r: mut ref Vec<i64> = mut ref xs;
+                push(r, 4);
+              }
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("access to xs after r's block has exited must be accepted");
+    }
+
+    #[test]
+    fn bug36_reassigning_ref_binding_tracks_new_target() {
+        // `r = mut ref ys;` must recompute `r`'s tracked alias --
+        // otherwise `ys` (the new, real target) would never be
+        // recognized as borrowed at all (a soundness gap), while `xs`
+        // (the old target) would stay incorrectly locked forever (a
+        // usability bug). Both directions are exercised here: `xs` is
+        // used successfully BEFORE the reassignment (while `r` still
+        // aliases it -- this must be rejected, confirming the OLD
+        // alias is still tracked right up to the reassignment), and
+        // `ys` is used AFTER (confirming the NEW alias is tracked).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = vec(4, 5, 6);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              r = mut ref ys;
+              push(r, 7);
+              return ys[0];
+            }
+        "#;
+        let err = compile(source).expect_err("reading ys while r (now retargeted) still borrows it must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic against the NEW target 'ys', got: {}",
+            combined
+        );
+    }
+
     #[test]
     fn l4_c_phase1_multi_ref_params_return_rejected() {
         // L4 (C) Phase 3: multi-ref-param return rejects with a

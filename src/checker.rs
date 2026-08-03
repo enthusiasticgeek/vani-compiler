@@ -11347,6 +11347,42 @@ fn check_one_stmt(
             };
             diagnose_partial_then_whole_move(expr, &coerced, env, diagnostics);
             consume_if_moved_var(expr, &coerced, env);
+            // BUG-36 fix (2026-08-02): `x = ...;` writes directly to
+            // `x`'s own storage -- if `x` is NOT itself a ref binding
+            // (i.e. this is a write to the true owner, not a write
+            // routed through a `mut ref` place, which uses a
+            // different statement shape), it must be rejected while
+            // some other binding holds a live `mut ref x`. Mirrors
+            // the read-side check in `check_expr`'s `ExprKind::Var`
+            // arm; see `find_live_mut_borrow_of`'s doc comment.
+            if !existing.ty.is_any_ref() {
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "cannot assign to '{}' while it is mutably borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
+                }
+            }
+            // BUG-36 fix: `r = mut ref ys;` reassigns a ref-typed
+            // LOCAL to a new source -- recompute `ref_aliases` from
+            // the new RHS (mirroring the `Let` binding path) so the
+            // exclusivity checks above track the new target, not a
+            // stale one. Without this, `xs` would stay incorrectly
+            // "locked" after `r` moves on to borrow `ys` instead
+            // (over-conservative but sound), AND -- the real
+            // soundness gap -- `ys` would never be recognized as
+            // borrowed at all.
+            let new_ref_aliases = if existing.ty.is_any_ref() {
+                Some(compute_ref_aliases_from_let_rhs(expr, env, signatures))
+            } else {
+                None
+            };
             let drop_old = !existing.ty.is_copy() && existing.moved.is_none();
             let mut rhs = coerced.expr;
             inject_branch_drops(&mut rhs);  // closure #179
@@ -11361,6 +11397,9 @@ fn check_one_stmt(
             if let Some(info) = env.lookup_mut(name) {
                 info.constant = None;
                 info.moved = None;
+                if let Some(aliases) = new_ref_aliases {
+                    info.ref_aliases = aliases;
+                }
             }
             // Reassignment invalidates any prior facts about `name`.
             // OUTSIDE of a loop body this is straightforward: the old
@@ -12115,6 +12154,28 @@ fn check_one_stmt(
                     return false;
                 }
             };
+
+            // BUG-36 fix (2026-08-02): `xs[i] = v;` writes directly to
+            // `xs`'s own storage when `through_ref` is false (the
+            // `mut ref xs[i]`-through-a-borrow shape sets
+            // `through_ref = true` and is exempt -- that IS the
+            // legitimate way to mutate through an outstanding mut
+            // ref). See `find_live_mut_borrow_of`'s doc comment.
+            if !through_ref {
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "cannot index-assign to '{}' while it is mutably \
+                                 borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
+                }
+            }
 
             verify_call_args_in_expr(index, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(value, smt_facts, env, signatures, diagnostics);
@@ -14357,6 +14418,100 @@ fn collect_ref_sources_in_expr(
 
 /// L4 (C) Phase 4 (2026-06-09): at a ref-escape site, walk
 /// the expression looking for `Var` nodes whose env entry
+/// BUG-36 fix (2026-08-02): v1's affine checker only ever tracked
+/// MOVES (a value can't be read after being moved) -- there was no
+/// pass at all enforcing that an outstanding `mut ref` alias makes
+/// its source binding temporarily unreadable, contrary to what the
+/// tutorials claimed ("`ref` can multiply, `mut ref` must be
+/// exclusive"). `docs/TODO_CURRENT.md`'s BUG-36 entry confirmed this
+/// with a direct repro: `let r: mut ref Vec<i64> = mut ref xs; push(r,
+/// 4); print xs[0];` compiled and ran cleanly with no diagnostic at
+/// all, on both backends.
+///
+/// This is a deliberately NAMED-BINDING-SCOPED, lexical (not real
+/// non-lexical-lifetime) approximation of exclusivity, chosen to keep
+/// the blast radius small and avoid the false-rejection risk a full
+/// liveness analysis would carry under time pressure:
+///
+///   * Only `let`-bound `ref`/`mut ref` bindings are tracked -- an
+///     inline `foo(mut ref xs)` call argument is never stored in
+///     `env` at all (see `check_ref_mut`: `TypedExprKind::RefMut`
+///     values passed directly as call arguments don't go through
+///     `Stmt::Let`), so it naturally never appears in this scan.
+///     This matches the tutorials' own documented model ("the
+///     compiler doesn't track them across the call -- once the call
+///     returns, the borrow ends") -- that shape is intentionally left
+///     alone, not a gap in this fix.
+///   * A tracked borrow's "lifetime" is exactly its owning binding's
+///     lexical scope: `env.scopes` only contains bindings whose
+///     enclosing block hasn't exited yet, so once the borrowing
+///     binding's own scope pops, this scan naturally stops seeing it
+///     -- no separate "borrow end" bookkeeping needed.
+///   * Reuses the pre-existing `ref_aliases` field (populated by
+///     `compute_ref_aliases_from_let_rhs`) rather than adding new
+///     state -- a live `Ref`/`RefMut`-typed binding whose
+///     `ref_aliases` contains `target` IS the borrow.
+///
+/// Known, deliberately-accepted gap: reassigning a ref-typed binding
+/// to a NEW source (`r = mut ref ys;`) is handled by `Stmt::Assign`
+/// recomputing `ref_aliases` (mirroring the `Let` path) so this stays
+/// sound for the common case; anything this lexical/named-binding
+/// model can't see (real interprocedural or non-lexical patterns)
+/// remains unchecked, exactly as before this fix -- a false negative,
+/// never a false positive, which is the required direction for a
+/// checker that must never reject sound code.
+///
+/// Returns the name of a live `mut ref` binding that aliases
+/// `target`, if one exists (scans every open scope). `exclude` lets a
+/// ref-creation site avoid flagging the binding currently being
+/// created (which isn't inserted into `env` yet at that point, but is
+/// here for future-proofing / defensive symmetry with
+/// `find_live_borrow_of`).
+fn find_live_mut_borrow_of<'a>(
+    env: &'a Env,
+    target: &str,
+    exclude: Option<&str>,
+) -> Option<&'a str> {
+    for scope in &env.scopes {
+        for (name, info) in scope {
+            if Some(name.as_str()) == exclude || name == target {
+                continue;
+            }
+            if matches!(info.ty, Type::RefMut(_)) && info.ref_aliases.iter().any(|a| a == target) {
+                return Some(name.as_str());
+            }
+        }
+    }
+    None
+}
+
+/// Sibling of `find_live_mut_borrow_of` for the ref/mut-ref CREATION
+/// site: taking a new `mut ref x` must be rejected if ANY live
+/// borrow (shared `ref` or `mut ref`) of `x` already exists (mutable
+/// access must be exclusive against everything); taking a new plain
+/// `ref x` only conflicts with an existing live `mut ref x` (shared
+/// refs may multiply freely against each other, per the documented
+/// rule). Returns `(borrower_name, existing_is_mut)`.
+fn find_live_borrow_of<'a>(
+    env: &'a Env,
+    target: &str,
+    exclude: Option<&str>,
+) -> Option<(&'a str, bool)> {
+    for scope in &env.scopes {
+        for (name, info) in scope {
+            if Some(name.as_str()) == exclude || name == target {
+                continue;
+            }
+            let is_mut = matches!(info.ty, Type::RefMut(_));
+            let is_shared = matches!(info.ty, Type::Ref(_));
+            if (is_mut || is_shared) && info.ref_aliases.iter().any(|a| a == target) {
+                return Some((name.as_str(), is_mut));
+            }
+        }
+    }
+    None
+}
+
 /// has recorded `ref_aliases` (populated by
 /// `compute_ref_aliases_from_let_rhs` at the binding site).
 /// Each alias becomes a `(source_name, span)` entry â€” the
@@ -16485,6 +16640,29 @@ fn check_expr(
                         diag = diag.with_related(expr.span, h);
                     }
                     diagnostics.push(diag);
+                }
+                // BUG-36 fix (2026-08-02): reading a binding directly
+                // while a `mut ref` of it is live in another binding
+                // is an aliasing violation -- the mut-ref holder is
+                // supposed to have exclusive access. See
+                // `find_live_mut_borrow_of`'s doc comment for the
+                // exact (lexical, named-binding-scoped) model this
+                // enforces. This is the read-side half of the check;
+                // `Stmt::Assign`/`Stmt::IndexAssign` cover direct
+                // writes, and `check_ref`/`check_ref_mut` cover
+                // rejecting a second overlapping borrow at creation
+                // time.
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "cannot use '{}' while it is mutably borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
                 }
                 let decl_span = info.decl_span;
                 // T4.15: when the resolved binding came from a
@@ -19464,6 +19642,21 @@ fn check_ref_mut(
             ),
         );
     }
+    // BUG-36 fix: a new `mut ref` must be exclusive against ANY
+    // already-live borrow of the same binding, shared or mut.
+    if let Some((borrower, existing_is_mut)) = find_live_borrow_of(env, name, None) {
+        let kind = if existing_is_mut { "mutably" } else { "as shared" };
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!(
+                    "cannot mutably borrow '{}' -- it is already borrowed {} by '{}'",
+                    name, kind, borrower
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+        );
+    }
     let ref_ty = Type::RefMut(Box::new(info.ty.clone()));
     let decl_span = info.decl_span;
     CheckedExpr::new(
@@ -19619,6 +19812,22 @@ fn check_ref(
             .with_elaboration(
                 crate::diagnostic_elaborations::raw_ptr_escape(),
             ),
+        );
+    }
+    // BUG-36 fix: a new shared `ref` only conflicts with an already-
+    // live `mut ref` of the same binding (shared refs may multiply
+    // freely against each other).
+    if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!(
+                    "cannot borrow '{}' as shared -- it is already mutably \
+                     borrowed by '{}'",
+                    name, borrower
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
         );
     }
     let ref_ty = Type::Ref(Box::new(info.ty.clone()));

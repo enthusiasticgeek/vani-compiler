@@ -5776,4 +5776,106 @@ was correctly deferred to its own dedicated session.
   closure/struct-field-filtered `cargo test --lib` tests pass, 0
   regressions.
 
+- [x] **BUG-36 (fixed 2026-08-02 -- the missing checker subsystem,
+  attempted despite being flagged as highest-risk/dedicated-session
+  material).** The "single mutable borrow" exclusivity rule (`ref`
+  can multiply, `mut ref` must be exclusive) had NO enforcement at
+  all -- only affine move tracking existed. `let r: mut ref Vec<i64>
+  = mut ref xs; push(r, 4); print xs[0];` compiled and ran cleanly on
+  both backends with no diagnostic.
+  **Design, deliberately narrow to keep the false-rejection risk
+  low**: a lexical (NOT full non-lexical-lifetime) approximation,
+  scoped only to NAMED `let`-bound `ref`/`mut ref` bindings:
+  - A tracked borrow's "lifetime" is exactly its owning binding's own
+    lexical scope (`env.scopes` in `checker.rs` only contains
+    bindings whose enclosing block hasn't exited yet, so this falls
+    out for free from the existing scope-stack machinery -- no new
+    "borrow end" bookkeeping needed).
+  - An inline `foo(mut ref xs)` call argument is NEVER stored in
+    `env` (confirmed by reading `check_ref_mut`: a `TypedExprKind::
+    RefMut` value passed directly as a call argument doesn't go
+    through `Stmt::Let`), so it's structurally invisible to this
+    check -- exactly matching the tutorials' own pre-existing
+    documented model ("the compiler doesn't track them across the
+    call -- once the call returns, the borrow ends"). This is the
+    single biggest reason the false-rejection risk stayed low: the
+    dangerous, trackable shape (a persisted named binding) and the
+    safe, untracked shape (an ephemeral call-argument borrow) are
+    already syntactically distinct in the AST.
+  - Reuses the pre-existing `ref_aliases` field on `VarInfo`
+    (populated by `compute_ref_aliases_from_let_rhs`, built for the
+    unrelated L4 scope-escape checks) rather than adding new state --
+    a live `Ref`/`RefMut`-typed binding whose `ref_aliases` contains
+    `target` IS the borrow. Two new helpers, `find_live_mut_borrow_of`
+    / `find_live_borrow_of` (`checker.rs`), scan all open scopes for
+    a conflicting live borrow.
+  **Enforcement points** (four call sites, all reusing the two
+  helpers above): (1) `check_expr`'s `ExprKind::Var` read arm --
+  reading a binding directly while a `mut ref` of it is live is
+  rejected (this alone also covers `Stmt::FieldAssign`'s writes for
+  free, since that handler already routes its `object` expression
+  through `check_expr`); (2) `Stmt::Assign` -- a direct `x = ...;`
+  write is rejected the same way, gated on `!existing.ty.is_any_ref()`
+  so writing THROUGH a ref binding itself is correctly exempt; (3)
+  `Stmt::IndexAssign` -- `xs[i] = v;` rejected when `!through_ref`
+  (mirrors (2)); (4) `check_ref` / `check_ref_mut`'s bare-`Var`
+  branches -- creating a NEW `ref`/`mut ref` of an already-borrowed
+  binding is rejected at the creation site itself, for an earlier,
+  clearer diagnostic than waiting for the first conflicting access.
+  **Soundness follow-up found and fixed in the same pass**:
+  `Stmt::Assign` reassigning a ref-typed LOCAL to a new source
+  (`r = mut ref ys;`) previously left `ref_aliases` stale (confirmed
+  this shape already type-checked before this fix, so it's a real,
+  reachable gap) -- would have both incorrectly kept the OLD target
+  locked forever (usability bug, still sound) AND, the actual
+  soundness gap, never recognized the NEW target as borrowed at all.
+  Fixed by recomputing `ref_aliases` via the same
+  `compute_ref_aliases_from_let_rhs` the `Let` path already uses,
+  whenever the reassigned binding's own type is a ref.
+  **Verification, given the explicit "could introduce false
+  rejections across a huge amount of existing working code" risk
+  flagged when this was first deferred**: (1) a full `cargo test
+  --release --workspace` run, 0 failures; (2) an exhaustive
+  before/after `vanic check` sweep of all 1034 `.vani` files under
+  `examples/` (stashed the fix, built a baseline binary, ran `check`
+  on every file, restored the fix, rebuilt, ran `check` on every file
+  again, `diff`'d the two pass/fail sets) -- **byte-identical, zero
+  differences** across the entire corpus; (3) directly extracted and
+  re-verified the two tutorial code blocks using a NAMED `mut ref`
+  binding found by grepping every tutorial for the pattern
+  (`intermediate/03d_cyclic_references_primer.md`'s `register`/`sub`
+  pattern -- confirmed unaffected, since nothing reads the borrowed
+  binding directly after the named borrow is taken; and
+  `intermediate/03b_affine_deeper_primer.md`'s own repro, which is
+  the bug itself and is now correctly rejected).
+  **Docs updated**: `03b_affine_deeper_primer.md`'s "Borrow scopes"
+  section (previously documented the gap as "as of this writing, not
+  enforced" -- now shows the real enforced diagnostic and explains
+  the lexical/named-binding-only scope precisely), its "two-way
+  trade" section and summary bullet (both previously downplayed the
+  exclusivity rule as unenforced design-intent -- now state the real,
+  current enforcement boundary).
+  New tests: 10 checker-level (`src/lib.rs` -- read/write/reassign/
+  index-assign violations rejected; second-borrow-while-live rejected
+  both directions shared-then-mut and mut-then-shared; inline call-
+  argument borrow correctly NOT tracked; multiple named shared refs
+  coexist; scope-ended borrow correctly releases; reassigning a ref
+  binding correctly retargets the tracked alias) + 2 end-to-end
+  (`tests/run_end_to_end.rs` -- real `vanic check`/`run` invocations,
+  one confirming the clean rejection, one confirming a legitimate
+  scope-bounded usage still compiles and runs correctly on both
+  backends). Full `cargo test --release --workspace` after the tests
+  landed: 13/13 binaries clean, 0 failed (2688 lib tests, up from
+  2678; 139 end-to-end tests, up from 137).
+  **Known, deliberately-accepted residual gap** (documented in the
+  new `find_live_mut_borrow_of` doc comment and in the updated
+  tutorial section): this is a lexical approximation, not real
+  liveness analysis -- a borrow is considered live for the REST of
+  its declaring scope even past its actual last use, and only NAMED
+  bindings are tracked at all. Anything beyond that (interprocedural
+  aliasing, non-lexical patterns) remains unchecked exactly as
+  before this fix -- a false negative, never a false positive, which
+  is the required direction for a checker that must never reject
+  sound code.
+
 ---

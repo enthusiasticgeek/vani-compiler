@@ -845,8 +845,16 @@ proof-engine gap) was initially flagged in that pass as a 6th item
 deliberately deferred for soundness risk — that was a mistake: BUG-33
 had already been fixed 2026-08-01 (commit `304c922`), before this
 session started; re-verified directly (2026-08-02), no work needed.
-BUG-36 (missing `mut ref` exclusivity subsystem) remains genuinely
-open and is still deferred to its own dedicated session.
+BUG-36 (missing `mut ref` exclusivity subsystem) was fixed 2026-08-02
+in a follow-up pass, despite the "own dedicated session" deferral
+above — a deliberately narrow, lexical (not full non-lexical-
+lifetime), named-`let`-binding-scoped enforcement, chosen specifically
+to keep the false-rejection risk low. Verified against a full
+`cargo test --release --workspace` run plus an exhaustive before/
+after `vanic check` diff of all 1034 `.vani` files under `examples/`
+(byte-identical pass/fail sets — zero new rejections anywhere in the
+corpus). Full writeup: search "BUG-36 (fixed 2026-08-02" in
+`docs/TODO_CURRENT.md`.
 
 ## Non-goals for this pass
 

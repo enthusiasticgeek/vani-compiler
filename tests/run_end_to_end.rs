@@ -8046,3 +8046,118 @@ fn main() -> i64 {
         stderr
     );
 }
+
+// BUG-36 (2026-08-02): the "single mutable borrow" exclusivity rule
+// ("`ref` can multiply, `mut ref` must be exclusive") was documented
+// but never enforced by the checker at all. `let r: mut ref Vec<i64>
+// = mut ref xs; push(r, 4); print xs[0];` used to compile and run
+// cleanly on both backends with no diagnostic. Real-binary
+// confirmation (not just an in-process `compile()` check) that
+// `vanic check` now rejects this with the exclusivity diagnostic.
+#[test]
+fn mut_ref_exclusivity_violation_is_cleanly_rejected() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mut-ref-exclusivity-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: mut ref Vec<i64> = mut ref xs;
+  push(r, 4);
+  print xs[0];
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    let _ = fs::remove_file(&src);
+
+    assert!(
+        !output.status.success(),
+        "expected a clean rejection, got success (this exact shape used to \
+         compile and run cleanly with no diagnostic at all before the fix)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("mutably borrowed by 'r'"),
+        "expected the exclusivity diagnostic, got:\n{}",
+        stderr
+    );
+}
+
+// Companion positive test: a named `mut ref` binding used the
+// ordinary, non-aliasing way (created, used, its scope ends, THEN
+// the source is read again) must still compile and run correctly on
+// both backends -- confirms the fix's lexical-scope model doesn't
+// over-reject legitimate, non-overlapping usage.
+#[test]
+fn mut_ref_used_normally_still_compiles_and_runs_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mut-ref-normal-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  if true {
+    let r: mut ref Vec<i64> = mut ref xs;
+    push(r, 4);
+  }
+  print xs[0];
+  print len(xs) as i64;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n4\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
