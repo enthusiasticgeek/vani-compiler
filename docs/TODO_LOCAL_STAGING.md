@@ -901,3 +901,37 @@ Fix attempt: `tools/localfuzz/findings/20260803-215901-backend-divergence-adfea2
 }
 ```
 
+
+---
+
+### Candidate: 20260803-221100-backend-divergence-7e42843eaf
+
+Repro: `tools/localfuzz/findings/20260803-221100-backend-divergence-7e42843eaf/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-221100-backend-divergence-7e42843eaf/fix_attempt.md`
+
+**Staging Entry: Backend-Divergence**
+
+### What Was Run
+
+- **Base Corpus File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/odia/option_types.vani`
+- **Mutant/Generated Source**:
+  ```vani
+  // vani-lang: odia
+  //
+  // build & run:
+  //   vanic run examples/language/odia/option_types.vani --backend=c  # C (tagged-union)
+  //   vanic run examples/language/odia/option_types.vani              # LLVM
+  ```
+
+### The Observed Symptom
+
+The program executed with the given `--backend=c` failed, causing it to terminate with a crash. The exact error message was:
+```
+vanic-candidate-1928013-1785795059753022202: /tmp/vanic-candidate-1928013-1785795059753022202.c:355: fn_main: Assertion `(v_y == 100)' failed.\n
+```
+
+### Which Backends It Affects
+
+This bug affects the `--backend=c` and `--backend=llvm` backends.
+
+### STATUS: needs human/frontier root-cause review.
