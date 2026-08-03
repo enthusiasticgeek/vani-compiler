@@ -6614,3 +6614,44 @@ across all 13 binaries -- clean.
   New tests for rows 1/2/4/5/6/7: 6 `src/lib.rs` + 3 `tests/
   run_end_to_end.rs`. Category 7 (all 7 rows) fully closed in
   `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 8
+
+Category 8 (FFI x generics/containers/error-handling), all 3 rows
+checked clean -- no bugs found, all three combinations either work
+correctly or are cleanly rejected exactly as documented:
+
+- (row 1) `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC
+  struct by value (BUG-77 only tested a concrete, non-generic
+  struct). A small (<=16 byte, all-scalar-field) monomorphized
+  generic struct (`Wrapper<i32>`, mangled `Wrapper__i32`) passes AND
+  returns by value correctly against a real linked C shim, on both
+  backends -- confirming the mangled name and the ABI-lowering path
+  agree, exactly the concern this row was written to probe. An
+  oversized monomorphized generic struct (`Triple<i64>`, 24 bytes)
+  is cleanly rejected, with the diagnostic correctly naming the
+  MANGLED monomorphized type (`Triple__i64`, not the generic
+  template name) -- confirming FFI ABI validation runs after
+  monomorphization and sees the concrete shape.
+- (row 2) `extern "C"` fn signature using `Option<T>`/`Result<T,E>`
+  directly in a parameter or return position: cleanly rejected on
+  both backends with a specific, on-point diagnostic ("enum-by-value
+  layout is not yet wired through FFI"), in both return position
+  (`Option<i64>`) and parameter position (`Result<i64, i64>`).
+- (row 3) Calling an `extern "C"` function inside a spawned `task`
+  body: a plain (non-pure) `extern "C" fn` call hits the exact same
+  "task body cannot call non-pure function" diagnostic as any other
+  impure call -- and the diagnostic's own hint ("mark it `pure
+  extern`") points at a REAL, documented escape hatch (`pure extern
+  "C" fn`, `tutorials/src/intermediate/09_ffi.md`) that was verified
+  to genuinely work end-to-end: a `pure extern "C" fn` called inside
+  a `task` body, joined, against a real linked C shim, runs
+  correctly on both backends. `valgrind --leak-check=full` on the
+  resulting native binary: 0 errors, all heap blocks freed. Not a
+  distinct, undocumented gap.
+  New tests: 4 `src/lib.rs` + 2 `tests/run_end_to_end.rs` (the two
+  e2e tests are the real verification here, each linking and running
+  a genuine C shim). Category 8 (all 3 rows) fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.

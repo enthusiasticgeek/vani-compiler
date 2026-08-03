@@ -379,23 +379,32 @@ Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
       form at all; the parser rejects `Graph<T>`/`Trie<T>` syntax
       outright.
 
-## 8. FFI x generics/containers/error-handling (🟡)
+## 8. FFI x generics/containers/error-handling (🟡) -- CLOSED 2026-08-03
 
-- [ ] 🟡 `extern "C"` function taking or returning a MONOMORPHIZED
+- [x] 🟡 `extern "C"` function taking or returning a MONOMORPHIZED
       GENERIC struct by value (BUG-77 tested a concrete, non-generic
       struct; never tested a generic one's monomorphized shape
       specifically, where the mangled name and the ABI-lowering path
-      both have to agree).
-- [ ] 🟢 `extern "C"` function signature using `Option<T>`/
+      both have to agree). Checked clean on both backends: a small
+      monomorphized generic struct passes/returns by value correctly
+      against a real linked C shim; an oversized one is cleanly
+      rejected, diagnostic correctly naming the MANGLED type.
+- [x] 🟢 `extern "C"` function signature using `Option<T>`/
       `Result<T,E>` directly in a parameter or return position —
       confirm this is a CLEAN rejection (enums almost certainly can't
       cross the FFI ABI boundary as-is) rather than emitting garbage
-      or crashing at the `cc`/`lli` step.
-- [ ] 🟢 Calling an `extern "C"` function from inside a spawned
+      or crashing at the `cc`/`lli` step. Checked clean: cleanly
+      rejected on both backends, in both parameter and return
+      position, with a specific diagnostic.
+- [x] 🟢 Calling an `extern "C"` function from inside a spawned
       `task` body (task bodies are restricted to `pure fn` calls per
       the concurrency chapters — confirm an FFI call inside a task
       body hits that same restriction cleanly, or is a distinct,
-      undocumented gap).
+      undocumented gap). Checked clean: a plain extern call hits the
+      same "task body cannot call non-pure function" rejection; the
+      documented `pure extern "C" fn` escape hatch genuinely works
+      end-to-end (verified against a real linked C shim, both
+      backends, valgrind-clean).
 
 ## 9. Affine/ownership x generics x containers (🟡 — three-way, the deepest layer the closed sweep reached was two-way)
 

@@ -51070,6 +51070,105 @@ fn main() -> i64 { return 0; }
             .expect("Trie<T> generic syntax must be rejected (LLVM)");
     }
 
+    // Feature-combination gap audit (2026-08-03), category 8, row 1:
+    // `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC struct
+    // by value (BUG-77 tested a concrete, non-generic struct only).
+    // Checked clean on both backends -- a small (<=16 byte,
+    // all-scalar-field) monomorphized generic struct passes/returns
+    // by value correctly (verified with a real linked C shim, see
+    // the matching e2e test); an oversized one is cleanly rejected
+    // with the mangled monomorphized name in the diagnostic,
+    // confirming FFI ABI validation runs AFTER monomorphization and
+    // correctly sees the concrete `Triple__i64` shape.
+    #[test]
+    fn extern_c_fn_with_oversized_monomorphized_generic_struct_is_rejected() {
+        let source = r#"
+            struct Triple<T> { a: T, b: T, c: T }
+            extern "C" fn make_triple(a: i64, b: i64, c: i64) -> Triple<i64>;
+            extern "C" fn triple_sum(t: Triple<i64>) -> i64;
+            fn main() -> i64 {
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("oversized monomorphized generic struct by value must be rejected (C)");
+        let msg = format!("{:?}", c_err);
+        assert!(
+            msg.contains("Triple__i64") && msg.contains("unsupported"),
+            "expected diagnostic to name the mangled monomorphized struct: {:?}",
+            c_err
+        );
+        compile_to_llvm(source)
+            .err()
+            .expect("oversized monomorphized generic struct by value must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 8, row 2:
+    // `extern "C"` fn signature using `Option<T>`/`Result<T,E>`
+    // directly in a parameter or return position. Checked clean on
+    // both backends -- cleanly rejected ("enum-by-value layout is
+    // not yet wired through FFI"), both in return position
+    // (`Option<i64>`) and parameter position (`Result<i64, i64>`).
+    #[test]
+    fn extern_c_fn_with_option_or_result_in_signature_is_rejected() {
+        let option_source = r#"
+            extern "C" fn maybe_get(x: i64) -> Option<i64>;
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(option_source)
+            .err()
+            .expect("Option<T> in extern fn return position must be rejected (C)");
+        compile_to_llvm(option_source)
+            .err()
+            .expect("Option<T> in extern fn return position must be rejected (LLVM)");
+
+        let result_source = r#"
+            extern "C" fn handle_result(r: Result<i64, i64>) -> i64;
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(result_source)
+            .err()
+            .expect("Result<T,E> in extern fn parameter position must be rejected (C)");
+        compile_to_llvm(result_source)
+            .err()
+            .expect("Result<T,E> in extern fn parameter position must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 8, row 3:
+    // calling an `extern "C"` function inside a spawned `task` body.
+    // Checked clean on both backends -- a plain (non-pure) `extern
+    // "C" fn` call is rejected with the SAME "task body cannot call
+    // non-pure function" diagnostic as any other impure call, with a
+    // helpful hint pointing at the documented escape hatch (`pure
+    // extern "C" fn`, `tutorials/src/intermediate/09_ffi.md`); using
+    // that escape hatch genuinely works end-to-end (see the matching
+    // e2e test) -- not a distinct, undocumented gap.
+    #[test]
+    fn extern_c_call_inside_task_body_requires_pure_extern() {
+        let source = r#"
+            extern "C" fn c_add(a: i64, b: i64) -> i64;
+            fn main() -> i64 {
+              task worker {
+                let x: i64 = c_add(3, 4);
+              }
+              join worker;
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("plain extern fn call inside task body must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("task body cannot call non-pure function"),
+            "unexpected rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(source)
+            .err()
+            .expect("plain extern fn call inside task body must be rejected (LLVM)");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

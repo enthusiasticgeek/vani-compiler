@@ -9391,3 +9391,188 @@ fn main() -> i64 {
     let _ = fs::remove_file(&src);
     let _ = fs::remove_file(&bin_path);
 }
+
+// Feature-combination gap audit (2026-08-03), category 8 row 1:
+// `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC struct
+// (`Wrapper<i32>`, mangled to `Wrapper__i32`) by value, verified
+// against a REAL linked C shim on both backends (matching BUG-77's
+// verification style, extended to a generic struct's monomorphized
+// shape). 3 + 4 = 7.
+#[test]
+fn extern_c_monomorphized_generic_struct_by_value_runs_correctly_on_both_backends() {
+    use std::fs;
+
+    let src = write_tmp_vani(
+        "extern_generic_struct_by_value",
+        r#"
+struct Wrapper<T> { x: T, y: T }
+extern "C" fn make_wrapper(x: i32, y: i32) -> Wrapper<i32>;
+extern "C" fn wrapper_sum(w: Wrapper<i32>) -> i32;
+fn main() -> i64 {
+  let w: Wrapper<i32> = make_wrapper(3 as i32, 4 as i32);
+  let s: i32 = wrapper_sum(w);
+  print s as i64;
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("wrapper_shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\n\
+         typedef struct { int32_t x; int32_t y; } Wrapper_i32;\n\
+         Wrapper_i32 make_wrapper(int32_t x, int32_t y) { Wrapper_i32 w; w.x = x; w.y = y; return w; }\n\
+         int32_t wrapper_sum(Wrapper_i32 w) { return w.x + w.y; }\n",
+    )
+    .expect("write wrapper_shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let llvm_bin = dir.join("wrapper_prog_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "LLVM backend output mismatch"
+    );
+
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Feature-combination gap audit (2026-08-03), category 8 row 3: the
+// documented escape hatch (`pure extern "C" fn`) for calling foreign
+// code inside a `task` body genuinely works end-to-end, on both
+// backends, against a real linked C shim.
+#[test]
+fn pure_extern_c_call_inside_task_body_runs_correctly_on_both_backends() {
+    use std::fs;
+
+    let src = write_tmp_vani(
+        "pure_extern_in_task",
+        r#"
+pure extern "C" fn c_add(a: i64, b: i64) -> i64;
+fn main() -> i64 {
+  task worker {
+    let x: i64 = c_add(3, 4);
+  }
+  join worker;
+  print "done";
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("cadd_shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\nint64_t c_add(int64_t a, int64_t b) { return a + b; }\n",
+    )
+    .expect("write cadd_shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let llvm_bin = dir.join("pure_extern_task_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "done\n",
+        "LLVM backend output mismatch"
+    );
+
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "done\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
