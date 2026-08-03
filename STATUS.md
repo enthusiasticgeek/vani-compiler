@@ -10,6 +10,52 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-08-02 (testing-matrix sweep: 13 bugs found+fixed, BUG-68–BUG-80)
+
+**State**: completed a full, systematic sweep of `docs/TESTING_MATRIX_TODO.md`'s
+"container operations x intermediate/advanced feature nesting" matrix — 19
+rows covering SMT contracts, generics, enum/pattern matching, FFI, affine
+ownership, Big-O, `parallel for`/SIMD, and `Option`/`Result`, each crossed
+with a container type (`Vec`, `Array`, `Tuple`, generic struct). Every row
+got a real `.vani` snippet run through both `--backend` values, checked
+against hand-computed values. **13 real bugs found and fixed** (BUG-68
+through BUG-80); 6 rows confirmed already-correct or a real, consistently-
+enforced v1 limitation. Every row (bug or not) got a permanent
+`src/lib.rs` compile-time test plus a `tests/run_end_to_end.rs` real-
+binary test on both backends. 10 commits, each pushed and confirmed
+CI-green before starting the next. No version bump this session (all
+patch-level fixes; compiler version stays `0.9.1-dev`). Full technical
+writeups: `docs/TODO_CURRENT.md` (search "BUG-68" through "BUG-80").
+Per-row sweep notes + closing summary: `docs/TESTING_MATRIX_TODO.md`.
+
+### Shipped this session (2026-08-02)
+
+| Item | What shipped |
+|------|-------------|
+| **BUG-68** — SMT `ensures` silent-accept | `verify_ensures_at_return` treated ANY `ensures` clause the SMT encoder couldn't fully encode as silently PROVEN (empty non-`Proven` match arm — a "fall back to constant-true check" comment that was never implemented). A deliberately false `ensures` clause over a `ref` struct parameter's field compiled clean. Fixed by (1) generalizing struct-field-to-SMT-var modeling to ANY struct-typed binding (not just literal-init locals), making `ref` struct param field access in contracts genuinely verifiable, and (2) making `verify_ensures_at_return` push a real diagnostic on the unproven verdicts, mirroring the already-correct loop-invariant path. Re-running the now-real solver against a pre-existing example caught an actual latent overflow bug in its own contract. Same push: `walk_for_reassigns` didn't handle `Stmt::FieldAssign`, breaking loop-invariant preservation for struct-field accumulators mutated via `acc.field = ...;`. |
+| **BUG-69** — `vec_fill` after `if` crashes LLVM | `TypedStmt::If`'s LLVM emitter never updated `ctx.current_block` after the if — the one builtin (`vec_fill`) that reads it for its own PHI predecessor got wired to a stale block whenever called after any prior `if` in the same function. "PHI node entries do not match predecessors!" |
+| **BUG-70** — generic struct construction breaks at 2+ instantiations | Same root cause and fix shape as the earlier BUG-46 (which only covered enum-variant construction): `Env::resolve_struct_name`'s "exactly one candidate" fallback can't disambiguate a bare `StructLit` once 2+ instantiations of the same generic struct exist. Fixed via `resolve_bare_struct_lits_in_stmt`, mirroring `resolve_bare_enum_ctors_in_stmt`. |
+| **BUG-71** — generic inference through `ref Vec<T>` | Bound T to the whole Vec instead of the element, for ANY T (confirmed with a scalar-only repro first — not container/generics-angle specific). `infer_concrete_type_for_call` never re-wrapped a `ref` argument's resolved type in `Type::Ref` before structural unification. |
+| **BUG-72** — Tuple generic specialization crashes LLVM | `type_mangle`'s Debug-based fallback didn't escape `[`/`]` from `Type::Tuple`'s derived-Debug repr, producing an invalid LLVM identifier. |
+| **BUG-73** — generic struct construction inside `vec(...)` | BUG-70's fix only handled a bare `StructLit` as a `let`'s top-level RHS, not nested inside a `vec(...)` call's args — the natural way to write "a Vec of a generic struct." |
+| **BUG-74** — enum payload `Tuple<Array>` | Checker admission gate too conservative (`Type::Array::is_copy()` is unconditionally `false` by design, poisoning `Tuple`'s element-wise Copy check) + two C-backend codegen gaps (array-typedef emission ordering, and an invalid C array-assignment initializer). |
+| **BUG-75** — `clone_at` on mixed-payload-type enum | Silently corrupted every SCALAR payload on LLVM (`Num(7)` cloned as `Num(0)`) — wrong OwnedStr-tag detection (picked the FIRST payload type, not "does any variant have OwnedStr"), then an LLVM type mismatch once that was fixed (mixed-payload enums store the payload as an opaque `[N x i8]` byte buffer, not `i8*`). Real backend divergence — C was correct throughout. |
+| **BUG-76** — `Option<UserEnum>.None` crashes LLVM | Payload-less variant's zero-value placeholder match was missing a `Type::Enum(_)` arm — same class as the earlier BUG-29 (`Str`) / BUG-35 (`Box<T>`). |
+| **BUG-77** — `extern "C" fn` returning a struct by value | Crashed LLVM at the call site — the System V x86-64 ABI-lowering had the param-passing-side "lower before the call" step but no return-side "un-lower after the call" mirror. Found by actually calling a real linked C function, not just declaring one (the pre-existing test suite only ever compiled a struct-returning declaration). |
+| **BUG-78** — `Array<Tuple/Struct,N>` function parameters | Crashed the C backend — `format_declarator`'s `Type::Array` arm used the wrong leaf-only type-spelling helper (`c_leaf_type` instead of `c_element_storage`), leaking a placeholder comment into the declarator. |
+| **BUG-79** — `vec128`/`vec256`/`vec512` struct fields | Crashed the C backend — `c_element_storage` simply never had arms for these three types (unlike Closure/Channel/Mutex, which got this exact fix in earlier sessions). |
+| **BUG-80** — `Option<Array<T,N>>` | Crashed the C backend — match-arm payload-binding codegen used the wrong type spelling, then (once fixed) hit "C arrays can't be copy-assigned via `=`" (fixed via array-decay-to-pointer), plus a typedef-emission gap for enum payloads that are directly `Array<T,N>` (not nested in a Tuple, which an earlier fix in this same sweep already covered). |
+| Doc sync | `CHANGELOG.md` gained a `v0.9.1` section for this batch; tutorials updated where a page demonstrated (or should now demonstrate) a capability this sweep verified for the first time — see the Documentation section of the changelog entry for the exact list. |
+
+### Key numbers (2026-08-02)
+- **Compiler version**: `0.9.1-dev` (no bump this session — patch-level fixes only)
+- **Commits this session**: 10, each pushed individually and confirmed CI-green (`05031fd`, `8e905e4`, `2dd59e3`, `f9f2df5`, `87d9fa8`, `d542bc2`, `ebd2cd4`, `8f96a2f`, `73643fd`, `cab1803`)
+- **Bugs found**: 13 (BUG-68 through BUG-80); **rows confirmed clean**: 6 of 19
+- **New regression tests**: ~30 `src/lib.rs` compile-time tests + ~17 `tests/run_end_to_end.rs` real-binary tests (both backends), one per sweep row
+- **`cargo test --release --workspace`**: run in full at every batch checkpoint this session (not just spot-checked) — 13/13 test binaries clean, 0 failures, every time
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-07-22 (Kosh audit-safety gate + v0.6.0 release + Kosh namespacing arc)
 
 **State**: the single biggest-scope session in this log. Four largely-independent

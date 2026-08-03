@@ -117,6 +117,48 @@ value.
 See [Advanced 4c -- Attributes reference](../advanced/04c_attributes_reference.md)
 for `#[repr(packed)]` (removes padding entirely for wire protocols).
 
+### Returning a struct by value from C
+
+The examples above all pass a struct *into* C. The reverse direction
+-- a C function *returning* a small `#[repr(C)]` struct by value --
+works the same way, with the same size caps:
+
+```vani
+#[repr(C)]
+struct Vec2 { x: f64, y: f64 }
+
+extern "C" fn c_make_vec2(x: f64, y: f64) -> Vec2;
+
+fn main() -> i64 {
+  let v: Vec2 = c_make_vec2(3.0, 4.0);
+  print "v.x =", v.x;
+  print "v.y =", v.y;
+  return 0;
+}
+```
+
+```c
+// shim.c
+typedef struct { double x; double y; } Vec2;
+Vec2 c_make_vec2(double x, double y) {
+  Vec2 v; v.x = x; v.y = y;
+  return v;
+}
+```
+
+```bash
+vanic run int9_return.vani --backend=c --link-with shim.c
+# or, for the LLVM backend:
+vanic build int9_return.vani --link-with shim.c -lm -o int9_return && ./int9_return
+```
+
+Output (either backend):
+
+```
+v.x = 3
+v.y = 4
+```
+
 A bare struct -- no `#[repr(C)]` -- passed by value across the
 FFI boundary is rejected outright, with a hint pointing at the fix:
 

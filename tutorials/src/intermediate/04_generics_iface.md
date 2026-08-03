@@ -189,6 +189,32 @@ The compiler checks that every method required by `Printable`
 is present on `T` (satisfiability check) before accepting the
 blanket impl.
 
+### Two instantiations of the same generic struct
+
+A generic struct isn't limited to one concrete `T` per program --
+construct `Wrapper<Dog>` and `Wrapper<Cat>` side by side and each
+gets its own independently-monomorphized copy:
+
+```vani
+struct Dog { name: i64 }
+implement Printable for Dog {
+  fn print_it(self: Dog) -> i64 { return 111; }
+}
+
+struct Cat { name: i64 }
+implement Printable for Cat {
+  fn print_it(self: Cat) -> i64 { return 222; }
+}
+
+fn main() -> i64 {
+  let wd: Wrapper<Dog> = Wrapper { inner: Dog { name: 1 } };
+  let wc: Wrapper<Cat> = Wrapper { inner: Cat { name: 2 } };
+  print wd.print_it();   // 111 -- forwards to Dog's impl
+  print wc.print_it();   // 222 -- forwards to Cat's impl
+  return 0;
+}
+```
+
 ## Choosing static vs dynamic dispatch
 
 | Need | Use |

@@ -241,6 +241,28 @@ fn main() -> i64 {
 }
 ```
 
+### `vec128<T>` as a struct field
+
+A `vec128<T>` value can live inside a struct alongside a regular
+`Vec<T>` field -- the two very different SIMD/heap storage shapes
+don't interfere with each other:
+
+```vani
+// vani-lang: english
+intent "vec128 struct field";
+
+struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+
+fn main() -> i64 {
+    let l: vec128<f64> = simd_splat(3.0 as f64);
+    let c: Combo = Combo { lane: l, xs: vec(1.0 as f64, 2.0 as f64, 3.0 as f64) };
+    let s: f64 = simd_reduce_add(c.lane);
+    print s;          // 6 (2 lanes of 3.0)
+    print c.xs[0];    // 1
+    return 0;
+}
+```
+
 ---
 
 ## Layer 4 — `vec256<T>` and the `simd256_*` builtins

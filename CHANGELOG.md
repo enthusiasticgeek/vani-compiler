@@ -1,5 +1,37 @@
 # Changelog
 
+## [v0.9.1] — 2026-08-02
+
+Fixes found during a systematic sweep of `docs/TESTING_MATRIX_TODO.md`'s
+container-x-feature nesting matrix (19 rows, both backends, real
+end-to-end runs checked against hand-computed values). No new language
+features or breaking changes — patch release.
+
+### Fixed
+
+- **BUG-68**: `ensures` clauses the SMT encoder couldn't fully verify (e.g. a `ref` struct parameter's field) were silently treated as PROVEN instead of erroring — a real soundness gap, not just a missing-feature restriction. Struct-field SMT modeling is now general (any struct-typed binding, not just literal-initialized locals), so this class of contract is now genuinely checked instead of rubber-stamped. Also fixed: a loop invariant over a struct field mutated via `p.field = ...;` inside the loop body was incorrectly rejected as "not preserved."
+- **BUG-69**: `vec_fill` crashed the LLVM backend ("PHI node entries do not match predecessors!") whenever called anywhere after a plain `if` statement in the same function.
+- **BUG-70**: constructing a user-defined generic struct (`Box2 { items: ... }`) broke with "unknown struct type" once a second instantiation of that same generic struct existed anywhere in the program — same bug class as the `Result`/`Option` construction bug fixed previously, just never re-checked for user-defined generic structs.
+- **BUG-71**: generic type inference through a `ref Vec<T>` parameter bound `T` to the whole `Vec` instead of its element type, for any `T` (not container/generics-specific — even `T = i64` was affected).
+- **BUG-72**: a generic function specialized over a `Tuple` type parameter crashed the LLVM backend with an invalid identifier (unescaped `[`/`]` in the mangled name).
+- **BUG-73**: BUG-70's fix didn't cover a generic struct literal nested inside a `vec(...)` call's arguments — the natural way to write "a `Vec` of a generic struct."
+- **BUG-74**: an enum variant payload shaped `Tuple` containing an `Array` (e.g. `(i64, [i64; 3])`) was incorrectly rejected as unsupported, and once admitted, crashed the C backend (typedef-ordering + an invalid array-assignment initializer).
+- **BUG-75**: `clone_at` on a `Vec` element of a mixed-payload-type enum silently corrupted every scalar payload on the LLVM backend (e.g. `Num(7)` cloned as `Num(0)`); the C backend was unaffected.
+- **BUG-76**: `Option<UserEnum>.None` crashed the LLVM backend — the payload-less-variant zero-placeholder codegen was missing a case for enum-typed payloads.
+- **BUG-77**: an `extern "C" fn` returning a small struct by value crashed the LLVM backend the first time it was actually called (declaring one alone compiled fine) — the System V x86-64 ABI lowering only had the parameter-passing half of the fix, not the return-value half.
+- **BUG-78**: any function taking a fixed-size array of tuples or structs (`[Tuple; N]` / `[Struct; N]`) by value crashed the C backend with an invalid parameter declaration.
+- **BUG-79**: a struct field of SIMD type (`vec128<T>`/`vec256<T>`/`vec512<T>`) crashed the C backend with an invalid field declaration.
+- **BUG-80**: `Option<Array<T,N>>` crashed the C backend when matched — wrong local-variable type spelling in the generated match arm, then (once fixed) an invalid C array-assignment initializer.
+
+### Documentation
+
+- `tutorials/src/intermediate/09_ffi.md` — added a worked example for an `extern "C"` function *returning* a small struct by value (previously only parameter-passing was demonstrated; BUG-77 was found because this direction had never actually been exercised against a real linked C function).
+- `tutorials/src/intermediate/04_generics_iface.md` — added a worked example constructing two different instantiations of the same user-defined generic struct in one program (BUG-70/BUG-73's exact scenario, now verified fixed).
+- `tutorials/src/intermediate/12_smt_deepdive.md` — the "works today / doesn't yet" table now lists struct-field access in `requires`/`ensures`/`prove` as supported, reflecting BUG-68's fix.
+- `tutorials/src/advanced/05_simd.md` — added a worked example of a struct holding both a `vec128<T>` field and a plain `Vec<T>` field (BUG-79's exact scenario, now verified fixed).
+
+---
+
 ## [v0.9.0] — 2026-07-26
 
 ### Added

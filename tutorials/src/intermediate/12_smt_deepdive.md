@@ -162,6 +162,7 @@ can no longer be discharged, so the function is rejected.
 | `assert` in straight-line code | Recursion across the call boundary without `ensures` |
 | Loop body with `invariant` | Loops without an invariant |
 | Cross-function reasoning via `ensures` | Polymorphic generic bodies (each instantiation re-verifies) |
+| Struct field access (`p.x`) in `requires`/`ensures`/`prove`, for any struct-typed binding (a literal-init local, a `ref` parameter, ...) | A `Vec<Struct>`/`Array<Struct,N>` element's field (`xs[i].x`) -- array theory only models scalar `Vec`/`Array` elements |
 
 The big gap to be aware of: **the v1 encoder can't reason
 across a function call unless the callee carries an
