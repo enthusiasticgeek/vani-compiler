@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/english/echo_pool.vani",
+  "kind": "run-crash",
+  "c": {
+    "rc": 0,
+    "stdout": "server bound (port > 0): true\ntotal bytes received across pool: 9\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}

@@ -156,3 +156,11 @@ Repro: `tools/localfuzz/findings/20260803-033452-run-crash-99db3e1928/repro.vani
 Repro: `tools/localfuzz/findings/20260803-045744-run-crash-85f5fcb578/repro.vani`
 
 Status: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-050543-run-crash-6bd324cd8f
+
+Repro: `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani`
+
+STATUS: needs human/frontier root-cause review.
