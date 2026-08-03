@@ -745,3 +745,12 @@ Repro: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/r
 Fix attempt: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-185109-backend-divergence-9aeae2f8ff
+
+Repro: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
