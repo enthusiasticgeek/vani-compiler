@@ -1,2 +1,4 @@
 findings/*
 !findings/.gitkeep
+candidate_regressions/*
+!candidate_regressions/.gitkeep

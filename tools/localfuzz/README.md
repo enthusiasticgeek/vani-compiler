@@ -89,34 +89,81 @@ turns these files into `systemd-run` arguments.
 Not an LLM guessing at bugs -- an LLM assisting a deterministic harness.
 Each cycle:
 
-1. Picks a file from `examples/**/*.vani` (1000+ files already in the
-   repo, including the `examples/edge_cases/` adversarial corpus) and
-   applies 1-2 small text-level mutations (numeric boundary values,
-   statement duplication/deletion/reordering, primitive-type swaps).
-   Every 5th cycle (`HARNESS_GENERATE_EVERY`), instead asks the local
-   model to write a fresh program combining two random language features,
-   primed with the project's own `tools/llm_context/bundle.py` context
-   (keyword tables, examples, `docs/v1_limitations.md`) so it's not
-   guessing at syntax from scratch.
-2. Runs the candidate through `vanic check`, then `vanic run` on both
-   backends (`--backend=c` and default LLVM), each under a timeout (with
-   the whole process group killed on timeout, so a test program stuck in
-   an infinite loop under `lli` can't leak past its deadline).
-3. Flags it if: `check` itself crashes/hangs, either backend
-   crashes/hangs, or both backends exit 0 with different stdout
-   (backend divergence -- the bug class that found most of this
-   project's real bugs historically).
-4. On a flag: saves the repro + raw results under
-   `tools/localfuzz/findings/<timestamp>-<kind>-<hash>/`, asks the local
-   model to draft a terse, honesty-gated staging entry (explicitly
-   forbidden from claiming a root cause it hasn't verified), appends it
-   to `docs/TODO_LOCAL_STAGING.md`, and commits both to
-   `local-fuzz-findings`.
+1. **Pick a candidate.** Usually: a file from `examples/**/*.vani`
+   (1000+ files already in the repo, including the
+   `examples/edge_cases/` adversarial corpus), with 1-2 small
+   text-level mutations applied (numeric boundary values, statement
+   duplication/deletion/reordering, primitive-type swaps). Every
+   `HARNESS_GENERATE_EVERY`th cycle (default 10), instead: qwen writes
+   a fresh program combining two real language features. It's grounded
+   in two REAL example snippets pulled from `examples/language/english/`
+   by keyword match against the `FEATURES` list in `harness.py` (NOT
+   the full `tools/llm_context/bundle.py` dump -- that's tens of
+   thousands of tokens and reliably timed out regardless of model
+   size; a couple of concrete examples plus the keyword-alias table is
+   enough grounding and actually fits in the timeout budget). This is
+   qwen "learning" the feature set in the loosest sense: it never sees
+   the compiler source, only real usage examples, each cycle.
+2. Runs the candidate through `vanic check`, then (only if `check`
+   accepts it) `vanic run` on both backends (`--backend=c` and default
+   LLVM), each under a timeout (with the whole process group killed on
+   timeout, so a test program stuck in an infinite loop under `lli`
+   can't leak past its deadline).
+3. Classifies the result: `check` itself crashes/hangs -> finding.
+   `check` cleanly rejects it (a normal diagnostic, common for
+   qwen-generated candidates that got the syntax wrong) -> discarded,
+   not a finding. Either backend crashes/hangs, or both exit with a
+   different code or stdout (backend divergence -- the bug class that
+   found most of this project's real bugs historically) -> finding.
+   Both backends agree and complete cleanly -> success.
+4. **On a finding**: saves the repro + raw results under
+   `tools/localfuzz/findings/<timestamp>-<kind>-<hash>/`, qwen drafts a
+   terse, honesty-gated staging entry (explicitly forbidden from
+   claiming a root cause it hasn't verified) into
+   `docs/TODO_LOCAL_STAGING.md`, and -- if `HARNESS_ATTEMPT_FIXES=1`,
+   the default -- qwen gets one bounded shot at a fix; see "Fix
+   attempts" below. All committed to `local-fuzz-findings`. Never
+   blocks waiting for anyone to look at it.
+5. **On a clean success that was qwen-generated** (not a mutation):
+   saved under `tools/localfuzz/candidate_regressions/` -- a candidate
+   for promotion into `examples/` or `tests/run_end_to_end.rs` as a
+   permanent regression test, since it demonstrates a feature
+   combination that compiled and ran consistently on both backends.
+   Also unreviewed until a human/frontier-model looks at it.
+6. **On a clean success from mutation**: discarded, just logged --
+   it's a minor variation of an example that already exists in the
+   corpus, not new coverage.
 
 This mirrors the mechanical compile-and-diff method that found nearly
 every real bug in this project's history (see `project_vani_compiler_status`
-memory) -- the harness does the finding, the local model does the volume
-generation and the first-pass writeup.
+memory) -- the harness does the finding, qwen does the volume generation,
+first-pass writeup, and (rarely successful, but attempted) fix drafting.
+
+### Fix attempts
+
+On every finding (if `HARNESS_ATTEMPT_FIXES=1`), qwen gets ONE call: the
+repro, the symptom, and a *heuristic* (not confirmed) guess at which
+source file is likely involved, based on which stage/backend failed
+(`guess_likely_area()` in `harness.py`). It's asked for a short
+hypothesis, and *only if confident*, an optional unified diff.
+
+- If qwen doesn't produce anything diff-shaped (the common case, given
+  this model's demonstrated capability -- see "Hardware-driven tuning
+  notes"): the hypothesis (or an honest "no hypothesis") is saved to
+  `fix_attempt.md` next to the finding. This is the expected fallback --
+  a documented starting point for a human or a frontier model, not a fix.
+- If it DOES produce something diff-shaped: `git apply --check` first
+  (a nearly-free dry run against HEAD -- almost certain to fail, since
+  qwen has never seen the actual file content it's patching blind). Only
+  if that unexpectedly succeeds does it go further: apply for real in a
+  disposable, throwaway `git worktree` (never the live one this harness
+  runs from), `cargo build --release`, and confirm the specific repro no
+  longer crashes.
+- **Even a fully-validated patch is NEVER auto-applied or auto-committed**
+  -- it's saved as `proposed_fix.patch`, clearly marked as needing real
+  review. "Builds and doesn't crash on this one repro" is not the same
+  claim as "correct," and this project's own history (e.g. BUG-31's
+  follow-up regression) has examples of exactly that gap.
 
 ## First-time setup
 
@@ -194,16 +241,22 @@ frontier-model session) against the real `vani-compiler` checkout,
 root-cause it properly, and only then write a real `BUG-N` entry into
 `docs/TODO_CURRENT.md` on `main` -- the same rigor every other bug in
 this project has gotten. Nothing from `local-fuzz-findings` should be
-merged into `main` as-is.
+merged into `main` as-is. The same applies to
+`tools/localfuzz/candidate_regressions/*.vani` -- verify each one
+actually demonstrates something not already covered before copying it
+into `examples/` or adding a `tests/run_end_to_end.rs` case for it.
 
-## Fixing findings (manual, not automated)
+## Fixing findings, deeper manual pass (Aider)
 
-Deliberately NOT wired into the continuous loop -- auto-editing compiler
-source unattended is a different risk tier than generating/flagging test
-programs. If you want the local model to attempt a fix for something
-staged here, do it as an explicit, separate, manual step, e.g. with
-[Aider](https://aider.chat) against the same Ollama instance (start it
-first via `./start.sh` if it isn't already running):
+The continuous loop already gives every finding one bounded, automatic
+fix attempt (see "Fix attempts" above) -- `fix_attempt.md` next to each
+finding tells you whether that produced anything. This section is for
+going deeper on a specific finding by hand, when you want to actually
+sit with it -- still deliberately kept OUT of the unattended loop, since
+open-ended multi-turn editing is a different risk tier than one bounded
+generate-and-validate call. E.g. with [Aider](https://aider.chat)
+against the same Ollama instance (start it first via `./start.sh` if it
+isn't already running):
 
 Run it through `run-sandboxed.sh` so it gets the same filesystem
 confinement as everything else here:
@@ -212,7 +265,7 @@ confinement as everything else here:
 pip install --user --break-system-packages aider-chat   # one-time
 cd tools/localfuzz
 export OLLAMA_API_BASE=http://127.0.0.1:11434
-./run-sandboxed.sh -- aider --model ollama_chat/qwen2.5-coder:7b-instruct-q4_K_M \
+./run-sandboxed.sh -- aider --model ollama_chat/qwen2.5-coder:1.5b \
       src/checker.rs   # or whichever file the finding points at
 ```
 
@@ -239,11 +292,19 @@ reasoning a frontier model gives, not a 7B local one.
 - `OLLAMA_MODEL` env var: swap in a larger model (e.g. a 14B) if you
   raise the memory cap; smaller/faster if you want tighter caps.
 - `HARNESS_SLEEP`: seconds between cycles.
-- `HARNESS_GENERATE_EVERY`: how often to use LLM-generation vs. plain
-  mutation (mutation is nearly free; generation costs a model call).
-  Default `0` (disabled) -- see "Hardware-driven tuning notes" below.
+- `HARNESS_GENERATE_EVERY`: how often to use qwen-generation vs. plain
+  mutation (mutation is nearly free, ~20s/cycle; generation is a real
+  model call, observed ~1-5 min/cycle depending on load -- see
+  "Hardware-driven tuning notes" below). Default `10`.
+- `HARNESS_ATTEMPT_FIXES=0`: disable the one-shot fix-attempt call on
+  findings (still logs/stages the finding itself, just skips
+  `fix_attempt.md`).
 - `HARNESS_AUTOCOMMIT=0`: disable auto-commit, review findings manually
   before committing anything to `local-fuzz-findings`.
+- `FEATURES` in `harness.py`: the feature-name/keyword pairs used for
+  generation grounding. Add an entry for any language feature you want
+  qwen combining more often; `find_example()` just needs a keyword that
+  matches an existing filename under `examples/language/english/`.
 
 ## Hardware-driven tuning notes (from running this on a modest CPU-only box)
 
@@ -259,16 +320,23 @@ waiting), a bigger model will produce better-quality generated programs
 and reports -- this default is chosen for reliability on a typical loaded
 desktop, not peak quality.
 
-Even so, `generate_novel_program()` (fresh-program generation, primed
-with the full `tools/llm_context/bundle.py` context) reliably times out
-at 240s regardless of model size -- the bottleneck is prompt *length*
-(the context bundle), not the model. `draft_report()` (used for real
-findings) has a much shorter prompt and completes in ~40s. This is why
-`HARNESS_GENERATE_EVERY` defaults to `0`: it was reliably burning ~4
-minutes per attempt for a call that always fails anyway. Report drafting
-stays on since it actually works, just isn't fast. If you want
-generation back, raise the CPU cap substantially and/or trim what
-`bundle.py` sends (`--no-limits` cuts the largest section).
+The FIRST version of `generate_novel_program()` primed qwen with the
+FULL `tools/llm_context/bundle.py` context (tens of thousands of
+tokens) and reliably timed out even at 240s regardless of model size --
+the bottleneck was prompt *length*, not model size. Fixed by grounding
+it in just two real example snippets pulled by keyword from
+`examples/language/english/` (see `FEATURES`/`find_example()`) plus the
+small `bundle.py --section aliases` table -- a few KB instead of tens of
+KB. That version completes, but is still genuinely slow on this
+CPU-only, contended box: observed ~29 tokens/sec prompt processing and
+noticeably slower token generation, so a full generation call
+(including a bounded `num_predict` cap to stop it rambling) has taken
+40s-4min+ depending on load, and can queue up behind another in-flight
+call since Ollama serves one request at a time (`-np 1`) by default.
+`draft_report()` (used for real findings, shorter prompt) is the fast
+path at ~40s-180s. None of this blocks the loop -- cycles just take
+however long the model calls inside them take; `HARNESS_GENERATE_EVERY`
+(default `10`) is the knob for how often you pay that cost.
 
 **Both services have `Restart=on-failure`/`RestartSec=15`** -- confirmed
 necessary, not just defensive: a mutated test candidate can trigger a
