@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/hungarian/try_question_op.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1486563-1785774453314886979: /tmp/vanic-candidate-1486563-1785774453314886979.c:346: fn_main: Assertion `(fn_kicsomagol_vagy(v_b, (-9223372036854775808)) == 99)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

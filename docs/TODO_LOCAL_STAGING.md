@@ -575,3 +575,49 @@ Repro: `tools/localfuzz/findings/20260803-161512-run-crash-388a573f5a/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260803-161512-run-crash-388a573f5a/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-162734-backend-divergence-8008a2972e
+
+Repro: `tools/localfuzz/findings/20260803-162734-backend-divergence-8008a2972e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-162734-backend-divergence-8008a2972e/fix_attempt.md`
+
+Staging Entry:
+
+**Title: Backend-divergence on `try_question_op.vani` in Hungarian Language**
+
+**Description**: A test mutant has been generated for the `try_question_op.vani` file, which is a part of the vani-compiler project's local staging log. The generated source code exhibits unexpected behavior when compiled with different backends (LLVM and C).
+
+**Mutant/generated source**:
+```vani
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/try_question_op.vani              # LLVM
+//   vanic run examples/language/hungarian/try_question_op.vani --backend=c  # C
+
+cél "Hungarian postfix ? early-return sugar on payloaded enums";
+
+felsorolás Opt { Some(i64), None }
+
+fuggveny ketszerezett_q(o: Opt) -> Opt {
+  legyen v: i64 = o?;
+  visszatér Opt.Some(v * 2);
+}
+
+fuggveny kicsomagol_vagy(o: Opt, alapert: i64) -> i64 {
+  visszatér egyezzen o {
+    Opt.Some(v) akkor v,
+    Opt.None    akkor alapert,
+  };
+}
+
+fn main() -> i64 {
+  legyen a: Opt = ketszerezett_q(Opt.Some(5));
+  állítsd kicsomagol_vagy(a, 0) == 10;
+
+  legyen b: Opt = ketszerezett_q(Opt.None);
+  állítsd kicsomagol_vagy(b, -9223372036854775808) == 99;
+
+  nyomtass "Some(5)? ketszerezve =",
