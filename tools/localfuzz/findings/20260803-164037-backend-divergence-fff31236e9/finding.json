@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/persian/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "cc failed while compiling '/tmp/vanic-candidate-1493788-1785775236442637463.c' (left at this path for debugging):\n/tmp/vanic-candidate-1493788-1785775236442637463.c:336:16: error: conflicting types for \u2018fn______\u2019; have \u2018int64_t(Enum_Opt)\u2019 {aka \u2018long int(Enum_Opt)\u2019}\n  336 | static int64_t fn______(Enum_Opt v_o);\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:335:16: note: previous declaration of \u2018fn______\u2019 with type \u2018int64_t(Enum_Opt,  int64_t)\u2019 {aka \u2018long int(Enum_Opt,  long int)\u2019}\n  335 | static int64_t fn______(Enum_Opt v_o, int64_t v_k);\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:339:16: error: conflicting types for \u2018fn______\u2019; have \u2018int64_t(Enum_Opt,  int64_t)\u2019 {aka \u2018long int(Enum_Opt,  long int)\u2019}\n  339 | static int64_t fn______(Enum_Opt v_o, int64_t v_k) {\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:336:16: note: previous declaration of \u2018fn______\u2019 with type \u2018int64_t(Enum_Opt)\u2019 {aka \u2018long int(Enum_Opt)\u2019}\n  336 | static int64_t fn______(Enum_Opt v_o);\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:344:16: error: conflicting types for \u2018fn______\u2019; have \u2018int64_t(Enum_Opt)\u2019 {aka \u2018long int(Enum_Opt)\u2019}\n  344 | static int64_t fn______(Enum_Opt v_o) {\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:339:16: note: previous definition of \u2018fn______\u2019 with type \u2018int64_t(Enum_Opt,  int64_t)\u2019 {aka \u2018long int(Enum_Opt,  long int)\u2019}\n  339 | static int64_t fn______(Enum_Opt v_o, int64_t v_k) {\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c: In function \u2018fn_main\u2019:\n/tmp/vanic-candidate-1493788-1785775236442637463.c:352:17: error: too many arguments to function \u2018fn______\u2019\n  352 |   int64_t v_x = fn______(v_a, 0);\n      |                 ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:344:16: note: declared here\n  344 | static int64_t fn______(Enum_Opt v_o) {\n      |                ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:353:17: error: too many arguments to function \u2018fn______\u2019\n  353 |   int64_t v_y = fn______(v_b, 100);\n      |                 ^~~~~~~~\n/tmp/vanic-candidate-1493788-1785775236442637463.c:344:16: note: declared here\n  344 | static int64_t fn______(Enum_Opt v_o) {\n      |                ^~~~~~~~\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
