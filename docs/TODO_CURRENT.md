@@ -7030,3 +7030,46 @@ fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
   unchanged.
   New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
   `cargo test --release --workspace`: 0 failed.
+
+- [x] **BUG-96 (found+fixed 2026-08-03). Deferred finding from
+  BUG-93: field access through a bare `Box<T>` (`n.value` where
+  `n: Box<Node>`) was rejected outright ("field access on non-struct
+  type Box<...>").** `Box<T>` (T != `dyn Iface`) lowers to a bare
+  `T*` in both backends (confirmed in `c_type_name`/`llvm_byte_size`)
+  -- bit-identical to Ref/RefMut's own runtime representation -- but
+  the checker's FieldAccess resolution only ever unwrapped
+  `Ref`/`RefMut` via `Type::deref()`, never `Box`, and both backends'
+  FieldAccess codegen gated the pointer-load path on `is_any_ref()`,
+  which is likewise Ref/RefMut-only.
+  Fixed with two new, narrowly-scoped `Type` helpers in `ast.rs`:
+  `is_field_access_indirect()` (true for Ref/RefMut and non-dyn Box)
+  and `deref_through_box()` (like `deref()`, but also peels one
+  non-dyn Box layer) -- used ONLY at the three FieldAccess
+  resolution/codegen sites (`checker.rs`'s `ExprKind::FieldAccess`
+  arm, `backend_c.rs`'s `TypedExprKind::FieldAccess` arm,
+  `backend_llvm.rs`'s `TypedExprKind::FieldAccess` arm in
+  `emit_expr`). Deliberately NOT folded into the general-purpose
+  `is_any_ref()`/`deref()`: those are consulted by 60+ call sites
+  across checker.rs/backend_c.rs/backend_llvm.rs/ssa.rs/smt.rs,
+  many of which assume Ref/RefMut's specific *borrowed* semantics
+  (borrow-checking, move analysis, drop) -- conflating an owned
+  `Box` with a borrow there would be a much larger, riskier change
+  than this fix warrants. `Box<dyn Iface>` is deliberately excluded
+  and remains cleanly rejected: it lowers to the 16-byte fat-pointer
+  struct itself (with an owning `.data` pointer), not a pointer to a
+  field-bearing aggregate, so it genuinely has no fields to read;
+  verified this exclusion holds (no regression) with a dedicated
+  spot-check. The SSA fast-path emitters (`ssa_backend_c.rs`,
+  `ssa_backend_llvm.rs`) don't implement `FieldAccess` at all (their
+  instruction set doesn't cover struct field access), so no change
+  was needed there.
+  Also updated `tutorials/src/intermediate/03a_box_raii_primer.md`,
+  which had documented this exact gap as "a real v1 boundary" after
+  the BUG-93 investigation surfaced it -- replaced the caution note
+  with a short confirmation that field access now works through
+  `Box<T>` the same way it works through a ref.
+  Verified on both backends with a struct having a direct `Box<T>`
+  binding AND a `Box<T>`-typed struct field (covering the
+  lvalue-chaining path, e.g. `n.next.x`).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.

@@ -51393,6 +51393,47 @@ fn main() -> i64 { return 0; }
             .expect("direct struct-literal form of recursive generic struct must compile to LLVM");
     }
 
+    // BUG-96 (found+fixed 2026-08-03). Deferred finding from BUG-93:
+    // field access through a bare `Box<T>` (`n.value` where `n:
+    // Box<Node>`) was rejected outright ("field access on non-
+    // struct type Box<...>"). `Box<T>` (T != dyn Iface) lowers to a
+    // bare `T*` in both backends -- bit-identical to Ref/RefMut's
+    // own runtime representation -- so field access can peel it the
+    // same way `ref_to_point.x` peels a `Ref`. Fixed with two new,
+    // narrowly-scoped `Type` helpers in ast.rs
+    // (`is_field_access_indirect` / `deref_through_box`) used only
+    // at FieldAccess resolution/codegen sites, deliberately NOT
+    // folded into the general-purpose `is_any_ref()`/`deref()` (60+
+    // call sites there assume Ref/RefMut's specific *borrowed*
+    // semantics -- e.g. borrow-checking and move analysis -- which
+    // must not conflate an owned `Box` with a borrow). `Box<dyn
+    // Iface>` is deliberately excluded (still cleanly rejected): it
+    // lowers to the 16-byte fat-pointer struct itself, not a
+    // pointer to a field-bearing aggregate, so it genuinely has no
+    // fields to read. Verified `Box<dyn Iface>` field access is
+    // still correctly rejected (no regression) as part of this fix.
+    #[test]
+    fn field_access_through_bare_box_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            struct Node { value: Point, next: Box<Point> }
+            fn main() -> i64 {
+              let p: Point = Point { x: 3, y: 4 };
+              let boxed: Box<Point> = box(p);
+              print boxed.x;
+              print boxed.y;
+              let n: Node = Node { value: Point { x: 1, y: 2 }, next: box(Point { x: 9, y: 8 }) };
+              print n.next.x;
+              print n.next.y;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("field access through a bare Box<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("field access through a bare Box<T> must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never

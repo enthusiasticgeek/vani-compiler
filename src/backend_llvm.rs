@@ -17588,12 +17588,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             phi
         }
         TypedExprKind::FieldAccess { object, field_index, .. } => {
-            // Through a ref we have a pointer to the struct;
-            // load + extractvalue. Otherwise extract directly.
+            // Through a ref (or a Box<T>, which lowers to the same
+            // bare pointer) we have a pointer to the struct; load +
+            // extractvalue. Otherwise extract directly.
             let inner = emit_expr(object, ctx, out);
             let dest = ctx.fresh_tmp();
-            if object.ty.is_any_ref() {
-                let underlying = object.ty.deref();
+            if object.ty.is_field_access_indirect() {
+                let underlying = object.ty.deref_through_box();
                 let struct_ty = llvm_type_string(underlying);
                 let loaded = ctx.fresh_tmp();
                 out.push_str(&format!(

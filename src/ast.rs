@@ -1310,6 +1310,38 @@ impl Type {
         }
     }
 
+    /// True for Ref/RefMut, and for `Box<T>` where `T` is not
+    /// `dyn Iface`. Both backends lower `Box<T>` (T != dyn Iface) to
+    /// a bare `T*` — bit-identical to Ref/RefMut's own runtime
+    /// representation — so field access can treat them the same way
+    /// ("one level of indirection to peel"). `Box<dyn Iface>` is
+    /// excluded: it lowers to the 16-byte fat-pointer struct itself,
+    /// not a pointer to a field-bearing aggregate.
+    /// Deliberately a NEW, narrowly-scoped query rather than folded
+    /// into `is_any_ref()`/`deref()` above: those are consulted by
+    /// 60+ call sites (borrow-checking, moves, drop) that assume
+    /// Ref/RefMut's specific *borrowed* semantics, which an owned
+    /// Box must not be conflated with.
+    pub fn is_field_access_indirect(&self) -> bool {
+        match self {
+            Type::Ref(_) | Type::RefMut(_) => true,
+            Type::Box(inner) => !matches!(**inner, Type::Object(_)),
+            _ => false,
+        }
+    }
+
+    /// Like `deref()`, but also peels a `Box<T>` layer (except
+    /// `Box<dyn Iface>` — see `is_field_access_indirect`). Used
+    /// exclusively for field-access resolution; see that method's
+    /// doc comment for why this is kept separate from `deref()`.
+    pub fn deref_through_box(&self) -> &Type {
+        match self {
+            Type::Ref(inner) | Type::RefMut(inner) => inner.deref_through_box(),
+            Type::Box(inner) if !matches!(**inner, Type::Object(_)) => inner.deref_through_box(),
+            other => other,
+        }
+    }
+
     pub fn is_copy(&self) -> bool {
         // References are Copy (cheap pointer copy). Owned aggregates
         // and OwnedStr (heap-allocated, must be freed exactly once)

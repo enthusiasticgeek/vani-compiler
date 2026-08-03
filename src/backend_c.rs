@@ -15752,10 +15752,11 @@ fn emit_expr(expr: &TypedExpr) -> String {
             format!("({}){{ {} }}", struct_c_name(type_name), parts.join(", "))
         }
         TypedExprKind::FieldAccess { object, field, .. } => {
-            // Through-a-borrow access uses `->`; by-value
-            // uses `.`. Distinguish via the operand's type.
+            // Through-a-borrow (or a Box<T>, which lowers to the
+            // same bare `T*`) access uses `->`; by-value uses `.`.
+            // Distinguish via the operand's type.
             let inner = emit_expr(object);
-            if object.ty.is_any_ref() {
+            if object.ty.is_field_access_indirect() {
                 format!("({})->{}", inner, field)
             } else {
                 format!("({}).{}", inner, field)

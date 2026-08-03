@@ -18616,8 +18616,12 @@ fn check_expr(
             }
             let inner = check_expr(object, env, signatures, diagnostics);
             // Field access works through one level of borrow
-            // (so `ref_to_point.x` reads `(*ref_to_point).x`).
-            let underlying = inner.ty().deref().clone();
+            // (so `ref_to_point.x` reads `(*ref_to_point).x`),
+            // and likewise through one level of `Box<T>` (BUG-95
+            // follow-up, task #38): `Box<T>` lowers to a bare `T*`
+            // in both backends, identical to Ref/RefMut, so
+            // `boxed_point.x` reads `(*boxed_point).x` the same way.
+            let underlying = inner.ty().deref_through_box().clone();
             let (struct_name, field_ty, field_index) = match &underlying {
                 Type::Struct(name) => {
                     let Some(decl) = env.lookup_struct(name) else {
