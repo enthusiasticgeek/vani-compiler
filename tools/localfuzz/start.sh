@@ -35,7 +35,8 @@ if systemctl --user is-active --quiet vani-localfuzz-ollama.service 2>/dev/null;
   echo "vani-localfuzz-ollama already running."
 else
   systemd-run --user --unit=vani-localfuzz-ollama \
-    -p MemoryMax=3G -p MemorySwapMax=0 -p CPUQuota=150% \
+    -p MemoryMax=2G -p MemorySwapMax=0 -p CPUQuota=150% \
+    -p Restart=on-failure -p RestartSec=15 \
     -p ProtectSystem=strict -p ProtectHome=tmpfs \
     -p "BindPaths=$OLLAMA_DATA" -p "BindReadOnlyPaths=$OLLAMA_DIST" \
     -p PrivateTmp=yes -p NoNewPrivileges=yes \
@@ -60,12 +61,13 @@ build_sandbox_args   # -> $SANDBOX_ARGS, from allowed_paths.conf / allowed_reado
 
 systemd-run --user --unit=vani-localfuzz-harness \
   -p MemoryMax=1G -p MemorySwapMax=0 -p CPUQuota=100% \
+  -p Restart=on-failure -p RestartSec=15 \
   "${SANDBOX_ARGS[@]}" \
   -E OLLAMA_URL=http://127.0.0.1:11434 \
-  -E OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}" \
+  -E OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:1.5b}" \
   -E HARNESS_SLEEP="${HARNESS_SLEEP:-20}" \
   -E HARNESS_AUTOCOMMIT="${HARNESS_AUTOCOMMIT:-1}" \
-  -E HARNESS_GENERATE_EVERY="${HARNESS_GENERATE_EVERY:-5}" \
+  -E HARNESS_GENERATE_EVERY="${HARNESS_GENERATE_EVERY:-0}" \
   -E GIT_AUTHOR_NAME=vani-localfuzz-bot \
   -E GIT_AUTHOR_EMAIL=localfuzz@vani.local \
   -E GIT_COMMITTER_NAME=vani-localfuzz-bot \

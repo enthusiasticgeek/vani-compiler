@@ -39,11 +39,11 @@ STAGING_DOC = REPO / "docs" / "TODO_LOCAL_STAGING.md"
 SCRATCH = Path("/tmp/localfuzz")
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
 CHECK_TIMEOUT = int(os.environ.get("CHECK_TIMEOUT", "15"))
 RUN_TIMEOUT = int(os.environ.get("RUN_TIMEOUT", "20"))
 AUTOCOMMIT = os.environ.get("HARNESS_AUTOCOMMIT", "1") == "1"
-GENERATE_EVERY = int(os.environ.get("HARNESS_GENERATE_EVERY", "5"))
+GENERATE_EVERY = int(os.environ.get("HARNESS_GENERATE_EVERY", "0"))
 
 CRASH_MARKERS = (
     "panicked at", "RUST_BACKTRACE", "memory allocation of",
@@ -307,6 +307,13 @@ def git_commit(paths, message):
 
 
 def generate_novel_program(rng):
+    # Disabled by default (HARNESS_GENERATE_EVERY=0): the bundle.py context
+    # below is large enough that CPU-only prefill reliably exceeds even a
+    # 240s timeout on a capped small model -- confirmed on this host with
+    # qwen2.5-coder:1.5b. It's the prompt SIZE that's the bottleneck here,
+    # not model size, so a bigger model won't help and a smaller CPU cap
+    # would only make it worse. draft_report() (used for real findings) has
+    # a much shorter prompt and works fine within the same timeout budget.
     bundle = subprocess.run(
         ["python3", "tools/llm_context/bundle.py", "--no-examples"],
         cwd=REPO, capture_output=True, text=True, timeout=30,

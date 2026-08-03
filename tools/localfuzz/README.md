@@ -241,8 +241,44 @@ reasoning a frontier model gives, not a 7B local one.
 - `HARNESS_SLEEP`: seconds between cycles.
 - `HARNESS_GENERATE_EVERY`: how often to use LLM-generation vs. plain
   mutation (mutation is nearly free; generation costs a model call).
+  Default `0` (disabled) -- see "Hardware-driven tuning notes" below.
 - `HARNESS_AUTOCOMMIT=0`: disable auto-commit, review findings manually
   before committing anything to `local-fuzz-findings`.
+
+## Hardware-driven tuning notes (from running this on a modest CPU-only box)
+
+Started with `qwen2.5-coder:7b-instruct-q4_K_M`; switched to
+`qwen2.5-coder:1.5b` (the current default) after a cold load of the 7B
+model didn't complete even after 15 minutes under normal desktop
+contention (this machine has no GPU, 4 cores, and was concurrently
+running a browser, an audio synth daemon, and another Claude Code
+session -- not an idle benchmark box). The 1.5B model cold-loads in
+~20s and answers a short prompt in ~22s total under the same conditions.
+If you have more headroom (more cores, less contention, or don't mind
+waiting), a bigger model will produce better-quality generated programs
+and reports -- this default is chosen for reliability on a typical loaded
+desktop, not peak quality.
+
+Even so, `generate_novel_program()` (fresh-program generation, primed
+with the full `tools/llm_context/bundle.py` context) reliably times out
+at 240s regardless of model size -- the bottleneck is prompt *length*
+(the context bundle), not the model. `draft_report()` (used for real
+findings) has a much shorter prompt and completes in ~40s. This is why
+`HARNESS_GENERATE_EVERY` defaults to `0`: it was reliably burning ~4
+minutes per attempt for a call that always fails anyway. Report drafting
+stays on since it actually works, just isn't fast. If you want
+generation back, raise the CPU cap substantially and/or trim what
+`bundle.py` sends (`--no-limits` cuts the largest section).
+
+**Both services have `Restart=on-failure`/`RestartSec=15`** -- confirmed
+necessary, not just defensive: a mutated test candidate can trigger a
+large allocation in the *compiled test binary*, which counts against the
+harness's own memory cap (it's a child process in the same cgroup) and
+can OOM-kill the harness itself, not just that one test. Without
+auto-restart this was observed to silently kill the pipeline, which then
+sat dead for over an hour before anyone noticed. With it, systemd brings
+the service back automatically (verified by killing the process directly
+and confirming a fresh PID appears within `RestartSec`).
 
 ## Replicating on another PC
 
