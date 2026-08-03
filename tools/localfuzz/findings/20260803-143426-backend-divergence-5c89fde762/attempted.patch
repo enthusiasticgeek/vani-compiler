@@ -1,0 +1,15 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -69,7 +69,10 @@ fn emit_fadd(c: &mut CodegenContext, op1: Operand, op2: Operand) {
+         let result = emit_binop(
+             c,
+             BinOp::Add,
+-            op1,
++            match op1 {
++                Operand::Literal(LiteralValue::Float(n)) => {
++                    if n.is_nan() { return Err(Error::InvalidValue); }
++                    Operand::Literal(LiteralValue::Int(i64::from(f64::trunc(n)))) // Truncate to integer
++                },
+                 _ => op1,
+             },
+             op2,

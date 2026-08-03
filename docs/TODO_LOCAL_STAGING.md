@@ -418,3 +418,16 @@ Repro: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-143426-backend-divergence-5c89fde762
+
+Repro: `tools/localfuzz/findings/20260803-143426-backend-divergence-5c89fde762/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-143426-backend-divergence-5c89fde762/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler local staging log indicates that there was a backend-divergence issue with the control_flow.vani test case, specifically using both LLVM and C backends. The generated mutant source demonstrates incorrect behavior in the `temdeg` function when the input is less than zero, where it should return -1 instead of adding 5. The divergence arises because the LLVM backend encountered a type mismatch between an integer constant (0) and a double value, while the C backend successfully compiled the code without errors but produced divergent output.
+
+To investigate further, it would be beneficial to debug both LLVM and C backends separately to identify the root cause of the integer constant type mismatch. Once identified, appropriate fixes can be implemented in the compiler source to address this specific issue.
