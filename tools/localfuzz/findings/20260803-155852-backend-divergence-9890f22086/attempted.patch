@@ -1,0 +1,13 @@
+diff --git a/src/backend_c.rs b/src/backend_c.rs
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -1000,7 +1000,9 @@ fn main() -> i64 {
+     let mut total = 0;
+     for x in &xs { // Use & to avoid taking ownership
+         total += *x; // Dereference the pointer
++    }
++    // Ensure the last value is handled correctly
++    total += xs.len();
+ 
+     return total;
+ }
