@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/vietnamese/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Box<Vec<i64>> \u0111\u00e3 t\u1ea1o\nT\u00faiNh\u1edb \u0111\u00e3 t\u1ea1o\nBox<OwnedStr> \u0111\u00e3 t\u1ea1o\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1996127-1785798414329505175.ll:617:10: error: expected '=' after name\n%Struct_T\u00faiNh\u1edb = type { %intent_vec_i64* }\n\n",
+    "timed_out": false
+  }
+}
