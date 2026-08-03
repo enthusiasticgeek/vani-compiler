@@ -975,3 +975,28 @@ Repro: `tools/localfuzz/findings/20260803-230655-backend-divergence-1713f2d074/r
 Fix attempt: `tools/localfuzz/findings/20260803-230655-backend-divergence-1713f2d074/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-232413-backend-divergence-7b016d3dc1
+
+Repro: `tools/localfuzz/findings/20260803-232413-backend-divergence-7b016d3dc1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-232413-backend-divergence-7b016d3dc1/fix_attempt.md`
+
+### Staging Entry
+
+**Summary:**
+A backend-divergence issue was encountered in the vani-compiler when running a specific mutant file using both LLVM and C backends. The program diverged unexpectedly, leading to a crash.
+
+**Environment:**
+- **Vani Compiler Source:** Not provided as it's not read.
+- **Mutant/File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/yoruba/try_question_op.vani`
+- **Backend(s):** LLVM and C
+- **Execution Details:**
+  - `vanic run examples/language/yoruba/try_question_op.vani` executed with no errors.
+  - `vanic run examples/language/yoruba/try_question_op.vani --backend=c` resulted in a crash.
+
+**Raw Result Data:**
+The raw result data shows the divergent behavior between LLVM and C backends. The LLVM backend ran successfully, but the C backend crashed due to an expected error that occurred at line 1945 of a generated LLVM IR file.
+
+**Status:** needs human/frontier root-cause review.

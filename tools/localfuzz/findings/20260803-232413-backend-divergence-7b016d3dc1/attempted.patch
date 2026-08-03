@@ -1,0 +1,20 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -429,7 +429,8 @@ fn emit_return_value(arg: &Value, reg: Reg) {
+         // Return the value from the register.
+         asm! {
+             "movq {} into %%rax",
+-            reg.into() : : "a"(value) : "rcx", "rdx"
++            reg.into() : : "a"(value), "r"(&arg) : "rcx", "rdx"
+         }
+     } else if let Opt::Some(value) = arg {
+         // Return the value from the register.
+-        asm! {
++        asm! {
+             "movq {} into %%rax",
+             reg.into() : : "a"(value), "r"(&arg) : "rcx", "rdx"
+         }
+     } else {
+         unreachable!("unexpected enum case");
+     }
+ }

@@ -1,0 +1,33 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/try_question_op.vani              # LLVM
+//   vanic run examples/language/yoruba/try_question_op.vani --backend=c  # C
+
+ìpinnu "Yoruba postfix ? early-return sugar on payloaded enums";
+
+àkọsílẹ̀ Opt { Some(i64), None }
+
+iṣẹ́ ilọ_pọ̀_q(o: Opt) -> Opt {
+  jẹ́ v: i64 = o?;
+  padà Opt.Some(v * 2);
+}
+
+iṣẹ́ ṣí_tàbí(o: Opt, ìpilẹ̀: i64) -> i64 {
+  padà bámu o {
+    Opt.Some(v) nígbànáà v,
+    Opt.None    nígbànáà ìpilẹ̀,
+  };
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ a: Opt = ilọ_pọ̀_q(Opt.Some(5));
+  jẹ́risí ṣí_tàbí(a, 0) == 10;
+
+  jẹ́ b: Opt = ilọ_pọ̀_q(Opt.None);
+  jẹ́risí ṣí_tàbí(b, 99) == 99;
+
+  tẹ̀ "Some(5)? ilọpọ =", ṣí_tàbí(a, 0);
+  tẹ̀ "None? ìpilẹ̀", ṣí_tàbí(b, 99);
+  padà 0;
+}

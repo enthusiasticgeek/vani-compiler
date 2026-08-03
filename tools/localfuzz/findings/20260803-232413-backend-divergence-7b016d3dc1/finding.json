@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/yoruba/try_question_op.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Some(5)? il\u1ecdp\u1ecd = 10\nNone? \u00ecpil\u1eb9\u0300 99\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2011224-1785799452746011209.ll:1945:71: error: expected ')' at end of argument list\ndefine i64 @fn__u1E63_u00ED_t_u00E0b_u00ED(%Enum_Opt %arg_o, i64 %arg_\u00ecpil\u1eb9\u0300) {\n\n",
+    "timed_out": false
+  }
+}
