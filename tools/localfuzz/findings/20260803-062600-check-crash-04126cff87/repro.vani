@@ -1,0 +1,22 @@
+--set env:RUST_BACKTRACE=1
+
+pub struct Struct {
+    field1: i32,
+    field2: f64,
+}
+
+impl Struct {
+    fn new(field1: i32, field2: f64) -> Self {
+        Self { field1, field2 }
+    }
+}
+
+fn main() {
+    let vec = Vec::new();
+    let index = 0;
+    let item = Struct::new(1, 2.5);
+    vec.push(item.clone_at(index));
+
+    // The next line should not panic
+    println!("vec[{index}] = {:?}", vec[index]);
+}

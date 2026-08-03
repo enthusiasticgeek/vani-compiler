@@ -164,3 +164,11 @@ Status: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-062600-check-crash-04126cff87
+
+Repro: `tools/localfuzz/findings/20260803-062600-check-crash-04126cff87/repro.vani`
+
+STATUS: needs human/frontier root-cause review.
