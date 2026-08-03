@@ -470,26 +470,43 @@ Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
       binding used inside the guard expression itself. Checked clean
       on both backends.
 
-## 11. Boundary confirmations (🟢 — expected-to-reject, but never actually confirmed; closes a documentation-accuracy gap even if not a "bug")
+## 11. Boundary confirmations (🟢 — expected-to-reject, but never actually confirmed; closes a documentation-accuracy gap even if not a "bug") -- CLOSED 2026-08-03 (FINAL CATEGORY)
 
 Not expected to reveal bugs, but nobody has actually run these to
 confirm the assumed rejection is real, clean, and backend-consistent
 rather than silently accepted or a raw panic:
 
-- [ ] `HashMap<StructKey, V>` (non-scalar key) — confirm clean,
+- [x] `HashMap<StructKey, V>` (non-scalar key) — confirm clean,
       consistent rejection on both backends with a real diagnostic.
-- [ ] `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width payload) —
+      Found+fixed a real bug (BUG-94): the checker's OWN suggested
+      fix (`self: ref Self`) crashed both backends outright (LLVM
+      JIT SIGSEGV, C conflicting-declaration compile error). The
+      by-value `self: Self` form already worked. Fixed in both
+      backends' HashMap<StructKey,V> bundle codegen.
+- [x] `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width payload) —
       confirm clean rejection matching the documented i64-width-only
-      restriction.
-- [ ] A `dyn Iface` method call held across an `.await` point inside
+      restriction. Checked clean on both backends.
+- [x] A `dyn Iface` method call held across an `.await` point inside
       an `async fn` — `missing_features.md` documents this as
       rejected in principle; confirm the actual diagnostic fires
       (this may already be covered — verify before re-testing).
-- [ ] `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>` or
+      Checked clean -- but the documented rejection was STALE: this
+      actually works correctly on both backends (verified across two
+      await points and two concrete types). Corrected `docs/
+      missing_features.md`.
+- [x] `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>` or
       `RwLock<U>` (nested locks) — confirm this either works
       correctly (composable locking, deadlock risk is the
       programmer's problem) or is cleanly rejected; either is fine,
-      but nobody has checked which.
+      but nobody has checked which. Found a real gap: this crashed
+      the native toolchain outright (undefined bundle symbols, no
+      nested-lock codegen ever implemented). Fixed with an explicit,
+      clean rejection covering all four nesting combinations.
+
+**This closes the full 11-category feature-combination gap audit
+sweep** (`docs/FEATURE_COMBINATION_GAPS_TODO.md`'s original 49-row
+list). See `docs/TODO_CURRENT.md` for the complete session log across
+all 11 categories.
 
 ---
 

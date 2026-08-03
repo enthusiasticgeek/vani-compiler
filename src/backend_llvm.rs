@@ -340,6 +340,23 @@ thread_local! {
     pub(crate) static LLVM_EXTERN_FN_REGISTRY:
         std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Gap-audit fix (2026-08-03): LLVM-backend sibling of
+    /// `backend_c.rs`'s `IMPL_METHOD_SELF_BY_REF_REGISTRY` -- maps a
+    /// hoisted method's `@fn_<name>` symbol to whether its `self`
+    /// parameter is by-reference (compiled to an LLVM pointer arg)
+    /// or by-value (compiled to a bare aggregate arg). Populated at
+    /// the start of `emit_llvm` from `program.functions`. The
+    /// `HashMap<StructKey, V>` bundle (ARC 1.7) used to always CALL
+    /// the user's `Hash`/`Eq` impl methods with a by-value struct
+    /// argument regardless of how `self` was actually declared --
+    /// when the user writes `self: ref Self` (exactly what the
+    /// checker's own "HashMap key must implement Hash" diagnostic
+    /// suggests), the real hoisted function takes a pointer, and
+    /// calling it with a bare struct value crashes `lli`/`llc`
+    /// outright (ill-typed `call` argument).
+    pub(crate) static LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY:
+        std::cell::RefCell<std::collections::HashMap<String, bool>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// Set of `#[no_mangle]` fn names. Populated at the start of
     /// `emit_llvm`. Consulted by the Call emitter to use the bare
     /// vāṇी name (no `fn_` prefix) for calls to these functions.
@@ -800,6 +817,16 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         for f in &program.functions {
             if f.no_mangle {
                 reg.insert(f.name.clone());
+            }
+        }
+    });
+    LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if let Some(first) = f.params.first() {
+                let by_ref = matches!(first.ty, Type::Ref(_) | Type::RefMut(_));
+                reg.insert(format!("fn_{}", f.name), by_ref);
             }
         }
     });
@@ -32189,6 +32216,71 @@ fn emit_intent_hashmap_struct_pair_llvm(
     let k_llvm = format!("%Struct_{}", llvm_mangle_ident(k_name));
     let hash_fn = format!("fn_{}_hash", k_name);
     let eq_fn = format!("fn_{}_eq", k_name);
+    // Gap-audit fix (2026-08-03): match the REAL calling convention
+    // of the user's `implement Hash`/`implement Eq for K` methods
+    // (`self: ref Self` -> LLVM pointer arg; `self: Self` -> bare
+    // aggregate arg) instead of always calling with a bare struct
+    // value. Unlike C, an LLVM SSA value isn't directly addressable
+    // -- getting a pointer to `%k` (a by-value function parameter)
+    // needs an explicit `alloca`+`store` spill first; a value
+    // already loaded from the table via `getelementptr` (`%kcell`)
+    // is ALREADY a pointer, so the by-ref path skips the redundant
+    // `load` entirely and passes `%kcell` straight through. See
+    // `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY`'s doc comment for the
+    // full root-cause writeup (this is the LLVM-backend sibling of
+    // the analogous C-backend fix in `emit_intent_hashmap_struct_
+    // pair_c_body`).
+    let hash_by_ref = LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&hash_fn).copied())
+        .unwrap_or(false);
+    let eq_by_ref = LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&eq_fn).copied())
+        .unwrap_or(false);
+    // Spills `%k` (the by-value HashMap-API parameter every one of
+    // these functions takes) into a fresh stack slot so its address
+    // can be passed to a by-ref hash/eq impl. A no-op string when
+    // the impl is by-value.
+    let hash_k_slot_prep = if hash_by_ref {
+        format!(" %hk_slot = alloca {k}\n \x20 store {k} %k, {k}* %hk_slot\n", k = k_llvm)
+    } else {
+        String::new()
+    };
+    let hash_call_arg = if hash_by_ref {
+        format!("{}* %hk_slot", k_llvm)
+    } else {
+        format!("{} %k", k_llvm)
+    };
+    let eq_k_slot_prep = if eq_by_ref {
+        format!(" %eqk_slot = alloca {k}\n \x20 store {k} %k, {k}* %eqk_slot\n", k = k_llvm)
+    } else {
+        String::new()
+    };
+    // The table-slot side of an eq call: by-ref skips the `load`
+    // (the getelementptr result `%kcell` is already a pointer);
+    // by-value loads it into `%kv` exactly as before.
+    let eq_kv_load = if eq_by_ref {
+        String::new()
+    } else {
+        format!(" %kv = load {k}, {k}* %kcell\n", k = k_llvm)
+    };
+    let eq_call_args = if eq_by_ref {
+        format!("{k}* %kcell, {k}* %eqk_slot", k = k_llvm)
+    } else {
+        format!("{k} %kv, {k} %k", k = k_llvm)
+    };
+    // `_remove`'s check-eq block reuses the same logic under `_rm`-
+    // suffixed local names (a separate top-level function's own SSA
+    // namespace).
+    let eq_kv_load_rm = if eq_by_ref {
+        String::new()
+    } else {
+        format!(" %kv_rm = load {k}, {k}* %kcell_rm\n", k = k_llvm)
+    };
+    let eq_call_args_rm = if eq_by_ref {
+        format!("{k}* %kcell_rm, {k}* %eqk_slot", k = k_llvm)
+    } else {
+        format!("{k} %kv_rm, {k} %k", k = k_llvm)
+    };
     out.push_str(&format!(
         "%{s} = type {{ {k}*, {v}*, i8*, i64, i64, i64 }}\n\
          define %{s} @{s}_new() {{\n\
@@ -32239,7 +32331,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret void\n\
          }}\n\
          define internal i64 @{s}__hash_key({k} %k) {{\n\
-         \x20 %raw = call i64 @{hash_fn}({k} %k)\n\
+         {hash_k_slot_prep}\
+         \x20 %raw = call i64 @{hash_fn}({hash_call_arg})\n\
          \x20 %h_p = alloca i64\n\
          \x20 store i64 -3750763034362895579, i64* %h_p\n\
          \x20 %i_p = alloca i64\n\
@@ -32265,9 +32358,11 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret i64 %final\n\
          }}\n",
         s = s, k = k_llvm, v = v_llvm, hash_fn = hash_fn,
+        hash_k_slot_prep = hash_k_slot_prep, hash_call_arg = hash_call_arg,
     ));
     out.push_str(&format!(
         "define internal void @{s}__insert_raw(%{s}* %m, {k} %k, {v} %v) {{\n\
+         {eq_k_slot_prep}\
          \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
          \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
          \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
@@ -32291,8 +32386,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 br i1 %is_empty, label %ir_store, label %ir_check_eq\n\
          ir_check_eq:\n\
          \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-         \x20 %kv = load {k}, {k}* %kcell\n\
-         \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+         {eq_kv_load}\
+         \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
          \x20 br i1 %eq, label %ir_update, label %ir_next\n\
          ir_update:\n\
          \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
@@ -32394,6 +32489,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret void\n\
          }}\n\
          define i1 @{s}_contains_key(%{s}* %m, {k} %k) {{\n\
+         {eq_k_slot_prep}\
          \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
          \x20 %cap = load i64, i64* %cp\n\
          \x20 %is_zero = icmp eq i64 %cap, 0\n\
@@ -32420,8 +32516,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 br i1 %is_occ_ck, label %ck_check, label %ck_next\n\
          ck_check:\n\
          \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-         \x20 %kv = load {k}, {k}* %kcell\n\
-         \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+         {eq_kv_load}\
+         \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
          \x20 br i1 %eq, label %ck_yes, label %ck_next\n\
          ck_next:\n\
          \x20 %i_p1 = add i64 %i, 1\n\
@@ -32439,10 +32535,12 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret i64 %len\n\
          }}\n",
         s = s, k = k_llvm, v = v_llvm, vsz = v_size, eq_fn = eq_fn,
+        eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
     ));
     if has_option_v {
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, {k} %k) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %cap = load i64, i64* %cp\n\
              \x20 %is_zero = icmp eq i64 %cap, 0\n\
@@ -32471,8 +32569,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_g, label %g_check, label %g_next\n\
              g_check:\n\
              \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-             \x20 %kv = load {k}, {k}* %kcell\n\
-             \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+             {eq_kv_load}\
+             \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
              \x20 br i1 %eq, label %g_some, label %g_next\n\
              g_next:\n\
              \x20 %i_p1 = add i64 %i, 1\n\
@@ -32491,6 +32589,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, {k} %k, {v} %v) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
              \x20 %tp = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
@@ -32533,8 +32632,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_ins, label %ins_check_eq, label %ins_test_tomb\n\
              ins_check_eq:\n\
              \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-             \x20 %kv = load {k}, {k}* %kcell\n\
-             \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+             {eq_kv_load}\
+             \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
              \x20 br i1 %eq, label %ins_update, label %ins_next\n\
              ins_test_tomb:\n\
              \x20 %ft_cur = load i64, i64* %first_tomb_p\n\
@@ -32586,6 +32685,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, {k} %k) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %cap_rm = load i64, i64* %cp_rm\n\
              \x20 %is_zero_rm = icmp eq i64 %cap_rm, 0\n\
@@ -32616,8 +32716,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_rm, label %hmr_check_eq, label %hmr_next\n\
              hmr_check_eq:\n\
              \x20 %kcell_rm = getelementptr {k}, {k}* %keys_rm, i64 %i_rm\n\
-             \x20 %kv_rm = load {k}, {k}* %kcell_rm\n\
-             \x20 %eq_rm = call i1 @{eq_fn}({k} %kv_rm, {k} %k)\n\
+             {eq_kv_load_rm}\
+             \x20 %eq_rm = call i1 @{eq_fn}({eq_call_args_rm})\n\
              \x20 br i1 %eq_rm, label %hmr_yes, label %hmr_next\n\
              hmr_next:\n\
              \x20 %i_p1_rm = add i64 %i_rm, 1\n\
@@ -32643,6 +32743,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, k = k_llvm, v = v_llvm, eq_fn = eq_fn, opt = opt_v,
+            eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
+            eq_kv_load_rm = eq_kv_load_rm, eq_call_args_rm = eq_call_args_rm,
         ));
     }
     // clear() always emitted

@@ -23522,6 +23522,31 @@ fn check_mutex_builtin(
             // Phase 2: infer T from the initial value's type.
             let initial = check_expr(&args[0], env, signatures, diagnostics);
             let inferred_element = initial.ty().clone();
+            // Gap-audit fix (2026-08-03): nested concurrency handles
+            // (`Mutex<Mutex<T>>`, `Mutex<RwLock<T>>`) were never
+            // actually implemented -- neither backend generates the
+            // "Mutex-of-Mutex" bundle infrastructure, so this used to
+            // compile straight through the checker and crash `opt`/
+            // `llc`/`cc` with undefined bundle types/symbols
+            // (`intent_mutex_intent_mutex_i64`, never emitted). Reject
+            // cleanly instead, matching the boundary-confirmation
+            // row's "either works correctly or is cleanly rejected;
+            // either is fine" framing -- full nested-lock codegen
+            // support is a substantive follow-up, not a missing-arm
+            // fix.
+            if matches!(inferred_element, Type::Mutex(_) | Type::RwLock(_)) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "nested concurrency handles are not supported in v1: \
+                         'mutex_new' was given a value of type {}, which is itself \
+                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
+                         data instead of wrapping one lock in another.",
+                        inferred_element
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &inferred_element.to_string())));
+                return CheckedExpr::fallback(Type::Mutex(Box::new(Type::I64)), span);
+            }
             let inferred_mutex_ty = Type::Mutex(Box::new(inferred_element.clone()));
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -24353,6 +24378,24 @@ fn check_rwlock_builtin(
             }
             let v = check_expr(&args[0], env, signatures, diagnostics);
             let element = v.ty().clone();
+            // Gap-audit fix (2026-08-03): see the matching check in
+            // `mutex_new` above for the full root-cause writeup --
+            // nested concurrency handles were never actually
+            // implemented in either backend and used to crash the
+            // native toolchain instead of failing cleanly.
+            if matches!(element, Type::Mutex(_) | Type::RwLock(_)) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "nested concurrency handles are not supported in v1: \
+                         'rwlock_new' was given a value of type {}, which is itself \
+                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
+                         data instead of wrapping one lock in another.",
+                        element
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &element.to_string())));
+                return CheckedExpr::fallback(Type::RwLock(Box::new(Type::I64)), span);
+            }
             let ret_ty = Type::RwLock(Box::new(element));
             CheckedExpr::new(
                 TypedExprKind::Call {

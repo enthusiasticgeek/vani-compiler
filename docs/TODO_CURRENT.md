@@ -6852,3 +6852,106 @@ checked clean -- no bugs found:
 New tests: 3 `src/lib.rs` + 3 `tests/run_end_to_end.rs`. Full `cargo
 test --release --workspace`: 0 failed. Category 10 (all 3 rows) now
 fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 11 (FINAL)
+
+- [x] **BUG-94 (found+fixed 2026-08-03). Category 11, row 1:
+  `HashMap<StructKey, V>` with `self: ref Self` in the `Hash`/`Eq`
+  impls -- EXACTLY what the checker's own diagnostic suggests --
+  crashed both backends outright.** Found while confirming this
+  boundary case is "a clean, consistent rejection" per the row's own
+  framing; instead of a rejection, the checker's own suggested fix
+  triggered a genuine crash. The by-value `self: Self` form (no
+  `ref`) already worked and still does (verified as a no-regression
+  check).
+  Two SEPARATE bugs, one per backend, same root cause: the
+  `HashMap<StructKey, V>` bundle (ARC 1.7, both
+  `emit_intent_hashmap_struct_pair_c_body` in `backend_c.rs` and
+  `emit_intent_hashmap_struct_pair_llvm` in `backend_llvm.rs`)
+  hard-coded an assumption about how the user's `Hash`/`Eq` impl
+  methods take `self`, instead of matching however the user actually
+  declared it:
+  - C backend: always forward-declared `fn_Key_hash`/`fn_Key_eq` as
+    taking the struct BY VALUE (`Struct_Key self`). When the user
+    writes `self: ref Key`, the REAL hoisted function (emitted by the
+    ordinary interface-method codegen) takes a POINTER (`const
+    Struct_Key* v_self`) -- two conflicting C declarations of the
+    same symbol: `error: conflicting types for 'fn_Key_hash'; have
+    'int64_t(const Struct_Key *)' ... previous declaration ...
+    'int64_t(Struct_Key)'`.
+  - LLVM backend: always CALLED `fn_Key_hash`/`fn_Key_eq` with a
+    bare-value argument (`{k} %k`). When the real function takes a
+    pointer, this is an ill-typed `call` -- `lli` crashed the JIT
+    outright (SIGSEGV in `llvm::orc::runAsMain`).
+  Fixed by adding a registry per backend
+  (`IMPL_METHOD_SELF_BY_REF_REGISTRY` in `backend_c.rs`,
+  `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY` in `backend_llvm.rs`),
+  populated at the start of each backend's `emit_*` from
+  `program.functions`, keyed by the hoisted method's own first-
+  parameter type (`Type::Ref`/`Type::RefMut` -> by-ref; anything else
+  -> by-value) -- mirroring the SAME "sibling walker never learned
+  about a shape" root-cause pattern this whole sweep kept finding,
+  just applied to a calling-convention mismatch instead of a missing
+  type-walk arm. A subtlety specific to LLVM: the hoisted method's
+  own name is stored WITHOUT the `fn_` emission prefix
+  (`program.functions` entries are named e.g. "Key_hash"; `fn_` is
+  added only at C/LLVM text-emission time), so the registry keys by
+  the pre-mangled `fn_`-prefixed spelling to match how the HashMap
+  bundle's own `hash_fn`/`eq_fn` strings are already constructed --
+  missing this on the first attempt at the fix left the registry
+  lookup silently falling back to "by-value" for every entry (a
+  quiet, easy-to-miss failure mode worth flagging for future
+  registry-based fixes of this shape).
+  The HashMap bundle now matches whichever convention the impl
+  actually uses: the C forward declaration picks pointer vs value
+  param types accordingly; the LLVM bundle spills `%k` (the by-value
+  HashMap-API parameter) into a fresh stack slot via `alloca`+`store`
+  to get an address when by-ref is needed (an LLVM SSA value isn't
+  otherwise addressable, unlike C locals/array elements), and reuses
+  an already-addressable `getelementptr` result (`%kcell`, the
+  table-slot side of an eq comparison) directly instead of
+  redundantly loading-then-respilling it.
+  Verified with a fuller round-trip exercising the whole API (3
+  inserts, `get`, `contains_key` hit/miss, update-returns-old-value,
+  remove-returns-old-value, `len`) on both backends; `valgrind
+  --leak-check=full` on native AOT builds of both backends: 0 errors,
+  all heap blocks freed. Given the blast radius (touches HashMap
+  <StructKey, V> codegen in both backends), ran the full `cargo test
+  --release --workspace` suite immediately after the fix compiled
+  (before adding new tests): 13/13 binaries clean, 0 failed.
+  Also swept the rest of category 11:
+  - (row 2) `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width
+    payload): checked clean -- cleanly rejected on both backends,
+    matching the documented i64-width-only restriction.
+  - (row 3) A `dyn Iface` method call held across an `.await` point:
+    checked clean, but surfaced a DOCUMENTATION-ACCURACY finding --
+    `docs/missing_features.md` documented this shape as unsupported
+    ("dyn-method receivers can't be held across suspend points"), but
+    it actually works correctly on both backends, verified with a
+    `dyn` binding held across TWO separate `await` points (method
+    called both before and after the second await) and two different
+    concrete types behind the same binding, values matching hand-
+    computation exactly (`87`, `143`). Corrected the stale entry in
+    `docs/missing_features.md`.
+  - (row 4) `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>`/
+    `RwLock<U>` (nested locks): found a real gap -- this used to
+    compile straight through the checker and crash the native
+    toolchain (undefined `intent_mutex_intent_mutex_i64` bundle
+    symbols never generated by either backend; full nested-lock
+    codegen support was never implemented, a substantially larger
+    task than a missing-arm fix). Per the row's own "either works
+    correctly or is cleanly rejected; either is fine" framing, fixed
+    with an explicit, clean rejection in `mutex_new`/`rwlock_new`'s
+    own type-checking, covering all four nesting combinations
+    (`Mutex<Mutex<T>>`, `Mutex<RwLock<T>>`, `RwLock<Mutex<T>>`,
+    `RwLock<RwLock<T>>`) with a clear diagnostic pointing at the fix
+    ("nested concurrency handles are not supported in v1 ... Use a
+    single Mutex<T>/RwLock<T> around the innermost data").
+  New tests: 4 `src/lib.rs` + 2 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace` after all category 11 changes
+  landed: 13/13 binaries clean, 0 failed. Category 11 (all 4 rows,
+  the FINAL category of the 11-category feature-combination gap
+  audit sweep) now fully closed in `docs/FEATURE_COMBINATION_GAPS_
+  TODO.md`.

@@ -9926,3 +9926,151 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-94 (2026-08-03), feature-combination gap audit category 11 row
+// 1: `HashMap<StructKey, V>` with `self: ref Self` in the `Hash`/`Eq`
+// impls -- exactly what the checker's own diagnostic suggests --
+// crashed both backends outright. See the matching src/lib.rs test's
+// doc comment for the full root-cause writeup (two separate bugs,
+// one per backend, same root cause: the HashMap bundle hard-coded a
+// by-value calling convention instead of matching the impl's real
+// self-parameter convention).
+#[test]
+fn hashmap_struct_key_hash_eq_self_by_ref_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "hashmap_struct_key_self_ref",
+        r#"
+struct Key { a: i64, b: i64 }
+interface Hash { fn hash(self: ref Self) -> i64; }
+interface Eq { fn eq(self: ref Self, other: ref Self) -> bool; }
+implement Hash for Key {
+  fn hash(self: ref Key) -> i64 {
+    return self.a * 1000003 + self.b;
+  }
+}
+implement Eq for Key {
+  fn eq(self: ref Key, other: ref Key) -> bool {
+    return self.a == other.a && self.b == other.b;
+  }
+}
+fn main() -> i64 {
+  let m: HashMap<Key, i64> = hashmap_new();
+  let k1: Key = Key { a: 1, b: 2 };
+  let k2: Key = Key { a: 3, b: 4 };
+  let k3: Key = Key { a: 5, b: 6 };
+  let _ = hashmap_insert(mut ref m, k1, 100);
+  let _ = hashmap_insert(mut ref m, k2, 200);
+  let _ = hashmap_insert(mut ref m, k3, 300);
+  print hashmap_len(ref m);
+  let lookup1: Key = Key { a: 1, b: 2 };
+  print option_unwrap_or(hashmap_get(ref m, lookup1), -1);
+  let lookup2: Key = Key { a: 3, b: 4 };
+  print hashmap_contains_key(ref m, lookup2);
+  let lookup_missing: Key = Key { a: 9, b: 9 };
+  print hashmap_contains_key(ref m, lookup_missing);
+  let update_k: Key = Key { a: 1, b: 2 };
+  let old: i64 = option_unwrap_or(hashmap_insert(mut ref m, update_k, 999), -1);
+  print old;
+  let updated_lookup: Key = Key { a: 1, b: 2 };
+  print option_unwrap_or(hashmap_get(ref m, updated_lookup), -1);
+  let remove_k: Key = Key { a: 5, b: 6 };
+  let removed: i64 = option_unwrap_or(hashmap_remove(mut ref m, remove_k), -1);
+  print removed;
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "3\n100\ntrue\nfalse\n100\n999\n300\n2\n";
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, expected, "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 11 row 3: a
+// `dyn Iface` method call held across (and between) TWO `.await`
+// points inside an `async fn`. This surfaced a documentation-
+// accuracy gap: `docs/missing_features.md` documented this shape as
+// unsupported ("dyn-method receivers can't be held across suspend
+// points"), but it actually works correctly on both backends --
+// verified with two different concrete types behind the same `dyn`
+// binding and two separate method calls, one before and one after a
+// second await.
+#[test]
+fn dyn_iface_method_across_multiple_await_points_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "dyn_across_multi_await",
+        r#"
+interface Speaker {
+  fn speak(self: Self) -> i64;
+}
+struct Dog { id: i64 }
+implement Speaker for Dog {
+  fn speak(self: Dog) -> i64 { return self.id; }
+}
+struct Cat { id: i64 }
+implement Speaker for Cat {
+  fn speak(self: Cat) -> i64 { return self.id * 10; }
+}
+async fn delay(x: i64) -> i64 {
+  return x;
+}
+async fn use_dyn_multi_await(use_dog: bool) -> i64 {
+  let dog: Dog = Dog { id: 42 };
+  let cat: Cat = Cat { id: 7 };
+  let d: dyn Speaker = if use_dog { dog as dyn Speaker } else { cat as dyn Speaker };
+  let v1: i64 = await(delay(1));
+  let mid: i64 = d.speak();
+  let v2: i64 = await(delay(2));
+  let end: i64 = d.speak();
+  return mid + end + v1 + v2;
+}
+fn main() -> i64 {
+  let r1: i64 = await(use_dyn_multi_await(true));
+  print r1;
+  let r2: i64 = await(use_dyn_multi_await(false));
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "87\n143\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}

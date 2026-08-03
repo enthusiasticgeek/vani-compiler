@@ -102,6 +102,20 @@ Solution: the `next` field is a `Box<Node>`. A `Box<Node>` is
 heap. The recursion ends naturally (or via `Option<Box<Node>>`
 for the last element).
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this is a real v1 boundary, not a style choice"/>
+
+**A real v1 boundary, confirmed by testing (2026-08-03)**: this
+tutorial only ever BUILDS a `Box<Node>` chain -- it never reads a
+field back through one. That's not a stylistic choice: field access
+does NOT go through a `Box<T>` in v1. Given `n: Box<Node>`, writing
+`n.value` is rejected outright ("field access on non-struct type
+Box<Node>"). This is unrelated to ownership or ergonomics -- the
+checker's field-access resolution only unwraps `Ref`/`RefMut`
+(`ref_to_point.x` reads `(*ref_to_point).x`), not `Box`. There is
+currently no supported way to read a field through a bare `Box<T>`
+binding. If you need to walk a `Box<Node>` chain, plan around this
+until it's fixed.
+
 ### Case 3: large struct in a hot loop
 
 A 4 KB struct on the stack means every recursive call or

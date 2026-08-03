@@ -109,6 +109,27 @@ thread_local! {
     /// when the type has no owning fields. T2.7 phase 2.
     static USER_DROP_REGISTRY: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Gap-audit fix (2026-08-03): maps a hoisted method's C function
+    /// name (e.g. "fn_Key_hash") -> whether its FIRST parameter
+    /// (`self`) is by-reference (`ref Self`/`mut ref Self`, compiled
+    /// to a C pointer param) or by-value (compiled to a bare struct
+    /// param). Populated at the start of `emit_c` from
+    /// `program.functions`. `emit_intent_hashmap_struct_pair_c_body`
+    /// (the `HashMap<StructKey, V>` bundle, ARC 1.7) used to
+    /// unconditionally forward-declare the user's `Hash`/`Eq` impl
+    /// methods as by-value (`{k_ctype} self`) regardless of how the
+    /// user actually declared `self` -- the checker's OWN diagnostic
+    /// for "HashMap key must implement Hash" suggests exactly the
+    /// `self: ref Self` form, which the real hoisted function then
+    /// compiles to a POINTER parameter, conflicting with the
+    /// bundle's hard-coded by-value forward declaration ("conflicting
+    /// types for 'fn_Key_hash'": `int64_t(const Struct_Key*)` vs
+    /// `int64_t(Struct_Key)"), and crashing the LLVM path outright.
+    /// This registry lets the bundle match whichever convention the
+    /// user's impl actually uses instead of assuming one.
+    static IMPL_METHOD_SELF_BY_REF_REGISTRY:
+        std::cell::RefCell<std::collections::HashMap<String, bool>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// Per-enum list of variant tags that carry a payload.
     /// Populated alongside `ENUM_PAYLOAD_REGISTRY` at the start
     /// of `emit_c`. The Drop handler reads this to switch on
@@ -271,6 +292,24 @@ pub fn emit_c(program: &TypedProgram) -> String {
         for f in &program.functions {
             if let Some(type_name) = f.name.strip_suffix("_drop") {
                 reg.insert(type_name.to_string());
+            }
+        }
+    });
+    IMPL_METHOD_SELF_BY_REF_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if let Some(first) = f.params.first() {
+                let by_ref = matches!(first.ty, Type::Ref(_) | Type::RefMut(_));
+                // A hoisted `implement Iface for T { fn m(...) }` method
+                // is stored internally as the bare mangled name
+                // ("Key_hash"); the "fn_" prefix used at the C call
+                // sites (e.g. this HashMap bundle's own `fn_{}_hash`
+                // convention) is only added at emission time, not part
+                // of the function's own stored name. Key the registry
+                // by the emitted "fn_"-prefixed spelling so lookups
+                // elsewhere (which already use that spelling) find it.
+                reg.insert(format!("fn_{}", f.name), by_ref);
             }
         }
     });
@@ -3567,12 +3606,37 @@ fn emit_intent_hashmap_struct_pair_c_body(
     // codegen (single underscore between type + method).
     let hash_fn = format!("fn_{}_hash", k_name);
     let eq_fn = format!("fn_{}_eq", k_name);
+    // Gap-audit fix (2026-08-03): match the REAL calling convention
+    // the user's `implement Hash`/`implement Eq for K` methods use
+    // (`self: ref Self` -> pointer param; `self: Self` -> by-value
+    // param) instead of always assuming by-value. See
+    // IMPL_METHOD_SELF_BY_REF_REGISTRY's doc comment for the full
+    // root-cause writeup.
+    let hash_by_ref = IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&hash_fn).copied())
+        .unwrap_or(false);
+    let eq_by_ref = IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&eq_fn).copied())
+        .unwrap_or(false);
+    let hash_param_ty = if hash_by_ref {
+        format!("const {}*", k_ctype)
+    } else {
+        k_ctype.to_string()
+    };
+    let eq_param_ty = if eq_by_ref {
+        format!("const {}*", k_ctype)
+    } else {
+        k_ctype.to_string()
+    };
+    let hash_arg_k = if hash_by_ref { "&k".to_string() } else { "k".to_string() };
+    let eq_arg_keys_i = if eq_by_ref { "&m->keys[i]".to_string() } else { "m->keys[i]".to_string() };
+    let eq_arg_k = if eq_by_ref { "&k".to_string() } else { "k".to_string() };
     out.push_str(&format!(
         "typedef struct {{ {k_ctype}* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
          /* Declare the user-defined hash + eq fns; they may be\n\
           * defined later in the same translation unit. */\n\
-         static int64_t {hash_fn}({k_ctype} self);\n\
-         static bool {eq_fn}({k_ctype} self, {k_ctype} other);\n\
+         static int64_t {hash_fn}({hash_param_ty} self);\n\
+         static bool {eq_fn}({eq_param_ty} self, {eq_param_ty} other);\n\
          static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
          \x20 {prefix} m;\n\
          \x20 m.keys = ({k_ctype}*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
@@ -3587,7 +3651,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
          \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
          }}\n\
          static INTENT_UNUSED uint64_t {prefix}__hash_key({k_ctype} k) {{\n\
-         \x20 int64_t raw = {hash_fn}(k);\n\
+         \x20 int64_t raw = {hash_fn}({hash_arg_k});\n\
          \x20 /* FNV-1a over the raw i64 hash so struct hash\n\
           *    impls that return e.g. a single field's value\n\
           *    still distribute across the table. */\n\
@@ -3632,7 +3696,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
          \x20 uint64_t mask = m->capacity - 1;\n\
          \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
          \x20 while (m->occ[i] != 0) {{\n\
-         \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) return true;\n\
+         \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) return true;\n\
          \x20   i = (i + 1) & mask;\n\
          \x20 }}\n\
          \x20 return false;\n\
@@ -3655,6 +3719,8 @@ fn emit_intent_hashmap_struct_pair_c_body(
          }}\n",
         k_ctype = k_ctype, v_ctype = v_ctype,
         prefix = prefix, hash_fn = hash_fn, eq_fn = eq_fn,
+        hash_param_ty = hash_param_ty, eq_param_ty = eq_param_ty,
+        hash_arg_k = hash_arg_k, eq_arg_keys_i = eq_arg_keys_i, eq_arg_k = eq_arg_k,
     ));
     if has_option_v {
         out.push_str(&format!(
@@ -3664,7 +3730,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
              \x20   i = (i + 1) & mask;\n\
              \x20 }}\n\
              \x20 r.tag = 1; r.payload = 0; return r;\n\
@@ -3676,7 +3742,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 int64_t first_tomb = -1;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{\n\
              \x20     r.tag = 0; r.payload = m->values[i];\n\
              \x20     m->values[i] = v;\n\
              \x20     return r;\n\
@@ -3699,7 +3765,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{\n\
              \x20     r.tag = 0; r.payload = m->values[i];\n\
              \x20     m->occ[i] = 2;\n\
              \x20     m->len--;\n\
@@ -3712,6 +3778,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              }}\n\n",
             k_ctype = k_ctype, v_ctype = v_ctype,
             prefix = prefix, eq_fn = eq_fn, opt_v = opt_v,
+            eq_arg_keys_i = eq_arg_keys_i, eq_arg_k = eq_arg_k,
         ));
     }
 }

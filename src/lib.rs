@@ -51540,6 +51540,210 @@ fn main() -> i64 { return 0; }
             .expect("or-pattern guard referencing variant binding must compile to LLVM");
     }
 
+    // BUG-94 (found+fixed 2026-08-03). Category 11, row 1:
+    // `HashMap<StructKey, V>` (non-scalar key) -- the checker's OWN
+    // diagnostic for "HashMap key must implement Hash" suggests
+    // `implement Hash for K { fn hash(self: ref Self) -> i64 {...} }`
+    // -- writing EXACTLY that crashed both backends outright (LLVM:
+    // `lli` JIT SIGSEGV; C: `cc` "conflicting types for
+    // 'fn_Key_hash'"). The by-VALUE form (`self: Self`, no `ref`)
+    // already worked correctly and still does (verified below as a
+    // no-regression check).
+    // Two SEPARATE bugs, one per backend, same root cause: the
+    // `HashMap<StructKey, V>` bundle (ARC 1.7) hard-coded an
+    // assumption about how the user's `Hash`/`Eq` impl methods take
+    // `self`, instead of matching however the user actually declared
+    // it.
+    // - C backend (`emit_intent_hashmap_struct_pair_c_body`): always
+    //   forward-declared `fn_Key_hash`/`fn_Key_eq` as taking the
+    //   struct BY VALUE (`Struct_Key self`). When the user writes
+    //   `self: ref Key`, the REAL hoisted function (emitted by the
+    //   ordinary interface-method codegen) takes a POINTER
+    //   (`const Struct_Key* v_self`) -- two conflicting C
+    //   declarations of the same symbol, a hard compile error.
+    // - LLVM backend (`emit_intent_hashmap_struct_pair_llvm`): always
+    //   CALLED `fn_Key_hash`/`fn_Key_eq` with a bare-value argument
+    //   (`{k} %k`). When the real function takes a pointer, this is
+    //   an ill-typed `call` -- `lli` (and would-be `llc`) reject it,
+    //   crashing the JIT.
+    // Fixed by adding a registry (`IMPL_METHOD_SELF_BY_REF_REGISTRY`
+    // in backend_c.rs, `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY` in
+    // backend_llvm.rs) populated at the start of each backend's
+    // `emit_*` from `program.functions`, keyed by the hoisted
+    // method's own first-parameter type (`Type::Ref`/`Type::RefMut`
+    // -> by-ref; anything else -> by-value). The HashMap bundle now
+    // matches whichever convention the impl actually uses: the C
+    // forward declaration picks pointer vs value param types
+    // accordingly; the LLVM bundle spills `%k` into a fresh stack
+    // slot (via `alloca`+`store`) to get an address when by-ref is
+    // needed (an SSA value isn't otherwise addressable), and reuses
+    // an already-addressable `getelementptr` result (`%kcell`)
+    // directly instead of redundantly loading-then-respilling it.
+    // Verified with a fuller round-trip (3 inserts, get, contains_key
+    // hit/miss, update-returns-old-value, remove-returns-old-value,
+    // len) on both backends; `valgrind --leak-check=full` on native
+    // AOT builds of both backends: 0 errors, all heap blocks freed.
+    #[test]
+    fn hashmap_struct_key_hash_eq_self_by_ref_lib() {
+        let source = r#"
+            struct Key { a: i64, b: i64 }
+            interface Hash { fn hash(self: ref Self) -> i64; }
+            interface Eq { fn eq(self: ref Self, other: ref Self) -> bool; }
+            implement Hash for Key {
+              fn hash(self: ref Key) -> i64 {
+                return self.a * 1000003 + self.b;
+              }
+            }
+            implement Eq for Key {
+              fn eq(self: ref Key, other: ref Key) -> bool {
+                return self.a == other.a && self.b == other.b;
+              }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Key, i64> = hashmap_new();
+              let k1: Key = Key { a: 1, b: 2 };
+              let k2: Key = Key { a: 3, b: 4 };
+              let k3: Key = Key { a: 5, b: 6 };
+              let _ = hashmap_insert(mut ref m, k1, 100);
+              let _ = hashmap_insert(mut ref m, k2, 200);
+              let _ = hashmap_insert(mut ref m, k3, 300);
+              print hashmap_len(ref m);
+              let lookup1: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, lookup1), -1);
+              let lookup2: Key = Key { a: 3, b: 4 };
+              print hashmap_contains_key(ref m, lookup2);
+              let lookup_missing: Key = Key { a: 9, b: 9 };
+              print hashmap_contains_key(ref m, lookup_missing);
+              let update_k: Key = Key { a: 1, b: 2 };
+              let old: i64 = option_unwrap_or(hashmap_insert(mut ref m, update_k, 999), -1);
+              print old;
+              let updated_lookup: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, updated_lookup), -1);
+              let remove_k: Key = Key { a: 5, b: 6 };
+              let removed: i64 = option_unwrap_or(hashmap_remove(mut ref m, remove_k), -1);
+              print removed;
+              print hashmap_len(ref m);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("HashMap<StructKey,V> with self:ref Self must compile to C");
+        compile_to_llvm(source).expect("HashMap<StructKey,V> with self:ref Self must compile to LLVM");
+    }
+
+    // No-regression check: the by-value `self: Self` form (never
+    // broken) still works exactly as before.
+    #[test]
+    fn hashmap_struct_key_hash_eq_self_by_value_lib() {
+        let source = r#"
+            struct Key { a: i64, b: i64 }
+            interface Hash { fn hash(self: Self) -> i64; }
+            interface Eq { fn eq(self: Self, other: Self) -> bool; }
+            implement Hash for Key {
+              fn hash(self: Key) -> i64 {
+                return self.a * 1000003 + self.b;
+              }
+            }
+            implement Eq for Key {
+              fn eq(self: Key, other: Key) -> bool {
+                return self.a == other.a && self.b == other.b;
+              }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Key, i64> = hashmap_new();
+              let k1: Key = Key { a: 1, b: 2 };
+              let _ = hashmap_insert(mut ref m, k1, 100);
+              let lookup_k: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, lookup_k), -1);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("HashMap<StructKey,V> with self:Self must compile to C");
+        compile_to_llvm(source).expect("HashMap<StructKey,V> with self:Self must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 11, row
+    // 2: `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width payload).
+    // Checked clean: cleanly rejected on both backends, matching the
+    // documented i64-width-only restriction.
+    #[test]
+    fn atomic_non_i64_width_payload_is_rejected() {
+        let vec_source = r#"
+            fn main() -> i64 {
+              let a: Atomic<Vec<i64>> = atomic_new(vec(1, 2, 3));
+              return 0;
+            }
+        "#;
+        compile_to_c(vec_source).err().expect("Atomic<Vec<T>> must be rejected (C)");
+        compile_to_llvm(vec_source).err().expect("Atomic<Vec<T>> must be rejected (LLVM)");
+
+        let struct_source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let a: Atomic<Point> = atomic_new(Point { x: 1, y: 2 });
+              return 0;
+            }
+        "#;
+        compile_to_c(struct_source).err().expect("Atomic<Struct> must be rejected (C)");
+        compile_to_llvm(struct_source).err().expect("Atomic<Struct> must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 11, row
+    // 4: `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>`/
+    // `RwLock<U>` (nested locks). Found a real gap: this used to
+    // compile straight through the checker and crash the native
+    // toolchain (undefined `intent_mutex_intent_mutex_i64` bundle
+    // symbols never generated by either backend -- full nested-lock
+    // codegen support was never implemented). Fixed with a clean,
+    // explicit rejection in `mutex_new`/`rwlock_new`'s own type-
+    // checking, covering all four nesting combinations
+    // (Mutex<Mutex>, Mutex<RwLock>, RwLock<Mutex>, RwLock<RwLock>).
+    #[test]
+    fn nested_concurrency_handles_are_cleanly_rejected() {
+        let mutex_in_mutex = r#"
+            fn main() -> i64 {
+              let inner: Mutex<i64> = mutex_new(5);
+              let outer: Mutex<Mutex<i64>> = mutex_new(inner);
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("nested concurrency handles are not supported"),
+            "unexpected rejection message: {:?}", c_err
+        );
+        compile_to_llvm(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (LLVM)");
+
+        let rwlock_in_mutex = r#"
+            fn main() -> i64 {
+              let inner_rw: RwLock<i64> = rwlock_new(5);
+              let outer_m: Mutex<RwLock<i64>> = mutex_new(inner_rw);
+              return 0;
+            }
+        "#;
+        compile_to_c(rwlock_in_mutex).err().expect("Mutex<RwLock<T>> must be rejected (C)");
+        compile_to_llvm(rwlock_in_mutex).err().expect("Mutex<RwLock<T>> must be rejected (LLVM)");
+
+        let mutex_in_rwlock = r#"
+            fn main() -> i64 {
+              let inner_m: Mutex<i64> = mutex_new(5);
+              let outer_rw: RwLock<Mutex<i64>> = rwlock_new(inner_m);
+              return 0;
+            }
+        "#;
+        compile_to_c(mutex_in_rwlock).err().expect("RwLock<Mutex<T>> must be rejected (C)");
+        compile_to_llvm(mutex_in_rwlock).err().expect("RwLock<Mutex<T>> must be rejected (LLVM)");
+
+        let rwlock_in_rwlock = r#"
+            fn main() -> i64 {
+              let inner: RwLock<i64> = rwlock_new(5);
+              let outer: RwLock<RwLock<i64>> = rwlock_new(inner);
+              return 0;
+            }
+        "#;
+        compile_to_c(rwlock_in_rwlock).err().expect("RwLock<RwLock<T>> must be rejected (C)");
+        compile_to_llvm(rwlock_in_rwlock).err().expect("RwLock<RwLock<T>> must be rejected (LLVM)");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {
