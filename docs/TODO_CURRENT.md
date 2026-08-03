@@ -5671,9 +5671,17 @@ verifying the four fixes above against their tutorial worked examples
 User asked for a prioritized list of every open item still on the
 books outside the BUG-68..80 sweep, approved items 1-5, ordered
 cheapest/lowest-risk first. BUG-33 (SMT `let`-then-`return` proof gap)
-and BUG-36 (`mut ref` exclusivity — missing checker subsystem) were
-deliberately left for their own dedicated sessions given soundness/
-architecture risk, per the original plan.
+was listed as still-open in that prioritization pass, deliberately
+left for its own dedicated session given soundness risk — this was a
+mistake in the audit that produced the list: BUG-33's own entry above
+already carries a "✅ Fixed 2026-08-01" resolution (commit `304c922`),
+predating this session entirely. Re-verified directly (2026-08-02):
+the entry's exact repro (`let r: i64 = n * 2; return r;` with
+`ensures _return == n * 2;`) proves cleanly, and a genuinely wrong
+`ensures` on the same shape is still correctly rejected — no work
+needed, BUG-33 was never actually open this session. BUG-36 (`mut ref`
+exclusivity — missing checker subsystem) remains genuinely open and
+was correctly deferred to its own dedicated session.
 
 - [x] **DOC-4 / DOC-5 — already fixed, stale bookkeeping only.** Both
   tutorial files (`intermediate/03b_affine_deeper_primer.md`'s

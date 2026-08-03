@@ -840,10 +840,13 @@ ignored on string/float matches and slice wildcard arms; BUG-66
 residual — a closure with a heap-owning capture crashed both
 backends when stored in a struct field, now a clean checker
 rejection instead). Full writeups: search "Clearing the backlog of
-previously-deferred open bugs" in `docs/TODO_CURRENT.md`. Two items
-were deliberately left for their own dedicated sessions given
-soundness/architecture risk: BUG-33 (SMT proof-engine gap) and
-BUG-36 (missing `mut ref` exclusivity subsystem) — both still open.
+previously-deferred open bugs" in `docs/TODO_CURRENT.md`. BUG-33 (SMT
+proof-engine gap) was initially flagged in that pass as a 6th item
+deliberately deferred for soundness risk — that was a mistake: BUG-33
+had already been fixed 2026-08-01 (commit `304c922`), before this
+session started; re-verified directly (2026-08-02), no work needed.
+BUG-36 (missing `mut ref` exclusivity subsystem) remains genuinely
+open and is still deferred to its own dedicated session.
 
 ## Non-goals for this pass
 
