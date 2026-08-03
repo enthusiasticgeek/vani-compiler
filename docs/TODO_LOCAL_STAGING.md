@@ -649,3 +649,12 @@ Fix attempt: `tools/localfuzz/findings/20260803-164037-backend-divergence-fff312
 }
 ```
 
+
+---
+
+### Candidate: 20260803-165310-backend-divergence-29eecfabd1
+
+Repro: `tools/localfuzz/findings/20260803-165310-backend-divergence-29eecfabd1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-165310-backend-divergence-29eecfabd1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

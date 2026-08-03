@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/punjabi/try_question_op.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1520376-1785775989609734846: /tmp/vanic-candidate-1520376-1785775989609734846.c:360: fn_main: Assertion `(fn_unwrap_or(v_a, 0) == 10)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
