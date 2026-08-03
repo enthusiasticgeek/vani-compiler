@@ -1,0 +1,60 @@
+// candidate regression, qwen-generated (qwen2.5-coder:1.5b), UNREVIEWED
+// features: atomics, Box<dyn Iface>
+// compiled and ran cleanly on both backends -- candidate for examples/ or
+// tests/run_end_to_end.rs after human/frontier-model review.
+
+// build & run:
+//   vanic run examples/language/english/atomics_box_dyn_iface.vani # LLVM
+//   vanic run examples/language/english/atomics_box_dyn_iface.vani --backend=c  # C
+
+intent "L2 Phase 3 + Box<dyn Iface> — Box<dyn Iface> with heap-owning fat pointers";
+
+// This example extends the `box` function from the previous program by adding
+// support for storing a dynamically typed interface value in a boxed struct.
+// The box can be used to store an instance of any type that implements the `Drawable`
+// trait, and it will automatically handle the memory management.
+
+struct Circle { r: i64 }
+struct Square { side: i64 }
+
+interface Drawable {
+  fn area(self: Circle) -> i64;
+}
+
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+
+implement Drawable for Square {
+  fn area(self: Square) -> i64 { return self.side * self.side; }
+}
+
+// Owned dyn-iface argument — like plain `dyn Drawable` but the
+// caller heap-allocates and we drop on scope exit.
+fn report_area(b: ref Box<dyn Drawable>) -> i64 {
+  return b.area();
+}
+
+struct Drawer {
+  rend: Box<dyn Drawable>,
+}
+
+// The originally documented L2 blocker: struct field holds a
+// heterogeneous Drawable, owned via Box<dyn>. The Drawer's
+// scope-exit drop chains into the Box's `.data` free, so no
+// leaks.
+fn main() -> i64 {
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c as dyn Drawable);
+  let direct: i64 = report_area(ref b);
+  assert direct == 49;
+
+  let sq: Square = Square { side: 4 };
+  let d: Drawer = Drawer { rend: box(sq as dyn Drawable) };
+  let inside: i64 = d.rend.area();
+  assert inside == 16;
+
+  print direct, inside;
+  return 0;
+}
+
