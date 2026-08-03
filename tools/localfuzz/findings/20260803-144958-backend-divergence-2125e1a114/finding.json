@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/english/graph_algo2.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "index out of bounds: 0, len 0\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "astar dijkstra-like 0->4: -1\nastar admissible 0->4: -1\nastar self-distance: -1\nastar size mismatch: -1\ntopo_sort count: 0\ntopo[ 0 ] = 94480208184997\ntopo[ 1 ] = 0\ntopo[ 2 ] = 0\ntopo[ 3 ] = 49\ntopo[ 4 ] = 17\ncyclic topo count (< 3 = cycle): 0\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}
