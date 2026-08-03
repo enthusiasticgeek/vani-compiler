@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/marathi/for_loops.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1471437-1785772508356477231: /tmp/vanic-candidate-1471437-1785772508356477231.c:481: fn_main: Assertion `(v_s == 30)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
