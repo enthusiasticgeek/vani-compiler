@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/yoruba/async_cancel_auto.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1240331-1785759483822231504: /tmp/vanic-candidate-1240331-1785759483822231504.c:355: fn_main: Assertion `(v_b == 0)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

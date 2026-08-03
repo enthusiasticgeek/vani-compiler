@@ -1,0 +1,22 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/yoruba/async_cancel_auto.vani --backend=c  # C
+
+ìpinnu "Yoruba async/await smoke";
+
+async iṣẹ́ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  padà v;
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ a: i64 = await(delay(5, 42));
+  jẹ́ b: i64 = await(delay(10, 7));
+
+  jẹ́risí a == 42;
+  jẹ́risí b == 0;
+  tẹ̀ "delays:", a, b;
+  padà 0;
+}

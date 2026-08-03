@@ -279,3 +279,12 @@ Fix attempt: `tools/localfuzz/findings/20260803-112813-backend-divergence-488f14
 }
 ```
 
+
+---
+
+### Candidate: 20260803-121804-backend-divergence-f06e4a126e
+
+Repro: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
