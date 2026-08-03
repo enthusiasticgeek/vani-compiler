@@ -6136,6 +6136,70 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
   tests, up from 143). Category 3 (all 5 rows) now fully closed in
   `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
 
+- [ ] **BUG-87 (found 2026-08-03, NOT fixed -- async internals are
+  explicitly sensitive/partially-shipped machinery per this
+  session's own BUG-45 precedent; deferred rather than risking a
+  hasty fix). Category 4, rows 1-2: `async fn` combined with generics
+  or a built-in generic enum return type is broken -- two related
+  symptoms, one root cause.**
+  - **Row 1, `async fn identity<T>(x: T) -> T`**: calling it directly
+    inside `await(identity(42))` fails monomorphization outright
+    ("generic function 'identity' is declared but never called with
+    concrete types") -- the call-site scanner that discovers which
+    concrete `T`'s a generic function is used at doesn't look inside
+    `await(...)`'s argument expression. Pre-extracting to a `let f =
+    identity(42);` first works around THIS half (monomorphization
+    then succeeds, correctly producing `Future__i64`) but hits a
+    SECOND bug: `await(f)`'s desugared match ("match scrutinee must
+    be an enum, integer, or bool type, got Future__i64") --
+    `Future__i64` prints identically to a real registered enum name
+    but isn't actually resolving to `Type::Enum("Future__i64")` by
+    the time the match-dispatch check runs, strongly suggesting
+    `Future<T>`'s return type stays as an unresolved `Type::Apply`
+    wrapper (built directly in `parser.rs`'s async desugar, `name:
+    "Future".to_string()`) rather than going through the SAME
+    generic-enum monomorphization pipeline `Option<T>`/`Result<T,E>`
+    use (the one BUG-46 already fixed for bare-name resolution) --
+    `Future<T>` appears to be a special-cased, parallel mechanism
+    that was never wired into that pipeline at all.
+  - **Row 2, `async fn maybe_get(n: i64) -> Option<i64>`**: same root
+    cause, different surface -- "match arm body has type i64 but
+    earlier arm produced Option__i64" when `await`'s own desugared
+    match interacts with a user `match` over the awaited
+    `Option<i64>` result.
+  - **Row 3, `async fn` + `requires`/`ensures`**: NOT the same bug --
+    a clean, SAFE rejection ("cannot verify 'ensures' clause: method
+    calls not supported in SMT v1"), because `_return` for an async
+    fn is the desugared `Future.Ready(expr)` constructor call, which
+    reads as a method call to the SMT encoder. This is a real
+    functional limitation (SMT contracts don't work on `async fn` at
+    all today) but not a soundness bug -- matches BUG-68's "unverifiable
+    means rejected, never silently accepted" fix.
+  - **Rows 4-5, checked clean**: `async fn` taking a plain `fn(T) ->
+    R` function-pointer parameter (called before AND after the
+    `await`) computes correctly on both backends; `async fn` that
+    internally spawns a `task`/`join`s it (a DIFFERENT concurrency
+    primitive family, both inside the single synchronous-desugar
+    function body) also computes correctly on both backends.
+  - **Why not fixed this session**: properly fixing rows 1-2 requires
+    either (a) routing `Future<T>`'s `Type::Apply` construction
+    through the same monomorphization/enum-registration pipeline
+    `Option<T>`/`Result<T,E>` already use, or (b) teaching the
+    call-site scanner and match-dispatch-kind check to specially
+    recognize `Type::Apply { name: "Future", .. }` and resolve it the
+    way `Type::Enum` already is. Either touches the async desugar
+    (`parser.rs`) and/or generic monomorphization (`checker.rs`)
+    under time pressure, in code this session's own BUG-45 entry
+    already flagged as "new, sensitive, partially-shipped machinery"
+    where "a wrong fix risks silently breaking the cases that DO work
+    today." Whoever picks this up next: start by checking whether
+    `Future<T>`'s `Type::Apply` ever gets monomorphized into a real
+    `Type::Enum(name)` ANYWHERE in the pipeline for a non-scalar `R`/
+    generic `T` (the doc's own worked examples only ever use scalar
+    `i64` returns, which may be why this was never caught before), and
+    whether the fix should generalize `resolve_bare_enum_ctors_in_stmt`
+    (BUG-46) or take a narrower, Future-specific path.
+
 ---
 
 ## Bug found by the local-model differential-fuzzing harness (2026-08-03)

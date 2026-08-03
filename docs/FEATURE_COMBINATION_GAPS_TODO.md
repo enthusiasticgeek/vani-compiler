@@ -220,16 +220,45 @@ of hanging the suite). Full `cargo test --release --workspace`:
 The closed sweep tested async x plain struct/Vec return (not a bug,
 synchronous-desugar case only). Nothing below was tested.
 
-- [ ] 🟡 `async fn` that is ALSO generic: `async fn foo<T>(x: T) ->
-      T`.
-- [ ] 🟡 `async fn` returning `Option<T>`/`Result<T,E>` specifically
-      (the closed sweep tested plain struct/Vec return, not the
-      built-in generic enums).
-- [ ] 🟡 `async fn` with a `requires`/`ensures` contract.
-- [ ] 🟢 `async fn` taking a `Closure(...)` parameter and calling it
-      before vs. after an `.await` point.
-- [ ] 🟢 `async fn` spawning a `task` internally (async x the OTHER
-      concurrency primitive family) — do they compose or collide?
+- [x] 🟡 `async fn` that is ALSO generic: `async fn foo<T>(x: T) ->
+      T` — **found 2026-08-03, BUG-87 (NOT fixed, deferred given
+      async-internals risk).** Broken two ways: calling it directly
+      inside `await(...)` fails monomorphization outright (the
+      call-site scanner doesn't look inside `await`'s argument);
+      pre-extracting to a `let` first gets past that but then hits a
+      second bug in `await`'s own desugared match dispatch. See
+      `docs/TODO_CURRENT.md`'s BUG-87 entry for the full root-cause
+      writeup (likely: `Future<T>`'s `Type::Apply` construction in
+      `parser.rs` was never wired into the same monomorphization
+      pipeline `Option<T>`/`Result<T,E>` use).
+- [x] 🟡 `async fn` returning `Option<T>`/`Result<T,E>` specifically —
+      **found 2026-08-03, same BUG-87 root cause.** Fails with "match
+      arm body has type i64 but earlier arm produced Option__i64"
+      when a user `match` interacts with `await`'s own desugared
+      match over the result.
+- [x] 🟡 `async fn` with a `requires`/`ensures` contract — **checked
+      2026-08-03, not a soundness bug**: a clean, SAFE rejection
+      ("cannot verify 'ensures' clause: method calls not supported in
+      SMT v1"), since `_return` for an async fn is the desugared
+      `Future.Ready(expr)` constructor call, which reads as a method
+      call to the SMT encoder. A real functional limitation (SMT
+      contracts don't work on `async fn` at all), but matches BUG-68's
+      "unverifiable means rejected, never silently accepted" fix —
+      not unsound.
+- [x] 🟢 `async fn` taking a `Closure(...)` parameter and calling it
+      before vs. after an `.await` point — **checked 2026-08-03, not
+      a bug**: correct on both backends (tested with a plain
+      `fn(T) -> R` function pointer parameter specifically).
+- [x] 🟢 `async fn` spawning a `task` internally (async x the OTHER
+      concurrency primitive family) — **checked 2026-08-03, not a
+      bug**: correct on both backends.
+
+Category 4 closed with one real bug found and DELIBERATELY left
+unfixed (BUG-87 — async internals are explicitly sensitive,
+partially-shipped machinery per this session's own BUG-45 precedent;
+see `docs/TODO_CURRENT.md` for the full reasoning and a starting
+point for whoever picks it up). No regression tests added for BUG-87
+since it documents currently-broken behavior, not a boundary to pin.
 
 ## 5. dyn dispatch x generics (🟡 — two different polymorphism mechanisms meeting)
 
