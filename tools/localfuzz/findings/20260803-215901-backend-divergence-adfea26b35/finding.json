@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/norwegian/keywords.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1897747-1785794340244283114: /tmp/vanic-candidate-1897747-1785794340244283114.c:343: fn_hoved: Assertion `(v_s == 7)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

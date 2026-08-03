@@ -873,3 +873,31 @@ Repro: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/r
 Fix attempt: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-215901-backend-divergence-adfea26b35
+
+Repro: `tools/localfuzz/findings/20260803-215901-backend-divergence-adfea26b35/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-215901-backend-divergence-adfea26b35/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1897747-1785794340244283114: /tmp/vanic-candidate-1897747-1785794340244283114.c:343: fn_hoved: Assertion `(v_s == 7)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
