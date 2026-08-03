@@ -10762,6 +10762,23 @@ pub(crate) fn element_tag(element: &Type) -> String {
         // For `Box<dyn Iface>` the inner is Type::Object whose
         // tag is `dyn_<Iface>` → `box_dyn_<Iface>`.
         Type::Box(inner) => format!("box_{}", element_tag(inner)),
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` (a SIMD
+        // lane type as a CONTAINER ELEMENT, not a struct field --
+        // BUG-79 already fixed the struct-field case in
+        // `c_element_storage`, a separate function that was never
+        // given the matching arm here). The `_ => c_leaf_type(...)`
+        // fallback below returns `c_leaf_type`'s placeholder
+        // comment ("/* vec128<T> */"), and `.replace(' ', "_")`
+        // turns it into `/*_vec128<T>_*/` -- not a valid C
+        // identifier, and embedding it into every generated
+        // `intent_vec_<tag>__*` name corrupts the whole bundle
+        // (confirmed: `cc` rejected the output with a cascade of
+        // "expected '=', ',', ';'..." errors, one per corrupted
+        // identifier). Recursive composition mirrors the
+        // Atomic/Channel/Box arms above.
+        Type::Vec128(inner) => format!("vec128_{}", element_tag(inner)),
+        Type::Vec256(inner) => format!("vec256_{}", element_tag(inner)),
+        Type::Vec512(inner) => format!("vec512_{}", element_tag(inner)),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }

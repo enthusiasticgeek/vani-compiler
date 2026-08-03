@@ -5878,4 +5878,101 @@ was correctly deferred to its own dedicated session.
   is the required direction for a checker that must never reject
   sound code.
 
+## Feature-combination gap audit sweep (2026-08-03)
+
+Working through `docs/FEATURE_COMBINATION_GAPS_TODO.md` (49-row TODO
+created 2026-08-02 for exactly this purpose). User authorized fully
+autonomous operation ("proceed without any inputs from me... automate
+and fix automatically without asking") for this pass.
+
+- [x] **BUG-81 (found+fixed 2026-08-03 -- two independent bugs, one
+  per backend, same "container element with its own codegen path
+  forgot this case" class as BUG-61/79). `Vec<vec128<T>>` (a SIMD
+  lane type as a Vec ELEMENT, not a struct field) crashed both
+  backends.** Category 1, row 1 of the gap audit -- the top-priority
+  row, flagged in advance as the closest unswept analog of BUG-61.
+  - **C backend**: `element_tag` (`backend_c.rs`) -- the function
+    that names Vec BUNDLE typedefs/helpers -- is a SEPARATE function
+    from `c_element_storage` (which BUG-79 already fixed for the
+    struct-FIELD case) and never got the matching arm. Its `_ =>
+    c_leaf_type(element).replace(' ', "_")` fallback returned
+    `c_leaf_type`'s placeholder comment `"/* vec128<T> */"`, and the
+    space-replace turned it into `/*_vec128<T>_*/` -- embedded into
+    every generated `intent_vec_<tag>__*` identifier, corrupting the
+    entire bundle. `cc` rejected the output with a cascade of
+    "expected '=', ',', ';'..." errors, one per corrupted identifier.
+    Fixed by adding explicit `Vec128`/`Vec256`/`Vec512` arms
+    (recursive composition, mirroring the Atomic/Channel/Box arms
+    already in the same function).
+  - **LLVM backend, layered**: (1) `vec_struct_tag` (the LLVM analog
+    of `element_tag`) had the identical missing-arm gap, causing a
+    Rust panic on compile ("llvm_type: use llvm_type_string for
+    aggregate / ref type Vec128(F64)") -- fixed the same way. (2)
+    Fixing that alone revealed a SECOND, more severe bug underneath:
+    `vec_element_byte_size` (drives the Vec's malloc/realloc SIZE
+    calculation for push/growth, a sibling of the already-correct
+    `llvm_byte_size`) has a final fallback `element.bits().
+    unwrap_or(64) / 8` -- `Type::bits()` returns `None` for SIMD lane
+    types (they're not in its bits-classified match), so this
+    silently computed 8 bytes for what's actually a 16-byte
+    `vec128`/32-byte `vec256`/64-byte `vec512` register --
+    under-allocating the buffer by half to 1/8th of what it needs.
+    Confirmed via the exact failure signature every prior BUG-6x
+    under-allocation fix describes: `realloc(): invalid next size` at
+    runtime, corrupting the heap on the second element's `push`.
+    Fixed by adding explicit 16/32/64-byte arms, matching
+    `llvm_byte_size`'s already-correct constants.
+  - **Verification**: beyond the usual both-backend stdout check, ran
+    `valgrind --leak-check=full` against a native AOT LLVM build
+    (`vanic build ... -lm`, since `--backend=c`/JIT paths don't
+    produce a persistent native binary for LLVM the same way) --
+    0 errors, all heap blocks freed, confirming the fix isn't just
+    "happened not to crash this time" on a heap-layout-dependent bug.
+  - Also swept the REST of category 1 (rows 2-8: `Array<vec128,N>`,
+    `struct { Vec<vec256<T>> }`, `(vec128<T>, i64)` tuple, generic
+    struct at `T=vec128<T>`, `Option<vec128<T>>`, `HashMap<i64,
+    vec128<T>>`, `clone_at` on `Vec<Struct>` with a SIMD field) --
+    all correct on both backends except `HashMap<i64, vec128<T>>`,
+    which is a clean, consistent rejection matching the documented
+    "hashmap_insert() supports scalar V in v1" restriction (not a
+    bug). New tests: 8 `src/lib.rs` (one per row) + 2
+    `tests/run_end_to_end.rs` (real stdout, both backends -- one for
+    the bug itself, one covering the array/generic-wrapper rows).
+
+- [x] **BUG-82 (found+fixed 2026-08-03, same sweep, LLVM-only). While
+  testing category 1's `Option<vec128<f64>>`/`Result<vec128<f64>,
+  E>` row, `Result<vec128<f64>, i64>` -- a MIXED-payload-type enum
+  (unlike `Option<vec128<f64>>`, which has only ONE payloaded
+  variant) -- segfaulted `lli` with no diagnostic, on both
+  construction and match-arm extraction.** Root cause: mixed-payload
+  enums store their payload in an `{i32, [N x i8]}` byte buffer;
+  reading/writing the real payload type through it requires a
+  `bitcast i8* ... to <payload_llvm_type>*` then load/store. Neither
+  the construction site (`TypedExprKind::EnumVariantWithPayload`) nor
+  the match-arm extraction site had an explicit `align` on that
+  load/store -- LLVM defaults to the pointee type's ABI alignment
+  (16 bytes for `<2 x double>`/vec128, more for vec256/512), but the
+  buffer itself only guarantees 4-byte alignment (from the struct's
+  leading `i32` tag) -- an ALIGNED SSE/AVX move against actually-
+  unaligned memory is a hard segfault, not a compile error. `Option
+  <T>` never hits this: single-payload-type enums use
+  `insertvalue`/`extractvalue` directly on the SSA struct, never
+  touching the byte buffer. Fixed by adding an explicit `align 1` to
+  both sites -- unaligned move instructions are always correct
+  regardless of the buffer's real alignment, for every payload type
+  this path handles, not just SIMD ones (a strictly safer, simpler
+  fix than trying to compute and thread through the real per-enum
+  alignment requirement). Verified with `valgrind --leak-check=full`
+  on a native AOT LLVM build covering BOTH variants (`Result.Ok` and
+  `Result.Err`): 0 errors, all heap blocks freed. New tests: 1
+  `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real stdout, both
+  variants exercised, both backends -- this is a RUNTIME crash a
+  compile-only test can't catch, since LLVM compilation itself
+  succeeded before the fix).
+
+Full `cargo test --release --workspace` after both BUG-81 and BUG-82
+landed: 13/13 binaries clean, 0 failed (2697 lib tests, up from 2688;
+142 end-to-end tests, up from 139). Category 1 (all 8 rows) now fully
+closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
 ---

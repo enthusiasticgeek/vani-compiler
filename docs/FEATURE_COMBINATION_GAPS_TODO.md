@@ -62,28 +62,53 @@ their own element-size/storage logic (`c_vec128_type` etc., per this
 session's own BUG-78/79 fixes to `c_element_storage`) — exactly the
 shape of helper that forgot cases before.
 
-- [ ] `Vec<vec128<f64>>` — a Vec whose ELEMENT is a SIMD lane type
-      (not a struct FIELD containing SIMD, which BUG-79 already
-      covers). Indexed read/write, `push`, and `clone_at` if the
-      lane type is non-Copy-adjacent in the storage layer.
-- [ ] `Array<vec128<f64>, N>` — same question for fixed-size arrays.
-- [ ] `struct { lanes: Vec<vec256<f64>> }` — SIMD-typed Vec nested
-      inside a struct field (two levels: struct → Vec → SIMD).
-- [ ] `Tuple` containing a `vec128<T>` element, e.g. `(vec128<f64>,
-      i64)`.
-- [ ] A generic struct `struct Wrapper<T> { v: T }` instantiated at
-      `T = vec128<f64>` — does monomorphization even accept a SIMD
-      type as a generic type argument? If rejected, confirm it's a
-      *clean* rejection, not a panic.
-- [ ] `Option<vec128<f64>>` / `Result<vec128<f64>, E>` — SIMD type as
-      a built-in generic enum payload.
-- [ ] `HashMap<i64, vec128<f64>>` — SIMD as a HashMap value (the
-      collections tutorial documents `Vec<T>` values needing a
-      special pattern; does SIMD need the same, or does it hit a
-      different wall?).
-- [ ] SIMD field/element `clone_at` — `Vec<Struct>` where `Struct`
-      has a `vec128<T>` field, accessed via the `clone_at` idiom
-      (mutate-the-clone-then-`set` pattern from the affine chapters).
+- [x] `Vec<vec128<f64>>` — **found+fixed 2026-08-03, BUG-81 (two
+      independent bugs, one per backend).** C: `element_tag` was
+      missing the Vec128/256/512 arms (a separate function from
+      `c_element_storage`, which BUG-79 already fixed), corrupting
+      every generated bundle identifier. LLVM: `vec_struct_tag` had
+      the identical gap (Rust panic), and fixing that alone revealed
+      `vec_element_byte_size` under-counting a SIMD element's malloc/
+      realloc size (`Type::bits()` returns `None` for SIMD types, so
+      the fallback silently computed 8 bytes for a real 16/32/64-byte
+      register) — heap corruption on push. Verified with valgrind on
+      a native AOT LLVM build. See `docs/TODO_CURRENT.md`'s BUG-81
+      entry for the full writeup.
+- [x] `Array<vec128<f64>, N>` — **checked 2026-08-03, not a bug**:
+      correct on both backends once BUG-81's fixes landed (shares the
+      same underlying tag/size helpers).
+- [x] `struct { lanes: Vec<vec256<f64>> }` — **checked 2026-08-03,
+      not a bug**: correct on both backends.
+- [x] `Tuple` containing a `vec128<T>` element, e.g. `(vec128<f64>,
+      i64)` — **checked 2026-08-03, not a bug**: correct on both
+      backends.
+- [x] A generic struct `struct Wrapper<T> { v: T }` instantiated at
+      `T = vec128<f64>` — **checked 2026-08-03, not a bug**:
+      monomorphization accepts SIMD as a generic type argument and
+      computes correctly on both backends.
+- [x] `Option<vec128<f64>>` / `Result<vec128<f64>, E>` — **`Option`
+      checked 2026-08-03, not a bug; `Result` found+fixed 2026-08-03,
+      BUG-82, LLVM-only.** `Result<vec128<f64>, i64>` is a MIXED-
+      payload-type enum (unlike `Option`, which has only one
+      payloaded variant) — segfaulted `lli` on both construction and
+      match-arm extraction due to a missing `align 1` on the byte-
+      buffer bitcast load/store (LLVM assumed the SIMD payload's
+      natural 16-byte ABI alignment against a buffer that only
+      guarantees 4). Verified with valgrind covering both `Ok`/`Err`
+      variants. See `docs/TODO_CURRENT.md`'s BUG-82 entry.
+- [x] `HashMap<i64, vec128<f64>>` — **checked 2026-08-03, not a
+      bug**: cleanly and consistently rejected on both backends,
+      matching the documented "hashmap_insert() supports scalar V in
+      v1" restriction.
+- [x] SIMD field/element `clone_at` — `Vec<Struct>` where `Struct`
+      has a `vec128<T>` field — **checked 2026-08-03, not a bug**:
+      the `clone_at`/mutate/`set` idiom works correctly on both
+      backends.
+
+Category 1 fully closed. New tests: 10 `src/lib.rs` + 3
+`tests/run_end_to_end.rs` (see `docs/TODO_CURRENT.md`'s BUG-81/82
+entries). Full `cargo test --release --workspace`: 13/13 binaries
+clean, 0 failed.
 
 ## 2. Generics x concurrency handles (🔴 high — untested direction of an already-fixed bug class)
 

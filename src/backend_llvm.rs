@@ -17169,8 +17169,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = bitcast i8* {} to {}*\n",
                     pay_typed_ptr, first_elem, payload_ll
                 ));
+                // Gap-audit fix (2026-08-03): the byte buffer's real
+                // alignment is only whatever the `{i32, [N x i8]}`
+                // struct naturally provides (4 bytes, from the tag
+                // field) -- but a SIMD payload type (`vec128<T>` etc.)
+                // needs up to 64-byte alignment for its native
+                // aligned load/store instructions. Without an
+                // explicit `align 1` here, LLVM assumes the pointee
+                // type's ABI alignment (16/32/64 bytes for vec128/
+                // 256/512) and may emit an aligned SSE/AVX store,
+                // segfaulting on the actually-4-byte-aligned buffer
+                // (confirmed: `Result<vec128<f64>, i64>` crashed `lli`
+                // with a bare segfault, no diagnostic). `align 1`
+                // tells LLVM to use unaligned move instructions --
+                // always correct regardless of the buffer's real
+                // alignment, for every payload type this path
+                // handles, not just SIMD ones.
                 out.push_str(&format!(
-                    "  store {} {}, {}* {}\n",
+                    "  store {} {}, {}* {}, align 1\n",
                     payload_ll, payload_val, payload_ll, pay_typed_ptr
                 ));
                 let loaded = ctx.fresh_tmp();
@@ -17388,8 +17404,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 "  {} = bitcast i8* {} to {}*\n",
                                 typed_ptr, first_elem, bty_ll
                             ));
+                            // Gap-audit fix (2026-08-03): matching
+                            // construction-site fix above -- `align 1`
+                            // so LLVM doesn't assume the byte buffer
+                            // meets the payload type's natural ABI
+                            // alignment (a SIMD payload needs up to
+                            // 64 bytes; the buffer only guarantees 4,
+                            // from the enum struct's leading i32 tag).
                             out.push_str(&format!(
-                                "  {} = load {}, {}* {}\n",
+                                "  {} = load {}, {}* {}, align 1\n",
                                 extracted, bty_ll, bty_ll, typed_ptr
                             ));
                         } else {
@@ -44014,6 +44037,24 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
             Type::Object(_) => 16,
             _ => 8,
         },
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` and friends.
+        // `Type::bits()` returns `None` for SIMD lane types (they're
+        // not a `bits`-classified scalar width), so the `_` fallback
+        // below silently computed `64 / 8 = 8` bytes for a REAL
+        // 16/32/64-byte SIMD register -- under-allocating the Vec's
+        // malloc buffer by half (vec128) to 1/8th (vec512) of what
+        // it needs, corrupting the heap on the second element's
+        // store. Exact same failure class as every prior BUG-6x
+        // under-allocation fix (`realloc(): invalid next size` /
+        // `free(): invalid pointer`). These are fixed 16/32/64-byte
+        // constants regardless of the SIMD lane element type T
+        // (`llvm_byte_size` above already gets this right; this
+        // sibling function -- the one Vec push/literal/growth
+        // codegen actually calls via `vec_element_size_expr`'s
+        // fallback -- never got the matching arm).
+        Type::Vec128(_) => 16,
+        Type::Vec256(_) => 32,
+        Type::Vec512(_) => 64,
         _ => (element.bits().unwrap_or(64) / 8) as u64,
     }
 }
@@ -44344,6 +44385,16 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // C backend's `box_<inner_tag>` shape so cross-backend
         // identifier names match.
         Type::Box(inner) => format!("box_{}", vec_struct_tag(inner)),
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` -- a SIMD
+        // lane type as a Vec ELEMENT. Same shape as every other arm
+        // in this match: without it, the `_` fallback calls
+        // `llvm_type(Vec128(_))`, which is `unreachable!` (SIMD
+        // vector types can't be expressed as a single `&'static
+        // str`, same reason FnPtr/Tuple/Struct above needed their
+        // own arms). Mirrors the C backend's `element_tag` fix.
+        Type::Vec128(inner) => format!("vec128_{}", vec_struct_tag(inner)),
+        Type::Vec256(inner) => format!("vec256_{}", vec_struct_tag(inner)),
+        Type::Vec512(inner) => format!("vec512_{}", vec_struct_tag(inner)),
         // Note: Type::Vec(_) and Type::Array { .. } are handled
         // by the leading arms of this match (lines 38416-38418) —
         // earlier-arm shadowing made the trailing duplicates

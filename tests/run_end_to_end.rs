@@ -8161,3 +8161,203 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// Feature-combination gap audit (2026-08-03), category 1: SIMD as a
+// Vec ELEMENT. Two real bugs found and fixed here, one per backend --
+// see the matching src/lib.rs test's doc comment for the full root-
+// cause writeup. This is the execution-level confirmation: the C
+// bug corrupted every generated identifier (a compile-time failure,
+// already caught by the lib.rs test), but the LLVM bug was a runtime
+// heap corruption from an under-sized malloc/realloc that only a
+// real execution (not just successful compilation) can catch.
+#[test]
+fn vec_of_vec128_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-vec-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let a: vec128<f64> = simd_splat(1.0 as f64);
+  let b: vec128<f64> = simd_splat(2.0 as f64);
+  let mut_v: Vec<vec128<f64>> = vec(a, b);
+  let s: f64 = simd_reduce_add(mut_v[0]);
+  print s;
+  push(mut ref mut_v, simd_splat(3.0 as f64));
+  print len(mut_v) as i64;
+  let s2: f64 = simd_reduce_add(mut_v[2]);
+  print s2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\n3\n6\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn array_of_vec128_and_generic_wrapper_vec128_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-array-generic-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Wrapper<T> { v: T }
+fn main() -> i64 {
+  let a: vec128<f64> = simd_splat(1.0 as f64);
+  let b: vec128<f64> = simd_splat(2.0 as f64);
+  let arr: [vec128<f64>; 2] = [a, b];
+  print simd_reduce_add(arr[0]);
+  print simd_reduce_add(arr[1]);
+  let w: Wrapper<vec128<f64>> = Wrapper { v: a };
+  print simd_reduce_add(w.v);
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\n4\n2\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-82 (2026-08-03, same gap-audit pass as the Vec<vec128> tests
+// above, LLVM-only). `Result<vec128<f64>, i64>` -- a MIXED-payload-
+// type enum -- segfaulted `lli` on both construction and match-arm
+// extraction, because neither site's bitcast-through-the-byte-buffer
+// load/store had an explicit alignment, so LLVM assumed the SIMD
+// payload's natural (16-byte) ABI alignment against a buffer that
+// only guarantees 4 bytes. This is a runtime crash a compile-only
+// test can't catch (the C backend, and even LLVM compilation itself,
+// both succeeded before the fix -- only actually RUNNING the LLVM
+// output crashed).
+#[test]
+fn result_of_vec128_mixed_payload_enum_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-result-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn make(flag: bool) -> Result<vec128<f64>, i64> {
+  if flag {
+    return Result.Ok(simd_splat(4.0 as f64));
+  }
+  return Result.Err(99);
+}
+fn main() -> i64 {
+  let r1: Result<vec128<f64>, i64> = make(true);
+  let r2: Result<vec128<f64>, i64> = make(false);
+  let s: f64 = match r1 {
+    Result.Ok(v) then simd_reduce_add(v),
+    Result.Err(_) then 0.0 as f64,
+  };
+  let e: i64 = match r2 {
+    Result.Ok(_) then -1,
+    Result.Err(code) then code,
+  };
+  print s;
+  print e;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "8\n99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}

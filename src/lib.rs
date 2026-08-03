@@ -53266,6 +53266,248 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    // Feature-combination gap audit (2026-08-03), category 1: SIMD as
+    // a CONTAINER ELEMENT (not a struct field, which BUG-79 above
+    // already covers). `Vec<vec128<f64>>` found TWO real bugs, one
+    // per backend, both the same "per-shape codegen helper forgot
+    // this element type" class as BUG-61/79:
+    //
+    // (1) C backend: `element_tag` (backend_c.rs) -- the function
+    //     that names Vec BUNDLE typedefs/helpers, a separate function
+    //     from `c_element_storage` that BUG-79 fixed -- had no arm
+    //     for Vec128/256/512, so its `_ => c_leaf_type(...)` fallback
+    //     returned the placeholder comment "/* vec128<T> */", and
+    //     `.replace(' ', "_")` turned it into `/*_vec128<T>_*/` --
+    //     embedded into every generated `intent_vec_<tag>__*`
+    //     identifier, corrupting the whole bundle (`cc` rejected with
+    //     a cascade of "expected '=', ',', ';'..." errors).
+    // (2) LLVM backend: TWO layered issues. First, `vec_struct_tag`
+    //     (backend_llvm.rs, the LLVM analog of `element_tag`) had the
+    //     same missing-arm gap, causing a Rust panic
+    //     ("llvm_type: use llvm_type_string for aggregate / ref
+    //     type"). Fixing that alone revealed a SECOND, more severe
+    //     bug: `vec_element_byte_size` (drives the Vec's malloc/
+    //     realloc sizing for push/growth) has a final fallback
+    //     `element.bits().unwrap_or(64) / 8` -- `Type::bits()`
+    //     returns `None` for SIMD lane types, so this silently
+    //     computed 8 bytes for a REAL 16-byte `vec128` (32 for
+    //     vec256, 64 for vec512) -- under-allocating the buffer by
+    //     half to 1/8th, corrupting the heap on the second element's
+    //     store (`realloc(): invalid next size` at runtime). Fixed
+    //     both: added the missing arms to `vec_struct_tag`
+    //     (identifier-safe recursive tag, mirroring `element_tag`)
+    //     and to `vec_element_byte_size` (16/32/64-byte constants,
+    //     matching the already-correct `llvm_byte_size`). Verified
+    //     with `valgrind --leak-check=full` on a native AOT LLVM
+    //     build in addition to both backends' stdout: 0 errors, all
+    //     heap blocks freed.
+    #[test]
+    fn vec_of_vec128_pushes_and_indexes_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let b: vec128<f64> = simd_splat(2.0 as f64);
+              let mut_v: Vec<vec128<f64>> = vec(a, b);
+              let s: f64 = simd_reduce_add(mut_v[0]);
+              print s;
+              push(mut ref mut_v, simd_splat(3.0 as f64));
+              print len(mut_v) as i64;
+              let s2: f64 = simd_reduce_add(mut_v[2]);
+              print s2;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<vec128<f64>> must compile to C");
+        assert!(
+            !c.contains("/*_vec128<T>_*/") && !c.contains("/* vec128<T> */"),
+            "must not leak the vec128<T> placeholder into a Vec bundle identifier; got:\n{}",
+            c
+        );
+        compile_to_llvm(source).expect("Vec<vec128<f64>> must compile to LLVM without panicking");
+    }
+
+    #[test]
+    fn array_of_vec128_indexes_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let b: vec128<f64> = simd_splat(2.0 as f64);
+              let arr: [vec128<f64>; 2] = [a, b];
+              let s0: f64 = simd_reduce_add(arr[0]);
+              let s1: f64 = simd_reduce_add(arr[1]);
+              print s0;
+              print s1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("[vec128<f64>; 2] must compile to C");
+        compile_to_llvm(source).expect("[vec128<f64>; 2] must compile to LLVM");
+    }
+
+    #[test]
+    fn struct_field_vec_of_vec256_compiles() {
+        // Two levels of nesting: struct -> Vec -> SIMD (as opposed
+        // to BUG-79's one-level struct -> SIMD).
+        let source = r#"
+            struct Lanes { data: Vec<vec256<f64>> }
+            fn main() -> i64 {
+              let a: vec256<f64> = simd256_splat(1.5 as f64);
+              let l: Lanes = Lanes { data: vec(a) };
+              let s: f64 = simd256_reduce_add(l.data[0]);
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("struct { Vec<vec256<f64>> } must compile to C");
+        compile_to_llvm(source).expect("struct { Vec<vec256<f64>> } must compile to LLVM");
+    }
+
+    #[test]
+    fn tuple_containing_vec128_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(2.0 as f64);
+              let pair: (vec128<f64>, i64) = (a, 42);
+              let s: f64 = simd_reduce_add(pair.0);
+              print s;
+              print pair.1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("(vec128<f64>, i64) tuple must compile to C");
+        compile_to_llvm(source).expect("(vec128<f64>, i64) tuple must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_struct_instantiated_at_vec128_compiles() {
+        let source = r#"
+            struct Wrapper<T> { v: T }
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(3.0 as f64);
+              let w: Wrapper<vec128<f64>> = Wrapper { v: a };
+              let s: f64 = simd_reduce_add(w.v);
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Wrapper<vec128<f64>> must compile to C");
+        compile_to_llvm(source).expect("Wrapper<vec128<f64>> must compile to LLVM");
+    }
+
+    #[test]
+    fn option_of_vec128_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(4.0 as f64);
+              let o: Option<vec128<f64>> = Option.Some(a);
+              let s: f64 = match o {
+                Option.Some(v) then simd_reduce_add(v),
+                Option.None then 0.0 as f64,
+              };
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Option<vec128<f64>> must compile to C");
+        compile_to_llvm(source).expect("Option<vec128<f64>> must compile to LLVM");
+    }
+
+    // BUG-82 (found+fixed 2026-08-03, same gap-audit pass as BUG-81
+    // above, LLVM-only). `Result<vec128<f64>, i64>` -- a MIXED-
+    // payload-type enum (unlike `Option<vec128<f64>>` just above,
+    // which has only ONE payloaded variant and so never touches the
+    // mixed-payload path at all) -- crashed `lli` with a bare
+    // segfault, no diagnostic, on both construction (`Result.Ok(v)`)
+    // and match-arm extraction. Root cause: mixed-payload enums store
+    // their payload in an `{i32, [N x i8]}` byte buffer (see the
+    // `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY` doc comment); reading or
+    // writing the ACTUAL payload type through that buffer requires a
+    // `bitcast i8* ... to <payload_llvm_type>*` followed by a
+    // load/store. Neither the construction site
+    // (`TypedExprKind::EnumVariantWithPayload`) nor the match-arm
+    // extraction site had an explicit `align` on that load/store --
+    // LLVM defaults to the pointee type's ABI alignment, which for
+    // `<2 x double>` (vec128) is 16 bytes, `<4 x double>` (vec256) is
+    // 32, etc. The buffer itself only guarantees 4-byte alignment
+    // (from the struct's leading `i32` tag field), so LLVM emitted an
+    // ALIGNED SSE/AVX move instruction against actually-unaligned
+    // memory -- a hard segfault at runtime, not a compile-time error,
+    // and not caught by `Option<T>` (single-payload-type enums use
+    // `insertvalue`/`extractvalue` directly on the SSA struct value,
+    // never touching the byte buffer at all). Fixed by adding an
+    // explicit `align 1` to both the construction-site store and the
+    // match-arm-extraction load -- tells LLVM to use unaligned move
+    // instructions, which is always correct regardless of the
+    // buffer's real alignment, for every payload type this code path
+    // handles (not just SIMD ones). Verified with `valgrind
+    // --leak-check=full` on a native AOT LLVM build covering BOTH
+    // variants (`Result.Ok` and `Result.Err`): 0 errors.
+    #[test]
+    fn result_of_vec128_and_i64_mixed_payload_enum_compiles() {
+        let source = r#"
+            fn make(flag: bool) -> Result<vec128<f64>, i64> {
+              if flag {
+                return Result.Ok(simd_splat(4.0 as f64));
+              }
+              return Result.Err(99);
+            }
+            fn main() -> i64 {
+              let r1: Result<vec128<f64>, i64> = make(true);
+              let r2: Result<vec128<f64>, i64> = make(false);
+              let s: f64 = match r1 {
+                Result.Ok(v) then simd_reduce_add(v),
+                Result.Err(_) then 0.0 as f64,
+              };
+              let e: i64 = match r2 {
+                Result.Ok(_) then -1,
+                Result.Err(code) then code,
+              };
+              print s;
+              print e;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Result<vec128<f64>, i64> must compile to C");
+        compile_to_llvm(source).expect("Result<vec128<f64>, i64> must compile to LLVM without panicking");
+    }
+
+    #[test]
+    fn hashmap_value_vec128_is_cleanly_rejected() {
+        // Matches the documented "hashmap_insert() supports scalar V
+        // in v1" restriction (same boundary as Vec<T> values) --
+        // confirming it's real and consistent for SIMD too, not
+        // silently accepted or a panic.
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(5.0 as f64);
+              let m: HashMap<i64, vec128<f64>> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, a);
+              return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(result.is_err(), "HashMap<i64, vec128<f64>> value must be rejected in v1");
+    }
+
+    #[test]
+    fn clone_at_on_struct_with_simd_field_in_vec_compiles_and_runs_correctly() {
+        let source = r#"
+            struct Combo { lane: vec128<f64>, tag: i64 }
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let items: Vec<Combo> = vec(Combo { lane: a, tag: 1 }, Combo { lane: a, tag: 2 });
+              let c: Combo = clone_at(items, 0);
+              let s: f64 = simd_reduce_add(c.lane);
+              print s;
+              print c.tag;
+              print len(items) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("clone_at on Vec<Combo> (SIMD field) must compile to C");
+        compile_to_llvm(source).expect("clone_at on Vec<Combo> (SIMD field) must compile to LLVM");
+    }
+
     /// BUG-58 (found in the same audit): `simd_store`/`simd256_store`/
     /// `simd512_store` mutate the target `Vec<T>` THROUGH its ref/
     /// pointer and return a byval COPY of the struct header (the SAME
