@@ -1,0 +1,26 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/keywords.vani              # LLVM
+//   vanic run examples/language/cherokee/keywords.vani --backend=c  # C
+//
+// Note: Cherokee has no native enum keyword; struct + functions tested instead.
+
+ᎤᎲᏍᏛ "Cherokee keyword smoke-test";
+
+ᎠᏙᏢᏍᎩ Nvdo {
+  x: i64,
+  y: i64,
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ neilemj(Ꭰ: i64, ᏈᎵ: i64) -> i64 {
+  ᏗᎬᏎᏗ Ꭰ + ᏈᎵ;
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ p: Nvdo = Nvdo { x: 3, y: 4 };
+  ᎠᏁᎳ s: i64 = neilemj(p.x, p.y);
+  ᎯᏍᏗᏎᏍᏗ s == 7;
+  ᎠᎴᏂᏍᎬᎢ "Cherokee keywords OK", s;
+  ᏗᎬᏎᏗ 0;
+}

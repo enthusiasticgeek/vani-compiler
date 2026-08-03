@@ -288,3 +288,31 @@ Repro: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/r
 Fix attempt: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-122029-backend-divergence-d10ddca462
+
+Repro: `tools/localfuzz/findings/20260803-122029-backend-divergence-d10ddca462/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-122029-backend-divergence-d10ddca462/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Cherokee keywords OK 7\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1241310-1785759628563797965.ll:1901:33: error: expected ')' at end of argument list\ndefine i64 @fn_neilemj(i64 %arg_\u13a0, i64 %arg_\u13c8\u13b5) {\n\n",
+    "timed_out": false
+  }
+}
+```
+
