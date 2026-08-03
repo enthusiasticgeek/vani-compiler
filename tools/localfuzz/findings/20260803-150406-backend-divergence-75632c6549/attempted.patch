@@ -1,0 +1,11 @@
+--- src/backend_c.rs
++++ src/backend_c.rs
+@@ -1008,7 +1008,7 @@
+     total = 0;
+     for x in xs {
+         total = total + *x; // Assuming x is a pointer to i64
+-        assert!(total < 2); // Incorrect comparison
++        assert!(total < len(x)); // Correct comparison
+     }
+     return total;
+ }
