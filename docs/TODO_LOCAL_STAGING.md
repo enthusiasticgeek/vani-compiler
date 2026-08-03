@@ -94,3 +94,30 @@ Repro: `tools/localfuzz/findings/20260803-003108-run-crash-4804c21458/repro.vani
 }
 ```
 
+
+---
+
+### Candidate: 20260803-023025-run-crash-c753807be3
+
+Repro: `tools/localfuzz/findings/20260803-023025-run-crash-c753807be3/repro.vani`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
