@@ -935,3 +935,12 @@ vanic-candidate-1928013-1785795059753022202: /tmp/vanic-candidate-1928013-178579
 This bug affects the `--backend=c` and `--backend=llvm` backends.
 
 ### STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-222704-backend-divergence-2c07ac5b34
+
+Repro: `tools/localfuzz/findings/20260803-222704-backend-divergence-2c07ac5b34/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-222704-backend-divergence-2c07ac5b34/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
