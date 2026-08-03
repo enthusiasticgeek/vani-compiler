@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/italian/vec_invariants.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "0\n9223372036854775807\n9223372036854775807\n9223372036854775807\n9223372036854775807\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "0\n9223372036854775807\n-2\n9223372036854775805\n-4\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}

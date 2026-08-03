@@ -736,3 +736,12 @@ Fix attempt: `tools/localfuzz/findings/20260803-182951-backend-divergence-86aeb7
   }
 
   fn main() -> i64
+
+---
+
+### Candidate: 20260803-184651-backend-divergence-15e17b9e43
+
+Repro: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
