@@ -468,3 +468,65 @@ Repro: `tools/localfuzz/findings/20260803-150406-backend-divergence-75632c6549/r
 Fix attempt: `tools/localfuzz/findings/20260803-150406-backend-divergence-75632c6549/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-150820-run-crash-ad0d70d226
+
+Repro: `tools/localfuzz/findings/20260803-150820-run-crash-ad0d70d226/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-150820-run-crash-ad0d70d226/fix_attempt.md`
+
+### Staging Entry
+
+**Date:** [Insert Date]
+
+**Description:**
+
+Vani-compiler's local staging log reveals a run-crash issue in the `control_flow.vani` file using the LLVM backend. The mutant source provided reproduces this crash, resulting in an unhandled exception or abnormal termination of the program.
+
+**Repro Source:**
+
+The repro source is attached to this bug report.
+
+```vani
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/control_flow.vani              # LLVM
+//   vanic run examples/language/danish/control_flow.vani --backend=c  # C
+
+formaal "Danish control flow — hvis/ellers/mens";
+
+funktion tegn(n: i64) -> i64 {
+  hvis n > 0 {
+    returner 1;
+  } ellers hvis n < 0 {
+    returner -1;
+  } ellers {
+    returner 0;
+  }
+}
+
+funktion nedtaelling(fra_n: i64) -> i64 {
+  lad i: i64 = fra_n;
+  lad sum: i64 = 0;
+  mens i > 0 {
+    sum = sum + i;
+    i = i - 1;
+  }
+  returner sum;
+}
+
+fn main() -> i64 {
+  bekraeft tegn(5)  == 1;
+  bekraeft tegn(-3) == -1;
+  bekraeft tegn(0)  == 0;
+  bekraeft nedtaelling(9223372036854775807) == 10;
+  udskriv "tegn og nedtaelling ok";
+  returner 0;
+}
+```
+
+**Observed Symptom:**
+
+When the `control_flow.v
