@@ -408,17 +408,32 @@ Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
 
 ## 9. Affine/ownership x generics x containers (🟡 — three-way, the deepest layer the closed sweep reached was two-way)
 
-- [ ] 🟡 `clone_at` on `Vec<GenericStruct<T>>` specifically (the
+- [x] 🟡 `clone_at` on `Vec<GenericStruct<T>>` specifically (the
       closed sweep tested `Vec<GenericStruct<i64>>` ALONGSIDE
       `Vec<GenericStruct<f64>>` existing in the same program as a
       monomorphization-collision check — it did not specifically
       confirm `clone_at`'s indexed-mutate-then-`set` idiom works
-      through a generic element type).
-- [ ] 🟡 A recursive GENERIC struct: `struct Node<T> { value: T, next:
+      through a generic element type). Checked clean on both
+      backends, valgrind-clean. See BUG-93 in `docs/TODO_CURRENT.md`.
+- [x] 🟡 A recursive GENERIC struct: `struct Node<T> { value: T, next:
       Option<Box<Node<T>>> }` — self-referential AND generic at
       once. Recursive structs (non-generic) and `Box<T>`-in-enum-
       payload are each independently well-tested; nobody has
-      combined them.
+      combined them. Found+fixed a real bug (BUG-93: five compounding
+      gaps -- four missing `Type::Box` arms across four copies of the
+      generics-monomorphization type-walker, plus a single-pass
+      generation loop that silently discarded newly-discovered needs
+      from a freshly-monomorphized struct's own fields, fixed via a
+      proper fixed-point worklist). Investigating this also surfaced
+      THREE separate, narrower, deferred findings: bare enum
+      constructors nested directly in struct-literal fields are still
+      ambiguous once 2+ generic-enum instantiations exist (has a
+      working workaround); field access through a bare `Box<T>`
+      doesn't auto-deref at all (orthogonal to generics, wide blast
+      radius to fix); and a pre-existing C-backend memory leak in
+      `Box<StructWithHeapOwningFields>`'s scope-exit Drop, reproducing
+      on the already-shipped BUG-35 example independent of generics.
+      All documented in BUG-93's writeup in `docs/TODO_CURRENT.md`.
 - [ ] 🟢 `Box<T>` through a generic function boundary: `fn identity<T>
       (b: Box<T>) -> Box<T>` — explicitly flagged as "worth probing,
       never observed broken" in `missing_features.md`'s own closing

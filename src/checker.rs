@@ -7572,7 +7572,7 @@ fn monomorphize_type_decls_in_program(
                 Type::Param(_) => true,
                 Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
                 | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
-                | Type::Channel(t, _) => has_param(t),
+                | Type::Box(t) | Type::Channel(t, _) => has_param(t),
                 Type::Array { element, .. } => has_param(element),
                 Type::Tuple(elements) => elements.iter().any(has_param),
                 Type::FnPtr(params, ret) => params.iter().any(has_param) || has_param(ret),
@@ -7613,8 +7613,24 @@ fn monomorphize_type_decls_in_program(
                     needed_structs, needed_enums,
                 );
             }
+            // Gap-audit fix (2026-08-03): `Type::Box` was missing
+            // from this arm (and its two sibling copies of this same
+            // walker, at `rewrite_apply_in_ty` and the local `rec`
+            // inside `collect_apply_in_stmt`) -- a `Type::Apply`
+            // nested inside a `Box<...>` (e.g. `Option<Box<Node<T>>
+            // >`'s inner `Node<T>`, the canonical recursive-generic-
+            // struct shape) was never discovered as needing
+            // monomorphization, so it never got rewritten from the
+            // unresolved `Type::Apply{Node,[i64]}` into the concrete
+            // `Type::Struct("Node__i64")`. The VALUE side (`box(x)`'s
+            // own type-checking) already produced the correctly
+            // mangled type independently, so the two sides disagreed
+            // -- surfacing as "enum payload must be assignable to
+            // Box<Node<i64>>, got Box<Node__i64>" (same underlying
+            // type, one resolved, one not).
             Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner)
-            | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
+            | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::Box(inner) => {
                 collect_apply_in_ty(
                     inner, struct_templates, enum_templates,
                     needed_structs, needed_enums,
@@ -7972,7 +7988,8 @@ fn monomorphize_type_decls_in_program(
                 }
             }
             Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
-            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i) => {
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => {
                 normalize_one(i, st, en, all_enum_names);
             }
             Type::Array { element, .. } => normalize_one(element, st, en, all_enum_names),
@@ -8006,75 +8023,139 @@ fn monomorphize_type_decls_in_program(
     // Templates' variant payloads / field types reference
     // Type::Param(name); substitute each occurrence with
     // the matching concrete arg.
+    //
+    // Gap-audit fix (2026-08-03): a freshly-monomorphized struct's
+    // OWN fields can reference a FURTHER generic instantiation that
+    // wasn't otherwise discoverable from any call site (e.g. a
+    // self-referential generic `struct Node<T> { value: T, next:
+    // Option<Box<Node<T>>> }` monomorphized to `Node__i64` needs
+    // `Option<Box<Node__i64>>` registered too, but nothing else in
+    // the program ever writes that type out literally). This used to
+    // be discovered via `collect_apply_in_ty(..., &mut needed_structs
+    // .clone(), &mut needed_enums.clone())` -- cloning BOTH output
+    // lists so the discovery had nowhere to go, silently discarded
+    // ("ignored copy", per the old comment). Fixed by turning this
+    // into a proper fixed-point worklist, mirroring the established
+    // "XL4 multi-pass" pattern `monomorphize_generics_in_program`
+    // already uses for the analogous fn-generics case: each round
+    // processes only the NEWLY-pending (name, args) pairs, collects
+    // any further needs a freshly-generated decl's own fields/
+    // payloads introduce, and loops until a round adds nothing new.
+    // `processed_*` guards against reprocessing (and against a
+    // pathological infinite loop, though ordinary monomorphization
+    // can't actually cycle -- each round's new needs are always
+    // MORE concrete than the last).
     let mut new_structs: Vec<StructDecl> = Vec::new();
-    for (name, args) in &needed_structs {
-        let template = &struct_templates[name];
-        if template.type_params.len() != args.len() {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic struct '{}' expects {} type arguments, got {}",
-                    name, template.type_params.len(), args.len()
-                ),
-            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
-            continue;
-        }
-        let mangled = mangle_generic_decl(name, args);
-        let mut mono = template.clone();
-        mono.name = mangled;
-        mono.type_params = Vec::new();
-        for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
-            for fld in mono.fields.iter_mut() {
-                substitute_type_param(&mut fld.ty, tp, concrete);
-            }
-        }
-        // Replace any Type::Apply we just substituted into
-        // the fields (e.g. `Pair<i64, T>` inside a generic
-        // struct's field becomes `Pair<i64, concrete>`
-        // after substitution â€” collect it for the worklist).
-        for fld in &mono.fields {
-            collect_apply_in_ty(
-                &fld.ty, &struct_templates, &enum_templates,
-                &mut needed_structs.clone(), // ignored copy
-                &mut needed_enums.clone(),   // ignored copy
-            );
-        }
-        new_structs.push(mono);
-    }
     let mut new_enums: Vec<EnumDecl> = Vec::new();
-    for (name, args) in &needed_enums {
-        let template = &enum_templates[name];
-        if template.type_params.len() != args.len() {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic enum '{}' expects {} type arguments, got {}",
-                    name, template.type_params.len(), args.len()
-                ),
-            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
-            continue;
-        }
-        let mangled = mangle_generic_decl(name, args);
-        let mut mono = template.clone();
-        mono.name = mangled;
-        mono.type_params = Vec::new();
-        for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
-            for variant in mono.variants.iter_mut() {
-                for p_ty in variant.payload.iter_mut() {
-                    substitute_type_param(p_ty, tp, concrete);
+    // `Type` isn't `Hash`, so track "already processed" with a plain
+    // Vec + linear scan (these lists stay small in practice -- the
+    // number of distinct generic instantiations in a program).
+    let mut processed_structs: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut processed_enums: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut pending_structs = needed_structs.clone();
+    let mut pending_enums = needed_enums.clone();
+    while !pending_structs.is_empty() || !pending_enums.is_empty() {
+        let mut discovered_structs: Vec<(String, Vec<Type>)> = Vec::new();
+        let mut discovered_enums: Vec<(String, Vec<Type>)> = Vec::new();
+        for (name, mut args) in pending_structs.drain(..) {
+            normalize_apply_args(&mut args, &struct_templates, &enum_templates, &all_enum_names);
+            let key = (name.clone(), args.clone());
+            if processed_structs.contains(&key) {
+                continue;
+            }
+            processed_structs.push(key);
+            let Some(template) = struct_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                diagnostics.push(Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic struct '{}' expects {} type arguments, got {}",
+                        name, template.type_params.len(), args.len()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
+                continue;
+            }
+            let mangled = mangle_generic_decl(&name, &args);
+            let mut mono = template.clone();
+            mono.name = mangled;
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for fld in mono.fields.iter_mut() {
+                    substitute_type_param(&mut fld.ty, tp, concrete);
                 }
             }
-        }
-        // Closure #284: after substitution, any Type::Struct
-        // names that are actually declared enums need to be
-        // rewritten to Type::Enum so the payload type-equality
-        // check at variant constructors lines up.
-        for variant in mono.variants.iter_mut() {
-            for p_ty in variant.payload.iter_mut() {
-                normalize_one(p_ty, &struct_templates, &enum_templates, &all_enum_names);
+            // Replace any Type::Apply we just substituted into
+            // the fields (e.g. `Pair<i64, T>` inside a generic
+            // struct's field becomes `Pair<i64, concrete>`
+            // after substitution) -- feed genuinely new needs
+            // into the NEXT round instead of discarding them.
+            for fld in &mono.fields {
+                collect_apply_in_ty(
+                    &fld.ty, &struct_templates, &enum_templates,
+                    &mut discovered_structs, &mut discovered_enums,
+                );
             }
+            new_structs.push(mono);
         }
-        new_enums.push(mono);
+        for (name, mut args) in pending_enums.drain(..) {
+            normalize_apply_args(&mut args, &struct_templates, &enum_templates, &all_enum_names);
+            let key = (name.clone(), args.clone());
+            if processed_enums.contains(&key) {
+                continue;
+            }
+            processed_enums.push(key);
+            let Some(template) = enum_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                diagnostics.push(Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic enum '{}' expects {} type arguments, got {}",
+                        name, template.type_params.len(), args.len()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
+                continue;
+            }
+            let mangled = mangle_generic_decl(&name, &args);
+            let mut mono = template.clone();
+            mono.name = mangled;
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for variant in mono.variants.iter_mut() {
+                    for p_ty in variant.payload.iter_mut() {
+                        substitute_type_param(p_ty, tp, concrete);
+                    }
+                }
+            }
+            // Closure #284: after substitution, any Type::Struct
+            // names that are actually declared enums need to be
+            // rewritten to Type::Enum so the payload type-equality
+            // check at variant constructors lines up.
+            for variant in mono.variants.iter_mut() {
+                for p_ty in variant.payload.iter_mut() {
+                    normalize_one(p_ty, &struct_templates, &enum_templates, &all_enum_names);
+                }
+            }
+            // Same worklist-feeding as the struct arm above -- an
+            // enum variant payload can equally introduce a further
+            // generic instantiation need.
+            for variant in &mono.variants {
+                for p_ty in &variant.payload {
+                    collect_apply_in_ty(
+                        p_ty, &struct_templates, &enum_templates,
+                        &mut discovered_structs, &mut discovered_enums,
+                    );
+                }
+            }
+            new_enums.push(mono);
+        }
+        pending_structs = discovered_structs
+            .into_iter()
+            .filter(|k| !processed_structs.contains(k))
+            .collect();
+        pending_enums = discovered_enums
+            .into_iter()
+            .filter(|k| !processed_enums.contains(k))
+            .collect();
     }
     // Drop the generic templates from the program; append
     // the new monomorphic copies.
@@ -8699,7 +8780,7 @@ fn rewrite_apply_in_ty(
                     Type::Param(_) => true,
                     Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
                     | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
-                    | Type::Channel(t, _) => has_param_local(t),
+                    | Type::Box(t) | Type::Channel(t, _) => has_param_local(t),
                     Type::Array { element, .. } => has_param_local(element),
                     Type::Tuple(elements) => elements.iter().any(has_param_local),
                     Type::FnPtr(params, ret) => params.iter().any(has_param_local) || has_param_local(ret),
@@ -8723,7 +8804,8 @@ fn rewrite_apply_in_ty(
             };
         }
         Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner)
-        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
+        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+        | Type::Box(inner) => {
             rewrite_apply_in_ty(inner, struct_names, enum_names);
         }
         Type::Array { element, .. } => rewrite_apply_in_ty(element, struct_names, enum_names),
@@ -8777,7 +8859,8 @@ fn collect_apply_in_stmt(
                     }
                 }
                 Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
-                | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i) => {
+                | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+                | Type::Box(i) => {
                     rec(i, st, en, ns, ne)
                 }
                 Type::Array { element, .. } => rec(element, st, en, ns, ne),

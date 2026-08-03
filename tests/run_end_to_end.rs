@@ -9576,3 +9576,73 @@ fn main() -> i64 {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// BUG-93 (2026-08-03), feature-combination gap audit category 9 row
+// 2: a recursive GENERIC struct (`struct Node<T> { value: T, next:
+// Option<Box<Node<T>>> }`) failed to compile at all -- five
+// compounding gaps in the generics-monomorphization pipeline (four
+// missing Type::Box arms across four separate "walk a Type for
+// nested Apply" copies, plus a single-pass-instead-of-fixed-point
+// generation loop that silently discarded newly-discovered needs
+// from a freshly-monomorphized struct's own fields). See the
+// matching src/lib.rs test's doc comment for the full root-cause
+// writeup, including three separate deferred findings surfaced
+// along the way (enum-ctor-in-struct-literal ambiguity with a
+// working workaround, no field access through a bare Box<T>, and a
+// pre-existing C-backend memory leak in the already-shipped BUG-35
+// example independent of generics).
+#[test]
+fn recursive_generic_struct_node_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-recursive-generic-node-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+fn main() -> i64 {
+  let tail: Node<i64> = Node { value: 3, next: Option.None };
+  let tail_next: Option<Box<Node<i64>>> = Option.Some(box(tail));
+  let mid: Node<i64> = Node { value: 2, next: tail_next };
+  let mid_next: Option<Box<Node<i64>>> = Option.Some(box(mid));
+  let head: Node<i64> = Node { value: 1, next: mid_next };
+  print head.value;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}

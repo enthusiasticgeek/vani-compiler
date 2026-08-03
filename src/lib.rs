@@ -51169,6 +51169,161 @@ fn main() -> i64 { return 0; }
             .expect("plain extern fn call inside task body must be rejected (LLVM)");
     }
 
+    // Feature-combination gap audit (2026-08-03), category 9, row 1:
+    // `clone_at` on `Vec<GenericStruct<T>>` -- the indexed-mutate-
+    // then-`set` idiom through a generic element type. Checked clean
+    // on both backends -- `clone_at` correctly deep-clones the
+    // element (including a non-Copy `OwnedStr` field), `set` writes
+    // the mutated clone back to the right index, and unrelated
+    // slots are untouched. Verified with `valgrind --leak-check=full`
+    // on native AOT builds of both backends: 0 errors, all heap
+    // blocks freed.
+    #[test]
+    fn clone_at_indexed_mutate_then_set_on_generic_struct_vec_lib() {
+        let source = r#"
+            struct Holder<T> { value: T, label: OwnedStr }
+            fn main() -> i64 {
+              let items: Vec<Holder<i64>> = vec(
+                Holder { value: 1, label: "a" + "" },
+                Holder { value: 2, label: "b" + "" },
+              );
+              let mut_item: Holder<i64> = clone_at(ref items, 1);
+              let updated: Holder<i64> = Holder { value: mut_item.value + 100, label: mut_item.label };
+              let _ = set(mut ref items, 1, updated);
+              let a: Holder<i64> = clone_at(ref items, 0);
+              let b: Holder<i64> = clone_at(ref items, 1);
+              print a.value;
+              print b.value;
+              print b.label;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("clone_at indexed-mutate-then-set on generic struct Vec must compile to C");
+        compile_to_llvm(source)
+            .expect("clone_at indexed-mutate-then-set on generic struct Vec must compile to LLVM");
+    }
+
+    // BUG-93 (found+fixed 2026-08-03). Category 9, row 2: a recursive
+    // GENERIC struct (`struct Node<T> { value: T, next: Option<Box
+    // <Node<T>>> }`, self-referential AND generic at once) failed to
+    // compile at all -- "unknown variable 'Option'" / "struct field
+    // 'next' must be assignable to Option__Box_Struct__Node__i64___,
+    // got i64" -- even though the exact same pattern with a
+    // CONCRETE (non-generic) `Node` has been a working, shipped
+    // regression test since BUG-35.
+    // Root cause was FIVE compounding gaps, the SAME "sibling walker
+    // never learned about a shape" pattern from BUG-90, but this
+    // time the missing shape was `Type::Box` (not Match/Block):
+    //   1-4. `collect_apply_in_ty`, `rewrite_apply_in_ty`, the `rec`
+    //      closure inside `collect_apply_in_stmt`, and `normalize_one`
+    //      (FOUR independent copies of essentially the same "walk a
+    //      Type looking for/rewriting nested Type::Apply" logic, all
+    //      in checker.rs) each had an arm for Vec/Ref/RefMut/Atomic/
+    //      Mutex/Guard but none for `Type::Box` -- so a generic
+    //      instantiation nested inside a `Box<...>` (e.g. `Option<Box
+    //      <Node<T>>>`'s inner `Node<T>`) was invisible to every one
+    //      of these passes. Fixed by adding the missing arm to all
+    //      four, mirroring the existing sibling-type arms exactly.
+    //   5. Even with (1-4) fixed, `monomorphize_type_decls_in_program`
+    //      still only ran discovery+generation in a SINGLE pass: a
+    //      freshly-monomorphized generic struct's OWN fields can
+    //      introduce a FURTHER generic instantiation need (concretely:
+    //      `Node__i64`'s own `next` field needs `Option<Box<Node__
+    //      i64>>` registered, but nothing else in the program ever
+    //      writes that type out literally for the single discovery
+    //      pass to find). The code already collected this via
+    //      `collect_apply_in_ty(&fld.ty, ..., &mut needed_structs.
+    //      clone(), &mut needed_enums.clone())` -- but cloning BOTH
+    //      output lists meant the discovery had nowhere real to go;
+    //      the surrounding comment literally said "ignored copy".
+    //      Fixed by converting the single-pass generation into a
+    //      proper fixed-point worklist (mirroring the established
+    //      "XL4 multi-pass" pattern `monomorphize_generics_in_program`
+    //      already uses for the analogous fn-generics case): each
+    //      round processes only newly-pending (name, args) pairs and
+    //      feeds any further discovered needs into the next round,
+    //      until a round adds nothing new.
+    // Verified with `valgrind --leak-check=full` on a native AOT
+    // LLVM build: 0 errors.
+    // Two SEPARATE, narrower findings surfaced during this
+    // investigation, both deferred (not fixed) rather than rushed:
+    //   (a) A bare enum constructor written DIRECTLY inside a struct-
+    //       literal field (`Node { value: 2, next: Option.Some(box(
+    //       tail)) }`) is still ambiguous once 2+ instantiations of
+    //       the same generic enum exist in the program -- BUG-46's
+    //       existing fix (`resolve_bare_enum_ctors_in_stmt`) only
+    //       covers a `Let`'s own top-level initializer or a `Return`,
+    //       not an enum constructor nested inside a StructLit field.
+    //       HAS A WORKING WORKAROUND: bind the constructor to its own
+    //       `let` with an explicit enum annotation first (`let
+    //       tail_next: Option<Box<Node<i64>>> = Option.Some(box(
+    //       tail));`), THEN use that binding as the struct field --
+    //       this hits BUG-46's already-working `Let`-annotation path
+    //       and compiles/runs correctly (verified, both backends).
+    //   (b) Field access through a BARE `Box<T>` (`n1.value` where
+    //       `n1: Box<Node<i64>>`) is rejected outright ("field access
+    //       on non-struct type Box<...>") -- `Type::deref()` (ast.rs)
+    //       only peels `Ref`/`RefMut`, never `Box`. Reproduces
+    //       identically with a non-generic Box<T> too, so it's
+    //       orthogonal to generics specifically. `Type::deref()` is
+    //       used in 60+ call sites across checker.rs/backend_c.rs/
+    //       backend_llvm.rs/ssa.rs/smt.rs -- extending it (or adding a
+    //       parallel Box-aware variant) needs careful auditing of
+    //       every call site's assumptions before it's safe to touch,
+    //       the same category of risk as BUG-91's deferred fix.
+    //   (c) While valgrind-verifying (a)'s workaround, found a THIRD,
+    //       genuinely separate pre-existing memory leak, independent
+    //       of generics entirely: `Box<StructWithHeapOwningFields>`'s
+    //       scope-exit Drop (`backend_c.rs`'s per-statement Drop
+    //       AND its sibling `emit_struct_field_drops` helper, both
+    //       hit the exact same gap) only frees the Box's OWN heap
+    //       slot -- it never recursively drops the BOXED struct's
+    //       OWN heap-owning fields first. Reproduces on the ALREADY-
+    //       SHIPPED, non-generic `examples/language/english/
+    //       option_box_recursive_struct.vani` (BUG-35's own
+    //       regression example): `valgrind --leak-check=full` on its
+    //       C-backend build shows "48 (24 direct, 24 indirect) bytes
+    //       ... definitely lost" (LLVM backend: 0 errors, unaffected).
+    //       Deferred rather than fixed in-session: unlike the other
+    //       fixes in this session, this ISN'T a simple missing-arm
+    //       fix -- a `Box<Node>` field pointing into a chain of
+    //       unknown-at-compile-time length needs a genuine runtime
+    //       recursive/iterative free routine (mirroring how `Vec<T>`'s
+    //       own drop is a real per-element-type HELPER FUNCTION that
+    //       loops at runtime, not inlined code), which is a
+    //       substantive design task rather than a mirrored one-line
+    //       arm addition. Whoever picks this up next: start from
+    //       `emit_struct_field_drops`'s `Type::Box(box_inner) => match
+    //       &**box_inner { ... _ => free-only ... }` arm (backend_c.rs)
+    //       and the analogous top-level scope-exit Drop arm for
+    //       `Type::Box(inner)` -- both need a `Type::Struct(name)` case
+    //       that emits a call to a NEW dedicated recursive free helper
+    //       (one per boxed struct shape) rather than a bare `free()`.
+    // New tests: 2 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real
+    // stdout, both backends) for the fixed recursive-generic-struct
+    // case (using workaround (a)'s pattern, which is also the
+    // idiomatic v1 way to write this).
+    #[test]
+    fn recursive_generic_struct_node_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+            fn main() -> i64 {
+              let tail: Node<i64> = Node { value: 3, next: Option.None };
+              let tail_next: Option<Box<Node<i64>>> = Option.Some(box(tail));
+              let mid: Node<i64> = Node { value: 2, next: tail_next };
+              let mid_next: Option<Box<Node<i64>>> = Option.Some(box(mid));
+              let head: Node<i64> = Node { value: 1, next: mid_next };
+              print head.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("recursive generic struct Node<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("recursive generic struct Node<T> must compile to LLVM");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {
