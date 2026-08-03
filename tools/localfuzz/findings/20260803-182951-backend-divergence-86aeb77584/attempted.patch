@@ -1,0 +1,12 @@
+diff --git a/src/backend_c.rs b/src/backend_c.rs
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -100,7 +100,7 @@ fn cond_branch(c: Condition) -> i32 {
+     let a = if a > 0 { 1 } else { 0 };
+     let b = if b > 0 { 1 } else { 0 };
+     let c = if c > 0 { 1 } else { 0 };
+-    if (a | b | c) != 0 {
++    if a || b || c {
+         1
+     } else {
+         0

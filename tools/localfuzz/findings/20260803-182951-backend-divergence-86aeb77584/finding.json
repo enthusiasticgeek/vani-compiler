@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/hungarian/control_flow.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "elojel es visszaszamlal ok\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1654584-1785781790642205315.ll:69:27: error: integer constant must have integer type\n  %v_1 = fadd double 0.0, 0\n                          ^\n\n",
+    "timed_out": false
+  }
+}

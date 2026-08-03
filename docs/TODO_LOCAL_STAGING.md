@@ -685,3 +685,54 @@ Repro: `tools/localfuzz/findings/20260803-174717-backend-divergence-b600ec1f18/r
 Fix attempt: `tools/localfuzz/findings/20260803-174717-backend-divergence-b600ec1f18/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-182951-backend-divergence-86aeb77584
+
+Repro: `tools/localfuzz/findings/20260803-182951-backend-divergence-86aeb77584/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-182951-backend-divergence-86aeb77584/fix_attempt.md`
+
+**STAGING ENTRY**
+
+* **Component**: Compiler (vani-compiler)
+* **Repository**: [vani-compiler-localfuzz](https://github.com/virgo/source/vani-compiler-localfuzz/)
+* **Build Configuration**: 
+  - LLVM: Latest stable version
+  - C backend: Enabled
+* **Mutant Identifier**: 1654584-1785781790642205315
+* **Target Architecture**: x86_64 (Linux)
+* **Fuzzing Mode**: Local staging
+* **Mutation Source**: 
+  ```vani
+  // vani-lang: hungarian
+  //
+  // build & run:
+  //   vanic run examples/language/hungarian/control_flow.vani              # LLVM
+  //   vanic run examples/language/hungarian/control_flow.vani --backend=c  # C
+  ```
+* **Mutant Generated Source**:
+  ```vani
+  cél "Hungarian control flow — ha/különben/amíg";
+
+  fuggveny elojel(n: f64) -> i64 {
+    ha n > 0 {
+      visszatér 1;
+    } különben ha n < 0 {
+      visszatér -1;
+    } különben {
+      visszatér 0;
+    }
+  }
+
+  fuggveny visszaszamlal(n_tol: i64) -> i64 {
+    legyen i: i64 = n_tol;
+    legyen osszeg: i64 = 0;
+    amíg i > 0 {
+      osszeg = osszeg + i;
+      i = i - 1;
+    }
+    visszatér osszeg;
+  }
+
+  fn main() -> i64
