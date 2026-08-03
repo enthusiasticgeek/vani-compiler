@@ -772,3 +772,31 @@ Repro: `tools/localfuzz/findings/20260803-193223-backend-divergence-c9f03b1901/r
 Fix attempt: `tools/localfuzz/findings/20260803-193223-backend-divergence-c9f03b1901/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-200030-backend-divergence-060a62fb21
+
+Repro: `tools/localfuzz/findings/20260803-200030-backend-divergence-060a62fb21/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-200030-backend-divergence-060a62fb21/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "5! = \u0967\u0968\u0966  6! = 720\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1766252-1785787228998824453.ll:133:27: error: integer constant must have integer type\n  %v_4 = fadd double 0.0, 720\n                          ^\n\n",
+    "timed_out": false
+  }
+}
+```
+
