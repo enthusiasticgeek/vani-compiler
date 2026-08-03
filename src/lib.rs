@@ -51399,6 +51399,147 @@ fn main() -> i64 { return 0; }
             .expect("parallel for over Vec<Struct-with-OwnedStr> must compile to LLVM");
     }
 
+    // Feature-combination gap audit (2026-08-03), category 10, row 1:
+    // `match` with bindings on a DEEPLY nested built-in enum payload
+    // (`Result<Option<T>, E>`, matched in ONE `match` expression).
+    // Checked clean -- NOT a bug, confirmed to need the same
+    // documented "two flat matches" workaround user-declared nested
+    // enums already require (`tutorials/src/beginner/
+    // 08a_pattern_match_primer.md`): nesting `Result.Ok(Option.Some
+    // (v))` in one pattern is a clean PARSER rejection ("expected ')'
+    // (variant payload binding close)"); the two-flat-matches
+    // rewrite compiles and runs correctly on both backends.
+    #[test]
+    fn nested_result_option_match_requires_two_flat_matches_per_docs() {
+        let nested_source = r#"
+            fn lookup(x: i64) -> Result<Option<i64>, i64> {
+              if x < 0 { return Result.Err(-1); }
+              return Result.Ok(Option.Some(x * 2));
+            }
+            fn main() -> i64 {
+              let r: i64 = match lookup(5) {
+                Result.Ok(Option.Some(v)) then v,
+                Result.Ok(Option.None) then 0,
+                Result.Err(e) then e,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(nested_source)
+            .err()
+            .expect("one-expression nested Result<Option<T>,E> match must be rejected (C)");
+        compile_to_llvm(nested_source)
+            .err()
+            .expect("one-expression nested Result<Option<T>,E> match must be rejected (LLVM)");
+
+        let two_flat_source = r#"
+            fn lookup(x: i64) -> Result<Option<i64>, i64> {
+              if x < 0 { return Result.Err(-1); }
+              if x == 0 { return Result.Ok(Option.None); }
+              return Result.Ok(Option.Some(x * 2));
+            }
+            fn classify(x: i64) -> i64 {
+              let r: Result<Option<i64>, i64> = lookup(x);
+              let inner: Option<i64> = match r {
+                Result.Ok(opt) then opt,
+                Result.Err(e) then Option.None,
+              };
+              let is_err: bool = match r {
+                Result.Ok(_) then false,
+                Result.Err(_) then true,
+              };
+              if is_err {
+                return match r {
+                  Result.Ok(_) then 0,
+                  Result.Err(e) then e,
+                };
+              }
+              return match inner {
+                Option.Some(v) then v,
+                Option.None then 0,
+              };
+            }
+            fn main() -> i64 {
+              print classify(5);
+              print classify(0);
+              print classify(0 - 1);
+              return 0;
+            }
+        "#;
+        compile_to_c(two_flat_source)
+            .expect("two-flat-matches rewrite of nested Result<Option<T>,E> must compile to C");
+        compile_to_llvm(two_flat_source)
+            .expect("two-flat-matches rewrite of nested Result<Option<T>,E> must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 10, row 2:
+    // a guarded slice-pattern arm (`[a, b] if cond then ...`)
+    // combined with a GENERIC function `fn classify<T>(xs: Vec<T>)`
+    // where T is a Copy scalar type parameter. Checked clean on both
+    // backends, for both an i64 and an f64 instantiation of T.
+    #[test]
+    fn guarded_slice_pattern_through_generic_vec_element_type() {
+        let source = r#"
+            fn classify<T>(xs: Vec<T>, n: i64) -> i64 {
+              return match xs {
+                [a, b] if n > 10 then n,
+                _ if n > 5 then 100,
+                _ then -1,
+              };
+            }
+            fn main() -> i64 {
+              let ints: Vec<i64> = vec(1, 2);
+              print classify(ints, 20);
+              let ints2: Vec<i64> = vec(1, 2);
+              print classify(ints2, 6);
+              let ints3: Vec<i64> = vec(1, 2);
+              print classify(ints3, 1);
+              let floats: Vec<f64> = vec(1.0, 2.0);
+              print classify(floats, 20);
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("guarded slice pattern through generic Vec<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("guarded slice pattern through generic Vec<T> must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 10, row 3:
+    // an or-pattern-shaped guard condition (`if n == 1 || n == 2`) on
+    // an enum variant match arm, combined with the variant's payload
+    // BINDING used inside the guard expression itself. Checked clean
+    // on both backends.
+    #[test]
+    fn or_pattern_guard_referencing_variant_binding() {
+        let source = r#"
+            enum Shape {
+              Circle(i64),
+              Square(i64),
+            }
+            fn classify(s: Shape) -> i64 {
+              return match s {
+                Shape.Circle(n) if n == 1 || n == 2 then 100,
+                Shape.Circle(n) then n,
+                Shape.Square(n) if n == 1 || n == 2 then 200,
+                Shape.Square(n) then n * 10,
+              };
+            }
+            fn main() -> i64 {
+              print classify(Shape.Circle(1));
+              print classify(Shape.Circle(5));
+              print classify(Shape.Square(2));
+              print classify(Shape.Square(5));
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("or-pattern guard referencing variant binding must compile to C");
+        compile_to_llvm(source)
+            .expect("or-pattern guard referencing variant binding must compile to LLVM");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

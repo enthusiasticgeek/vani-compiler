@@ -6820,3 +6820,35 @@ no bugs found:
 New tests: 2 `src/lib.rs` + 2 `tests/run_end_to_end.rs`. Full `cargo
 test --release --workspace`: 0 failed. Category 9 (all 4 rows) now
 fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 10
+
+Category 10 (pattern matching depth x generics/enums), all 3 rows
+checked clean -- no bugs found:
+
+- (row 1) `match` with bindings on a DEEPLY nested built-in enum
+  payload (`Result<Option<T>, E>`, matched in ONE `match`
+  expression): confirmed to need the same documented "two flat
+  matches" workaround user-declared nested enums already require
+  (`tutorials/src/beginner/08a_pattern_match_primer.md`) -- nesting
+  `Result.Ok(Option.Some(v))` in one pattern is a clean PARSER
+  rejection ("expected ')' (variant payload binding close)"), and
+  the two-flat-matches rewrite compiles and runs correctly on both
+  backends (verified with a 3-way branch: `Ok(Some(_))`, `Ok(None)`,
+  `Err(_)`).
+- (row 2) A guarded slice-pattern arm (`[a, b] if cond then ...`)
+  combined with a GENERIC function `fn classify<T>(xs: Vec<T>) ->
+  ...`: checked clean on both backends, for both an `i64` and an
+  `f64` instantiation of `T` -- the guard is correctly evaluated and
+  the slice-length dispatch works through the monomorphized element
+  type exactly as it does for the non-generic case.
+- (row 3) Or-pattern-shaped guard conditions (`if n == 1 || n == 2`)
+  on an enum variant match arm, combined with the variant's payload
+  BINDING used inside the guard expression itself: checked clean on
+  both backends, for two different variants (`Circle`/`Square`) each
+  with their own guarded and unguarded arm.
+New tests: 3 `src/lib.rs` + 3 `tests/run_end_to_end.rs`. Full `cargo
+test --release --workspace`: 0 failed. Category 10 (all 3 rows) now
+fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.

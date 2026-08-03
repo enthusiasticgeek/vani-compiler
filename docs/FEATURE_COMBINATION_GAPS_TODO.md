@@ -450,21 +450,25 @@ Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
       allocation inside the loop body hits a separate, already-
       documented purity rule (not this row's concern).
 
-## 10. Pattern matching depth x generics/enums (🟢–🟡)
+## 10. Pattern matching depth x generics/enums (🟢–🟡) -- CLOSED 2026-08-03
 
-- [ ] 🟡 `match` with bindings on a DEEPLY nested built-in enum
+- [x] 🟡 `match` with bindings on a DEEPLY nested built-in enum
       payload — `Result<Option<T>, E>` or similar, matched in ONE
       `match` expression if the language allows it, or confirmed to
       need the documented "two flat matches" workaround the same way
-      user-declared nested enums already do.
-- [ ] 🟢 A guarded slice-pattern arm (`[a, b] if cond then ...`,
+      user-declared nested enums already do. Confirmed: clean parser
+      rejection when nested in one expression; the two-flat-matches
+      rewrite compiles and runs correctly on both backends.
+- [x] 🟢 A guarded slice-pattern arm (`[a, b] if cond then ...`,
       already fixed this session) combined with a GENERIC function
       `fn classify<T>(xs: Vec<T>) -> ...` where `T` is a Copy scalar
       type parameter, not a concrete `i64` — confirm slice patterns
-      work through a monomorphized generic Vec element type.
-- [ ] 🟢 Or-pattern-shaped guard conditions (`if n == 1 || n == 2`) on
+      work through a monomorphized generic Vec element type. Checked
+      clean on both backends, for both i64 and f64 instantiations.
+- [x] 🟢 Or-pattern-shaped guard conditions (`if n == 1 || n == 2`) on
       an enum variant match arm, combined with the variant's payload
-      binding used inside the guard expression itself.
+      binding used inside the guard expression itself. Checked clean
+      on both backends.
 
 ## 11. Boundary confirmations (🟢 — expected-to-reject, but never actually confirmed; closes a documentation-accuracy gap even if not a "bug")
 
