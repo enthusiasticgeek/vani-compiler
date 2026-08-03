@@ -800,3 +800,67 @@ Fix attempt: `tools/localfuzz/findings/20260803-200030-backend-divergence-060a62
 }
 ```
 
+
+---
+
+### Candidate: 20260803-212459-backend-divergence-d44c4970a6
+
+Repro: `tools/localfuzz/findings/20260803-212459-backend-divergence-d44c4970a6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-212459-backend-divergence-d44c4970a6/fix_attempt.md`
+
+### VANIC LOCAL FUZZ Staging Log Entry
+
+**Date:** [Insert Date]
+**Time:** [Insert Time]
+
+#### Bug Report
+
+**Base Corpus File:**
+```vani
+/home/virgo/source/vani-compiler-localfuzz/examples/language/vietnamese/option_types.vani
+```
+
+**Mutant/generated source:**
+```vani
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/option_types.vani              # LLVM
+//   vanic run examples/language/vietnamese/option_types.vani --backend=c  # C
+
+mục_đích "Vietnamese payloaded enums via Opt<i64>";
+
+liệt_kê Opt { Some(i64), None }
+
+hàm mở_hoặc(o: Opt, mặc_định: i64) -> i64 {
+  trả_về khớp o {
+    Opt.Some(v) thì v,
+    Opt.None    thì mặc_định,
+  };
+}
+
+hàm có_some(o: Opt) -> i64 {
+  trả_về khớp o {
+    Opt.Some(v) thì 1,
+    Opt.None    then 0,
+  };
+}
+
+hàm main() -> i64 {
+  đặt a: Opt = Opt.Some(42);
+  đặt b: Opt = Opt.None;
+
+  đặt x: i64 = mở_hoặc(a, 0);
+  đặt y: i64 = mở_hoặc(b, 100);
+
+  khẳng_định x == 42;
+  khẳng_định có_some(a) == 1;
+  khẳng_định có_some(b) == 0;
+
+  in_ra "Some(-1) đã mở =", x;
+  in_ra "None mặc định 100 =", y;
+  trả_về 0;
+}
+```
+
+**Finding Kind:** backend

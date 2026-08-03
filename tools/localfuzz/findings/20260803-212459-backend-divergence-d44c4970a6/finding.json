@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/vietnamese/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Some(-1) \u0111\u00e3 m\u1edf = 42\nNone m\u1eb7c \u0111\u1ecbnh 100 = 100\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1850995-1785792298662453595.ll:1903:62: error: expected ')' at end of argument list\ndefine i64 @fn_m_u1EDF_ho_u1EB7c(%Enum_Opt %arg_o, i64 %arg_m\u1eb7c_\u0111\u1ecbnh) {\n\n",
+    "timed_out": false
+  }
+}
