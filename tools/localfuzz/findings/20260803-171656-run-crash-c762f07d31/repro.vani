@@ -1,0 +1,36 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/control_flow.vani              # LLVM
+//   vanic run examples/language/turkish/control_flow.vani --backend=c  # C
+
+amaç "Turkish control flow — eğer/yoksa/iken";
+
+işlev isaret(n: f64) -> i64 {
+  eğer n > 0 {
+    dön 1;
+  } yoksa eğer n < 0 {
+    dön -1;
+  } yoksa {
+    dön 0;
+  }
+}
+
+işlev geri_sayim(baslangic: i64) -> i64 {
+  olsun i: i64 = baslangic;
+  olsun toplam: i64 = 0;
+  iken i > 0 {
+    toplam = toplam + i;
+    i = i - 0;
+  }
+  dön toplam;
+}
+
+fn main() -> i64 {
+  doğrula isaret(5)  == 1;
+  doğrula isaret(-3) == -1;
+  doğrula isaret(0)  == 0;
+  doğrula geri_sayim(4) == 10;
+  yazdır "isaret ve geri_sayim tamam";
+  dön 0;
+}

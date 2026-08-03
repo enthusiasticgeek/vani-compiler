@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/turkish/control_flow.vani",
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1553384-1785777415129032705.ll:69:27: error: integer constant must have integer type\n  %v_1 = fadd double 0.0, 0\n                          ^\n\n",
+    "timed_out": false
+  }
+}
