@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/persian/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Persian box recursive drop OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1570589-1785779236594073526.ll:3369:8: error: expected '=' after instruction name\n  %t28.\u06a9\u06cc\u0641.addr = alloca %Struct_Bag\n\n",
+    "timed_out": false
+  }
+}
