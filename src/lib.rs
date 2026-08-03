@@ -50786,6 +50786,114 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-85 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 3, SSA-C only). A BARE (SSA-eligible -- no structs,
+    // no block expressions forcing tree) `Mutex<i64>`/`Guard<i64>`
+    // program failed to compile on the C backend at all: `cc`
+    // rejected it with "implicit declaration of function
+    // 'intent_mutex_i64_new'". Root cause: `ssa_backend_c.rs` has
+    // its OWN, entirely separate `mutex_new`/`mutex_lock`/
+    // `guard_get`/`guard_set` implementation (and its own
+    // `c_declarator` type-spelling function) from the TREE emitter
+    // in `backend_c.rs` -- and this SSA-specific copy was hardcoded
+    // to the literal name `intent_mutex_i64`/`intent_guard_i64`,
+    // stale since BUG-19 (2026-07-27) made the preamble bundle
+    // ALWAYS use the parametric name (`intent_mutex_int64_t`) even
+    // for the plain i64 case. The tree emitter was updated at the
+    // time; this sibling SSA implementation never was. Found because
+    // the specific program shape needed to trigger this (a Mutex used
+    // with NO structs/block-expressions anywhere, so the SSA fast
+    // path is actually taken instead of falling back to tree) had
+    // never been end-to-end tested before -- every prior Mutex test
+    // this session used either a struct payload or a block-
+    // expression, both of which force tree. Fixed by routing all
+    // four builtins plus the six `c_declarator` arms (bare/`&`/`&mut`
+    // x Mutex/Guard) through `c_mutex_storage`/`c_guard_storage`
+    // (extracting the real element type from `instr.ty` or the
+    // argument's type via `value_types`), mirroring the pattern
+    // `channel_new`/`channel_send`/`channel_recv` already used in the
+    // same file.
+    #[test]
+    fn bare_scalar_mutex_ssa_path_compiles_with_parametric_naming() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<i64> = mutex_new(0);
+              let g: Guard<i64> = mutex_lock(ref m);
+              print guard_get(ref g);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("bare scalar Mutex<i64> (SSA-eligible) must compile to C");
+        assert!(
+            c.contains("intent_mutex_int64_t_new") && c.contains("intent_mutex_int64_t_lock")
+                && c.contains("intent_guard_int64_t_get"),
+            "SSA-C path must use the parametric bundle name, not the stale \
+             hardcoded 'intent_mutex_i64_*'/'intent_guard_i64_*' forms; got:\n{}",
+            c
+        );
+        assert!(
+            !c.contains("v_0 = intent_mutex_i64_new") && !c.contains("intent_guard_i64_get("),
+            "SSA-C path must not reference the stale, never-declared \
+             'intent_mutex_i64'/'intent_guard_i64' names at any call site; got:\n{}",
+            c
+        );
+    }
+
+    // BUG-86 (found+fixed 2026-08-03, same gap-audit pass, tree-C
+    // only -- a REAL SILENT DEADLOCK, not a compile failure). Once
+    // BUG-85's naming fix made a bare Mutex<i64> compile on the C
+    // backend, testing TWO SEQUENTIAL (non-overlapping) lock/unlock
+    // cycles on the SAME mutex through a block-expression
+    // (`let v: i64 = { let g = mutex_lock(ref m); guard_get(ref g)
+    // };`, the tutorial's own idiom) revealed the program HANGS
+    // FOREVER on the second `mutex_lock` call. Root cause: the
+    // block-expression-specific `TypedStmt::Drop` emitter in
+    // `backend_c.rs` (a completely separate, incomplete
+    // reimplementation of the correct top-level statement Drop
+    // emitter a few thousand lines earlier in the same file) has
+    // explicit arms for OwnedStr/Vec/Struct/Enum but NONE for
+    // Guard/ReadGuard/WriteGuard -- it silently fell through to a
+    // `_ => {}` no-op, so the guard's RAII unlock never fired. The
+    // first lock was never released, so the second `mutex_lock`
+    // spun forever waiting for a lock that (from the runtime's
+    // point of view) was still legitimately held. No diagnostic, no
+    // crash -- the worst possible failure mode for a concurrency
+    // primitive. Fixed by adding the three missing arms, mirroring
+    // the already-correct top-level statement Drop handler exactly.
+    #[test]
+    fn block_expr_guard_drop_unlocks_the_mutex_for_sequential_reuse() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<i64> = mutex_new(0);
+              let v1: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              let v2: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v1;
+              print v2;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("two sequential block-expr-scoped lock/unlock cycles must compile to C");
+        let unlock_count = c.matches("_unlock(&v_g)").count();
+        assert!(
+            unlock_count >= 2,
+            "expected the guard's unlock call to be emitted for EACH block-\
+             expression-scoped `let g = mutex_lock(...);` (found {} unlock \
+             call(s) referencing v_g) -- a missing unlock here is a silent \
+             deadlock at runtime (the second mutex_lock spins forever), not \
+             just a leaked resource; got:\n{}",
+            unlock_count,
+            c
+        );
+    }
+
     // BUG-22 (2026-07-27): found while verifying BUG-19 against the C
     // backend. `c_type_name` (called by the Let-statement / fn-param /
     // fn-return type-spelling path) was missing Mutex/Guard/RwLock/

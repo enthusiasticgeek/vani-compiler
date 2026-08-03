@@ -16277,6 +16277,47 @@ fn emit_expr(expr: &TypedExpr) -> String {
                                 }
                             }
                         }
+                        // Gap-audit fix (2026-08-03): the block-
+                        // expression Drop handler above has arms for
+                        // OwnedStr/Vec/Struct/Enum but never had one
+                        // for Guard/ReadGuard/WriteGuard -- it fell
+                        // through to the `_ => {}` no-op below,
+                        // silently skipping the RAII unlock. This is
+                        // a completely separate, incomplete
+                        // reimplementation of the TOP-LEVEL statement
+                        // Drop handler (~line 13727 above, which
+                        // already has the correct arms) -- the two
+                        // never got kept in sync. Confirmed as a
+                        // real, silent deadlock: `let v: i64 = { let
+                        // g = mutex_lock(ref m); guard_get(ref g) };`
+                        // used TWICE in a row on the same mutex hung
+                        // forever -- the first guard's drop never
+                        // fired, so the second `mutex_lock` spun on
+                        // a lock that (from the runtime's point of
+                        // view) was still held. No diagnostic, no
+                        // crash -- just a hang, the most dangerous
+                        // failure mode for a concurrency primitive.
+                        Type::Guard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_guard_storage(elt),
+                                local_name(name)
+                            ));
+                        }
+                        Type::ReadGuard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_read_guard_storage(elt),
+                                local_name(name)
+                            ));
+                        }
+                        Type::WriteGuard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_write_guard_storage(elt),
+                                local_name(name)
+                            ));
+                        }
                         _ => {}
                     },
                     _ => {}

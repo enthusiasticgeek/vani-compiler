@@ -8437,3 +8437,140 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// BUG-85/BUG-86 (2026-08-03), feature-combination gap audit category
+// 3. See the matching src/lib.rs tests' doc comments for the full
+// root-cause writeups. BUG-85 (SSA-C only): a bare, SSA-eligible
+// Mutex<i64> failed to compile at all (stale hardcoded naming).
+// BUG-86 (tree-C only): once BUG-85 was fixed, a program with two
+// SEQUENTIAL, non-overlapping lock/unlock cycles on the same mutex
+// (through a block-expression, the tutorial's own idiom) HUNG
+// FOREVER on the second lock -- a real, silent deadlock, not a
+// compile error. This test wraps the invocation in the `timeout`
+// command specifically so a FUTURE regression of BUG-86 fails this
+// test (and CI) instead of hanging the test suite itself forever.
+#[test]
+fn sequential_mutex_lock_unlock_via_block_expr_does_not_deadlock_on_either_backend() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mutex-sequential-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let m: Mutex<i64> = mutex_new(0);
+  let v1: i64 = {
+    let g = mutex_lock(ref m);
+    guard_get(ref g)
+  };
+  {
+    let g = mutex_lock(ref m);
+    guard_set(mut ref g, 99);
+  }
+  let v2: i64 = {
+    let g = mutex_lock(ref m);
+    guard_get(ref g)
+  };
+  print v1;
+  print v2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        // Wrapped in the real `timeout` command: if a future
+        // regression reintroduces the deadlock, this test fails
+        // (non-zero / killed exit) after 20s instead of hanging the
+        // whole suite (and CI) forever.
+        let mut cmd_args = vec!["20", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?} (124 = timeout/deadlock), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "0\n99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn tutorial_verbatim_mutex_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mutex-tutorial-verbatim-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let m: Mutex<i64> = mutex_new(0);
+  {
+    let g: Guard<i64> = mutex_lock(ref m);
+    guard_set(mut ref g, 42);
+    let v: i64 = guard_get(ref g);
+    print v;
+  }
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
