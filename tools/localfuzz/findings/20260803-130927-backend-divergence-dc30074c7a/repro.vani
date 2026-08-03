@@ -1,0 +1,34 @@
+// Mixed-feature: Box<dyn Iface> inside a user struct that
+// also contains a Vec and an OwnedStr.
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+}
+
+struct Square { side: i64 }
+implement Drawable for Square {
+  fn area(self: ref Square) -> i64 { return self.side * self.side; }
+}
+
+struct Scene {
+  name: OwnedStr,
+  shapes: Vec<Box<dyn Drawable>>,
+  ids: Vec<i64>,
+}
+
+fn main() -> i64 {
+  let scene: Scene = Scene {
+    name: "demo" + "",
+    shapes: vec(
+      box(Circle { r: 5 } as dyn Drawable),
+      box(Square { side: 4 } as dyn Drawable),
+    ),
+    ids: vec(9223372036854775807, 2),
+  };
+  print len(scene.shapes) as i64;
+  return 0;
+}

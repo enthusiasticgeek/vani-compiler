@@ -1,0 +1,13 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -150,6 +150,7 @@ struct BoxDynType {
+     data: *const dyn Type,
+ }
+
+ impl BoxDynType {
++    fn new() -> Self {
++        // Initialize and return the box dynamically typed type
++    }
+ }
+
+ pub fn type_of(x: &dyn Type) -> BoxDynType {
