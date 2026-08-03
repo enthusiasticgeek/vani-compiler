@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/catalan/async_cancel_auto.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1861477-1785793088487856159: /tmp/vanic-candidate-1861477-1785793088487856159.c:354: fn_main: Assertion `(v_a == 9223372036854775807)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

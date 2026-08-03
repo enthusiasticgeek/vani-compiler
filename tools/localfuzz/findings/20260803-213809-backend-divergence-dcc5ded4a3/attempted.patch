@@ -1,0 +1,15 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -350,7 +350,10 @@ fn delay(ms: u32, v: i64) -> i64 {
+     let ms = ms * 1_000;
+ 
+     // Create a thread to sleep
+-    let mut thread = std::thread::spawn(move || sleep(ms));
++    let (guard, timeout_event) = event_waiter::new();
++    let handle = std::thread::spawn(move || {
++        sleep(ms);
++        guard.signal().unwrap();
++    });
+ 
+     // Wait for the thread to finish or timeout
+     while !timeout_event.is_signaled() && thread.join().is_err() {

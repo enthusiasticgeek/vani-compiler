@@ -864,3 +864,12 @@ hàm main() -> i64 {
 ```
 
 **Finding Kind:** backend
+
+---
+
+### Candidate: 20260803-213809-backend-divergence-dcc5ded4a3
+
+Repro: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
