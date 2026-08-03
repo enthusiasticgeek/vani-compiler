@@ -754,3 +754,12 @@ Repro: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/r
 Fix attempt: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-190819-run-crash-10bcae90d4
+
+Repro: `tools/localfuzz/findings/20260803-190819-run-crash-10bcae90d4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-190819-run-crash-10bcae90d4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
