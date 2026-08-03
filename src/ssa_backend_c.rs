@@ -1948,17 +1948,46 @@ fn emit_instr(
                 .unwrap();
                 return Ok(());
             }
-            // Mutex / Guard intrinsics — i64-only for v1,
-            // dispatched to the shared runtime helpers
-            // `intent_mutex_i64_*` / `intent_guard_i64_*`.
+            // Mutex / Guard intrinsics. Gap-audit fix (2026-08-03):
+            // these four were hardcoded to the literal names
+            // `intent_mutex_i64_*`/`intent_guard_i64_*` -- stale
+            // since BUG-19 (2026-07-27) made `Mutex<T>`/`Guard<T>`
+            // parametric over any T on both backends. The preamble
+            // now ALWAYS emits the parametric bundle name (e.g.
+            // `intent_mutex_int64_t` even for plain `Mutex<i64>`),
+            // but this SSA emitter -- a separate implementation from
+            // `backend_c.rs`'s tree-path `emit_call`, which WAS
+            // updated -- was never touched, so it called a function
+            // that was never declared anywhere. Confirmed this broke
+            // the SIMPLEST possible `Mutex<i64>` usage (no structs,
+            // fully SSA-eligible) on the C backend: `cc` rejected
+              // with "implicit declaration of function
+            // 'intent_mutex_i64_new'". Fixed by mirroring
+            // `channel_new`/`channel_send`/`channel_recv`'s existing
+            // pattern just below -- resolve the real element type
+            // from `instr.ty` (mutex_new's own result type) or the
+            // Mutex/Guard-ref argument's type, then route through
+            // the shared parametric naming helpers
+            // (`c_mutex_storage`/`c_guard_storage`,
+            // `mutex_element_from_ref_c`/`guard_element_from_ref_c`)
+            // instead of a hardcoded literal.
             if name == "mutex_new" {
+                let elt = match &instr.ty {
+                    Type::Mutex(e) => (**e).clone(),
+                    other => {
+                        return Err(EmitError {
+                            message: format!("mutex_new must return Mutex<T>, got {:?}", other),
+                        });
+                    }
+                };
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "mutex_new expects 1 arg".to_string(),
                 })?;
                 writeln!(
                     out,
-                    "  v_{} = intent_mutex_i64_new({});",
+                    "  v_{} = {}_new({});",
                     instr.result.0,
+                    crate::backend_c::c_mutex_storage(&elt),
                     c_operand(arg)
                 )
                 .unwrap();
@@ -1968,10 +1997,15 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "mutex_lock expects 1 arg".to_string(),
                 })?;
+                let arg_ty = operand_type(arg, value_types).ok_or_else(|| EmitError {
+                    message: "mutex_lock arg's type is unknown".to_string(),
+                })?;
+                let elt = crate::backend_c::mutex_element_from_ref_c(&arg_ty);
                 writeln!(
                     out,
-                    "  v_{} = intent_mutex_i64_lock({});",
+                    "  v_{} = {}_lock({});",
                     instr.result.0,
+                    crate::backend_c::c_mutex_storage(&elt),
                     c_operand(arg)
                 )
                 .unwrap();
@@ -1981,10 +2015,15 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "guard_get expects 1 arg".to_string(),
                 })?;
+                let arg_ty = operand_type(arg, value_types).ok_or_else(|| EmitError {
+                    message: "guard_get arg's type is unknown".to_string(),
+                })?;
+                let elt = crate::backend_c::guard_element_from_ref_c(&arg_ty);
                 writeln!(
                     out,
-                    "  v_{} = intent_guard_i64_get({});",
+                    "  v_{} = {}_get({});",
                     instr.result.0,
+                    crate::backend_c::c_guard_storage(&elt),
                     c_operand(arg)
                 )
                 .unwrap();
@@ -1997,10 +2036,15 @@ fn emit_instr(
                 let v = args.get(1).ok_or_else(|| EmitError {
                     message: "guard_set expects 2 args".to_string(),
                 })?;
+                let g_ty = operand_type(g, value_types).ok_or_else(|| EmitError {
+                    message: "guard_set arg's type is unknown".to_string(),
+                })?;
+                let elt = crate::backend_c::guard_element_from_ref_c(&g_ty);
                 writeln!(
                     out,
-                    "  v_{} = intent_guard_i64_set({}, {});",
+                    "  v_{} = {}_set({}, {});",
                     instr.result.0,
+                    crate::backend_c::c_guard_storage(&elt),
                     c_operand(g),
                     c_operand(v)
                 )
@@ -2491,15 +2535,30 @@ fn emit_instr(
                 Type::OwnedStr => {
                     writeln!(out, "  free((void*){});", c_operand(source)).unwrap();
                 }
-                Type::Guard(_) => {
-                    // `intent_guard_i64_unlock` takes a
-                    // non-const `intent_guard_i64*` so we
-                    // pass `&` of the SSA value, then cast
-                    // through `intent_guard_i64*` (the SSA
-                    // value's C type is already correct).
+                Type::Guard(element) => {
+                    // Gap-audit fix (2026-08-03): same stale-
+                    // hardcoded-name bug as the `mutex_new`/
+                    // `mutex_lock`/`guard_get`/`guard_set` builtins
+                    // above -- `intent_guard_i64_unlock` was never
+                    // declared anywhere once BUG-19 made the
+                    // preamble parametric. Confirmed as a REAL
+                    // deadlock, not just a compile failure: once the
+                    // naming was fixed for the four builtins above,
+                    // a program with TWO SEQUENTIAL (non-
+                    // overlapping) lock/unlock cycles on the same
+                    // mutex still HUNG -- the unlock call here was
+                    // silently never emitted/never linked, so the
+                    // guard's scope-exit drop never actually
+                    // released the lock, and the second
+                    // `mutex_lock` spun forever waiting for a lock
+                    // still (spuriously) held from the first cycle.
+                    // `element` is already available directly from
+                    // `Type::Guard(element)` -- no extra type lookup
+                    // needed, unlike the builtins above.
                     writeln!(
                         out,
-                        "  intent_guard_i64_unlock(&{});",
+                        "  {}_unlock(&{});",
+                        crate::backend_c::c_guard_storage(element),
                         c_operand(source)
                     )
                     .unwrap();
@@ -2941,11 +3000,15 @@ fn c_declarator(ty: &Type, name: &str) -> Result<String, EmitError> {
             // use site.
             format!("_Atomic {} {}", c_atomic_leaf(element)?, name)
         }
-        // Mutex/Guard are i64-only in v1, matching tree-C's
-        // runtime helpers `intent_mutex_i64` / `intent_guard_i64`.
-        // The runtime headers are emitted from the SSA-C preamble.
-        Type::Mutex(_) => format!("intent_mutex_i64 {}", name),
-        Type::Guard(_) => format!("intent_guard_i64 {}", name),
+        // Gap-audit fix (2026-08-03): same stale-hardcoded-name bug
+        // as `mutex_new`/etc. above and the Guard-drop unlock call --
+        // `Mutex<T>`/`Guard<T>` are parametric over any T since
+        // BUG-19; the preamble emits the REAL per-T bundle name
+        // (`c_mutex_storage`/`c_guard_storage`), not the literal
+        // `intent_mutex_i64`/`intent_guard_i64` this declarator used
+        // to spell.
+        Type::Mutex(element) => format!("{} {}", crate::backend_c::c_mutex_storage(element), name),
+        Type::Guard(element) => format!("{} {}", crate::backend_c::c_guard_storage(element), name),
         // `Channel<T, N>` uses a per-(T, N) struct (Vyukov
         // MPSC ring buffer); the bundle gets emitted from
         // SSA-C's preamble walker.
@@ -2975,8 +3038,8 @@ fn c_declarator(ty: &Type, name: &str) -> Result<String, EmitError> {
                 // can take a non-const cell pointer.
                 format!("_Atomic {}* {}", c_atomic_leaf(element)?, name)
             }
-            Type::Mutex(_) => format!("intent_mutex_i64* {}", name),
-            Type::Guard(_) => format!("const intent_guard_i64* {}", name),
+            Type::Mutex(element) => format!("{}* {}", crate::backend_c::c_mutex_storage(element), name),
+            Type::Guard(element) => format!("const {}* {}", crate::backend_c::c_guard_storage(element), name),
             Type::Channel(element, capacity) => format!(
                 // Channel refs also drop `const` — the
                 // shared `intent_channel_<T>_<N>_send` and
@@ -3004,8 +3067,8 @@ fn c_declarator(ty: &Type, name: &str) -> Result<String, EmitError> {
             Type::Atomic(element) => {
                 format!("_Atomic {}* {}", c_atomic_leaf(element)?, name)
             }
-            Type::Mutex(_) => format!("intent_mutex_i64* {}", name),
-            Type::Guard(_) => format!("intent_guard_i64* {}", name),
+            Type::Mutex(element) => format!("{}* {}", crate::backend_c::c_mutex_storage(element), name),
+            Type::Guard(element) => format!("{}* {}", crate::backend_c::c_guard_storage(element), name),
             Type::Channel(element, capacity) => format!(
                 "{}* {}",
                 crate::backend_c::c_channel_storage(element, *capacity),

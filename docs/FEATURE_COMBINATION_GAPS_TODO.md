@@ -164,38 +164,56 @@ The closed "Container x SMT contracts" section has exactly two rows
 (Vec/Struct field access in `ensures`, loop invariant on `Vec<Struct>`
 element). Everything below is genuinely untested.
 
-- [ ] 🔴 `requires`/`ensures` on a **generic function** `fn foo<T>(x:
-      T) -> T requires ...; ensures ...;` where the contract only
-      makes sense for the scalar instantiation (e.g. `T = i64`) —
-      confirm it discharges correctly per-monomorphization, and
-      confirm a SECOND instantiation at a non-scalar `T` (where the
-      contract can't be encoded) gets a clean rejection, not a
-      silent skip (this is exactly the BUG-68 failure mode: SMT
-      verdicts other than Proven/Disproven silently treated as
-      proven).
-- [ ] 🔴 `#[complexity(...)]` (Big-O annotation) and `requires`/
-      `ensures` on the SAME function — do the two independent
-      analysis passes (Big-O walker, SMT verifier) interfere, e.g.
-      does the Big-O walker choke on a function body shape the SMT
-      elision pass rewrites, or vice versa? Never tested together at
-      all per a direct grep of both tracking docs.
-- [ ] 🟡 `invariant` in a loop that also spawns a `task` or touches a
-      `Mutex`/`Channel` inside the loop body — does the SMT verifier
-      correctly treat the loop as opaque/unverifiable across the
-      concurrency call (the way it already does for ordinary
-      function calls without `ensures`), or does it incorrectly try
-      to reason through it?
-- [ ] 🟡 `ensures _return == ...` on a function returning
-      `Option<T>`/`Result<T,E>` where the postcondition needs to
-      distinguish the `Some`/`Ok` vs `None`/`Err` case — e.g.
-      `ensures _return != Option.None;` or similar tag-level
-      assertions. (Different from the already-tested "ensures on
-      Option<Vec<T>>/Result<Struct,E> RETURN TYPE" row — this is
-      about the postcondition PREDICATE referencing the enum's own
-      tag/variant, not just typing the return position.)
-- [ ] 🟢 `prove` statement referencing a `dyn Iface` method's return
-      value — confirm this is cleanly rejected (SMT can't reason
-      through a vtable call) rather than silently treated as proven.
+- [x] 🔴 `requires`/`ensures` on a **generic function** — **checked
+      2026-08-03, not a bug**: discharges correctly per-
+      monomorphization for a scalar instantiation (T=i64), and a
+      second, non-scalar instantiation (T=Point) gets a clean,
+      consistent rejection ("cannot verify 'ensures' clause: variable
+      'x' has unsupported type Point for SMT"), not a silent skip —
+      matches BUG-68's fix.
+- [x] 🔴 `#[complexity(...)]` (Big-O analysis, via `vanic check
+      --big-o`) and `requires`/`ensures` on the SAME function —
+      **checked 2026-08-03, not a bug**: both analyses coexist
+      correctly with no interference in either direction (Big-O
+      still reports the right complexity class when SMT proves
+      cleanly; a genuinely-violated `ensures` is still correctly
+      rejected with `--big-o` enabled).
+- [x] 🟡 `invariant` in a loop that also touches a `Mutex` inside the
+      loop body — **found+fixed 2026-08-03, BUG-85 and BUG-86 (two
+      severe, unrelated bugs found investigating this row, neither
+      actually about SMT/invariants at all)**. The row's own premise
+      (does the invariant checker interfere with concurrency
+      primitives in the loop body) checked out clean once both bugs
+      were fixed — but getting a working repro at all required a
+      BARE, SSA-eligible Mutex (no structs/block-expressions forcing
+      tree), which had never been tested end-to-end all session and
+      turned out to be completely broken on the C backend: (1) BUG-85
+      — the SSA-C emitter has its own, never-updated-since-BUG-19
+      hardcoded Mutex/Guard implementation, so it failed to compile
+      at all; (2) BUG-86 — once fixed, a program with two SEQUENTIAL
+      lock/unlock cycles on the same mutex (through a block-
+      expression, confirmed PRE-EXISTING via an isolated git
+      worktree check against the pre-sweep commit) hung FOREVER — the
+      tree-C block-expression Drop emitter has no arm for
+      Guard/ReadGuard/WriteGuard at all, so the RAII unlock silently
+      never fired. See `docs/TODO_CURRENT.md`'s BUG-85/86 entries.
+- [x] 🟡 `ensures`/`prove` referencing an enum's variant tag directly
+      (e.g. `ensures _return != Option.None;`) — **checked
+      2026-08-03, not a bug**: cleanly and consistently rejected
+      (enum `==`/`!=` requires an `Eq` impl at the language level;
+      separately, the SMT layer correctly reports "method calls not
+      supported in SMT v1" rather than silently skipping).
+- [x] 🟢 `prove` statement referencing a `dyn Iface` method's return
+      value — **checked 2026-08-03, not a bug**: cleanly rejected
+      ("method calls not supported in SMT v1"), not silently treated
+      as proven.
+
+Category 3 fully closed. New tests: 2 `src/lib.rs` + 2
+`tests/run_end_to_end.rs` (see `docs/TODO_CURRENT.md`'s BUG-85/86
+entries — one test wraps its invocation in the real `timeout` command
+so a future regression of the BUG-86 deadlock fails cleanly instead
+of hanging the suite). Full `cargo test --release --workspace`:
+13/13 binaries clean, 0 failed.
 
 ## 4. Async/await x everything else (🟡 — the async chapter's own roadmap flags several as "queued," worth confirming the boundary is a clean rejection, not a crash)
 

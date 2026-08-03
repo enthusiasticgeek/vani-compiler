@@ -6059,11 +6059,88 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
 (all 4 rows) now fully closed in
 `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
 
+- [x] **BUG-85 (found+fixed 2026-08-03, SSA-C only). Category 3, row 3
+  ("invariant with task/Mutex in loop"): investigating this row
+  required a BARE, SSA-eligible `Mutex<i64>` (no structs, no block
+  expressions -- both of which force the tree backend) for the first
+  time all session. It failed to compile on the C backend at all.**
+  Root cause: `ssa_backend_c.rs` has its own, entirely SEPARATE
+  `mutex_new`/`mutex_lock`/`guard_get`/`guard_set` implementation
+  (and its own `c_declarator` type-spelling function) from the TREE
+  emitter in `backend_c.rs` -- and this SSA-specific copy was
+  hardcoded to the literal name `intent_mutex_i64`/`intent_guard_i64`,
+  stale since BUG-19 (2026-07-27) made the preamble bundle ALWAYS use
+  the parametric name (`intent_mutex_int64_t`, even for the plain i64
+  case) on both backends. The tree emitter was updated at the time;
+  this sibling SSA implementation never was -- nobody had run a
+  purely-SSA-eligible Mutex program through the real C backend
+  end-to-end before. `cc` rejected the output: "implicit declaration
+  of function 'intent_mutex_i64_new'". Fixed by routing all four
+  builtins plus the six `c_declarator` arms (bare/`&`/`&mut` x
+  Mutex/Guard) through `c_mutex_storage`/`c_guard_storage`
+  (extracting the real element type from `instr.ty` or the argument's
+  type via `value_types`), mirroring the pattern
+  `channel_new`/`channel_send`/`channel_recv` already used in the same
+  file.
+
+- [x] **BUG-86 (found+fixed 2026-08-03, same investigation, tree-C
+  only -- a REAL SILENT DEADLOCK, not a compile failure). Once
+  BUG-85's fix made the bare Mutex compile, testing TWO SEQUENTIAL
+  (non-overlapping) lock/unlock cycles on the same mutex through a
+  block-expression (the tutorial's own idiom, `let v: i64 = { let g =
+  mutex_lock(ref m); guard_get(ref g) };`) hung FOREVER on the second
+  `mutex_lock` call.** Root cause: the block-expression-specific
+  `TypedStmt::Drop` emitter in `backend_c.rs` -- a completely separate,
+  incomplete reimplementation of the correct TOP-LEVEL statement Drop
+  emitter a few thousand lines earlier in the same file -- has
+  explicit arms for OwnedStr/Vec/Struct/Enum but NONE for
+  Guard/ReadGuard/WriteGuard; it silently fell through to a `_ => {}`
+  no-op, so the guard's RAII unlock never fired. The first lock was
+  never released, so the second `mutex_lock` spun forever waiting for
+  a lock that (from the runtime's point of view) was still
+  legitimately held -- no diagnostic, no crash, just a hang: the
+  worst possible failure mode for a concurrency primitive. Confirmed
+  this is TREE-C-only (LLVM's block-expression codegen handles this
+  correctly already) and confirmed PRE-EXISTING, not a session
+  regression: reproduced identically against commit `08f38c2` (the
+  last commit before this gap-audit sweep even started), verified in
+  an isolated `git worktree` so the main working tree was never at
+  risk. Fixed by adding the three missing arms, mirroring the
+  already-correct top-level statement Drop handler exactly.
+  **Verification, given the severity (silent deadlock)**: real
+  execution on both backends (not just compile success) for the
+  tutorial-verbatim single-lock-cycle case AND a two-sequential-
+  cycles case; `valgrind --leak-check=full` on BOTH a native AOT LLVM
+  build and a directly-`cc`-compiled native binary of the generated C
+  (0 errors, all heap blocks freed, on both). The new
+  `tests/run_end_to_end.rs` regression test wraps the sequential-
+  cycles invocation in the real `timeout` command specifically so a
+  FUTURE regression of this exact bug fails the test (and CI) after
+  20s instead of hanging the test suite itself forever.
+  Also swept the rest of category 3 (SMT contracts x generics/
+  concurrency/enums): a generic function's `requires`/`ensures`
+  proves correctly per-monomorphization (scalar T) and cleanly
+  rejects (non-scalar T, matching BUG-68's fix) rather than silently
+  skipping; `--big-o` analysis and SMT verification coexist correctly
+  on the same function with no interference in either direction; an
+  `ensures`/`prove` referencing an enum's variant tag directly, or a
+  `dyn Iface` method's return value, are both cleanly and
+  consistently rejected on both backends (`Eq`-required / "method
+  calls not supported in SMT v1" respectively) -- matching the
+  documented v1 SMT boundary, not bugs.
+  New tests: 2 `src/lib.rs` (SSA-C naming, block-expr guard-unlock
+  presence) + 2 `tests/run_end_to_end.rs` (tutorial-verbatim single
+  cycle; sequential two-cycle deadlock guard with the `timeout`
+  wrapper). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed (2705 lib tests, up from 2703; 145 end-to-end
+  tests, up from 143). Category 3 (all 5 rows) now fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
 ---
 
 ## Bug found by the local-model differential-fuzzing harness (2026-08-03)
 
-- [x] **BUG-85 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
+- [x] **BUG-87 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
   A non-ASCII local variable name (e.g. Devanagari `थैला`) crashed the
   LLVM backend's `lli` JIT with a parser error; the C backend handled
   the identical program fine.** Found by `tools/localfuzz/`'s continuous
@@ -6135,6 +6212,6 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
   a `let`/struct-literal reference to it, both under
   `examples/language/{russian,any}/`-style naming if formalized.
 
-Full `cargo test --release --workspace` after BUG-85: 2703 lib tests,
+Full `cargo test --release --workspace` after BUG-87: 2703 lib tests,
 144 end-to-end tests (including the 3 new cross-script cases), 0 failed
 across all 13 binaries -- clean.
