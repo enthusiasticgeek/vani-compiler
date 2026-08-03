@@ -316,3 +316,57 @@ Fix attempt: `tools/localfuzz/findings/20260803-122029-backend-divergence-d10ddc
 }
 ```
 
+
+---
+
+### Candidate: 20260803-123313-backend-divergence-bc931be757
+
+Repro: `tools/localfuzz/findings/20260803-123313-backend-divergence-bc931be757/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-123313-backend-divergence-bc931be757/fix_attempt.md`
+
+### Staging Entry for vani-compiler Local Fuzzing
+
+**Bug Report Draft:**
+
+---
+
+**Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/marathi/iterate.vani`
+
+**Mutant Generated Source:**
+```vani
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/english/iterate.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/iterate.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/iterate.vani -o /tmp/iterate && /tmp/iterate   # native binary
+
+उद्देश्य "Iterate over arrays and Vecs with `for x in ref xs` and consuming `for x in xs`";
+
+कार्य sum_vec(xs: पहा Vec<i64>) -> i64 {
+  मान total: i64 = 0;
+  साठी x में पहा xs {
+    total = total + x;
+  }
+  परत total;
+}
+
+कार्य max_in_array(xs: पहा [i64; 5]) -> i64 {
+  मान best: i64 = xs[0];
+  साठी x में पहा xs {
+    जर x > best {
+      best = x;
+    }
+  }
+  परत best;
+}
+
+कार्य count_positives(xs: पहा Vec<i64>) -> i64 {
+  मान count: i64 = 0;
+  साठी x में पहा xs {
+    जर x > 0 {
+      count = count + 1;
+    }
+  }
+
