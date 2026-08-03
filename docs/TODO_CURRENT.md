@@ -6204,7 +6204,7 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
 
 ## Bug found by the local-model differential-fuzzing harness (2026-08-03)
 
-- [x] **BUG-87 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
+- [x] **BUG-88 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
   A non-ASCII local variable name (e.g. Devanagari `थैला`) crashed the
   LLVM backend's `lli` JIT with a parser error; the C backend handled
   the identical program fine.** Found by `tools/localfuzz/`'s continuous
@@ -6276,6 +6276,6 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
   a `let`/struct-literal reference to it, both under
   `examples/language/{russian,any}/`-style naming if formalized.
 
-Full `cargo test --release --workspace` after BUG-87: 2703 lib tests,
+Full `cargo test --release --workspace` after BUG-88: 2703 lib tests,
 144 end-to-end tests (including the 3 new cross-script cases), 0 failed
 across all 13 binaries -- clean.
