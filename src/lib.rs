@@ -42765,6 +42765,61 @@ função main() -> i64 {
     }
 
     #[test]
+    fn vec_of_option_of_copy_struct_compiles_and_matches_correctly() {
+        // Testing-matrix sweep (final row): "Vec<Option<Struct>> --
+        // Option of a non-Copy struct, stored in a Vec (three-level:
+        // Vec -> Option -> Struct)". The "non-Copy struct" half of
+        // this row is not actually reachable in v1 at all: enum
+        // payload admission (checked 2026-08-02) cleanly and
+        // consistently rejects ANY non-Copy struct payload for ANY
+        // enum -- not just Option<T> -- with "payload type ... is not
+        // admitted in v1" (confirmed identically for a plain
+        // user-declared `enum Wrapper { Has(Item), Empty }` wrapping
+        // the same non-Copy `Item { name: OwnedStr, val: i64 }`, so
+        // this isn't an Option-specific gap). Real, documented v1
+        // restriction, not a bug -- the admitted payload set is Copy
+        // types, OwnedStr, Vec<T>, Box<T>, [T;N] of Copy, Task,
+        // Atomic<T>, Mutex<T>, Channel<T,N>. The three-level
+        // Vec<Option<Struct>> nesting itself, with a Copy struct
+        // (all-scalar fields), compiles and computes correctly on
+        // both backends -- see the paired e2e test.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let items: Vec<Option<Pt>> = vec(Option.Some(Pt { x: 1, y: 2 }), Option.None, Option.Some(Pt { x: 3, y: 4 }));
+              let n: i64 = len(items) as i64;
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < n {
+                let it: Option<Pt> = items[i];
+                let v: i64 = match it {
+                  Option.Some(p) then p.x + p.y,
+                  Option.None then 0,
+                };
+                total = total + v;
+                i = i + 1;
+              }
+              print total;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Vec<Option<Struct>> (Copy struct) must compile and match correctly");
+
+        let noncopy_source = r#"
+            struct Item { name: OwnedStr, val: i64 }
+            enum Wrapper { Has(Item), Empty }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(noncopy_source)
+            .expect_err("a non-Copy struct payload must be rejected for ANY enum, not just Option");
+        assert!(
+            errs.iter().any(|e| e.message.contains("is not admitted in v1")),
+            "expected the enum-payload admission diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
     fn option_constructor_in_let_annotation_resolves_with_two_instantiations() {
         let source = r#"
             fn main() -> i64 {

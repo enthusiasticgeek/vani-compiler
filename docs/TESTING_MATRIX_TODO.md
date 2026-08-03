@@ -791,11 +791,41 @@ mirroring exactly why `Vec<Channel<T,N>>` broke.
       `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both backends,
       Option<Array> Some/None AND Result<Tuple> Ok/Err all four
       paths, hand-computed values).
-- [ ] A `Vec<Option<Struct>>` -- Option of a non-Copy struct, stored
-      in a Vec (three-level: Vec -> Option -> Struct).
+- [x] A `Vec<Option<Struct>>` -- Option of a non-Copy struct, stored
+      in a Vec (three-level: Vec -> Option -> Struct) -- **checked
+      2026-08-02, not a bug (with one real, clean, general v1
+      limitation confirmed along the way).** The "non-Copy struct"
+      half of this row isn't actually reachable in v1 at all: enum
+      payload admission cleanly and consistently rejects ANY non-Copy
+      struct payload for ANY enum, not just `Option<T>` -- confirmed
+      identically for a plain user-declared `enum Wrapper { Has(Item),
+      Empty }` wrapping the same non-Copy `Item { name: OwnedStr, val:
+      i64 }`, so this isn't an Option-specific gap, just the
+      documented admitted-payload set (Copy types, `OwnedStr`,
+      `Vec<T>`, `Box<T>`, `[T;N]` of Copy, `Task`, `Atomic<T>`,
+      `Mutex<T>`, `Channel<T,N>`) not including plain non-Copy
+      structs. The three-level `Vec<Option<Struct>>` nesting itself,
+      with a Copy struct (all-scalar fields), compiles and computes
+      correctly on both backends. New tests: 1 `src/lib.rs`
+      (Copy-struct case + non-Copy-struct rejection confirmed general)
+      + 1 `tests/run_end_to_end.rs` (both backends).
 
 Cross off each row the same way as the section above: bug or no bug,
 add a permanent regression test and note the outcome inline.
+
+**This closes every row in this section (2026-08-02) -- all 19 rows
+across both "nested/multi-level combinations" and "container operations
+x intermediate/advanced feature nesting" done.** Summary: 13 real bugs
+found and fixed (BUG-68 through BUG-80), all backend-agnostic or
+LLVM/C-specific codegen/checker gaps rather than language-design issues;
+6 rows confirmed clean (correct behavior, or a real/already-documented
+v1 limitation cleanly and consistently enforced on both backends). Every
+row has a permanent `src/lib.rs` compile-time test and (except for two
+rows that are pure checker-rejection cases with no runtime path) a
+`tests/run_end_to_end.rs` real-binary test on both backends. Full bug
+writeups are in `docs/TODO_CURRENT.md` (search "BUG-68" through
+"BUG-80"). See that file's own entries for root-cause detail; this file
+tracks the sweep coverage, not the fixes themselves.
 
 ## Non-goals for this pass
 

@@ -7750,3 +7750,50 @@ fn main() -> i64 {
         assert_eq!(stdout, "6\n-999\n302\n-1\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep (final row): "Vec<Option<Struct>> -- Option of a
+// non-Copy struct, stored in a Vec (three-level: Vec -> Option -> Struct)".
+// The non-Copy-struct half of this row isn't reachable in v1 at all (a
+// clean, general enum-payload-admission restriction, confirmed separately
+// -- not a bug). The three-level nesting itself, with a Copy struct,
+// compiles and computes correctly on both backends.
+#[test]
+fn vec_of_option_of_copy_struct_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_option_copy_struct",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let items: Vec<Option<Pt>> = vec(Option.Some(Pt { x: 1, y: 2 }), Option.None, Option.Some(Pt { x: 3, y: 4 }));
+  let n: i64 = len(items) as i64;
+  let i: i64 = 0;
+  let total: i64 = 0;
+  while i < n {
+    let it: Option<Pt> = items[i];
+    let v: i64 = match it {
+      Option.Some(p) then p.x + p.y,
+      Option.None then 0,
+    };
+    total = total + v;
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // (1+2) + 0 (None) + (3+4) = 10
+        assert_eq!(stdout, "10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
