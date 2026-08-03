@@ -827,6 +827,24 @@ writeups are in `docs/TODO_CURRENT.md` (search "BUG-68" through
 "BUG-80"). See that file's own entries for root-cause detail; this file
 tracks the sweep coverage, not the fixes themselves.
 
+## Status update (2026-08-02, follow-up pass)
+
+After this section closed, a separate pass reviewed every OPEN item
+still on the books outside this sweep (found by re-reading
+`docs/TODO_CURRENT.md` end to end, not by re-testing this file's
+rows) and cleared the 5 cheapest/lowest-risk ones: 2 doc-only items
+(DOC-4/DOC-5) and 1 more (BUG-22 residual) turned out to already be
+fixed in earlier sessions with only a stale bookkeeping note left
+behind; 2 were real bugs (BUG-20 residual — pattern guards silently
+ignored on string/float matches and slice wildcard arms; BUG-66
+residual — a closure with a heap-owning capture crashed both
+backends when stored in a struct field, now a clean checker
+rejection instead). Full writeups: search "Clearing the backlog of
+previously-deferred open bugs" in `docs/TODO_CURRENT.md`. Two items
+were deliberately left for their own dedicated sessions given
+soundness/architecture risk: BUG-33 (SMT proof-engine gap) and
+BUG-36 (missing `mut ref` exclusivity subsystem) — both still open.
+
 ## Non-goals for this pass
 
 - Re-testing SMT/`ensures`/`try`/affine -- already well covered

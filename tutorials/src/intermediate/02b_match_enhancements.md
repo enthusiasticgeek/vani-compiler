@@ -333,6 +333,39 @@ falls through the failed `first == last` guard to "unbalanced". See
 [`examples/language/english/slice_pattern_guards.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/slice_pattern_guards.vani)
 for a runnable version with every case exercised.
 
+A guard also composes with a `_` wildcard arm in a slice/array
+match, exactly like the int/bool/enum wildcard case earlier in this
+chapter — a guarded wildcard does NOT close off the arms below it:
+
+```vani
+fn classify(xs: Vec<i64>, n: i64) -> i64 {
+  return match xs {
+    [a, b] if n > 10 then a + b,
+    _ if n > 5        then 100,
+    _                  then -1,
+  };
+}
+```
+
+`classify(vec(1, 2), 20)` matches the `[a, b]` arm (`n > 10`) and
+returns `3`. `classify(vec(1, 2, 3), 8)` fails `[a, b]` (wrong
+length) and the first `_` guard passes (`n > 5`), returning `100`.
+`classify(vec(1, 2, 3), 1)` falls all the way through to the final
+unguarded `_`, returning `-1`.
+
+Pattern guards also compose with string and float literal matches
+the same way:
+
+```vani
+fn classify_code(s: OwnedStr, n: i64) -> i64 {
+  return match s {
+    "x" if n > 10 then 1,
+    "y"           then 2,
+    _              then 0,
+  };
+}
+```
+
 ### What `..` can and cannot do
 
 - `..` may appear **at most once** per pattern. `[a, .., b, .., c]` is

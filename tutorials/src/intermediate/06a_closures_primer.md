@@ -234,14 +234,52 @@ number is in the 0-100 range. The min/max are baked in.
 ### 3. Stored in data structures
 
 ```vani
-struct EventHandler {
-  on_click: Closure(i64) -> i64,
-  on_hover: Closure(i64) -> i64,
+struct Handler { cb: Closure(i64) -> i64 }
+
+fn main() -> i64 {
+  let base: i64 = 100;
+  let cb = fn(extra: i64) -> i64 { return base + extra; };
+  let h: Handler = Handler { cb: cb };
+  let f: Closure(i64) -> i64 = h.cb;
+  print f(5);   // 105
+  return 0;
 }
 ```
 
-Each handler is a closure with whatever captures it needs to
-do its job.
+A closure whose captures are all Copy (like `base: i64` above)
+moves into a struct field and reads back out cleanly, verified
+end-to-end on both backends.
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+**Current limit**: a closure that captures a heap-owning value
+(a `Vec`, `OwnedStr`, or similar) BY MOVE cannot yet be stored
+in a struct field:
+
+```vani
+struct Handler { cb: Closure(i64) -> i64 }
+
+fn main() -> i64 {
+  let data: Vec<i64> = vec(1, 2, 3, 4);
+  let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+  let h: Handler = Handler { cb: cb };   // rejected
+  return 0;
+}
+```
+
+```
+error: closure 'cb' captures a heap-owning value by move --
+       storing it in struct field 'cb' is not yet supported in v1
+```
+
+v1 doesn't yet track a heap-owning closure environment's
+lifetime once it crosses a struct-field boundary, so this is a
+clean compile-time rejection rather than an attempt to make the
+pattern work. Workarounds: capture by `[ref name]` instead of by
+move if the captured value outlives the struct (subject to the
+`[ref name]` escape limits above), or restructure so the closure
+only captures Copy values and pass the heap-owning value as a
+call argument instead of capturing it.
 
 ## The capture rules
 
