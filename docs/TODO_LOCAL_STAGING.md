@@ -370,3 +370,31 @@ Fix attempt: `tools/localfuzz/findings/20260803-123313-backend-divergence-bc931b
     }
   }
 
+
+---
+
+### Candidate: 20260803-124546-backend-divergence-c6018c6f80
+
+Repro: `tools/localfuzz/findings/20260803-124546-backend-divergence-c6018c6f80/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-124546-backend-divergence-c6018c6f80/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-1301012-1785761144755655616: /tmp/vanic-candidate-1301012-1785761144755655616.c:1017: fn_main: Assertion `(v_owned_total == (-1))' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+

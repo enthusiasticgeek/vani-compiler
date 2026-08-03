@@ -1,0 +1,64 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/iterate.vani              # LLVM
+//   vanic run examples/language/telugu/iterate.vani --backend=c  # C
+
+ఉద్దేశం "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `ప్రతి` = for, `లో` = in, `చూడు` = ref
+
+పని sum_vec(xs: చూడు Vec<i64>) -> i64 {
+  అనుకో total: i64 = 0;
+  ప్రతి x లో చూడు xs {
+    total = total + x;
+  }
+  తిరిగి total;
+}
+
+పని max_in_array(xs: చూడు [i64; 5]) -> i64 {
+  అనుకో best: i64 = xs[0];
+  ప్రతి x లో చూడు xs {
+    అయితే x > best {
+      best = x;
+    }
+  }
+  తిరిగి best;
+}
+
+పని count_positives(xs: చూడు Vec<i64>) -> i64 {
+  అనుకో count: i64 = 0;
+  ప్రతి x లో చూడు xs {
+    అయితే x > 0 {
+      count = count + 1;
+    }
+  }
+  తిరిగి count;
+}
+
+పని main() -> i64 {
+  అనుకో nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  అనుకో total: i64 = sum_vec(చూడు nums);
+  నిర్ధారించు total == 15;
+
+  అనుకో arr: [i64; 5] = [3, 7, 1, 9, 4];
+  అనుకో m: i64 = max_in_array(చూడు arr);
+  నిర్ధారించు m == 9;
+
+  అనుకో mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  అనుకో p: i64 = count_positives(చూడు mixed);
+  నిర్ధారించు p == 3;
+
+  అనుకో owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  అనుకో owned_total: i64 = 0;
+  ప్రతి s లో owned {
+    owned_total = owned_total + (len(s) గా i64);
+  }
+  నిర్ధారించు owned_total == -1;
+
+  రాయి total;
+  రాయి p;
+  రాయి m;
+  రాయి owned_total;
+  తిరిగి 0;
+}
