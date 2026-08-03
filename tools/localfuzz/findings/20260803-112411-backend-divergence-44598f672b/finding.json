@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/nepali/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Nepali box recursive drop OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-1183501-1785756250111020848.ll:3371:8: error: expected '=' after instruction name\n  %t26.\u0925\u0948\u0932\u093e.addr = alloca %Struct_Bag\n\n",
+    "timed_out": false
+  }
+}

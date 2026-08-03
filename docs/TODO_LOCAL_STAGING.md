@@ -194,3 +194,60 @@ Expected outcome: Identify and fix the bug causing the crash on the C backend wh
 Repro: `tools/localfuzz/findings/20260803-110707-run-crash-3f94aefdee/repro.vani`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-112411-backend-divergence-44598f672b
+
+Repro: `tools/localfuzz/findings/20260803-112411-backend-divergence-44598f672b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-112411-backend-divergence-44598f672b/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+Vani compiler local staging log entry:
+
+**Base corpus file**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/nepali/box_recursive_drop.vani`
+
+**Mutant/generated source**:
+```vani
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/nepali/box_recursive_drop.vani --backend=c  # C
+
+उद्देश्य "Nepali Box recursive drop smoke-test";
+
+संरचना Bag {
+  contents: Box<Vec<i64>>,
+}
+
+कार्य main() -> i64 {
+  माना v: Vec<i64> = vec(0);
+  v = push(v, 10);
+  v = push(v, 20);
+  माना b: Box<Vec<i64>> = box(v);
+  माना v2: Vec<i64> = vec(0);
+  v2 = push(v2, 7);
+  माना थैला: Bag = Bag { contents: box(v2) };
+  लिखो "Nepali box recursive drop OK";
+  लौटाओ 0;
+}
+```
+
+**Finding kind**: backend-divergence
+
+**Raw result data**:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Nepali box recursive drop OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/v
