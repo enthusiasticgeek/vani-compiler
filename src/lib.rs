@@ -50444,6 +50444,70 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-89 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 5: dyn dispatch x generics). `Vec<dyn Iface>` holding
+    // TWO DIFFERENT monomorphizations of the same blanket-impl'd
+    // generic struct (`Wrapper<Dog>` and `Wrapper<Cat>`, both
+    // implementing `Printable` via `implement<T> Printable for
+    // Wrapper<T> where T is Printable`) crashed BOTH backends. Root
+    // cause: `expand_blanket_impls` (checker.rs) appends a concrete
+    // impl per monomorphization to `program.impls` but never removes
+    // the ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+    // Type::Apply { name, [Type::Param(_)] }`) -- unlike the exactly
+    // analogous, already-established pattern for generic functions/
+    // structs/enums in the same function (`program.functions.
+    // retain(|f| f.type_params.is_empty())` etc., which all correctly
+    // drop the generic template after monomorphization). Whatever
+    // later builds the `dyn Printable` vtable/trampoline set iterates
+    // every impl of the interface in `program.impls` and didn't
+    // filter out the still-present blanket template, so it generated
+    // a BOGUS THIRD trampoline for the literal unresolved template
+    // `Wrapper<Param(T)>` alongside the two real ones -- LLVM:
+    // "loading unsized types is not allowed"; C: "implicit
+    // declaration of function 'fn_Wrapper__Param__T___print_it'"
+    // (referencing a struct type that was never declared). Fixed by
+    // adding `program.impls.retain(|imp| imp.type_params.is_empty())`
+    // right after `expand_blanket_impls` runs, mirroring the
+    // established convention exactly. Verified with `valgrind
+    // --leak-check=full` on a native AOT LLVM build: 0 errors.
+    #[test]
+    fn vec_of_dyn_iface_with_two_blanket_impl_monomorphizations_compiles_and_runs_correctly() {
+        let source = r#"
+            interface Printable {
+              fn print_it(self: Self) -> i64;
+            }
+            struct Wrapper<T> { inner: T }
+            implement<T> Printable for Wrapper<T> where T is Printable {
+              fn print_it(self: Wrapper<T>) -> i64 {
+                return self.inner.print_it();
+              }
+            }
+            struct Dog { name: i64 }
+            implement Printable for Dog {
+              fn print_it(self: Dog) -> i64 { return 111; }
+            }
+            struct Cat { name: i64 }
+            implement Printable for Cat {
+              fn print_it(self: Cat) -> i64 { return 222; }
+            }
+            fn main() -> i64 {
+              let wd: Wrapper<Dog> = Wrapper { inner: Dog { name: 1 } };
+              let wc: Wrapper<Cat> = Wrapper { inner: Cat { name: 2 } };
+              let items: Vec<dyn Printable> = vec(wd as dyn Printable, wc as dyn Printable);
+              let i: u64 = 0;
+              while i < len(items) {
+                print items[i].print_it();
+                i = i + 1;
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<dyn Printable> of two blanket-impl monomorphizations must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<dyn Printable> of two blanket-impl monomorphizations must compile to LLVM");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

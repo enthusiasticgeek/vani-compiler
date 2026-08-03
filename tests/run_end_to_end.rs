@@ -8683,3 +8683,85 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// BUG-89 (2026-08-03), feature-combination gap audit category 5: dyn
+// dispatch x generics. `Vec<dyn Iface>` holding two different
+// monomorphizations of the same blanket-impl'd generic struct crashed
+// both backends because `expand_blanket_impls` never removed the
+// original blanket impl template from `program.impls`, so vtable
+// generation produced a bogus extra trampoline for the unresolved
+// template. See the matching src/lib.rs test's doc comment for the
+// full root-cause writeup.
+#[test]
+fn vec_of_dyn_iface_two_blanket_impl_monomorphizations_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-dyn-blanket-mono-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+interface Printable {
+  fn print_it(self: Self) -> i64;
+}
+struct Wrapper<T> { inner: T }
+implement<T> Printable for Wrapper<T> where T is Printable {
+  fn print_it(self: Wrapper<T>) -> i64 {
+    return self.inner.print_it();
+  }
+}
+struct Dog { name: i64 }
+implement Printable for Dog {
+  fn print_it(self: Dog) -> i64 { return 111; }
+}
+struct Cat { name: i64 }
+implement Printable for Cat {
+  fn print_it(self: Cat) -> i64 { return 222; }
+}
+fn main() -> i64 {
+  let wd: Wrapper<Dog> = Wrapper { inner: Dog { name: 1 } };
+  let wc: Wrapper<Cat> = Wrapper { inner: Cat { name: 2 } };
+  let items: Vec<dyn Printable> = vec(wd as dyn Printable, wc as dyn Printable);
+  let i: u64 = 0;
+  while i < len(items) {
+    print items[i].print_it();
+    i = i + 1;
+  }
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "111\n222\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}

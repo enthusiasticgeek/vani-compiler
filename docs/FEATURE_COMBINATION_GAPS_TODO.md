@@ -262,22 +262,29 @@ since it documents currently-broken behavior, not a boundary to pin.
 
 ## 5. dyn dispatch x generics (🟡 — two different polymorphism mechanisms meeting)
 
-- [ ] 🔴 `Vec<dyn Iface>` where the underlying concrete types are
+- [x] 🔴 `Vec<dyn Iface>` where the underlying concrete types are
       themselves DIFFERENT INSTANTIATIONS of the same generic struct
-      (`Wrapper<Dog>` and `Wrapper<Cat>`, both implementing
-      `Printable` via the blanket impl already tested, both pushed
-      into the SAME `Vec<dyn Printable>`). This directly composes two
-      patterns each individually tested this session (two-
-      instantiation generics; `Vec<dyn Iface>` heterogeneous
-      dispatch) but never together.
-- [ ] 🟡 A generic function bounded `<T: Iface>` that also accepts a
+      — **found+fixed 2026-08-03, BUG-89.** `expand_blanket_impls`
+      appends a concrete impl per monomorphization to `program.impls`
+      but never removes the original blanket-impl template, so
+      whatever builds the `dyn Iface` vtable/trampoline set generated
+      a bogus extra trampoline for the unresolved generic template —
+      crashed both backends. Fixed with a one-line `retain`, mirroring
+      the established pattern already used for generic functions/
+      structs/enums. See `docs/TODO_CURRENT.md`'s BUG-89 entry.
+- [x] 🟡 A generic function bounded `<T: Iface>` that also accepts a
       `dyn Iface` parameter of the SAME interface in a different
-      parameter slot (mixing static and dynamic dispatch for the
-      same trait in one call).
-- [ ] 🟢 A struct implementing TWO DIFFERENT interfaces, with a
+      parameter slot — **checked 2026-08-03, not a bug**: correct on
+      both backends.
+- [x] 🟢 A struct implementing TWO DIFFERENT interfaces, with a
       SINGLE instance referenced through both `Vec<dyn IfaceA>` and
-      `Vec<dyn IfaceB>` at once (two independent vtables over the
-      same concrete data).
+      `Vec<dyn IfaceB>` at once — **checked 2026-08-03, not a bug**:
+      correct on both backends.
+
+Category 5 fully closed. New tests: 1 `src/lib.rs` + 1
+`tests/run_end_to_end.rs` (see `docs/TODO_CURRENT.md`'s BUG-89 entry).
+Full `cargo test --release --workspace`: 13/13 binaries clean, 0
+failed.
 
 ## 6. Error propagation (`try`/`?`) x containers/generics (🟡)
 

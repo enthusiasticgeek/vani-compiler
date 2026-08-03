@@ -6279,3 +6279,59 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
 Full `cargo test --release --workspace` after BUG-88: 2703 lib tests,
 144 end-to-end tests (including the 3 new cross-script cases), 0 failed
 across all 13 binaries -- clean.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 5
+
+- [x] **BUG-89 (found+fixed 2026-08-03). Category 5, row 1:
+  `Vec<dyn Iface>` holding TWO DIFFERENT monomorphizations of the same
+  blanket-impl'd generic struct (`Wrapper<Dog>` and `Wrapper<Cat>`,
+  both implementing `Printable` via `implement<T> Printable for
+  Wrapper<T> where T is Printable`) crashed BOTH backends.** Root
+  cause: `expand_blanket_impls` (`checker.rs`) appends a concrete impl
+  per monomorphization to `program.impls` but never removes the
+  ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+  Type::Apply { name, [Type::Param(_)] }`) -- unlike the exactly
+  analogous, already-established pattern for generic functions/
+  structs/enums in the same function (`program.functions.retain(|f|
+  f.type_params.is_empty())`, `program.structs.retain(...)`,
+  `program.enums.retain(...)`, all in the same monomorphization
+  driver), which all correctly drop the generic template after
+  monomorphization -- impls were simply the one category that never
+  got this cleanup. Whatever later builds the `dyn Printable` vtable/
+  trampoline set iterates every impl of the interface in
+  `program.impls` and doesn't filter out the still-present blanket
+  template, so it generated a BOGUS THIRD trampoline for the literal
+  unresolved template `Wrapper<Param(T)>` alongside the two real
+  ones: LLVM rejected the emitted IR ("loading unsized types is not
+  allowed" on `%Struct_Wrapper__Param__T__`); C failed to compile
+  ("implicit declaration of function
+  'fn_Wrapper__Param__T___print_it'", referencing a struct type that
+  was never declared). Fixed with a single-line addition,
+  `program.impls.retain(|imp| imp.type_params.is_empty())`, placed
+  right after `expand_blanket_impls` runs -- mirroring the
+  established convention exactly. Given how broadly `program.impls`
+  is read throughout the rest of the checker (static dispatch
+  resolution, satisfiability checks, method lookup), ran the full
+  `cargo test --release --workspace` suite immediately after this
+  change (before adding new tests) to confirm nothing else depended
+  on the blanket template surviving past this point: 13/13 binaries
+  clean, 0 failed. Verified with `valgrind --leak-check=full` on a
+  native AOT LLVM build: 0 errors, all heap blocks freed.
+  Also swept the rest of category 5 (dyn dispatch x generics): a
+  generic function bounded `<T: Iface>` that ALSO takes a `dyn Iface`
+  parameter of the same interface in a different slot (mixing static
+  and dynamic dispatch for the same trait in one call), and a struct
+  implementing TWO DIFFERENT interfaces with a single instance
+  referenced through two SEPARATE `Vec<dyn IfaceA>`/`Vec<dyn IfaceB>`
+  Vecs, both checked clean on both backends -- not bugs.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real
+  stdout, both backends). Full `cargo test --release --workspace`
+  after the new tests landed: 13/13 binaries clean, 0 failed (2706
+  lib tests, up from 2705; 147 end-to-end tests, up from 146 --
+  counts relative to this session's own commit history, which may
+  differ slightly from a concurrently-updated `main` given another
+  process is independently landing fixes to this same repo in
+  parallel this session). Category 5 (all 3 rows) now fully closed
+  in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.

@@ -8071,6 +8071,30 @@ fn monomorphize_type_decls_in_program(
     let mono_enum_names: std::collections::HashSet<String> =
         program.enums.iter().map(|e| e.name.clone()).collect();
     expand_blanket_impls(program, &mono_struct_names, &mono_enum_names, &struct_names, &enum_names);
+    // Gap-audit fix (2026-08-03): `expand_blanket_impls` APPENDS a
+    // concrete impl per monomorphization but never removes the
+    // ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+    // Type::Apply { name, [Type::Param(_)] }`) from `program.impls` --
+    // unlike the exactly analogous, already-established pattern for
+    // generic functions/structs/enums just above/below in this same
+    // function (`program.functions.retain(|f| f.type_params.
+    // is_empty())`, `program.structs.retain(...)`, `program.enums.
+    // retain(...)`), which all correctly drop the generic template
+    // after monomorphization. Whatever later builds a `dyn Iface`
+    // vtable/trampoline set iterates every impl of that interface in
+    // `program.impls` and doesn't filter out the still-present
+    // blanket template -- so `Vec<dyn Printable>` holding TWO
+    // monomorphizations of a blanket-impl'd generic struct
+    // (`Wrapper<Dog>`, `Wrapper<Cat>`) generated a BOGUS THIRD
+    // trampoline for the literal unresolved template
+    // `Wrapper<Param(T)>`, which then crashed both backends at
+    // codegen ("loading unsized types is not allowed" on LLVM;
+    // "implicit declaration of function
+    // 'fn_Wrapper__Param__T___print_it'" on C, referencing a struct
+    // type that was never declared, `Struct_Wrapper__Param__T__`).
+    // Fixed by retaining the same way, mirroring the established
+    // convention exactly.
+    program.impls.retain(|imp| imp.type_params.is_empty());
     // Rewrite Type::Apply in `methods on T` blocks.
     for mb in program.methods_blocks.iter_mut() {
         rewrite_apply_in_ty(&mut mb.for_type, &struct_names, &enum_names);
