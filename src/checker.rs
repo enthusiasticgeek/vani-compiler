@@ -25,6 +25,38 @@ thread_local! {
     // baffling "expected Option__i64, got Option__i64" diagnostic.
     static GENERIC_ENUM_TEMPLATE_NAMES: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
+    // Gap-audit follow-up fix (2026-08-03, category 9 finding (a)
+    // root cause -- deeper than initially diagnosed): when a
+    // generic struct/enum's OWN field/payload type collapses a
+    // nested `Type::Apply` straight to `Type::Enum`/`Type::Struct`
+    // (the arm just below this thread_local), that collapse
+    // happens EAGERLY, in place, discarding the `(name, args)` pair
+    // that produced it. The struct/enum-decl worklist in
+    // `monomorphize_type_decls_in_program` tries to re-discover
+    // further-needed instantiations from a freshly-generated
+    // struct/enum's OWN fields via `collect_apply_in_ty` (the BUG-93
+    // fix) -- but `collect_apply_in_ty` only recognizes a literal
+    // `Type::Apply` NODE; once `substitute_type_param` has ALREADY
+    // collapsed it to `Type::Enum(mangled)`, there is nothing left
+    // for `collect_apply_in_ty` to find, so the corresponding
+    // `EnumDecl`/`StructDecl` never actually gets generated even
+    // though the FIELD correctly references its (never-materialized)
+    // mangled name. Concretely: `Node<T> { next: Option<Box<Node<T>>>
+    // }` monomorphized to `Node__i64` gets a `next` field correctly
+    // typed `Type::Enum("Option__Box_Struct__Node__i64___")`, but
+    // `program.enums` never actually contains an `EnumDecl` by that
+    // name -- "enum 'Option__Box_Struct__Node__i64___' is not
+    // declared" the instant anything tries to construct or match it
+    // directly (as opposed to the workaround of writing the
+    // instantiation out literally via an explicit `let` annotation
+    // elsewhere, which DOES reach `collect_apply_in_ty` while the
+    // `Type::Apply` node is still intact). This queue lets the
+    // collapse site record what it collapsed FROM, so the worklist
+    // can drain it and feed the underlying (name, args) pair back
+    // into `discovered_structs`/`discovered_enums` same as any other
+    // freshly-discovered need.
+    static NEWLY_COLLAPSED_GENERIC_APPLIES:
+        RefCell<Vec<(String, Vec<Type>, bool)>> = RefCell::new(Vec::new());
 }
 
 const BUILTIN_FUNCTION_NAMES: &[&str] =
@@ -7526,6 +7558,10 @@ fn monomorphize_type_decls_in_program(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Defensive: this queue should always be empty on entry (nothing
+    // upstream of this pass calls substitute_type_param yet), but
+    // clear it explicitly rather than assume.
+    NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| q.borrow_mut().clear());
     // Collect generic struct/enum templates and drop them
     // from the program (specializations replace them).
     let struct_templates: HashMap<String, StructDecl> = program
@@ -8095,6 +8131,27 @@ fn monomorphize_type_decls_in_program(
                     &mut discovered_structs, &mut discovered_enums,
                 );
             }
+            // Gap-audit follow-up fix (2026-08-03): the substitution
+            // above may have ALREADY collapsed a field's `Type::Apply`
+            // straight to `Type::Enum`/`Type::Struct` in place (e.g.
+            // a self-referential `next: Option<Box<Node<T>>>` field
+            // once T is concrete) -- `collect_apply_in_ty` just above
+            // can't see those anymore since there's no `Apply` node
+            // left. Drain whatever `substitute_type_param` recorded
+            // on its way to collapsing and feed it into this round's
+            // discovery too, so the corresponding decl actually gets
+            // generated instead of only ever being referenced.
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
             new_structs.push(mono);
         }
         for (name, mut args) in pending_enums.drain(..) {
@@ -8146,6 +8203,21 @@ fn monomorphize_type_decls_in_program(
                     );
                 }
             }
+            // Gap-audit follow-up fix (2026-08-03): same as the
+            // struct arm above -- drain anything the substitution
+            // collapsed away in place before `collect_apply_in_ty`
+            // ever got a chance to see it.
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
             new_enums.push(mono);
         }
         pending_structs = discovered_structs
@@ -8167,6 +8239,20 @@ fn monomorphize_type_decls_in_program(
     // the matching mangled Struct/Enum name.
     let struct_names: std::collections::HashSet<String> = struct_templates.keys().cloned().collect();
     let enum_names: std::collections::HashSet<String> = enum_templates.keys().cloned().collect();
+    // Gap-audit follow-up fix (2026-08-03, category 9 finding (a)):
+    // per-struct field-type lookup, built from the now-fully-
+    // monomorphized `program.structs` (the `.extend(new_structs)`
+    // above already ran). Feeds `resolve_bare_enum_ctor_in_struct_lit`
+    // below, which extends BUG-46's fix to a bare enum constructor
+    // nested INSIDE a struct-literal field (`Node { value: 2, next:
+    // Option.Some(box(tail)) }`) -- the original BUG-46 fix only
+    // covered a `Let`'s own top-level initializer or a `Return`.
+    let struct_field_types: std::collections::HashMap<String, Vec<crate::ast::StructField>> =
+        program
+            .structs
+            .iter()
+            .map(|s| (s.name.clone(), s.fields.clone()))
+            .collect();
     for f in program.functions.iter_mut() {
         for p in f.params.iter_mut() {
             rewrite_apply_in_ty(&mut p.ty, &struct_names, &enum_names);
@@ -8192,22 +8278,36 @@ fn monomorphize_type_decls_in_program(
         // its initializer. Resolve the ambiguity right here, while
         // we still have that context, by rewriting the bare
         // template name straight to the mangled one.
-        let fn_return_enum = match &f.return_type {
-            Type::Enum(n) => Some(n.clone()),
-            _ => None,
-        };
-        for stmt in f.body.iter_mut() {
-            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names);
-        }
         // BUG-46-class fix for generic STRUCTS (found later, same
         // root cause): same rewrite, keyed off Type::Struct instead
         // of Type::Enum.
+        //
+        // Gap-audit follow-up fix (2026-08-03): this MUST run before
+        // the enum-ctor resolution below, not after. A `StructLit`'s
+        // own `type_name` is still the bare generic template name
+        // ("Node") until this pass rewrites it to the monomorphized
+        // one ("Node__i64") -- `resolve_bare_enum_ctor_in_struct_lit`
+        // looks up `struct_field_types` BY the (already-mangled) type
+        // name, so running it first against an unresolved "Node"
+        // silently finds nothing and resolves nothing. Originally
+        // this ran in the opposite order (enum-ctors first, struct-
+        // lits second), which happened to be fine for the two
+        // existing BUG-46 cases (neither depends on StructLit's
+        // type_name) but broke the new struct-literal-field case
+        // outright.
         let fn_return_struct = match &f.return_type {
             Type::Struct(n) => Some(n.clone()),
             _ => None,
         };
         for stmt in f.body.iter_mut() {
             resolve_bare_struct_lits_in_stmt(stmt, fn_return_struct.as_deref(), &struct_names);
+        }
+        let fn_return_enum = match &f.return_type {
+            Type::Enum(n) => Some(n.clone()),
+            _ => None,
+        };
+        for stmt in f.body.iter_mut() {
+            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names, &struct_field_types);
         }
     }
     for s in program.structs.iter_mut() {
@@ -8234,19 +8334,23 @@ fn monomorphize_type_decls_in_program(
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
             // BUG-46 fix -- same as the plain-function loop above.
-            let method_return_enum = match &method.return_type {
-                Type::Enum(n) => Some(n.clone()),
-                _ => None,
-            };
-            for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
-            }
+            // Gap-audit follow-up fix (2026-08-03): struct-lit
+            // resolution must run BEFORE enum-ctor resolution here
+            // too -- see the matching comment on the plain-function
+            // loop above for why.
             let method_return_struct = match &method.return_type {
                 Type::Struct(n) => Some(n.clone()),
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
                 resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
+            }
+            let method_return_enum = match &method.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
             }
         }
     }
@@ -8298,19 +8402,23 @@ fn monomorphize_type_decls_in_program(
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
             // BUG-46 fix -- same as the plain-function loop above.
-            let method_return_enum = match &method.return_type {
-                Type::Enum(n) => Some(n.clone()),
-                _ => None,
-            };
-            for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
-            }
+            // Gap-audit follow-up fix (2026-08-03): struct-lit
+            // resolution must run BEFORE enum-ctor resolution here
+            // too -- see the matching comment on the plain-function
+            // loop above for why.
             let method_return_struct = match &method.return_type {
                 Type::Struct(n) => Some(n.clone()),
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
                 resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
+            }
+            let method_return_enum = match &method.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
             }
         }
     }
@@ -8353,12 +8461,56 @@ fn resolve_bare_enum_ctor_receiver(
     }
 }
 
+/// Gap-audit follow-up (2026-08-03, category 9 finding (a)): BUG-46's
+/// fix (`resolve_bare_enum_ctor_receiver`/
+/// `resolve_bare_enum_ctors_in_stmt`) only rewrote a bare enum-
+/// constructor receiver when the constructor call was the DIRECT
+/// initializer of a `let`/`return` -- it never looked inside a
+/// struct-literal's OWN fields. Once 2+ instantiations of the same
+/// generic enum exist in the program, a bare `Option.Some(x)`
+/// written directly as a struct-literal field value (`Node { value:
+/// 2, next: Option.Some(box(tail)) }`) stayed ambiguous and
+/// unresolved -- "unknown variable 'Option'" -- even though the
+/// struct's own (already-monomorphized) field type tells us exactly
+/// which concrete enum instantiation is needed. Looks up the
+/// enclosing struct literal's declared field types (built from the
+/// now-fully-monomorphized `program.structs`) and resolves any
+/// enum-typed field's bare constructor value the same way BUG-46
+/// already does for `let`/`return`. Recurses into each field's own
+/// value too, in case it's itself a nested struct literal.
+fn resolve_bare_enum_ctor_in_struct_lit(
+    expr: &mut Expr,
+    struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
+    enum_template_names: &std::collections::HashSet<String>,
+) {
+    if let ExprKind::StructLit { type_name, fields, .. } = &mut expr.kind {
+        if let Some(field_types) = struct_field_types.get(type_name.as_str()) {
+            for (field_name, field_expr) in fields.iter_mut() {
+                if let Some(sf) = field_types.iter().find(|f| &f.name == field_name) {
+                    if let Type::Enum(target) = &sf.ty {
+                        let target = target.clone();
+                        resolve_bare_enum_ctor_receiver(field_expr, &target, enum_template_names);
+                    }
+                }
+            }
+        }
+        for (_field_name, field_expr) in fields.iter_mut() {
+            resolve_bare_enum_ctor_in_struct_lit(field_expr, struct_field_types, enum_template_names);
+        }
+    }
+}
+
 /// Walks a statement (recursing into `if`/`if let`/`while`/
 /// `while let`/`for` bodies) applying `resolve_bare_enum_ctor_receiver`
 /// to `return` expressions (against `fn_return_enum`, the enclosing
 /// function's already-monomorphized return type) and `let`
 /// expressions (against that same `let`'s own already-monomorphized
-/// annotation, if any).
+/// annotation, if any). Also applies
+/// `resolve_bare_enum_ctor_in_struct_lit` to every `let`/`return`
+/// expression unconditionally (not gated on the annotation's own
+/// kind), since a struct-literal's ENUM-TYPED FIELD can need
+/// resolving regardless of whether the enclosing `let`/`return`
+/// itself is enum- or struct-typed.
 ///
 /// `IfLet`/`WhileLet` recursion was missing from the initial fix --
 /// found by testing a `return EnumName.Variant(...);` inside an
@@ -8370,46 +8522,51 @@ fn resolve_bare_enum_ctors_in_stmt(
     stmt: &mut Stmt,
     fn_return_enum: Option<&str>,
     enum_template_names: &std::collections::HashSet<String>,
+    struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
 ) {
     match stmt {
-        Stmt::Let { annotation: Some(Type::Enum(target)), expr, .. } => {
-            let target = target.clone();
-            resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+        Stmt::Let { annotation, expr, .. } => {
+            if let Some(Type::Enum(target)) = annotation {
+                let target = target.clone();
+                resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+            }
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
         }
         Stmt::Return { expr, .. } => {
             if let Some(target) = fn_return_enum {
                 resolve_bare_enum_ctor_receiver(expr, target, enum_template_names);
             }
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::IfLet { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::While { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::WhileLet { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         _ => {}
@@ -9214,6 +9371,14 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
                         let mangled = format!("{}__{}", name, type_mangle(&args[0]));
                         let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
                             .with(|c| c.borrow().contains(&name));
+                        // Gap-audit follow-up fix (2026-08-03): record
+                        // what this collapsed FROM so the struct/enum-
+                        // decl worklist can still discover it needs
+                        // generating -- see NEWLY_COLLAPSED_GENERIC_
+                        // APPLIES's doc comment for the full writeup.
+                        NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                            q.borrow_mut().push((name.clone(), args.clone(), is_enum));
+                        });
                         *ty = if is_enum {
                             Type::Enum(mangled)
                         } else {

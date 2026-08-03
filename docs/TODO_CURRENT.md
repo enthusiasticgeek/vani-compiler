@@ -6955,3 +6955,78 @@ fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
   the FINAL category of the 11-category feature-combination gap
   audit sweep) now fully closed in `docs/FEATURE_COMBINATION_GAPS_
   TODO.md`.
+
+---
+
+## Deferred-finding fixups (2026-08-03), post-sweep
+
+- [x] **BUG-95 (found+fixed 2026-08-03). Deferred finding from BUG-93:
+  a bare enum constructor written directly inside a struct-literal
+  field (`Node { value: 2, next: Option.Some(box(tail)) }`, with no
+  intermediate `let` to hold the value first) failed on both
+  backends.** The BUG-93 writeup had diagnosed this as a "BUG-46-
+  class ambiguity" (multiple generic-enum instantiations in scope,
+  receiver resolution can't tell which one a bare constructor means)
+  and shipped a workaround-pattern test instead of a fix. The real
+  shape turned out to be THREE compounding bugs, only the first of
+  which resembled the original diagnosis:
+  1. BUG-46's existing fix (`resolve_bare_enum_ctors_in_stmt`) only
+     ever looked at a `let`'s top-level initializer or a `return`
+     value -- never inside a struct-literal's OWN fields. Fixed by
+     adding `resolve_bare_enum_ctor_in_struct_lit`, which looks up
+     the struct literal's (already-monomorphized) field types and
+     resolves any enum-typed field's bare constructor the same way,
+     recursing into nested struct literals.
+  2. With (1) alone, the rewrite still silently failed: the pass that
+     resolves a `StructLit`'s own `type_name` from the bare generic-
+     template name ("Node") to the mangled monomorphized name
+     ("Node__i64") (`resolve_bare_struct_lits_in_stmt`) ran AFTER the
+     enum-ctor pass at all 3 call sites in
+     `monomorphize_type_decls_in_program`, so (1)'s field-type lookup
+     (keyed by the mangled name) always missed on a still-bare
+     `type_name`. Fixed by reordering the two passes at all 3 sites,
+     with a comment explaining why the order matters.
+  3. Even with (1) and (2) fixed, the target enum this now correctly
+     resolved TO didn't actually exist: `substitute_type_param`'s
+     `Type::Apply` -> `Type::Enum`/`Type::Struct` collapse (BUG-90's
+     fix) rewrites a struct field's type IN PLACE, eagerly, the
+     moment its args become concrete -- discarding the `(name, args)`
+     pair that produced it before `collect_apply_in_ty` (BUG-93's
+     worklist-feeding fix, which walks a freshly-monomorphized
+     struct's fields looking for `Type::Apply` nodes still needing
+     generation) ever gets a chance to see it. Concretely:
+     `Node__i64`'s `next` field correctly ends up typed
+     `Type::Enum("Option__Box_Struct__Node__i64___")`, but
+     `program.enums` never actually contained an `EnumDecl` by that
+     name -- "enum '...' is not declared" the instant anything
+     referenced it, including a completely unrelated-looking
+     `Option.None` reference in a sibling `let` that had never
+     touched the new code paths at all (traced via temporary debug
+     `eprintln!`s dumping `program.enums`'s actual contents, since
+     the failure mode gave no indication the missing piece was
+     enum-generation rather than receiver-resolution). This exactly
+     explains why the BUG-93 workaround (an explicit
+     `let: Option<Box<Node<i64>>>` elsewhere in the same function)
+     worked: that path keeps a genuine, literal `Type::Apply` node in
+     the AST long enough for the normal discovery walk to find it,
+     independent of the struct-field collapse. Fixed with a new
+     thread-local queue (`NEWLY_COLLAPSED_GENERIC_APPLIES` in
+     `checker.rs`) that the collapse site in `substitute_type_param`
+     records `(name, args, is_enum)` into on its way to erasing the
+     `Apply` shape; the same worklist round in
+     `monomorphize_type_decls_in_program` that already drains
+     `collect_apply_in_ty`'s discoveries into `discovered_structs`/
+     `discovered_enums` now also drains this queue, right after both
+     the struct-field and enum-variant-payload substitution passes.
+     Same "sibling/parallel code path silently missing a case" root-
+     cause family this whole sweep kept surfacing, just one level
+     deeper than the original diagnosis reached.
+  Verified with `valgrind --leak-check=full` on native AOT builds of
+  both backends: LLVM 0 errors; the C backend reproduces the SAME
+  pre-existing, already-separately-tracked leak in
+  `Box<StructWithHeapOwningFields>` Drop (not a new regression --
+  see the deferred finding in BUG-93's own writeup). No regression on
+  the BUG-93 workaround-pattern test, which continues to pass
+  unchanged.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.

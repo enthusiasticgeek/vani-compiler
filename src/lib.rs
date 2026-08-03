@@ -51324,6 +51324,75 @@ fn main() -> i64 { return 0; }
             .expect("recursive generic struct Node<T> must compile to LLVM");
     }
 
+    // BUG-95 (found+fixed 2026-08-03). Follow-up to BUG-93/BUG-46:
+    // a bare enum constructor written DIRECTLY inside a struct-
+    // literal field (`Node { value: 2, next: Option.Some(box(tail))
+    // }`, with NO intermediate `let` -- the pattern the BUG-93 test
+    // above needed as a workaround) now compiles and runs correctly.
+    // Root cause was TWO compounding bugs, deeper than the original
+    // "BUG-46-class ambiguity" diagnosis:
+    //   1. BUG-46's fix (`resolve_bare_enum_ctors_in_stmt`) never
+    //      looked inside a struct-literal's OWN fields, only a
+    //      `let`'s top-level initializer or a `return`. Fixed by
+    //      adding `resolve_bare_enum_ctor_in_struct_lit`, which
+    //      looks up the struct literal's (already-monomorphized)
+    //      field types and resolves any enum-typed field's bare
+    //      constructor value the same way.
+    //   2. That alone still failed: the pass that resolves a
+    //      `StructLit`'s own `type_name` from the bare template name
+    //      ("Node") to the mangled one ("Node__i64")
+    //      (`resolve_bare_struct_lits_in_stmt`) ran AFTER the enum-
+    //      ctor pass instead of before, so `resolve_bare_enum_ctor_
+    //      in_struct_lit`'s field-type lookup (keyed by the mangled
+    //      name) always missed. Fixed by reordering the two passes.
+    //   3. Even with (1) and (2) fixed, the target enum this now
+    //      correctly resolved TO didn't actually exist yet:
+    //      `substitute_type_param`'s `Type::Apply` collapse (BUG-90's
+    //      fix) collapses a struct field's type straight to
+    //      `Type::Enum(mangled)` IN PLACE the moment its args become
+    //      concrete -- discarding the `(name, args)` pair that
+    //      produced it before `collect_apply_in_ty` (BUG-93's
+    //      worklist-feeding fix) ever gets a chance to see the
+    //      now-gone `Type::Apply` node and register it as needed.
+    //      Concretely: `Node__i64`'s `next` field correctly ends up
+    //      typed `Type::Enum("Option__Box_Struct__Node__i64___")`,
+    //      but `program.enums` never actually contained an `EnumDecl`
+    //      by that name -- "enum '...' is not declared" the instant
+    //      anything referenced it directly, which is exactly why the
+    //      BUG-93 workaround (writing the instantiation out literally
+    //      via an explicit `let: Option<Box<Node<i64>>>` annotation
+    //      elsewhere) worked: that path keeps the `Type::Apply` node
+    //      intact long enough for the normal discovery walk to find
+    //      it. Fixed with a new thread-local queue
+    //      (`NEWLY_COLLAPSED_GENERIC_APPLIES`) that the collapse site
+    //      records into on its way to erasing the `Apply` shape,
+    //      drained by the same worklist round that already feeds
+    //      `collect_apply_in_ty`'s discoveries back in.
+    // Verified with `valgrind --leak-check=full` on a native AOT
+    // LLVM build: 0 errors (the C-backend build reproduces a
+    // SEPARATE, already-tracked, unrelated pre-existing leak in
+    // `Box<StructWithHeapOwningFields>` Drop -- see the deferred
+    // finding in BUG-93's own writeup in docs/TODO_CURRENT.md).
+    // No regression on the BUG-93 workaround-pattern test above,
+    // which continues to pass unchanged.
+    #[test]
+    fn recursive_generic_struct_node_direct_struct_literal_form_lib() {
+        let source = r#"
+            struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+            fn main() -> i64 {
+              let tail: Node<i64> = Node { value: 3, next: Option.None };
+              let mid: Node<i64> = Node { value: 2, next: Option.Some(box(tail)) };
+              let head: Node<i64> = Node { value: 1, next: Option.Some(box(mid)) };
+              print head.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("direct struct-literal form of recursive generic struct must compile to C");
+        compile_to_llvm(source)
+            .expect("direct struct-literal form of recursive generic struct must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
