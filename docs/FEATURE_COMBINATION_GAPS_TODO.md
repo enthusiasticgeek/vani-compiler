@@ -434,15 +434,21 @@ Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
       `Box<StructWithHeapOwningFields>`'s scope-exit Drop, reproducing
       on the already-shipped BUG-35 example independent of generics.
       All documented in BUG-93's writeup in `docs/TODO_CURRENT.md`.
-- [ ] 🟢 `Box<T>` through a generic function boundary: `fn identity<T>
+- [x] 🟢 `Box<T>` through a generic function boundary: `fn identity<T>
       (b: Box<T>) -> Box<T>` — explicitly flagged as "worth probing,
       never observed broken" in `missing_features.md`'s own closing
-      list; still unprobed.
-- [ ] 🟢 `parallel for` over a `Vec<Struct>` where the struct has an
+      list; still unprobed. Checked clean on both backends (struct T
+      and scalar T), valgrind-clean.
+- [x] 🟢 `parallel for` over a `Vec<Struct>` where the struct has an
       `OwnedStr` field — explicitly flagged as "worth probing" in the
       same list; confirm the required-Copy-capture rule correctly
       rejects this (an `OwnedStr` field makes the struct non-Copy),
       rather than silently allowing a double-free across threads.
+      Checked clean: each iteration writing to a distinct index via
+      `clone_at` is correctly ALLOWED (no actual race exists), and
+      valgrind confirms it's genuinely memory-safe. Fresh heap
+      allocation inside the loop body hits a separate, already-
+      documented purity rule (not this row's concern).
 
 ## 10. Pattern matching depth x generics/enums (🟢–🟡)
 

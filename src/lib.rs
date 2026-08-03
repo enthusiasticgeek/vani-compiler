@@ -51324,6 +51324,81 @@ fn main() -> i64 { return 0; }
             .expect("recursive generic struct Node<T> must compile to LLVM");
     }
 
+    // Feature-combination gap audit (2026-08-03), category 9, row 3:
+    // `Box<T>` through a generic function boundary (`fn identity<T>
+    // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
+    // observed broken" in missing_features.md's own closing list.
+    // Checked clean on both backends for a struct T and a scalar T,
+    // `valgrind --leak-check=full` clean (0 errors, all heap blocks
+    // freed) -- ownership correctly passes through the generic
+    // boundary and back without a double-free or leak.
+    #[test]
+    fn box_through_generic_function_boundary_lib() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn identity<T>(b: Box<T>) -> Box<T> {
+              return b;
+            }
+            fn main() -> i64 {
+              let p: Point = Point { x: 3, y: 4 };
+              let boxed: Box<Point> = box(p);
+              let round_tripped: Box<Point> = identity(boxed);
+              let n: i64 = 42;
+              let boxed_n: Box<i64> = box(n);
+              let round_tripped_n: Box<i64> = identity(boxed_n);
+              print "ok";
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Box<T> through generic fn boundary must compile to C");
+        compile_to_llvm(source).expect("Box<T> through generic fn boundary must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 9, row 4:
+    // `parallel for` over a `Vec<Struct>` where the struct has an
+    // `OwnedStr` field -- flagged "worth probing" in the same list.
+    // Checked clean: each iteration writes to a DISTINCT index (no
+    // cross-iteration aliasing), reading a source element via
+    // `clone_at` (a deep copy, no shared heap state) and writing the
+    // clone into its own slot -- the compiler correctly allows this
+    // (there is no actual race: no two iterations ever touch the
+    // same memory), and `valgrind --leak-check=full` on the
+    // C-backend build confirms it's genuinely safe: 0 errors, all
+    // heap blocks freed (the old OwnedStr previously at each slot is
+    // correctly dropped as part of the per-iteration write). Fresh
+    // heap allocation INSIDE the loop body (e.g. `"x" + ""`) hits a
+    // SEPARATE, already-documented purity restriction ("'parallel
+    // for' body cannot use `+` on strings (heap allocation is
+    // impure)") -- expected, not this row's concern.
+    #[test]
+    fn parallel_for_over_vec_struct_with_ownedstr_field_lib() {
+        let source = r#"
+            struct Item { id: i64, label: OwnedStr }
+            fn main() -> i64 {
+              let source: Vec<Item> = vec(
+                Item { id: 10, label: "a" + "" },
+                Item { id: 20, label: "b" + "" },
+                Item { id: 30, label: "c" + "" },
+              );
+              let items: Vec<Item> = vec(
+                Item { id: 0, label: "x" + "" },
+                Item { id: 0, label: "y" + "" },
+                Item { id: 0, label: "z" + "" },
+              );
+              parallel for i from 0 to 3 {
+                items[i] = clone_at(ref source, i);
+              }
+              let a: Item = clone_at(ref items, 0);
+              print a.id;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("parallel for over Vec<Struct-with-OwnedStr> must compile to C");
+        compile_to_llvm(source)
+            .expect("parallel for over Vec<Struct-with-OwnedStr> must compile to LLVM");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

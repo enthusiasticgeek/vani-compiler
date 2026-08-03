@@ -6777,3 +6777,46 @@ correctly or are cleanly rejected exactly as documented:
   after the new tests landed: 13/13 binaries clean, 0 failed.
   Category 9 rows 1 and 2 closed in `docs/FEATURE_COMBINATION_GAPS_
   TODO.md`; rows 3-4 remain for a follow-up sweep pass.
+
+Category 9 rows 3-4, swept immediately after -- both checked clean,
+no bugs found:
+
+- (row 3) `Box<T>` through a generic function boundary
+  (`fn identity<T>(b: Box<T>) -> Box<T>`) -- flagged "worth probing,
+  never observed broken" in `missing_features.md`'s own closing
+  list. Verified for both a struct T and a scalar T; `valgrind
+  --leak-check=full` clean on both backends -- ownership correctly
+  passes through the generic boundary and back with no double-free
+  or leak. (A second call site, `identity(box(42))` passing the
+  `box(...)` call expression directly rather than through a named
+  variable, hit v1's own DOCUMENTED and unrelated generic-inference
+  restriction -- "supports literal arguments... Var, or Ref/RefMut
+  (Var)... more complex argument expressions need full type-
+  checking context" -- expected, not a finding.)
+- (row 4) `parallel for` over a `Vec<Struct>` with an `OwnedStr`
+  field -- flagged "worth probing" in the same list. Each iteration
+  writes to a DISTINCT index via `clone_at` (a deep copy of a source
+  element, no shared heap state) -- the compiler correctly ALLOWS
+  this, since there is no actual race (no two iterations ever touch
+  the same memory location); confirmed genuinely safe with `valgrind
+  --leak-check=full` on the C-backend build: 0 errors, all heap
+  blocks freed (the old `OwnedStr` previously occupying each written
+  slot is correctly dropped as part of the per-iteration write). The
+  LLVM-backend build showed small "definitely lost"/"possibly lost"
+  counts under valgrind, but the backtrace traces entirely into
+  `libgomp`'s own OpenMP thread-pool machinery (`GOMP_parallel` ->
+  `pthread_create` -> `allocate_stack` -> `_dl_allocate_tls`) --
+  well-known valgrind-vs-libgomp housekeeping noise, not vani-
+  generated code; the C-backend run (identical program logic, no
+  libgomp) being fully clean confirms the LOGIC itself is correct.
+  Fresh heap allocation INSIDE the loop body (e.g. `"x" + ""`
+  string concatenation) hits a SEPARATE, already-documented purity
+  restriction ("'parallel for' body cannot use `+` on strings (heap
+  allocation is impure)") -- expected v1 behavior, not this row's
+  concern (the row asks about the ELEMENT TYPE's affine-ownership
+  interaction with `parallel for`, which `clone_at` isolates
+  cleanly from the separate "no impure heap alloc in the loop body"
+  rule).
+New tests: 2 `src/lib.rs` + 2 `tests/run_end_to_end.rs`. Full `cargo
+test --release --workspace`: 0 failed. Category 9 (all 4 rows) now
+fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.

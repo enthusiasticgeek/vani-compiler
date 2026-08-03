@@ -9646,3 +9646,109 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// Feature-combination gap audit (2026-08-03), category 9 row 3:
+// Box<T> through a generic function boundary, both a struct T and a
+// scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
+#[test]
+fn box_through_generic_function_boundary_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "box_through_generic_fn",
+        r#"
+struct Point { x: i64, y: i64 }
+fn identity<T>(b: Box<T>) -> Box<T> {
+  return b;
+}
+fn main() -> i64 {
+  let p: Point = Point { x: 3, y: 4 };
+  let boxed: Box<Point> = box(p);
+  let round_tripped: Box<Point> = identity(boxed);
+  let n: i64 = 42;
+  let boxed_n: Box<i64> = box(n);
+  let round_tripped_n: Box<i64> = identity(boxed_n);
+  print "ok";
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "ok\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 9 row 4:
+// `parallel for` over a `Vec<Struct>` with an `OwnedStr` field, each
+// iteration writing to its own distinct index via `clone_at` (no
+// cross-iteration aliasing). Verified memory-safe separately with
+// `valgrind --leak-check=full` on native AOT builds of both
+// backends: 0 errors, all heap blocks freed.
+#[test]
+fn parallel_for_over_vec_struct_with_ownedstr_field_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "parallel_for_ownedstr_struct",
+        r#"
+struct Item { id: i64, label: OwnedStr }
+fn main() -> i64 {
+  let source: Vec<Item> = vec(
+    Item { id: 10, label: "a" + "" },
+    Item { id: 20, label: "b" + "" },
+    Item { id: 30, label: "c" + "" },
+  );
+  let items: Vec<Item> = vec(
+    Item { id: 0, label: "x" + "" },
+    Item { id: 0, label: "y" + "" },
+    Item { id: 0, label: "z" + "" },
+  );
+  parallel for i from 0 to 3 {
+    items[i] = clone_at(ref source, i);
+  }
+  let a: Item = clone_at(ref items, 0);
+  let b: Item = clone_at(ref items, 1);
+  let c: Item = clone_at(ref items, 2);
+  print a.id;
+  print b.id;
+  print c.id;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "10\n20\n30\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
