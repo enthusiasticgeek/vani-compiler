@@ -79,6 +79,28 @@ thread_local! {
     /// scope. T1.2 phase 2b.
     static STRUCT_FIELDS_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, Type)>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Gap-audit fix (2026-08-03): recursion guard for the
+    /// `collect_mutex_specs`/`collect_rwlock_specs`/
+    /// `collect_channel_specs` struct-field-recursion arms. A struct
+    /// CAN legally contain itself indirectly through a `Vec<Self>`
+    /// field (`struct Node { children: Vec<Node> }` -- the shape
+    /// every tree/recursive-walk example needs; unlike direct by-
+    /// value self-nesting, `Vec` is always pointer-indirected, so
+    /// this isn't an infinite-size type and the checker allows it).
+    /// The initial fix for BUG-83 recursed into a struct's fields
+    /// unconditionally, assuming (wrongly) that a struct field graph
+    /// is always a DAG -- true for by-value nesting, but `Vec`/
+    /// `Array`/`Ref`/`RefMut` wrapping breaks that assumption. Without
+    /// this guard, `collect_mutex_specs(Struct(Node))` -> finds field
+    /// `Vec<Node>` -> recurses into the Vec's element -> back to
+    /// `Struct(Node)` -> infinite loop, a real stack overflow
+    /// (confirmed: `self_referential_struct_vec_example_produces_
+    /// correct_output_on_c_backend` crashed with "thread 'main' has
+    /// overflowed its stack"). Tracks which struct names are
+    /// currently being expanded on the current recursive walk; a
+    /// struct already in progress is skipped rather than re-entered.
+    static STRUCT_RECURSION_GUARD: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        std::cell::RefCell::new(std::collections::BTreeSet::new());
     /// Names of structs / enums that have an `implement Drop
     /// for T` impl in the program (hoisted to `T_drop`).
     /// Populated at the start of `emit_c` from the function
@@ -10666,6 +10688,30 @@ pub(crate) fn vec_c_struct(element: &Type) -> String {
     format!("intent_vec_{}", element_tag(element))
 }
 
+/// Gap-audit fix (2026-08-03): look up a struct's field list for the
+/// `collect_mutex_specs`/`collect_rwlock_specs`/`collect_channel_specs`
+/// struct-field-recursion arms. Checks this module's own
+/// `STRUCT_FIELDS_REGISTRY` first (populated by `emit_c`), falling
+/// back to `backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY` (populated by
+/// `emit_llvm`) -- these three collector functions are SHARED between
+/// both backends (the LLVM backend calls the C-module versions
+/// directly rather than duplicating them), but each backend populates
+/// its own independent copy of the struct-field registry, and only
+/// ONE of the two is actually populated for any given compile run
+/// (whichever backend is active). Without the fallback, a
+/// `--backend=llvm` compile (the default) silently found no fields
+/// for any struct, so a `struct Cache<T> { lock: Mutex<T> }` never
+/// discovered its nested `Mutex<T>` on the LLVM side even after the
+/// same fix made the C backend work correctly -- confirmed directly:
+/// the C output was correct while LLVM still failed with "Cannot
+/// allocate unsized type" (the mutex struct type was never emitted
+/// at all, since the collector silently found zero fields).
+pub(crate) fn lookup_struct_fields_any_backend(name: &str) -> Option<Vec<(String, Type)>> {
+    STRUCT_FIELDS_REGISTRY
+        .with(|r| r.borrow().get(name).cloned())
+        .or_else(|| crate::backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY.with(|r| r.borrow().get(name).cloned()))
+}
+
 /// Build a C-identifier-safe tag for an element type. The tag
 /// is used as the suffix on per-type helper names (e.g. `vec_int64_t`,
 /// `vec_vec_int64_t`, `vec_arr4_int64_t`). Composable so that
@@ -10896,6 +10942,24 @@ pub(crate) fn collect_rwlock_specs(
         }
         Type::Array { element, .. } => collect_rwlock_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_rwlock_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): see the matching comment on
+        // `collect_channel_specs`'s `Type::Struct` arm -- same gap,
+        // same fix, for `RwLock<T>`/`ReadGuard<T>`/`WriteGuard<T>`
+        // struct fields.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_rwlock_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }
@@ -11030,6 +11094,35 @@ pub(crate) fn collect_channel_specs(
         }
         Type::Array { element, .. } => collect_channel_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_channel_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): a struct FIELD of `Channel<T,N>`
+        // type was never discovered when that struct was the only
+        // place `Channel<T,N>` appeared in the whole program (no bare
+        // `let`/param of the same type anywhere else) -- this
+        // function only ever recursed into Vec/Atomic/Mutex/Guard/
+        // Array/Ref/RefMut, never a nominal struct's OWN field types.
+        // `struct Cache<T> { lock: Mutex<T> }` (same bug, different
+        // handle type) confirmed the pattern is real and reachable:
+        // `cc` failed with "implicit declaration of function
+        // 'intent_mutex_int64_t_new'" -- the bundle was simply never
+        // emitted. No cycle-guard needed: a struct field graph is
+        // always a DAG by construction (a struct can't contain
+        // itself by value -- that's an infinite-size type the
+        // checker already rejects), so plain recursion through the
+        // field-types registry can't loop forever.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_channel_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }
@@ -11147,6 +11240,23 @@ pub(crate) fn collect_mutex_specs(ty: &Type, seen: &mut BTreeSet<String>, out: &
         }
         Type::Array { element, .. } => collect_mutex_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_mutex_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): see the matching comment on
+        // `collect_channel_specs`'s `Type::Struct` arm -- same gap,
+        // same fix, for `Mutex<T>`/`Guard<T>` struct fields.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_mutex_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }

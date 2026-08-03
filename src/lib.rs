@@ -53769,6 +53769,218 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    // Feature-combination gap audit (2026-08-03), category 2:
+    // generics x concurrency handles. `struct Cache<T> { lock:
+    // Mutex<T> }` found BUG-83: `collect_mutex_specs`/
+    // `collect_rwlock_specs`/`collect_channel_specs` (the passes that
+    // discover which concrete T's need a bundle emitted) only ever
+    // recursed into Vec/Atomic/Array/Ref/RefMut -- never a nominal
+    // struct's OWN field types. Crucially, `struct_field_mutex_
+    // alongside_vec_field_compiles_to_c` just above did NOT catch
+    // this: it ALSO declares a bare `let m: Mutex<i64> = ...;`
+    // elsewhere in the same function, which the pre-existing
+    // `TypedStmt::Let` arm already discovers directly -- masking the
+    // gap entirely. The bug only manifests when the concrete T is
+    // used EXCLUSIVELY through the struct field, never as a bare
+    // local/param anywhere else in the program -- exactly the natural
+    // "a Cache/SharedState struct wraps a lock" pattern. Confirmed via
+    // `cc`: "implicit declaration of function
+    // 'intent_mutex_int64_t_new'" -- the bundle was never emitted at
+    // all. Fixed by adding a `Type::Struct(name)` arm to all three
+    // collector functions, looking up the struct's field types via a
+    // new shared `lookup_struct_fields_any_backend` helper.
+    //
+    // That helper's OWN existence is because of a second, LLVM-only
+    // layer to the same bug: these three collector functions live in
+    // `backend_c.rs` and are REUSED directly by `backend_llvm.rs` (no
+    // duplicate LLVM-side versions), but each backend populates its
+    // own independent struct-fields registry
+    // (`backend_c::STRUCT_FIELDS_REGISTRY` vs.
+    // `backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY`) -- only one is
+    // ever populated per compile run. A naive fix reading only the
+    // C-side registry made the C backend correct while LLVM kept
+    // failing with "Cannot allocate unsized type" (the mutex struct
+    // type was silently never emitted). `lookup_struct_fields_any_
+    // backend` checks both, in order.
+    #[test]
+    fn generic_struct_with_mutex_field_never_used_as_bare_local_compiles() {
+        let source = r#"
+            struct Cache<T> { lock: Mutex<T> }
+            fn main() -> i64 {
+              let ci: Cache<i64> = Cache { lock: mutex_new(42) };
+              let vi: i64 = {
+                let gi = mutex_lock(ref ci.lock);
+                guard_get(ref gi)
+              };
+              print vi;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Cache<i64> { lock: Mutex<i64> } must compile to C");
+        compile_to_llvm(source).expect("Cache<i64> { lock: Mutex<i64> } must compile to LLVM");
+    }
+
+    // Regression found verifying the BUG-83 fix above, fixed in the
+    // same pass (2026-08-03): the initial `Type::Struct` recursion
+    // arm added to `collect_mutex_specs`/`collect_rwlock_specs`/
+    // `collect_channel_specs` assumed a struct's field graph is
+    // always a DAG (true for by-VALUE nesting, which can't be
+    // infinite-sized) -- wrong for `Vec<Self>`, which IS legal and
+    // common (`struct Node { children: Vec<Node> }`, the shape every
+    // tree/recursive-walk example needs, since `Vec` is always
+    // pointer-indirected). Without a cycle guard, recursing into
+    // `Node`'s `Vec<Node>` field walked straight back into `Node`
+    // itself, forever -- confirmed as a REAL stack overflow at
+    // runtime (`examples/language/english/self_referential_struct_
+    // vec.vani`, an existing pinned regression test for a DIFFERENT,
+    // already-fixed bug (BUG-31), started crashing with "thread
+    // 'main' has overflowed its stack" the moment this fix landed).
+    // Fixed with a `STRUCT_RECURSION_GUARD` thread-local tracking
+    // which struct names are currently being expanded on the current
+    // walk -- a struct already in progress is skipped rather than
+    // re-entered, correctly breaking the cycle while still fully
+    // exploring every distinct struct once per top-level call.
+    #[test]
+    fn self_referential_struct_with_mutex_field_does_not_infinite_recurse() {
+        let source = r#"
+            struct Node { value: i64, children: Vec<Node>, lock: Mutex<i64> }
+            fn main() -> i64 {
+              let empty: Vec<Node> = vec();
+              let n: Node = Node { value: 1, children: empty, lock: mutex_new(0) };
+              print n.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("self-referential struct with an unrelated Mutex field must compile, not hang/stack-overflow");
+        compile_to_llvm(source).expect("self-referential struct with an unrelated Mutex field must compile to LLVM too");
+    }
+
+    // BUG-84 (found+fixed 2026-08-03, same gap-audit pass, LLVM-only).
+    // Testing `Cache<bool>` (a second instantiation of the same
+    // generic struct, T=bool) alongside the i64 one above surfaced a
+    // completely separate, general bug: `Mutex<bool>` (ANY `Mutex
+    // <bool>`, not just as a struct field or generic instantiation --
+    // confirmed with a bare top-level `Mutex<bool>` too) crashed `lli`
+    // with a type-mismatch verifier error ("defined with type 'i8'
+    // but expected 'i1'"). Root cause: `Mutex<bool>`'s payload is
+    // stored as `i8` (the same Atomic<bool> shadow-storage trick --
+    // `i1` isn't byte-addressable), but `guard_get`'s codegen returned
+    // the raw loaded `i8` value directly instead of converting it
+    // back to `i1`, and `guard_set` had the mirror gap on the write
+    // side. Fixed by mirroring `atomic_load`/`atomic_store`'s
+    // existing Bool handling (`icmp ne i8 X, 0` / `zext i1 to i8`).
+    #[test]
+    fn generic_struct_with_mutex_bool_field_compiles_and_runs_correctly() {
+        let source = r#"
+            struct Cache<T> { lock: Mutex<T> }
+            fn main() -> i64 {
+              let cb: Cache<bool> = Cache { lock: mutex_new(true) };
+              let vb: bool = {
+                let gb = mutex_lock(ref cb.lock);
+                guard_get(ref gb)
+              };
+              print vb;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Cache<bool> must compile to C");
+        compile_to_llvm(source).expect("Cache<bool> must compile to LLVM without a type-mismatch verifier error");
+    }
+
+    #[test]
+    fn bare_mutex_bool_guard_get_and_set_round_trip_correctly() {
+        // General confirmation beyond the struct-field case above:
+        // Mutex<bool> was broken for ANY usage shape, not just
+        // structs/generics.
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<bool> = mutex_new(true);
+              let v: bool = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("bare Mutex<bool> must compile to C");
+        compile_to_llvm(source).expect("bare Mutex<bool> must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_function_constructing_mutex_from_its_own_type_param_compiles() {
+        // Category 2, row 2: a generic function that itself
+        // constructs a Mutex<T>/RwLock<T>/Channel<T,N> from its own
+        // generic parameter (as opposed to a struct declaring the
+        // field). Checked clean -- no bug found.
+        let source = r#"
+            fn make_locked<T>(initial: T) -> Mutex<T> {
+              return mutex_new(initial);
+            }
+            fn main() -> i64 {
+              let m: Mutex<i64> = make_locked(7);
+              let v: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("generic fn constructing Mutex<T> must compile to C");
+        compile_to_llvm(source).expect("generic fn constructing Mutex<T> must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_task_capture_copy_check_applies_per_monomorphization() {
+        // Category 2, row 4: a generic, bounded task-capture Copy
+        // check must be evaluated PER MONOMORPHIZATION -- the exact
+        // same generic function body should accept a Copy
+        // instantiation (T=i64) and reject a non-Copy one (T=
+        // OwnedStr) within the SAME program. Checked clean -- no bug
+        // found; both directions behave correctly.
+        let accepted = r#"
+            fn use_val<T>(x: T) -> i64 {
+              task worker {
+                let _ = x;
+              }
+              join worker;
+              return 0;
+            }
+            fn main() -> i64 {
+              let n: i64 = use_val(5);
+              print n;
+              return 0;
+            }
+        "#;
+        compile_to_c(accepted).expect("task capture of Copy T=i64 must be accepted");
+        compile_to_llvm(accepted).expect("task capture of Copy T=i64 must be accepted (LLVM)");
+
+        let rejected = r#"
+            fn use_val<T>(x: T) -> i64 {
+              task worker {
+                let _ = x;
+              }
+              join worker;
+              return 0;
+            }
+            fn main() -> i64 {
+              let n: i64 = use_val(5);
+              let s: OwnedStr = "hi" + "";
+              let m: i64 = use_val(s);
+              print n;
+              print m;
+              return 0;
+            }
+        "#;
+        let result = compile(rejected);
+        assert!(
+            result.is_err(),
+            "task capture of non-Copy T=OwnedStr must be rejected even though \
+             the i64 instantiation of the same generic function is accepted"
+        );
+    }
+
     /// BUG-62 (tree-C, part 1): `array_c_typedef`'s helper for the
     /// INNER element spelling of a `Vec<[T;N]>` typedef fell
     /// through to `c_leaf_type` for Struct elements, which returns

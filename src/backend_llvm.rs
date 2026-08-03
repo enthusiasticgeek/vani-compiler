@@ -6496,6 +6496,25 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let val = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = load {}, {}* {}\n", val, payload_ty, payload_ty, value_p));
+                // Gap-audit fix (2026-08-03): `Mutex<bool>` stores its
+                // payload as `i8` (the same Atomic<bool>-style shadow
+                // trick `atomic_storage_llvm`/`atomic_load` already
+                // use -- i1 isn't byte-addressable), but this function
+                // returned the raw i8 SSA value directly instead of
+                // converting it back to i1 -- an LLVM type-mismatch
+                // verifier error the instant the caller tried to use
+                // the result as a bool ("defined with type 'i8' but
+                // expected 'i1'"). Confirmed general, not struct/
+                // generic-specific: a bare `Mutex<bool>` at top level
+                // hit the identical crash. Mirrors `atomic_load`'s
+                // existing `icmp ne i8 X, 0` conversion (not `trunc`,
+                // which would only look at the low bit -- `icmp ne 0`
+                // correctly treats any nonzero byte as true).
+                if matches!(elt, Type::Bool) {
+                    let truncd = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", truncd, val));
+                    return truncd;
+                }
                 return val;
             }
             if name == "guard_set" {
@@ -6523,7 +6542,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
                     value_p, m_ty, m_ty, m_ptr
                 ));
-                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, v, payload_ty, value_p));
+                // Gap-audit fix (2026-08-03): mirror of the guard_get
+                // fix above -- `v` is an i1 bool value but the slot's
+                // real storage type is i8, so storing it directly is
+                // the same class of type mismatch, just on the write
+                // side. `zext i1 to i8` matches `atomic_store`'s
+                // existing Bool handling.
+                let stored = if matches!(elt, Type::Bool) {
+                    let promoted = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = zext i1 {} to i8\n", promoted, v));
+                    promoted
+                } else {
+                    v.clone()
+                };
+                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, stored, payload_ty, value_p));
                 return v;
             }
             // Condvar builtins. Stack-by-value `%intent_condvar

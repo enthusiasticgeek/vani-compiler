@@ -8361,3 +8361,79 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// BUG-83/BUG-84 (2026-08-03), feature-combination gap audit category
+// 2: generics x concurrency handles. See the matching src/lib.rs
+// tests' doc comments for the full root-cause writeups:
+// BUG-83 -- collect_mutex_specs/collect_rwlock_specs/
+// collect_channel_specs never recursed into a struct's OWN field
+// types, so a lock used ONLY through a struct field (never a bare
+// local elsewhere) never got its bundle emitted; LLVM needed a
+// SECOND fix (a cross-backend struct-fields-registry fallback) since
+// the C and LLVM backends each populate their own independent copy.
+// BUG-84 -- Mutex<bool>'s guard_get/guard_set never converted between
+// the i1 (bool) and i8 (byte-addressable storage) representations,
+// an LLVM verifier crash for ANY Mutex<bool> at all, not just this
+// combination -- but found via the T=bool instantiation of the same
+// generic Cache<T> struct used for BUG-83.
+#[test]
+fn generic_struct_mutex_field_two_instantiations_produce_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-generic-mutex-cache-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Cache<T> { lock: Mutex<T> }
+fn main() -> i64 {
+  let ci: Cache<i64> = Cache { lock: mutex_new(42) };
+  let vi: i64 = {
+    let gi = mutex_lock(ref ci.lock);
+    guard_get(ref gi)
+  };
+  let cb: Cache<bool> = Cache { lock: mutex_new(true) };
+  let vb: bool = {
+    let gb = mutex_lock(ref cb.lock);
+    guard_get(ref gb)
+  };
+  print vi;
+  print vb;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\ntrue\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}

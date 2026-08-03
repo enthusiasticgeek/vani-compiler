@@ -5975,4 +5975,88 @@ landed: 13/13 binaries clean, 0 failed (2697 lib tests, up from 2688;
 142 end-to-end tests, up from 139). Category 1 (all 8 rows) now fully
 closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
 
+- [x] **BUG-83 (found+fixed 2026-08-03 -- two layered bugs, plus a
+  self-inflicted regression caught and fixed in the same pass).
+  Category 2, row 1: `struct Cache<T> { lock: Mutex<T> }` -- a
+  struct field holding a concurrency-handle type that's ONLY ever
+  used through that field (never as a bare local/param elsewhere in
+  the program) -- crashed both backends.** Root cause:
+  `collect_mutex_specs`/`collect_rwlock_specs`/`collect_channel_specs`
+  (the passes that discover which concrete T's need a bundle
+  emitted) only ever recursed into `Vec`/`Atomic`/`Array`/`Ref`/
+  `RefMut` -- never a nominal struct's OWN field types. The pre-
+  existing `struct_field_mutex_alongside_vec_field_...` test never
+  caught this: it ALSO declares a bare `let m: Mutex<i64> = ...;`
+  elsewhere, which the existing `TypedStmt::Let` arm already
+  discovers directly, masking the gap. Confirmed via `cc`: "implicit
+  declaration of function 'intent_mutex_int64_t_new'" -- the bundle
+  was simply never emitted. Fixed by adding a `Type::Struct(name)`
+  arm to all three collector functions.
+  **LLVM-specific second layer**: these three collectors live in
+  `backend_c.rs` and are directly REUSED by `backend_llvm.rs` (no
+  duplicate LLVM versions) -- but each backend populates its own
+  independent struct-fields registry (`backend_c::
+  STRUCT_FIELDS_REGISTRY` vs. `backend_llvm::
+  LLVM_STRUCT_FIELDS_REGISTRY`), and only one is ever populated per
+  compile run. The initial fix (reading only the C-side registry)
+  made C correct while LLVM kept failing ("Cannot allocate unsized
+  type" -- the mutex struct type was silently never emitted). Fixed
+  with a new `lookup_struct_fields_any_backend` helper that checks
+  both registries.
+  **Self-inflicted regression, found verifying the fix and fixed in
+  the same pass**: the `Type::Struct` recursion assumed a struct's
+  field graph is always a DAG -- true for BY-VALUE nesting (can't be
+  infinite-sized), false for `Vec<Self>` (legal and common --
+  `struct Node { children: Vec<Node> }`, the shape every tree/
+  recursive-walk example needs, since `Vec` is pointer-indirected).
+  Without a cycle guard, `collect_mutex_specs(Struct(Node))` walked
+  Node's `Vec<Node>` field straight back into itself, forever --
+  confirmed as a REAL stack overflow: the pre-existing, pinned
+  `self_referential_struct_vec_example_produces_correct_output_on_
+  c_backend` end-to-end test (a regression test for a DIFFERENT,
+  already-fixed bug, BUG-31) started crashing with "thread 'main' has
+  overflowed its stack" the moment the naive fix landed. Fixed with a
+  new `STRUCT_RECURSION_GUARD` thread-local tracking which struct
+  names are currently being expanded on the current walk -- already-
+  in-progress structs are skipped rather than re-entered.
+  Also found a completely separate, general (not struct/generic-
+  specific) bug while testing `Cache<bool>` (the second monomorphic
+  instantiation) alongside `Cache<i64>` -- logged as BUG-84 below.
+  Category 2 rows 2 and 4 (a generic function constructing a
+  `Mutex<T>` from its own type parameter; the task-capture Copy
+  check applying correctly PER MONOMORPHIZATION, accepting T=i64 and
+  rejecting T=OwnedStr within the same program) both checked clean,
+  no bug found. Row 3 (`Task<T>` as a generic function's return type)
+  is blocked by the pre-existing, correctly-enforced "spawn and join
+  must be in the same block" v1 architectural limitation -- applies
+  identically regardless of generics, not a new finding.
+  New tests: 6 `src/lib.rs` (struct-field discovery both directions,
+  the recursion-guard regression, the generic-fn-constructs-lock row,
+  both directions of the task-capture-Copy-check row) + 1
+  `tests/run_end_to_end.rs` (real stdout, both `Cache<i64>`/
+  `Cache<bool>` instantiations, both backends).
+
+- [x] **BUG-84 (found+fixed 2026-08-03, same pass, LLVM-only).
+  `Mutex<bool>` -- ANY `Mutex<bool>`, confirmed with a bare top-
+  level one too, not just the struct-field/generic case that
+  surfaced it -- crashed `lli` with a type-mismatch verifier error
+  ("defined with type 'i8' but expected 'i1'").** Root cause:
+  `Mutex<bool>`'s payload is stored as `i8` (the same `Atomic<bool>`
+  shadow-storage trick `atomic_storage_llvm` already uses -- `i1`
+  isn't byte-addressable), but `guard_get`'s codegen returned the
+  raw loaded `i8` value directly instead of converting it back to
+  `i1`; `guard_set` had the mirror gap on the write side. Fixed by
+  mirroring `atomic_load`/`atomic_store`'s existing Bool handling
+  (`icmp ne i8 X, 0` for the read direction -- not `trunc`, which
+  would only look at the low bit; `zext i1 to i8` for the write
+  direction).
+  Verified (both BUG-83 and BUG-84) with `valgrind --leak-check=full`
+  on a native AOT LLVM build: 0 errors, all heap blocks freed.
+
+Full `cargo test --release --workspace` after BUG-83/84 and the
+recursion-guard fix landed: 13/13 binaries clean, 0 failed (2703 lib
+tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
+(all 4 rows) now fully closed in
+`docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
 ---

@@ -118,21 +118,45 @@ still being a **generic type parameter** at the point the handle is
 declared (monomorphized later), as opposed to already being a
 concrete struct.
 
-- [ ] `struct Cache<T> { lock: Mutex<T> }`, instantiated at two
-      different `T` in the same program (mirrors the already-tested
-      "generic struct at 2+ different T" pattern, but with a
-      concurrency handle as the generic field instead of a plain
-      value).
-- [ ] `fn spawn_with_lock<T>(initial: T) -> Mutex<T>` — a generic
+- [x] `struct Cache<T> { lock: Mutex<T> }`, instantiated at two
+      different `T` in the same program — **found+fixed 2026-08-03,
+      BUG-83 (two layered bugs + a self-inflicted regression caught
+      in the same pass) and BUG-84 (a separate, general `Mutex<bool>`
+      bug surfaced by the T=bool instantiation).** A struct field
+      holding a concurrency handle used ONLY through that field
+      (never a bare local elsewhere) was never discovered by the
+      bundle-collection passes on either backend; LLVM needed a
+      second, cross-backend-registry fix on top. Fixing the
+      discovery gap naively assumed struct field graphs are acyclic,
+      which broke `Vec<Self>`-shaped structs (a real stack overflow,
+      caught by a pre-existing pinned regression test) — fixed with a
+      recursion guard. See `docs/TODO_CURRENT.md`'s BUG-83/84 entries
+      for the full writeup.
+- [x] `fn spawn_with_lock<T>(initial: T) -> Mutex<T>` — a generic
       function that itself constructs a `Mutex<T>`/`RwLock<T>`/
-      `Channel<T,N>` from its generic parameter.
-- [ ] `Task<T>` where `T` is a generic parameter of the enclosing
-      generic function (`fn run<T>(x: T) -> Task<T>`).
-- [ ] A generic function bounded `<T: Iface>` that spawns a `task`
-      capturing a `T`-typed value — does the "task captures must be
-      Copy" check correctly evaluate `T`'s Copy-ness per
-      monomorphization (Copy for one instantiation, non-Copy — should
-      reject — for another)?
+      `Channel<T,N>` from its generic parameter — **checked
+      2026-08-03, not a bug**: correct on both backends.
+- [x] `Task<T>` where `T` is a generic parameter of the enclosing
+      generic function (`fn run<T>(x: T) -> Task<T>`) — **checked
+      2026-08-03, blocked by a pre-existing, correctly-enforced v1
+      limitation, not a new bug**: returning a spawned `Task` from a
+      function and joining it in a DIFFERENT function/block hits the
+      already-documented "spawn and join must be in the same
+      statement list" restriction — applies identically with or
+      without generics, so this row can't isolate a generics-specific
+      behavior at all.
+- [x] A generic function bounded `<T: Iface>` that spawns a `task`
+      capturing a `T`-typed value — **checked 2026-08-03, not a
+      bug**: the "task captures must be Copy" check correctly
+      evaluates `T`'s Copy-ness PER MONOMORPHIZATION — the same
+      generic function accepts a Copy instantiation (T=i64) and
+      cleanly rejects a non-Copy one (T=OwnedStr) within the same
+      program.
+
+Category 2 fully closed. New tests: 6 `src/lib.rs` + 1
+`tests/run_end_to_end.rs` (see `docs/TODO_CURRENT.md`'s BUG-83/84
+entries). Full `cargo test --release --workspace`: 13/13 binaries
+clean, 0 failed.
 
 ## 3. SMT contracts x generics / concurrency / enums (🟡–🔴 mixed — the closed sweep only tested SMT x Vec/Struct)
 
