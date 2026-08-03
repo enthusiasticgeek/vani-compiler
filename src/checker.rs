@@ -4,7 +4,28 @@ use crate::ir::{
     TypedConst, TypedExpr, TypedExprKind, TypedFunction, TypedParam, TypedProgram, TypedStmt,
 };
 use crate::span::Span;
-use std::collections::{BTreeMap, HashMap};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+thread_local! {
+    // Gap-audit fix (2026-08-03): names of every generic enum
+    // TEMPLATE (e.g. "Option", "Result", or a user-declared generic
+    // enum) as they exist at the very start of the checker pipeline,
+    // before any monomorphization pass has touched them. Populated
+    // once from `program.enums` alongside `enum_names_pre` (used for
+    // `resolve_enum_types_in_program`) so it reflects the pristine
+    // set. `substitute_type_param`'s `Type::Apply` collapse needs
+    // this to decide whether a newly-all-concrete `Apply{name, args}`
+    // should collapse to `Type::Enum(mangled)` or `Type::Struct
+    // (mangled)` -- without it, every collapse defaulted to Struct,
+    // so a generic fn returning `Option<T>`/`Result<T,E>` produced a
+    // `Type::Struct("Option__i64")` for its specialized return type
+    // instead of `Type::Enum("Option__i64")`. Both Display the same
+    // (mangled name string), so the mismatch only surfaced as a
+    // baffling "expected Option__i64, got Option__i64" diagnostic.
+    static GENERIC_ENUM_TEMPLATE_NAMES: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
+}
 
 const BUILTIN_FUNCTION_NAMES: &[&str] =
     &["vec", "push", "pop", "set", "sort", "sort_by", "sort_desc", "vec_swap", "vec_remove_at", "vec_replace_all", "reverse", "dedup", "find", "contains", "binary_search", "swap_remove", "insert", "clear", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_split", "parse_int", "parse_float", "i64_to_str", "f64_to_str", "bool_to_str", "str_index_of", "substring", "str_repeat", "str_to_upper", "str_to_lower", "parse_bool", "str_join", "str_pad_left", "str_pad_right", "str_lines", "str_chars", "str_reverse", "str_strip_prefix", "str_strip_suffix", "str_count_char", "pow", "sqrt", "sin", "cos", "tan", "floor", "ceil", "abs", "log", "log2", "log10", "exp", "atan2", "f64_is_nan", "f64_is_inf", "f64_is_finite", "f64_pi", "f64_e", "f64_inf", "f64_nan", "f64_round", "f64_trunc_to_i64", "i64_gcd", "i64_lcm", "i64_pow", "i64_abs_diff", "i64_signum", "f64_signum", "is_ascii_digit", "is_ascii_alpha", "is_ascii_alphanumeric", "is_ascii_whitespace", "i64_count_set_bits", "i64_leading_zeros", "i64_trailing_zeros", "i64_bswap", "i64_rotate_left", "i64_rotate_right", "f64_to_bits", "f64_from_bits", "i64_min_value", "i64_max_value", "f64_max_finite", "i64_div_floor", "i64_mod_floor", "f64_lerp", "f64_clamp01", "i64_log2_floor", "i64_log2_ceil", "i64_is_power_of_2", "i64_next_power_of_2", "i64_saturating_add", "i64_saturating_sub", "i64_saturating_mul", "i64_min", "i64_max", "i64_clamp", "f64_min", "f64_max", "f64_clamp", "i64_isqrt", "f64_hypot", "f64_to_radians", "f64_to_degrees", "asin", "acos", "atan", "sinh", "cosh", "tanh", "f64_epsilon", "f64_min_positive", "f64_min_subnormal", "f64_copysign", "f64_fma", "f64_remainder", "f64_is_normal", "f64_is_subnormal", "f64_sign_bit", "f64_next_up", "f64_next_down", "i64_div_ceil", "i64_div_round", "f64_trunc", "f64_frac", "i64_count_digits", "i64_log10_floor", "i64_log10_ceil", "i64_pow_mod", "i64_is_prime", "i64_factorial", "i64_fibonacci", "i64_binomial", "i64_perm", "i64_avg", "i64_wrap", "f64_wrap", "f64_mod_floor", "i64_min_3", "i64_max_3", "f64_min_3", "f64_max_3", "f64_sigmoid", "f64_softsign", "f64_step", "f64_smoothstep", "f64_smoothstep5", "f64_inv_lerp", "f64_chebyshev", "f64_l1_norm", "i64_isqrt_ceil", "i64_is_perfect_square", "i64_divisor_count", "i64_divisor_sum", "i64_totient", "i64_radical", "i64_next_prime", "i64_prev_prime", "i64_mod_inverse", "i64_set_bit", "i64_clear_bit", "i64_toggle_bit", "i64_test_bit", "i64_reverse_bits", "f64_relu", "f64_leaky_relu", "f64_softplus", "f64_swish", "f64_logit", "f64_sinc", "f64_safe_div", "f64_safe_sqrt", "i64_safe_div", "f64_safe_log", "f64_geometric_mean", "f64_harmonic_mean", "f64_quadratic_mean", "f64_log_b", "f64_erf", "f64_erfc", "f64_tgamma", "f64_lgamma", "f64_cbrt", "f64_expm1", "f64_log1p", "f64_exp2", "f64_exp10", "f64_inv_sqrt", "f64_round_to", "f64_sec", "f64_csc", "f64_cot", "f64_normal_pdf", "f64_normal_cdf", "f64_lerp_clamp", "f64_atan2_deg", "f64_uniform_random", "f64_inv_smoothstep", "f64_atan_deg", "f64_rgb_to_grayscale", "i64_pack_rgb", "i64_unpack_rgb_r", "i64_unpack_rgb_g", "i64_unpack_rgb_b", "f64_remap", "str_byte_at", "str_len_bytes", "str_starts_with_byte", "str_ends_with_byte", "str_byte_count", "str_index_of_byte", "str_last_index_of_byte", "str_count_ascii_digits", "str_count_ascii_alpha", "str_count_ascii_alphanumeric", "str_count_ascii_whitespace", "str_count_ascii_upper", "str_count_ascii_lower", "str_count_ascii_punct", "str_count_ascii_control", "str_first_byte", "str_last_byte", "seed_rng", "rand_i64", "rand_in_range", "hash_i64", "hash_f64", "hash_str", "hash_combine", "siphash_i64", "siphash_str", "heap_push", "heap_pop", "heap_peek", "heapify", "deque_new", "deque_push_back", "deque_push_front", "deque_pop_back", "deque_pop_front", "deque_peek_back", "deque_peek_front", "deque_len", "deque_clear", "hashset_new", "hashset_insert", "hashset_contains", "hashset_remove", "hashset_len", "hashset_clear", "hashmap_new", "hashmap_insert", "hashmap_get", "hashmap_contains_key", "hashmap_remove", "hashmap_len", "hashmap_clear", "btreeset_new", "btreeset_insert", "btreeset_contains", "btreeset_remove", "btreeset_len", "btreeset_range", "btreeset_min", "btreeset_max", "btreeset_clear", "btreemap_new", "btreemap_insert", "btreemap_get", "btreemap_contains_key", "btreemap_remove", "btreemap_len", "btreemap_range_keys", "btreemap_range_values", "btreemap_min_key", "btreemap_max_key", "btreemap_clear", "vec_map", "vec_fold", "vec_filter", "vec_position", "vec_count_if", "vec_max_by", "vec_min_by", "vec_zip_with", "vec_take", "vec_drop", "vec_take_while", "vec_drop_while", "vec_map_fold", "vec_filter_fold", "vec_map_filter", "vec_map_filter_fold", "vec_sum", "vec_product", "vec_min", "vec_max", "vec_count", "vec_any", "vec_all", "vec_chain", "vec_range", "vec_repeat", "vec_extend", "vec_concat", "vec_reverse_copy", "vec_unique", "vec_iota", "vec_first", "vec_last", "vec_running_sum", "vec_dot", "vec_intersect", "vec_difference", "vec_union", "option_unwrap_or", "option_is_some", "option_is_none", "option_map", "option_filter", "option_or", "option_and_then", "option_unwrap_or_f64", "option_is_some_f64", "option_is_none_f64", "union_find_new", "union_find_union", "union_find_find", "union_find_connected", "union_find_count", "union_find_clear", "binary_heap_new", "binary_heap_push", "binary_heap_pop", "binary_heap_peek", "binary_heap_len", "binary_heap_clear", "bloom_filter_new", "bloom_filter_insert", "bloom_filter_contains", "bloom_filter_len", "bloom_filter_count", "bloom_filter_clear", "bst_new", "bst_insert", "bst_contains", "bst_remove", "bst_len", "bst_min", "bst_max", "bst_clear", "graph_new", "graph_add_edge", "graph_num_nodes", "graph_num_edges", "graph_bfs_reach", "graph_dfs_reach", "graph_dijkstra", "graph_has_cycle", "graph_mst_kruskal", "graph_mst_prim", "graph_astar", "graph_topo_sort", "graph_clear", "trie_new", "trie_insert", "trie_contains", "trie_starts_with", "trie_delete", "trie_len", "trie_node_count", "trie_clear", "skiplist_new", "skiplist_insert", "skiplist_contains", "skiplist_remove", "skiplist_len", "skiplist_min", "skiplist_max", "skiplist_clear", "clone", "clone_at", "hash_combine_3", "hash_combine_4", "hash_pair", "hash_triple", "f64_hash_pair", "f64_hash_triple", "str_hash_pair", "str_hash_triple", "vec_argmin", "vec_argmax", "vec_count_value", "vec_index_of_value", "vec_last_index_of_value", "vec_cumulative_max", "vec_cumulative_min", "vec_running_product", "vec_running_xor", "vec_running_and", "vec_running_or", "vec_all_equal", "vec_is_sorted_asc", "vec_is_sorted_desc", "vec_is_palindrome", "vec_sliding_max", "vec_sliding_min", "vec_sliding_sum", "vec_sliding_product", "vec_abs", "vec_negate", "vec_signum", "vec_square", "vec_add_scalar", "vec_sub_scalar", "vec_mul_scalar", "vec_div_scalar", "vec_eq_mask", "vec_ne_mask", "vec_lt_mask", "vec_le_mask", "vec_gt_mask", "vec_ge_mask", "vec_min_with_scalar", "vec_max_with_scalar", "vec_clamp_scalar", "vec_add_pairwise", "vec_sub_pairwise", "vec_mul_pairwise", "vec_min_pairwise", "vec_max_pairwise", "vec_mod_scalar", "vec_pow_scalar", "vec_shl_scalar", "vec_shr_scalar", "vec_rotate_left", "vec_rotate_right", "vec_shift_left", "vec_shift_right", "vec_subset_of", "vec_disjoint", "vec_equal_set", "vec_equal_seq", "vec_diff", "vec_pad_left", "vec_pad_right", "vec_replace_value", "vec_count_distinct", "vec_indices_of_value", "vec_dedup_consecutive", "vec_mean", "vec_merge_sorted", "vec_insert_sorted", "vec_is_sorted_unique", "vec_range_span", "vec_mode", "vec_kth_smallest", "vec_median", "i64_byte_at", "i64_set_byte", "i64_count_leading_ones", "i64_count_trailing_ones", "f64_asin_deg", "f64_acos_deg", "f64_sec_deg", "f64_csc_deg", "f64_cot_deg", "str_is_ascii", "str_is_digit_only", "str_is_alpha_only", "str_is_alphanumeric_only", "str_is_whitespace_only", "str_is_empty", "rand_f64", "rand_in_range_f64", "rand_bool", "rand_choice", "rand_normal", "vec_chunks", "vec_windows", "vec_flatten", "vec_group_by_value", "i64_parity", "i64_mod_pos", "i64_cube_root", "f64_pow_int", "f64_round_to_multiple", "f64_quadratic_root", "vec_running_mean", "vec_intersperse", "pool_new", "pool_alloc", "pool_get", "pool_free", "taint", "assert_safe", "raw_load", "raw_store", "unsafe_alloc", "unsafe_free", "bptr_new", "bptr_get", "bptr_set", "bptr_len", "region_new", "region_alloc_i64", "region_len", "region_borrow_i64", "aref_load", "aref_store", "mmio_read_u32", "mmio_write_u32", "mmio_read_u8", "mmio_read_u16", "mmio_write_u8", "mmio_write_u16", "sleep_ms",
@@ -523,6 +544,7 @@ fn check_impl(
     // analysis sees the right Type variant. T1.3.
     let enum_names_pre: std::collections::HashSet<String> =
         program.enums.iter().map(|e| e.name.clone()).collect();
+    GENERIC_ENUM_TEMPLATE_NAMES.with(|c| *c.borrow_mut() = enum_names_pre.clone());
     resolve_enum_types_in_program(&mut program, &enum_names_pre);
 
     // T4.15 alias half: build the alias registry, detect
@@ -7056,6 +7078,57 @@ fn collect_generic_calls_in_expr(
         ExprKind::Unary { expr: inner, .. } => {
             collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
         }
+        // Gap-audit fix (2026-08-03): `try EXPR`/`EXPR?` wraps its
+        // inner call in `ExprKind::Try { inner }` -- this scanner had
+        // no arm for it, so a generic function called ONLY through
+        // `try`/`?` (e.g. `let v: i64 = try wrap(n);` where `wrap<T>`
+        // is generic) was never discovered as a real call site,
+        // failing monomorphization outright ("generic function 'wrap'
+        // is declared but never called with concrete types") even
+        // though the call is genuinely there. Same root-cause SHAPE
+        // as the (deferred) BUG-87 async finding -- a special syntax
+        // wrapper node this walker doesn't know about -- but a much
+        // narrower, lower-risk fix here: `Try` is a simple pass-
+        // through wrapper (unlike `await`'s Future<T> desugar), so
+        // recursing into `inner` the same way `Unary` does is
+        // sufficient and carries none of async's architectural risk.
+        ExprKind::Try { inner } => {
+            collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
+        }
+        // Gap-audit fix (2026-08-03), part 2: `desugar_try_let_in_program`
+        // runs BEFORE this monomorphization pass, so by the time this
+        // scanner walks the program every `try EXPR` has ALREADY been
+        // rewritten into `Match { scrutinee: EXPR, arms: [Some(..)
+        // then Block{...}, None then ...] }` -- the `ExprKind::Try` arm
+        // above is dead code for that path (it only matters for `try`
+        // occurrences the desugar doesn't reach). This scanner had NO
+        // arm at all for `Match` or `Block`, so a generic call sitting
+        // in a match scrutinee or inside a desugared Some-arm's Block
+        // was invisible to monomorphization -- the real cause of
+        // `wrap(n)` never getting specialized, surfacing downstream as
+        // nonsensical "scrutinee is of integer type" diagnostics once
+        // the template was silently dropped for having no call sites.
+        ExprKind::Match { scrutinee, arms } => {
+            collect_generic_calls_in_expr(scrutinee, generics, needed, scope, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_generic_calls_in_expr(guard, generics, needed, scope, diagnostics);
+                }
+                collect_generic_calls_in_expr(&arm.body, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            let mut inner_scope = scope.clone();
+            for s in stmts {
+                collect_generic_calls_in_stmt(s, generics, needed, &mut inner_scope, diagnostics);
+            }
+            collect_generic_calls_in_expr(tail, generics, needed, &inner_scope, diagnostics);
+        }
+        ExprKind::IfExpr { cond, then_value, else_value } => {
+            collect_generic_calls_in_expr(cond, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(then_value, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(else_value, generics, needed, scope, diagnostics);
+        }
         _ => {}
     }
 }
@@ -7397,6 +7470,43 @@ fn rewrite_generic_calls_in_expr(
             }
             ExprKind::Unary { expr: inner, .. } => {
                 rewrite_generic_calls_in_expr(inner, generics, scope);
+            }
+            ExprKind::Try { inner } => {
+                rewrite_generic_calls_in_expr(inner, generics, scope);
+            }
+            // Gap-audit fix (2026-08-03), part 3: same missing-arm
+            // shape as `collect_generic_calls_in_expr` above -- this
+            // is the SIBLING pass that actually mangles a generic
+            // call site's name (`wrap` -> `wrap__i64`) once
+            // monomorphization knows the concrete type. Since
+            // `desugar_try_let_in_program` runs before either pass,
+            // a `try wrap(n)` call always sits inside a `Match`
+            // scrutinee (or a desugared Some-arm's `Block`) by the
+            // time this rewriter walks the tree. Without these arms
+            // the call site was never renamed, so the (now-removed)
+            // generic template's bare name lingered in the AST --
+            // "unknown function 'wrap'" once monomorphization
+            // dropped the template.
+            ExprKind::Match { scrutinee, arms } => {
+                rewrite_generic_calls_in_expr(scrutinee, generics, scope);
+                for arm in arms.iter_mut() {
+                    if let Some(guard) = &mut arm.guard {
+                        rewrite_generic_calls_in_expr(guard, generics, scope);
+                    }
+                    rewrite_generic_calls_in_expr(&mut arm.body, generics, scope);
+                }
+            }
+            ExprKind::Block { stmts, tail } => {
+                let mut inner_scope = scope.clone();
+                for s in stmts.iter_mut() {
+                    rewrite_generic_calls_in_stmt(s, generics, &mut inner_scope);
+                }
+                rewrite_generic_calls_in_expr(tail, generics, &inner_scope);
+            }
+            ExprKind::IfExpr { cond, then_value, else_value } => {
+                rewrite_generic_calls_in_expr(cond, generics, scope);
+                rewrite_generic_calls_in_expr(then_value, generics, scope);
+                rewrite_generic_calls_in_expr(else_value, generics, scope);
             }
             _ => {}
         }
@@ -8711,16 +8821,102 @@ fn collect_apply_in_stmt(
         }
         rec(ty, struct_templates, enum_templates, ns, ne);
     };
+    // Gap-audit fix (2026-08-03), part 4: `desugar_try_let_in_program`
+    // runs before this pass and synthesizes `Stmt::Let` nodes (with
+    // the user's ORIGINAL type annotation cloned onto them, e.g.
+    // `let r: Result<i64, i64> = __t;`) buried inside a `Block`
+    // expr nested inside a `Match` arm, itself the tail of a
+    // `Stmt::Return`. This walker only ever looked at the
+    // TOP-LEVEL stmt list's own annotations -- `expr: _` above
+    // discarded exactly the sub-tree where a try-desugar's nested
+    // annotation lives, and `Stmt::Return`/`Stmt::Assign` fell
+    // through the `_ => {}` catch-all entirely. Net effect: a
+    // nested generic-enum annotation produced by the try desugar
+    // never got its `Type::Apply` resolved into the monomorphized
+    // `Type::Enum`, surfacing as a baffling "expected Result<i64,
+    // i64>, got Result__i64__i64" (same annotation, one resolved
+    // one not).
+    fn walk_expr_for_nested_lets(
+        expr: &Expr,
+        struct_templates: &HashMap<String, StructDecl>,
+        enum_templates: &HashMap<String, EnumDecl>,
+        needed_structs: &mut Vec<(String, Vec<Type>)>,
+        needed_enums: &mut Vec<(String, Vec<Type>)>,
+    ) {
+        match &expr.kind {
+            ExprKind::Block { stmts, tail } => {
+                for s in stmts {
+                    collect_apply_in_stmt(
+                        s, struct_templates, enum_templates,
+                        needed_structs, needed_enums,
+                    );
+                }
+                walk_expr_for_nested_lets(
+                    tail, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                walk_expr_for_nested_lets(
+                    scrutinee, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        walk_expr_for_nested_lets(
+                            g, struct_templates, enum_templates,
+                            needed_structs, needed_enums,
+                        );
+                    }
+                    walk_expr_for_nested_lets(
+                        &arm.body, struct_templates, enum_templates,
+                        needed_structs, needed_enums,
+                    );
+                }
+            }
+            ExprKind::IfExpr { cond, then_value, else_value } => {
+                walk_expr_for_nested_lets(
+                    cond, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                walk_expr_for_nested_lets(
+                    then_value, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                walk_expr_for_nested_lets(
+                    else_value, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            ExprKind::Try { inner } => {
+                walk_expr_for_nested_lets(
+                    inner, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            _ => {}
+        }
+    }
     match stmt {
-        Stmt::Let { annotation, expr: _, .. } => {
+        Stmt::Let { annotation, expr, .. } => {
             if let Some(ty) = annotation {
                 walk_ty(ty, needed_structs, needed_enums);
             }
+            walk_expr_for_nested_lets(
+                expr, struct_templates, enum_templates,
+                needed_structs, needed_enums,
+            );
         }
         Stmt::LetTuple { annotation, .. } => {
             if let Some(ty) = annotation {
                 walk_ty(ty, needed_structs, needed_enums);
             }
+        }
+        Stmt::Return { expr, .. } | Stmt::Assign { expr, .. } => {
+            walk_expr_for_nested_lets(
+                expr, struct_templates, enum_templates,
+                needed_structs, needed_enums,
+            );
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body {
@@ -8756,16 +8952,64 @@ fn collect_apply_in_stmt(
     }
 }
 
+// Gap-audit fix (2026-08-03), part 4 (mutable sibling of the
+// collect-side fix above): mirrors `walk_expr_for_nested_lets`,
+// recursing through the `Block`/`Match`/`IfExpr`/`Try` shapes the
+// try-desugar produces to reach nested `Stmt::Let` annotations so
+// they actually get rewritten `Type::Apply` -> `Type::Enum`/
+// `Type::Struct`, not just discovered.
+fn rewrite_apply_in_expr_nested_lets(
+    expr: &mut Expr,
+    struct_names: &std::collections::HashSet<String>,
+    enum_names: &std::collections::HashSet<String>,
+) {
+    match &mut expr.kind {
+        ExprKind::Block { stmts, tail } => {
+            for s in stmts.iter_mut() {
+                rewrite_apply_in_stmt(s, struct_names, enum_names);
+            }
+            rewrite_apply_in_expr_nested_lets(tail, struct_names, enum_names);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            rewrite_apply_in_expr_nested_lets(scrutinee, struct_names, enum_names);
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard {
+                    rewrite_apply_in_expr_nested_lets(g, struct_names, enum_names);
+                }
+                rewrite_apply_in_expr_nested_lets(&mut arm.body, struct_names, enum_names);
+            }
+        }
+        ExprKind::IfExpr { cond, then_value, else_value } => {
+            rewrite_apply_in_expr_nested_lets(cond, struct_names, enum_names);
+            rewrite_apply_in_expr_nested_lets(then_value, struct_names, enum_names);
+            rewrite_apply_in_expr_nested_lets(else_value, struct_names, enum_names);
+        }
+        ExprKind::Try { inner } => {
+            rewrite_apply_in_expr_nested_lets(inner, struct_names, enum_names);
+        }
+        _ => {}
+    }
+}
+
 fn rewrite_apply_in_stmt(
     stmt: &mut Stmt,
     struct_names: &std::collections::HashSet<String>,
     enum_names: &std::collections::HashSet<String>,
 ) {
     match stmt {
-        Stmt::Let { annotation, .. } | Stmt::LetTuple { annotation, .. } => {
+        Stmt::Let { annotation, expr, .. } => {
             if let Some(ty) = annotation {
                 rewrite_apply_in_ty(ty, struct_names, enum_names);
             }
+            rewrite_apply_in_expr_nested_lets(expr, struct_names, enum_names);
+        }
+        Stmt::LetTuple { annotation, .. } => {
+            if let Some(ty) = annotation {
+                rewrite_apply_in_ty(ty, struct_names, enum_names);
+            }
+        }
+        Stmt::Return { expr, .. } | Stmt::Assign { expr, .. } => {
+            rewrite_apply_in_expr_nested_lets(expr, struct_names, enum_names);
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
@@ -8885,7 +9129,13 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
                 if let Type::Apply { name, args } = ty.clone() {
                     if args.len() == 1 {
                         let mangled = format!("{}__{}", name, type_mangle(&args[0]));
-                        *ty = Type::Struct(mangled);
+                        let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
+                            .with(|c| c.borrow().contains(&name));
+                        *ty = if is_enum {
+                            Type::Enum(mangled)
+                        } else {
+                            Type::Struct(mangled)
+                        };
                     }
                 }
             }

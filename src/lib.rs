@@ -50508,6 +50508,209 @@ fn main() -> i64 { return 0; }
             .expect("Vec<dyn Printable> of two blanket-impl monomorphizations must compile to LLVM");
     }
 
+    // BUG-90 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 6: try/? x containers/generics, row 2). `try EXPR`
+    // calling a GENERIC function (`fn wrap<T>(x: T) -> Option<T>`)
+    // failed with "generic function 'wrap' is declared but never
+    // called with concrete types" even though the call is genuinely
+    // there. Root cause was FOUR compounding gaps, all the same
+    // "sibling walker never learned about a syntax-sugar shape"
+    // pattern seen repeatedly this session:
+    //   1. `collect_generic_calls_in_expr` (checker.rs) had no arm
+    //      for `ExprKind::Match`/`ExprKind::Block` at all. Since
+    //      `desugar_try_let_in_program` runs BEFORE fn-generics
+    //      monomorphization, every `try wrap(n)` has ALREADY been
+    //      rewritten into `Match { scrutinee: Call(wrap, [n]), ... }`
+    //      by the time this scanner runs -- so the generic call was
+    //      structurally invisible to it, regardless of an earlier,
+    //      narrower `ExprKind::Try` arm fix (dead code for this
+    //      exact path, since `Try` nodes don't survive the desugar).
+    //   2. `rewrite_generic_calls_in_expr`, the SIBLING pass that
+    //      actually renames a resolved call site (`wrap` ->
+    //      `wrap__i64`), had the identical missing-arm gap --
+    //      without it the call site was never renamed, surfacing as
+    //      "unknown function 'wrap'" once the generic template was
+    //      dropped post-monomorphization.
+    //   3. `substitute_type_param`'s `Type::Apply` collapse (once
+    //      args are all-concrete) ALWAYS produced `Type::Struct
+    //      (mangled)`, never `Type::Enum(mangled)` -- so a generic
+    //      fn returning `Option<T>` specialized to a return type
+    //      that Displayed as "Option__i64" but was actually a
+    //      `Type::Struct`, not equal to the real `Type::Enum
+    //      ("Option__i64")` used elsewhere. Both print identically,
+    //      so the mismatch surfaced as a baffling "expected
+    //      Option__i64, got Option__i64" diagnostic. Fixed via a new
+    //      `GENERIC_ENUM_TEMPLATE_NAMES` thread-local (populated
+    //      once from `program.enums` before any monomorphization
+    //      touches them) so the collapse can tell enum templates
+    //      from struct templates by name.
+    //   4. `collect_apply_in_stmt`/`rewrite_apply_in_stmt` (used by
+    //      `monomorphize_type_decls_in_program` to resolve
+    //      `Type::Apply` annotations into concrete `Type::Enum`/
+    //      `Type::Struct`) only ever looked at a `Stmt::Let`'s own
+    //      `annotation` field, never recursed into `Return`/`Assign`
+    //      exprs to find NESTED `Stmt::Let`s the try-desugar
+    //      synthesizes inside `Block`/`Match` shapes -- so a nested
+    //      annotation like `let r: Result<i64, i64> = __t;` (from
+    //      `let r: Result<i64,i64> = try lookup(x);`) never got its
+    //      `Type::Apply` resolved, again surfacing as "expected
+    //      Result<i64, i64>, got Result__i64__i64" (same name, two
+    //      different unresolved/resolved representations).
+    // All four fixes compose; verified on both backends.
+    #[test]
+    fn try_inside_generic_function_call_produces_correct_output_on_both_backends_lib() {
+        let source = r#"
+            fn wrap<T>(x: T) -> Option<T> {
+              return Option.Some(x);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let w: i64 = try wrap(n);
+              return Option.Some(w + 1);
+            }
+            fn main() -> i64 {
+              let r: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("try wrapping a generic call must compile to C");
+        compile_to_llvm(source).expect("try wrapping a generic call must compile to LLVM");
+    }
+
+    #[test]
+    fn try_generic_call_after_try_concrete_call_produces_correct_output_lib() {
+        // Nested trys: a concrete call's `try` followed by a
+        // generic call's `try` in the same function, one taking the
+        // early-return path and one not.
+        let source = r#"
+            fn lookup(x: i64) -> Option<i64> {
+              if x < 0 { return Option.None; }
+              return Option.Some(x * 2);
+            }
+            fn wrap<T>(x: T) -> Option<T> {
+              return Option.Some(x);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let v: i64 = try lookup(n);
+              let w: i64 = try wrap(v);
+              return Option.Some(w + 1);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match compute(0 - 1) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("nested try(concrete)+try(generic) must compile to C");
+        compile_to_llvm(source).expect("nested try(concrete)+try(generic) must compile to LLVM");
+    }
+
+    // BUG-90 continued: category 6 row 3. Nested `Option<Result<T,
+    // E>>` -- the built-in generic enums nested in EACH OTHER --
+    // exercised via `try` propagation through both layers. This
+    // specifically needed fix #4 above (the nested-Let-annotation
+    // walk gap), since `let r: Result<i64, i64> = try lookup(x);`
+    // synthesizes a nested annotation that must resolve correctly.
+    #[test]
+    fn try_propagates_through_nested_option_result_enum_lib() {
+        let source = r#"
+            fn safe_div(a: i64, b: i64) -> Result<i64, i64> {
+              if b == 0 { return Result.Err(-1); }
+              return Result.Ok(a / b);
+            }
+            fn lookup(x: i64) -> Option<Result<i64, i64>> {
+              if x < 0 { return Option.None; }
+              return Option.Some(safe_div(100, x));
+            }
+            fn compute(x: i64) -> Option<Result<i64, i64>> {
+              let r: Result<i64, i64> = try lookup(x);
+              return Option.Some(r);
+            }
+            fn main() -> i64 {
+              let r1: Result<i64, i64> = match compute(4) {
+                Option.Some(v) then v,
+                Option.None then Result.Err(-99),
+              };
+              let out1: i64 = match r1 {
+                Result.Ok(v) then v,
+                Result.Err(e) then e,
+              };
+              let r2: Result<i64, i64> = match compute(0 - 1) {
+                Option.Some(v) then v,
+                Option.None then Result.Err(-99),
+              };
+              let out2: i64 = match r2 {
+                Result.Ok(v) then v,
+                Result.Err(e) then e,
+              };
+              print out1;
+              print out2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("try propagating through nested Option<Result<T,E>> must compile to C");
+        compile_to_llvm(source)
+            .expect("try propagating through nested Option<Result<T,E>> must compile to LLVM");
+    }
+
+    // Category 6 row 1: `try`/`?` inside a function that also
+    // holds a live LOCAL `Vec<Struct>` binding across the early
+    // return path. Checked clean (not a bug) -- the drop-sequence
+    // correctly accounts for the Vec<Struct> regardless of which
+    // branch of the try's implicit match fires. Verified with
+    // `valgrind --leak-check=full` on native AOT builds of both
+    // backends: 0 errors, all heap blocks freed.
+    #[test]
+    fn try_with_live_local_vec_struct_across_early_return_lib() {
+        let source = r#"
+            struct Item { id: i64, tag: OwnedStr }
+            fn find_positive(x: i64) -> Option<i64> {
+              if x < 0 { return Option.None; }
+              return Option.Some(x * 2);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let items: Vec<Item> = vec(
+                Item { id: 1, tag: "a" + "" },
+                Item { id: 2, tag: "b" + "" },
+              );
+              let doubled: i64 = try find_positive(n);
+              let first: Item = clone_at(ref items, 0);
+              let second: Item = clone_at(ref items, 1);
+              let total: i64 = doubled + first.id + second.id;
+              return Option.Some(total);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match compute(0 - 5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("try with a live local Vec<Struct> across early-return must compile to C");
+        compile_to_llvm(source)
+            .expect("try with a live local Vec<Struct> across early-return must compile to LLVM");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

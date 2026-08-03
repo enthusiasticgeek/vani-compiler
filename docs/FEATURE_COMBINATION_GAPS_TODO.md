@@ -286,20 +286,38 @@ Category 5 fully closed. New tests: 1 `src/lib.rs` + 1
 Full `cargo test --release --workspace`: 13/13 binaries clean, 0
 failed.
 
-## 6. Error propagation (`try`/`?`) x containers/generics (🟡)
+## 6. Error propagation (`try`/`?`) x containers/generics (🟡) -- CLOSED 2026-08-03
 
-- [ ] 🟡 `try`/`?` inside a function whose body also indexes/mutates
+- [x] 🟡 `try`/`?` inside a function whose body also indexes/mutates
       a `Vec<Struct>` or `HashMap` — does the early-return desugar's
       drop-sequence correctly account for a live container binding
       (mirrors BUG-45's now-fixed OwnedStr-parameter case, but for a
-      LOCAL Vec/HashMap rather than a parameter).
-- [ ] 🟡 `try`/`?` inside a GENERIC function `fn foo<T>(...) ->
-      Option<T> { let x = try bar::<T>(...); ... }`.
-- [ ] 🟢 Nested `Option<Result<T,E>>` or `Result<Option<T>,E>` — the
+      LOCAL Vec/HashMap rather than a parameter). Checked clean on
+      both backends (not a bug) -- `valgrind --leak-check=full`
+      clean on native AOT builds of both backends. See BUG-90 in
+      `docs/TODO_CURRENT.md`.
+- [x] 🟡 `try`/`?` inside a GENERIC function `fn foo<T>(...) ->
+      Option<T> { let x = try bar::<T>(...); ... }`. Found+fixed a
+      real bug (BUG-90: four compounding missing-arm/collapse gaps
+      in the generics-monomorphization pipeline, the try-desugar
+      producing `Match`/`Block` shapes those walkers never
+      anticipated). While testing this row also found a SEPARATE,
+      deeper, pre-existing bug independent of `try` entirely (a bare
+      generic call used directly as a `match` scrutinee, with no
+      concrete `Option<T>`/`Result<T,E>` annotation anywhere else in
+      the source to pre-register the needed enum decl) -- found but
+      NOT fixed, deferred as BUG-91 in `docs/TODO_CURRENT.md` given
+      its architectural blast radius (same category of risk as the
+      deferred BUG-87 async+generics finding).
+- [x] 🟢 Nested `Option<Result<T,E>>` or `Result<Option<T>,E>` — the
       built-in generic enums nested in EACH OTHER (not Vec/Array
       nested inside one of them, which the closed sweep covered) —
       confirm construction, `match`, and `try`/`?` propagation
-      through both layers.
+      through both layers. Construction+match (no `try`) checked
+      clean on both backends. `try` propagation through both layers
+      needed the same BUG-90 fixes as row 2 above (specifically the
+      nested-Let-annotation walk gap); confirmed working on both
+      backends after the fix.
 
 ## 7. Collections beyond Vec/HashMap (🟡 — thin coverage, flagged but never closed in the original priority list)
 

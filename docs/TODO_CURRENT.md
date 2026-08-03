@@ -6335,3 +6335,180 @@ across all 13 binaries -- clean.
   process is independently landing fixes to this same repo in
   parallel this session). Category 5 (all 3 rows) now fully closed
   in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 6
+
+- [x] **BUG-90 (found+fixed 2026-08-03). Category 6, rows 2 and 3:
+  `try EXPR` calling a GENERIC function (`fn wrap<T>(x: T) ->
+  Option<T>`) failed with "generic function 'wrap' is declared but
+  never called with concrete types" even though the call is
+  genuinely there; a related shape (`try` propagating through a
+  nested `Option<Result<T,E>>`) failed with a baffling "expected
+  Result<i64, i64>, got Result__i64__i64" -- same mangled name on
+  both sides of the mismatch.** Root cause was FOUR compounding
+  gaps, all the same "sibling walker never learned about a
+  syntax-sugar shape" pattern this session kept hitting all the way
+  back to BUG-83/85/86:
+  1. `collect_generic_calls_in_expr` (`checker.rs`) had NO arm for
+     `ExprKind::Match` or `ExprKind::Block` at all. `desugar_try_let_
+     in_program` runs BEFORE fn-generics monomorphization, so by the
+     time this scanner walks the program, every `try wrap(n)` has
+     ALREADY been rewritten into `Match { scrutinee: Call(wrap, [n]),
+     arms: [Some(..) then Block{...}, None then ...] }` -- the
+     generic call sitting in a match scrutinee (or inside a
+     desugared Some-arm's Block) was structurally invisible to this
+     walker. (A narrower `ExprKind::Try` arm was added first but is
+     dead code for this exact path, since `Try` nodes don't survive
+     the desugar -- it may still matter for `try` occurrences the
+     desugar doesn't reach, so it was kept.)
+  2. `rewrite_generic_calls_in_expr`, the SIBLING pass that actually
+     renames a resolved call site (`wrap` -> `wrap__i64`), had the
+     identical missing-arm gap. Without it the call site was never
+     renamed, so once the generic template got dropped post-
+     monomorphization the bare name lingered in the AST, surfacing
+     as "unknown function 'wrap'".
+  3. `substitute_type_param`'s `Type::Apply` collapse (once a
+     generic fn's substituted args become all-concrete) always
+     produced `Type::Struct(mangled)`, never `Type::Enum(mangled)`
+     -- so a generic fn returning `Option<T>`, once specialized,
+     got a return type that Displayed as "Option__i64" but was
+     actually a `Type::Struct`, not equal to the real `Type::Enum
+     ("Option__i64")` used at the call site. Both print identically
+     (Display doesn't distinguish struct/enum), so the mismatch
+     surfaced as "expected Option__i64, got Option__i64". Fixed with
+     a new `GENERIC_ENUM_TEMPLATE_NAMES` thread-local, populated
+     once from `program.enums` at the very start of the checker
+     pipeline (before any monomorphization pass touches them,
+     alongside the pre-existing `enum_names_pre` computation), so
+     the collapse can tell "this Apply name was originally an enum
+     template" from "this was a struct template" and pick the right
+     `Type` variant.
+  4. `collect_apply_in_stmt`/`rewrite_apply_in_stmt` (used by
+     `monomorphize_type_decls_in_program` to resolve `Type::Apply`
+     annotations into concrete `Type::Enum`/`Type::Struct`) only
+     ever looked at a `Stmt::Let`'s own `annotation` field and never
+     recursed into `Return`/`Assign` exprs at all -- so a NESTED
+     `Stmt::Let` the try-desugar synthesizes inside a `Block` inside
+     a `Match` arm (e.g. `let r: Result<i64, i64> = __t;`, lifted
+     from the user's `let r: Result<i64,i64> = try lookup(x);`)
+     never had its annotation's `Type::Apply` resolved at all,
+     again surfacing as "expected Result<i64, i64>, got
+     Result__i64__i64" (the SAME name, one resolved, one not).
+     Fixed by adding a `walk_expr_for_nested_lets`/
+     `rewrite_apply_in_expr_nested_lets` helper pair that recurses
+     through `Block`/`Match`/`IfExpr`/`Try` shapes to reach nested
+     `Stmt::Let`s, called from `Stmt::Let`'s own expr, `Stmt::
+     Return`, and `Stmt::Assign`.
+  All four fixes compose and were verified together on both
+  backends for: a plain `try wrap(n)` where `wrap<T>` is generic and
+  `n` is a Var argument (not just a literal); two chained `try`s in
+  the same function, one concrete (`lookup`) and one generic
+  (`wrap`), exercising both the early-return and pass-through paths;
+  and `try` propagating through a nested `Option<Result<i64, i64>>`
+  in both the early-return (`Option.None`) and pass-through
+  (`Option.Some(Result.Ok/Err(..))`) directions.
+  Also swept category 6 row 1 (`try`/`?` inside a function holding a
+  live LOCAL `Vec<Struct>` binding, read via `clone_at` after the
+  `try`, across the early-return path): checked clean on both
+  backends, not a bug -- verified with `valgrind --leak-check=full`
+  on native AOT builds of both backends: 0 errors, all heap blocks
+  freed, "All heap blocks were freed -- no leaks are possible".
+  New tests: 4 `src/lib.rs` + 3 `tests/run_end_to_end.rs` (real
+  stdout, both backends).
+  Category 6 rows 1 and 3 fully closed. Row 2 partially closed: the
+  `try`-specific failure mode is fixed (see above), but testing it
+  surfaced a SEPARATE, deeper, pre-existing bug independent of `try`
+  entirely -- see BUG-91 below, found but deferred.
+
+- [ ] **BUG-91 (found 2026-08-03, NOT fixed -- deferred).** A bare
+  call to a GENERIC function returning `Option<T>`/`Result<T,E>`,
+  used DIRECTLY as a `match` scrutinee with no intermediate `let`
+  binding (`match foo(7) { Option.Some(x) then x, Option.None then
+  -1 }` where `fn foo<T>(a: T) -> Option<T>`), fails with `enum
+  'Option__i64' is not declared` -- even though the exact same
+  generic fn + call, when the result is first bound via an
+  explicitly-annotated `let x: Option<i64> = foo(7);` and THEN
+  matched on `x` as a separate statement, compiles and runs
+  correctly. Reproduces with NO `try`/`?` anywhere in the program --
+  it surfaced while testing category 6 row 2 (a generic function
+  using `try` internally, whose caller in `main` naturally matches
+  the generic call's result directly), but the root cause is
+  independent of `try` and belongs to the generics/monomorphization
+  pipeline generally.
+  Root cause: `monomorphize_type_decls_in_program` (which
+  materializes a concrete `EnumDecl`/`StructDecl` -- e.g. the actual
+  `enum Option__i64 { ... }` declaration, not just the `Type::Enum`
+  reference to it -- for every `Type::Apply` it finds anywhere in
+  the program) runs BEFORE `monomorphize_generics_in_program` (the
+  fn-level pass that infers `T=i64` for `foo(7)` and creates
+  `foo__i64`). When the ONLY place a concrete `Option<i64>`
+  instantiation is discoverable is through fn-generics' own type
+  inference at a call site (no textual `Option<i64>` annotation
+  appears anywhere else in the source for the earlier decl-mono
+  pass to see), the enum-decl pass has already run and finished by
+  the time that need becomes known -- and worse, right after it
+  runs it unconditionally drops the generic template it monomorphized
+  from (`program.enums.retain(|e| e.type_params.is_empty())` at
+  checker.rs:8082, mirroring the same convention used for functions/
+  structs/impls), so there is no template left to re-specialize from
+  even if a second pass were added naively. `substitute_type_param`'s
+  collapse (see BUG-90 fix #3 above) DOES produce a correct
+  `Type::Enum("Option__i64")` reference for `foo__i64`'s return
+  type, but a bare `Type::Enum` reference isn't the same thing as
+  an actual `EnumDecl { name: "Option__i64", variants: [...] }`
+  existing in `program.enums` -- nothing materializes the latter for
+  this case, hence "enum 'Option__i64' is not declared".
+  This is why every earlier BUG-90 repro happened to work: in each
+  one, the ENCLOSING function's own return type was a concrete
+  `Option<i64>`/`Result<i64,i64>` (a literal, textual annotation
+  visible to the decl-mono pass before fn-generics ran), so the
+  needed `EnumDecl` always already existed for an unrelated reason
+  by the time the generic call's result needed it. BUG-91 is
+  specifically the case where NO such textual concrete annotation
+  exists anywhere in the source -- the concrete instantiation is
+  discoverable ONLY via inference at a generic call site, consumed
+  immediately (bare match scrutinee, no intermediate annotated
+  `let`).
+  Deferred rather than fixed in-session: a real fix needs either (a)
+  interleaving `monomorphize_type_decls_in_program` and
+  `monomorphize_generics_in_program` to a shared fixed point (each
+  pass's output can create new work for the other -- fn-mono
+  discovers new concrete Apply instantiations; decl-mono's freshly
+  materialized decls could in principle reference further generics),
+  or (b) retaining the original generic struct/enum templates (not
+  dropping them at checker.rs:8081-8082) until AFTER fn-generics
+  monomorphization has also stabilized, then running a final decl-
+  materialization pass against whatever's left in `program.structs`/
+  `program.enums`'s Type::Apply-in-signature surface at that point.
+  Both directions touch a large, heavily-load-bearing shared
+  pipeline stage with a wide blast radius (every generic struct/enum
+  instantiation in the whole language goes through this path) --
+  the same category of risk that led BUG-87 (async + generics) to
+  be deferred rather than rushed. Whoever picks this up next: start
+  by checking whether `monomorphize_generics_in_program` can, after
+  specializing a generic fn, feed any newly-concrete `Type::Apply`
+  it finds in the SPECIALIZED signature back into a queue that a
+  final call to (a re-entrant, template-preserving version of)
+  `monomorphize_type_decls_in_program` drains once fn-mono's own
+  worklist (`needed`/`generated_keys`) reaches its fixed point.
+  Repro (fails on both backends, no `try` involved):
+  ```
+  fn foo<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn main() -> i64 {
+    let r1: i64 = match foo(7) {
+      Option.Some(x) then x,
+      Option.None then -1,
+    };
+    print r1;
+    return 0;
+  }
+  ```
+  No regression test added (nothing to assert as passing); the repro
+  above is preserved here for whoever fixes it. Category 6 row 2 is
+  left checked in `docs/FEATURE_COMBINATION_GAPS_TODO.md` only for
+  its `try`-specific aspect (fixed); this deferred finding is noted
+  inline there too.

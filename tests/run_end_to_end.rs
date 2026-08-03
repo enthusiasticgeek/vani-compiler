@@ -8765,3 +8765,254 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// BUG-90 (2026-08-03), feature-combination gap audit category 6:
+// try/? x containers/generics. `try EXPR` calling a GENERIC function
+// failed with "generic function 'wrap' is declared but never called
+// with concrete types" -- four compounding gaps in the generics/
+// monomorphization pipeline, all the same "sibling walker never
+// learned about a syntax-sugar shape" pattern this session kept
+// hitting: `collect_generic_calls_in_expr` and its sibling
+// `rewrite_generic_calls_in_expr` had no `Match`/`Block` arms (the
+// try-desugar runs BEFORE fn-generics monomorphization, so every
+// `try wrap(n)` is already a `Match{scrutinee: Call(wrap,...)}` by
+// the time these walkers run); `substitute_type_param`'s
+// `Type::Apply` collapse always produced `Type::Struct`, never
+// `Type::Enum`, for a newly-concrete generic return type; and
+// `collect_apply_in_stmt`/`rewrite_apply_in_stmt` never recursed
+// into `Return`/`Assign` exprs to find the try-desugar's nested
+// synthesized `Let` annotations. See the matching src/lib.rs tests'
+// doc comments for the full root-cause writeup.
+#[test]
+fn try_inside_generic_function_call_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-generic-fn-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn lookup(x: i64) -> Option<i64> {
+  if x < 0 { return Option.None; }
+  return Option.Some(x * 2);
+}
+fn wrap<T>(x: T) -> Option<T> {
+  return Option.Some(x);
+}
+fn compute(n: i64) -> Option<i64> {
+  let v: i64 = try lookup(n);
+  let w: i64 = try wrap(v);
+  return Option.Some(w + 1);
+}
+fn main() -> i64 {
+  let r1: i64 = match compute(5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match compute(0 - 1) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "11\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-90 continued: category 6 row 3, `try` propagating through a
+// nested `Option<Result<T, E>>`. Needed the fourth sub-fix above
+// (the nested-Let-annotation walk gap in collect_apply_in_stmt /
+// rewrite_apply_in_stmt).
+#[test]
+fn try_propagates_through_nested_option_result_enum_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-nested-option-result-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn safe_div(a: i64, b: i64) -> Result<i64, i64> {
+  if b == 0 { return Result.Err(-1); }
+  return Result.Ok(a / b);
+}
+fn lookup(x: i64) -> Option<Result<i64, i64>> {
+  if x < 0 { return Option.None; }
+  return Option.Some(safe_div(100, x));
+}
+fn compute(x: i64) -> Option<Result<i64, i64>> {
+  let r: Result<i64, i64> = try lookup(x);
+  return Option.Some(r);
+}
+fn main() -> i64 {
+  let r1: Result<i64, i64> = match compute(4) {
+    Option.Some(v) then v,
+    Option.None then Result.Err(-99),
+  };
+  let out1: i64 = match r1 {
+    Result.Ok(v) then v,
+    Result.Err(e) then e,
+  };
+  let r2: Result<i64, i64> = match compute(0 - 1) {
+    Option.Some(v) then v,
+    Option.None then Result.Err(-99),
+  };
+  let out2: i64 = match r2 {
+    Result.Ok(v) then v,
+    Result.Err(e) then e,
+  };
+  print out1;
+  print out2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "25\n-99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Category 6 row 1: `try`/`?` inside a function holding a live
+// LOCAL `Vec<Struct>` binding across the early-return path. Checked
+// clean (not a bug); regression-tested for output correctness here.
+// Verified separately with `valgrind --leak-check=full` on native
+// AOT builds of both backends: 0 errors, all heap blocks freed.
+#[test]
+fn try_with_live_local_vec_struct_across_early_return_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-vec-struct-dropseq-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Item { id: i64, tag: OwnedStr }
+fn find_positive(x: i64) -> Option<i64> {
+  if x < 0 { return Option.None; }
+  return Option.Some(x * 2);
+}
+fn compute(n: i64) -> Option<i64> {
+  let items: Vec<Item> = vec(
+    Item { id: 1, tag: "a" + "" },
+    Item { id: 2, tag: "b" + "" },
+  );
+  let doubled: i64 = try find_positive(n);
+  let first: Item = clone_at(ref items, 0);
+  let second: Item = clone_at(ref items, 1);
+  let total: i64 = doubled + first.id + second.id;
+  return Option.Some(total);
+}
+fn main() -> i64 {
+  let r1: i64 = match compute(5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match compute(0 - 5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "13\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
