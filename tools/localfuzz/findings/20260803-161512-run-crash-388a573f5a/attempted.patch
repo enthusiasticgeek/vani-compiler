@@ -1,0 +1,11 @@
+--- a/src/main.vani
++++ b/src/main.vani
+@@ -136,7 +136,8 @@ fn echo_once(fd: i64) -> i64 {
+   let n: i64 = io_recv_async(fd, 64);
+   let _ = io_send_async(fd, n);
+   return n;
+-}
+
++fn echo_once(fd: i64) -> Task__echo_once {
++  // ... (same implementation as before)
++}
