@@ -1,0 +1,17 @@
+--- a/src/checker.rs / +++ b/src/checker.rs headers) --
+@@ -123,6 +123,7 @@ fn check_async_function(block: &Block) -> Result<(), CompilerError> {
+     if block.is_async() {
+         // Check for await in the async function body
+-        let await_stmt = find_first_await_statement(&block.body);
++        let await_stmt = find_first AwaitStatement(&block.body); // Ensure we check for AwaitStatement
+         match await_stmt {
+             Some(stmt) => {
+                 return Err(CompilerError::InvalidAsyncFunction(
+@@ -150,6 +151,7 @@ fn check_backend_function(block: &Block) -> Result<(), CompilerError> {
+     if block.is_async() {
+         // Check for await in the async function body
+-        let await_stmt = find_first_await_statement(&block.body);
++        let await_stmt = find_first AwaitStatement(&block.body); // Ensure we check for AwaitStatement
+         match await_stmt {
+             Some(stmt) => {
+                 return Err(CompilerError::InvalidAsyncFunction(

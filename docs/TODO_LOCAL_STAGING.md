@@ -530,3 +530,12 @@ fn main() -> i64 {
 **Observed Symptom:**
 
 When the `control_flow.v
+
+---
+
+### Candidate: 20260803-152100-run-crash-463a6dbf2d
+
+Repro: `tools/localfuzz/findings/20260803-152100-run-crash-463a6dbf2d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-152100-run-crash-463a6dbf2d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
