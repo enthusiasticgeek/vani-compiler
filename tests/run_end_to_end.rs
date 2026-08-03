@@ -8437,3 +8437,112 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// Found by the local-model differential-fuzzing harness (tools/localfuzz/),
+// 2026-08-03: a non-ASCII (Devanagari) local variable name crashed the LLVM
+// backend but not the C backend. Root cause: local variable/register names
+// (`%name.addr`, `%arg_name`, etc.) were built directly from the raw source
+// identifier at ~12 call sites in backend_llvm.rs, unlike global function
+// symbols (`@fn_name`), which already routed through the existing
+// `llvm_mangle_ident` helper (non-ASCII chars -> `_uHHHH` hex escapes,
+// producing a valid *bare* LLVM identifier). Fixed by routing all ~12 local
+// binding sites through the same helper. Confirmed general across three
+// unrelated scripts (Devanagari, Hangul, Cyrillic), not Nepali-specific --
+// the checker's lexer explicitly supports arbitrary Unicode identifiers
+// (see `lex_unicode_ident` in lexer.rs), so this could affect any dialect.
+//
+// NOT fixed in the same pass: struct/enum TYPE names (`%Struct_<Name>`,
+// `%Enum_<Name>`) have the same unmangled-identifier gap, at ~28 separate
+// call sites with no shared helper to fix centrally, and no confirmed
+// crashing repro (existing dialect examples all use Latin struct/fn names
+// even when using native-script local variables). Logged, not fixed --
+// needs its own dedicated pass; see docs/TODO_CURRENT.md.
+#[test]
+fn non_ascii_local_variable_name_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    // (source, expected stdout) pairs -- one per script, each using a
+    // non-ASCII local variable name in an otherwise-trivial program.
+    let cases: [(&str, &str); 3] = [
+        // Devanagari (Nepali dialect) -- the original repro.
+        (
+            r#"
+उद्देश्य "Devanagari local variable identifier smoke-test";
+
+कार्य main() -> i64 {
+  माना थैला: i64 = 41;
+  लिखो थैला + 1;
+  लौटाओ 0;
+}
+"#,
+            "42\n",
+        ),
+        // Hangul (Korean dialect).
+        (
+            r#"
+목적 "Korean local variable identifier smoke-test";
+
+함수 main() -> i64 {
+  정의 숫자: i64 = 41;
+  확인 숫자 >= 0;
+  반환 0;
+}
+"#,
+            "",
+        ),
+        // Cyrillic, English keywords -- proves this isn't tied to any one
+        // dialect's keyword set, just the identifier itself.
+        (
+            r#"
+intent "Cyrillic local variable identifier smoke-test";
+
+fn main() -> i64 {
+  let число: i64 = 41;
+  print число + 1;
+  return 0;
+}
+"#,
+            "42\n",
+        ),
+    ];
+
+    for (i, (source, expected_stdout)) in cases.iter().enumerate() {
+        let src: PathBuf = std::env::temp_dir().join(format!(
+            "intentc-non-ascii-local-{}-{}-{}.vani",
+            i,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(&src, source).expect("write src");
+
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                output.status.success(),
+                "case {i}, {:?}: status {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+            assert_eq!(
+                stdout, *expected_stdout,
+                "case {i}, for {:?}; got: {}",
+                backend_args, stdout
+            );
+        }
+        let _ = fs::remove_file(&src);
+    }
+}

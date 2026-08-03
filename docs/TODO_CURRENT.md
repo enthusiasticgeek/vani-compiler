@@ -6060,3 +6060,81 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
 `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
 
 ---
+
+## Bug found by the local-model differential-fuzzing harness (2026-08-03)
+
+- [x] **BUG-85 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
+  A non-ASCII local variable name (e.g. Devanagari `थैला`) crashed the
+  LLVM backend's `lli` JIT with a parser error; the C backend handled
+  the identical program fine.** Found by `tools/localfuzz/`'s continuous
+  differential-testing harness (mutating/generating `.vani` programs and
+  comparing both backends -- see that tool's README) on a mutated Nepali
+  tutorial example. Minimal repro: any `let <non-ascii-name>: T = ...;`
+  reached at the LLVM path.
+  ```
+  lli: candidate.ll:3371:8: error: expected '=' after instruction name
+    %t26.थैला.addr = alloca %Struct_Bag
+  ```
+  Root cause: local variable/register names (`%<name>.addr`,
+  `%arg_<name>`, the parameter list in a function's `define` line, task-
+  handle allocas, outlined-closure capture rehydration -- 12 call sites
+  total in `backend_llvm.rs`) were built directly from the raw source
+  identifier. LLVM's textual IR only allows *unquoted* local identifiers
+  matching `[a-zA-Z$._][a-zA-Z$._0-9]*`; anything else needs `%"..."`
+  quoting, which none of these sites did. Global function symbols
+  (`@fn_<name>`) already had this handled correctly via an existing
+  `llvm_mangle_ident` helper (non-ASCII byte -> `_uHHHH` hex escape,
+  producing a valid *bare* identifier rather than using LLVM's quoted-
+  string form) -- it just was never called from any of the local-variable
+  binding sites. Fixed by routing all 12 through the same helper; since
+  `ctx.locals` is keyed by the *original* source name (only the emitted
+  IR string needed mangling), no lookup-side code needed to change.
+  Confirmed the fix is general, not Nepali-specific: the checker's lexer
+  explicitly supports arbitrary Unicode identifiers (`lex_unicode_ident`
+  in `lexer.rs`), so verified against three unrelated scripts (Devanagari,
+  Hangul, Cyrillic) -- see the new
+  `non_ascii_local_variable_name_produces_correct_output_on_both_backends`
+  test in `tests/run_end_to_end.rs`.
+
+  **Sibling hardening, same session, but only partially verifiable --
+  read carefully before assuming it's "done":** struct/enum *type* names
+  (`%Struct_<Name>`, `%Enum_<Name>`) had the identical unmangled-
+  identifier gap, at 33 call sites throughout `backend_llvm.rs` (4 type-
+  definition sites plus 29 usage sites, all independently doing
+  `format!("%Struct_{}"/"%Enum_{}", <name>)` -- no shared helper, unlike
+  the 12 local-variable binding sites). All 33 now route through
+  `llvm_mangle_ident`, applied uniformly rather than auditing each site's
+  provenance individually -- safe to do that way specifically because
+  the helper is a proven no-op on all-ASCII input (`if name.bytes().all(|b|
+  b < 0x80) { return name.to_string(); }`), so this cannot change codegen
+  for any existing ASCII-named program; confirmed by the full
+  `cargo test --workspace --release` run staying at 2703/2703 lib tests
+  and 144/144 end-to-end tests, 0 failures, identical to before this change.
+
+  **However**, trying to actually exercise this end-to-end (a struct
+  declared with a non-ASCII name, then constructed/used) found the real
+  path is blocked EARLIER than the backend, by the parser: `struct
+  Кошка { age: i64 }` alone parses/checks fine (`vanic check` -> `ok`),
+  but referencing that name afterwards -- `let c: Кошка = ...` or the
+  struct-literal expression `Кошка { age: 3 }` -- fails to parse
+  (`error: expected ';'` right after the identifier), identically on
+  both backends, before codegen is ever reached. So the declaration
+  grammar accepts non-ASCII struct/enum names but the type-annotation
+  and struct-literal-constructor grammar apparently doesn't (some
+  dispatch/lookahead rule in `parser.rs` likely assumes an ASCII-only
+  shape for a "known type/constructor name" at those two call sites).
+  This is a DIFFERENT, NOT fixed bug, in the parser rather than the
+  LLVM backend -- logged here, not fixed, since it's out of the scope
+  this session actually verified (parser grammar dispatch is different,
+  higher-risk surface than the mechanical `llvm_mangle_ident` wrapping
+  done above). The `backend_llvm.rs` mangling is still worth keeping:
+  correct, safe (proven no-op on existing programs), and removes one
+  layer of work for whoever fixes the parser gap next -- they won't
+  also need to redo this. Repro files used (not committed, in `/tmp`,
+  easy to recreate): a `struct Кошка { age: i64 }` declaration, plus
+  a `let`/struct-literal reference to it, both under
+  `examples/language/{russian,any}/`-style naming if formalized.
+
+Full `cargo test --release --workspace` after BUG-85: 2703 lib tests,
+144 end-to-end tests (including the 3 new cross-script cases), 0 failed
+across all 13 binaries -- clean.
