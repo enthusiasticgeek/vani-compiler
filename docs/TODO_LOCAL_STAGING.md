@@ -409,3 +409,12 @@ Fix attempt: `tools/localfuzz/findings/20260803-130927-backend-divergence-dc3007
 STATUS: needs human/frontier root-cause review.
 
 The `/tmp/vanic-candidate-1314865-1785762566110443268.c` file contains a compilation error due to unknown type names `intent_dyn_Drawable`. This error occurs in the `vani_compiler_localfuzz/examples/edge_cases/mix_box_dyn_in_struct.vani` code, which introduces a user-defined struct with a `Vec<Box<dyn Drawable>>`. The backend diverges because the compiler cannot find the correct definitions for `Box<dyn Drawable>`, leading to a compilation failure.
+
+---
+
+### Candidate: 20260803-140059-run-crash-b5503177c0
+
+Repro: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

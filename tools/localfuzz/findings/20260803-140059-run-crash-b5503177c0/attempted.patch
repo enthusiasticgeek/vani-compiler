@@ -1,0 +1,11 @@
+diff --git a/src/backend_llvm.rs b/src/backend_llvm.rs
+--- a/src/backend_llvm.rs
++++ b/src/backend_llvm.rs
+@@ -123,7 +123,7 @@ fn __poll_handle(mut ref pool[j]) -> i64 {
+     if r != 0 - 2 {
+         if r > 0 { total = total + r; }
+-        alive[j] = false;
++        let result = alive[j];
+         done = done + 1;
+     }
+ }
