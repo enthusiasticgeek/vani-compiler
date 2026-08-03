@@ -148,3 +148,11 @@ Repro: `tools/localfuzz/findings/20260803-033452-run-crash-99db3e1928/repro.vani
 }
 ```
 
+
+---
+
+### Candidate: 20260803-045744-run-crash-85f5fcb578
+
+Repro: `tools/localfuzz/findings/20260803-045744-run-crash-85f5fcb578/repro.vani`
+
+Status: needs human/frontier root-cause review.
