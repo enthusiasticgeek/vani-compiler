@@ -1,0 +1,106 @@
+// Arc 8 v3.1 Phase 2.3a — match arms WITH suspends.
+//
+// Phase 2.3a generalizes Phase 2.1a (binary if-with-suspend)
+// to n-way match arms. The desugar runs BEFORE ANF lifting:
+// `let X = match SCRUT { p0 then e0, ..., _ then ed };`
+// where some arm contains an io_*_async call lowers into
+// `let X: i64 = 0; if SCRUT == p0 { X = e0; } else if ...`
+// Then Phase 2.1a/b machinery + ANF lifting + state-machine
+// codegen handle the rest.
+//
+// Supported in v3.1 Phase 2.3a:
+//   - Pattern::Int arms (integer-literal scrutinees)
+//   - Optional trailing Pattern::Wildcard arm
+//   - Suspends in any/all arm bodies
+//   - Mixed suspending + non-suspending arms
+//
+// Deferred to future sub-phases:
+//   - Pattern::Variant / Pattern::VariantWithBinding
+//   - Pattern::Bool / Pattern::Str
+//   - Multi-arm suspends inside the SAME arm with control
+//     flow (already supported via Phase 2.1a/b nesting on
+//     the desugared if-chain — no extra work needed)
+//
+// build & run:
+//   vanic run examples/language/english/echo_match_suspend.vani                # LLVM
+//   vanic run examples/language/english/echo_match_suspend.vani --backend=c    # C
+
+intent "Phase 2.3a — match arms with suspends in async fn";
+
+async fn pick_action(fd: i64, mode: i64) -> i64 {
+  // n-way match where SOME arms suspend.
+  //   mode = 0 -> recv up to 64 bytes (suspends)
+  //   mode = 1 -> recv up to 8 bytes (suspends, smaller cap)
+  //   mode = 2 -> non-suspending constant
+  //   _        -> non-suspending fallback
+  //
+  // The desugar lifts this to:
+  //   let n: i64 = 0;
+  //   if mode == 0 { n = io_recv_async(fd, 64); }
+  //   else if mode == 1 { n = io_recv_async(fd, 8); }
+  //   else if mode == 2 { n = 42; }
+  //   else { n = 0 - 1; }
+  //
+  // Phase 2.1a then state-splits each suspending branch into
+  // a poll-state, the rewriter walks each branch and rewrites
+  // outer-scope `fd`/`mode` refs to `__t.fd` / `__t.mode`.
+  let n: i64 = match mode {
+    0 then io_recv_async(fd, 64),
+    1 then io_recv_async(fd, 8),
+    2 then 42,
+    _ then 0 - 1
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick_action) -> i64 {
+  while true {
+    let r: i64 = __poll_pick_action(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  // Spawn a peer that sends 3 bytes then accepts a 1-byte send.
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abc");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 -> io_recv_async branch -> "abc" = 3 bytes
+  let t0: Task__pick_action = pick_action(cfd, 0);
+  let r0: i64 = drive(ep, mut ref t0);
+  print "mode=0 (recv):", r0;
+
+  // mode=2 -> non-suspending arm -> 42
+  let t2: Task__pick_action = pick_action(cfd, 2);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "mode=2 (const):", r2;
+  print "mode=2 (const):", r2;
+
+  // mode=99 -> wildcard default -> -1
+  let t9: Task__pick_action = pick_action(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "mode=99 (wildcard):", r9;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

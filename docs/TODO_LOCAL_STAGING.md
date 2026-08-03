@@ -172,3 +172,17 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-062600-check-crash-04126cff87/repro.vani`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260803-073518-run-crash-c77cd8d171
+
+Repro: `tools/localfuzz/findings/20260803-073518-run-crash-c77cd8d171/repro.vani`
+
+STATUS: needs human/frontier root-cause review.
+
+Found a bug in the vani-compiler project's local staging log where running the `echo_match_suspend.vani` example file with the C backend crashes. The generated mutant source is as provided, and it includes asynchronous functions that may lead to unexpected behavior or crashes when executed. 
+
+To investigate further, I'll need to run the example with different backends (LLVM and C) to see if the issue persists and identify any potential root causes such as handling of non-blocking sockets, asynchronous functions, or state management in the desugaring phase.
+
+Expected outcome: Identify and fix the bug causing the crash on the C backend while ensuring that the example runs successfully with both LLVM and C backends.
