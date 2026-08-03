@@ -1,0 +1,6 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -3369,7 +3369,7 @@ struct DropContext {
+     let bag = Bag { contents: box(vec![]), size: 0 };
+     drop_context.contents.push(bag);
+ }
