@@ -12503,6 +12503,7 @@ fn check_one_stmt(
             // this, the source binding would scope-exit-drop
             // and double-free the heap now owned by the
             // struct's field. Closure #166.
+            reject_affine_closure_into_struct_field(value, field_ty, field, diagnostics);
             consume_if_moved_var(value, &value_coerced, env);
             // L4 (B) Phase 2 (2026-06-08) â€” scope-escape check
             // for FieldAssign. When the RHS contains a `ref X`
@@ -14930,6 +14931,72 @@ fn validate_no_raw_ptr_on_hosted(
     }
 }
 
+/// BUG-66 residual fix (2026-08-02): a closure whose captured
+/// environment owns heap memory (a `Vec`/`OwnedStr`/other non-Copy
+/// capture, moved in rather than `ref`-captured) crashes both
+/// backends when moved into a struct field -- LLVM: the env struct
+/// is referenced as an unsized type at the point it's read back out
+/// of the field ("base element of getelementptr must be sized"); C:
+/// a double-free at runtime. There is no move-into-struct-field
+/// support for an affine closure env today (would need lifetime
+/// tracking for the heap-owning env across the struct-field
+/// boundary -- a real feature, not a quick fix). Until that lands,
+/// reject the pattern with a clean diagnostic instead of letting it
+/// reach codegen and crash.
+///
+/// Narrow, name-based check: `CLOSURE_AFF_REGISTRY` is keyed by the
+/// closure literal's own bind name, populated when the closure
+/// literal itself is checked (see the `L5` registration in the
+/// `Stmt::Let` closure-literal desugar). This catches the direct
+/// `Struct { field: closure_var }` / `obj.field = closure_var;`
+/// shape -- the one in the original bug report and the tutorial's
+/// own worked example -- without attempting full alias tracking
+/// through intermediate renames (`let cb2 = cb;`), which would need
+/// a broader mechanism than this targeted fix.
+fn reject_affine_closure_into_struct_field(
+    value_expr: &Expr,
+    field_ty: &Type,
+    field_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !matches!(field_ty, Type::Closure(_, _)) {
+        return;
+    }
+    if let ExprKind::Var(name) = &value_expr.kind {
+        let is_affine = crate::ast::CLOSURE_AFF_REGISTRY
+            .with(|r| r.borrow().contains_key(name));
+        if is_affine {
+            diagnostics.push(
+                Diagnostic::new(
+                    value_expr.span,
+                    format!(
+                        "closure '{}' captures a heap-owning value by move -- \
+                         storing it in struct field '{}' is not yet supported \
+                         in v1",
+                        name, field_name
+                    ),
+                )
+                .with_elaboration(vec![
+                    format!(
+                        "'{}' captures at least one non-Copy value (a `Vec`, \
+                         `OwnedStr`, or similar) by move, not by `ref`.",
+                        name
+                    ),
+                    "vāṇी doesn't yet track a heap-owning closure environment's \
+                     lifetime once it crosses a struct-field boundary -- storing \
+                     it and reading it back later is not a sound operation in v1."
+                        .to_string(),
+                    "Workarounds: capture by `ref` instead of by move if the \
+                     captured value outlives the struct, or restructure so the \
+                     closure only captures Copy values (pass the heap-owning \
+                     value as a call argument instead of capturing it)."
+                        .to_string(),
+                ]),
+            );
+        }
+    }
+}
+
 /// Emit a "cannot move whole struct after partial move"
 /// diagnostic when `source` is a Var consume of a binding
 /// that already has at least one moved-out field. Call BEFORE
@@ -15305,7 +15372,7 @@ fn check_match_str(
     let mut seen_strs: Vec<String> = Vec::new();
     let mut wildcard_body: Option<TypedExpr> = None;
     let mut wildcard_seen_at: Option<usize> = None;
-    let mut typed_arms: Vec<(String, TypedExpr)> = Vec::new();
+    let mut typed_arms: Vec<(String, Option<TypedExpr>, TypedExpr)> = Vec::new();
     let mut result_ty: Option<Type> = None;
     for (i, arm) in arms.iter().enumerate() {
         if wildcard_seen_at.is_some() {
@@ -15330,6 +15397,25 @@ fn check_match_str(
                     continue;
                 }
                 seen_strs.push(s.clone());
+                // BUG-20 residual fix (2026-08-02): guards on string
+                // match arms were parsed and type-checked nowhere --
+                // silently accepted then ignored, so a guarded arm
+                // always behaved as if its guard were `true`. String
+                // patterns bind no names, so evaluating the guard has
+                // no dependency on the pattern having matched (unlike
+                // the slice-pattern fix, which must gate guard
+                // evaluation behind the length check to avoid an
+                // out-of-bounds read) -- safe to fold eagerly below.
+                let guard_typed: Option<TypedExpr> = arm.guard.as_ref().map(|g| {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    gc.expr
+                });
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
@@ -15351,7 +15437,7 @@ fn check_match_str(
                 } else {
                     result_ty = Some(body_checked.ty().clone());
                 }
-                typed_arms.push((s.clone(), body_checked.expr));
+                typed_arms.push((s.clone(), guard_typed, body_checked.expr));
             }
             crate::ast::Pattern::Wildcard => {
                 wildcard_seen_at = Some(i);
@@ -15418,7 +15504,7 @@ fn check_match_str(
     // Fold the string arms right-to-left into a nested
     // IfExpr chain whose final else is the wildcard body.
     let mut chain = default_body;
-    for (text, body) in typed_arms.into_iter().rev() {
+    for (text, guard_opt, body) in typed_arms.into_iter().rev() {
         let scr_var = TypedExpr {
             kind: TypedExprKind::Var(tmp_name.clone()),
             ty: scrut_ty.clone(),
@@ -15433,7 +15519,7 @@ fn check_match_str(
             span,
             binding_decl_span: None,
         };
-        let cond = TypedExpr {
+        let eq_cond = TypedExpr {
             kind: TypedExprKind::Binary {
                 op: BinaryOp::Eq,
                 left: Box::new(scr_var),
@@ -15444,6 +15530,26 @@ fn check_match_str(
             constant: None,
             span,
             binding_decl_span: None,
+        };
+        // BUG-20 residual fix: fold the guard in with an eager `&&` --
+        // safe here since the guard never reads a pattern binding, so
+        // there's no need to gate its evaluation behind `eq_cond`
+        // first the way the slice-pattern fix must.
+        let cond = if let Some(guard_expr) = guard_opt {
+            TypedExpr {
+                kind: TypedExprKind::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(eq_cond),
+                    right: Box::new(guard_expr),
+                    checked: false,
+                },
+                ty: Type::Bool,
+                constant: None,
+                span,
+                binding_decl_span: None,
+            }
+        } else {
+            eq_cond
         };
         chain = TypedExpr {
             kind: TypedExprKind::IfExpr {
@@ -15611,7 +15717,7 @@ fn check_match_float(
     let mut seen_bits: Vec<u64> = Vec::new();
     let mut wildcard_body: Option<TypedExpr> = None;
     let mut wildcard_seen_at: Option<usize> = None;
-    let mut typed_arms: Vec<(f64, TypedExpr)> = Vec::new();
+    let mut typed_arms: Vec<(f64, Option<TypedExpr>, TypedExpr)> = Vec::new();
     let mut result_ty: Option<Type> = None;
     for (i, arm) in arms.iter().enumerate() {
         if wildcard_seen_at.is_some() {
@@ -15647,6 +15753,19 @@ fn check_match_float(
                     continue;
                 }
                 seen_bits.push(bits);
+                // BUG-20 residual fix (2026-08-02): see the matching
+                // comment in check_match_str -- float patterns bind no
+                // names either, so the guard can fold in eagerly.
+                let guard_typed: Option<TypedExpr> = arm.guard.as_ref().map(|g| {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    gc.expr
+                });
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
@@ -15668,7 +15787,7 @@ fn check_match_float(
                 } else {
                     result_ty = Some(body_checked.ty().clone());
                 }
-                typed_arms.push((*f, body_checked.expr));
+                typed_arms.push((*f, guard_typed, body_checked.expr));
             }
             crate::ast::Pattern::Wildcard => {
                 wildcard_seen_at = Some(i);
@@ -15734,7 +15853,7 @@ fn check_match_float(
         binding_decl_span: None,
     });
     let mut chain = default_body;
-    for (lit, body) in typed_arms.into_iter().rev() {
+    for (lit, guard_opt, body) in typed_arms.into_iter().rev() {
         let scr_var = TypedExpr {
             kind: TypedExprKind::Var(tmp_name.clone()),
             ty: scrut_ty.clone(),
@@ -15749,7 +15868,7 @@ fn check_match_float(
             span,
             binding_decl_span: None,
         };
-        let cond = TypedExpr {
+        let eq_cond = TypedExpr {
             kind: TypedExprKind::Binary {
                 op: BinaryOp::Eq,
                 left: Box::new(scr_var),
@@ -15760,6 +15879,22 @@ fn check_match_float(
             constant: None,
             span,
             binding_decl_span: None,
+        };
+        let cond = if let Some(guard_expr) = guard_opt {
+            TypedExpr {
+                kind: TypedExprKind::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(eq_cond),
+                    right: Box::new(guard_expr),
+                    checked: false,
+                },
+                ty: Type::Bool,
+                constant: None,
+                span,
+                binding_decl_span: None,
+            }
+        } else {
+            eq_cond
         };
         chain = TypedExpr {
             kind: TypedExprKind::IfExpr {
@@ -15864,10 +15999,34 @@ fn check_match_slice(
         }
         match &arm.pattern {
             crate::ast::Pattern::Wildcard => {
-                wildcard_seen = true;
+                // BUG-20 residual fix (2026-08-02): a guarded wildcard
+                // arm's `arm.guard` was never even read here (unlike
+                // the `Slice` arm below, which BUG-20's original fix
+                // already wired up) -- the guard was silently dropped
+                // and the wildcard always behaved as an unconditional
+                // catch-all. Mirrors the M3 int/bool/enum dispatch
+                // precedent: a guarded wildcard does NOT close off
+                // later arms (`wildcard_seen` stays false), and its
+                // guard is folded into the dispatch chain as an
+                // ordinary conditional entry (cond = guard, no length
+                // check needed since Wildcard structurally matches any
+                // length) rather than becoming the unconditional
+                // `wildcard_body` fallback.
                 let body = check_expr(&arm.body, env, signatures, diagnostics);
                 unify_arm_type(&body, &mut result_ty, diagnostics, arm.body.span);
-                wildcard_body = Some(body.expr);
+                if let Some(g) = &arm.guard {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    typed_arms.push((gc.expr, body.expr));
+                } else {
+                    wildcard_seen = true;
+                    wildcard_body = Some(body.expr);
+                }
             }
             crate::ast::Pattern::Slice { heads, tail, has_rest } => {
                 let needed = (heads.len() + tail.len()) as u64;
@@ -17669,6 +17828,7 @@ fn check_expr(
                 // backend would emit two `free` calls for it.
                 // T1.2 phase 2b.
                 diagnose_partial_then_whole_move(&found.1, &coerced, env, diagnostics);
+                reject_affine_closure_into_struct_field(&found.1, fty, fname, diagnostics);
                 consume_if_moved_var(&found.1, &coerced, env);
                 let mut field_expr = coerced.expr;
                 inject_branch_drops(&mut field_expr);

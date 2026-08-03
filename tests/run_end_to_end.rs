@@ -7797,3 +7797,252 @@ fn main() -> i64 {
         assert_eq!(stdout, "10\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// BUG-20 residual fix (2026-08-02): three adjacent guard-wiring gaps
+// left over from the original BUG-20 fix (which only wired guards into
+// the slice-pattern `Slice` arm). (1) A guarded `_` wildcard arm in a
+// slice/array match never read `arm.guard` at all -- always behaved as
+// an unconditional catch-all. (2) `check_match_str` never type-checked
+// or wired `arm.guard` into its generated dispatch -- a guarded string
+// match arm always behaved as if its guard were `true`. (3)
+// `check_match_float` had the identical gap. All three are the
+// "compiles fine but silently produces the wrong answer" class of bug
+// that only a real execution test catches.
+#[test]
+fn slice_pattern_guarded_wildcard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-guarded-wildcard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "slice_guarded_wildcard_e2e";
+fn classify(xs: Vec<i64>, n: i64) -> i64 {
+    return match xs {
+        [a, b] if n > 10 then a + b,
+        _ if n > 5 then 100,
+        _ then -1,
+    };
+}
+fn main() -> i64 {
+    print classify(vec(1, 2), 20);
+    print classify(vec(1, 2, 3), 8);
+    print classify(vec(1, 2, 3), 1);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "3\n100\n-1\n",
+            "guarded wildcard must be evaluated, not treated as unconditional, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn string_match_guard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-str-guard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "string_match_guard_e2e";
+fn classify(s: OwnedStr, n: i64) -> i64 {
+    return match s {
+        "x" if n > 10 then 1,
+        "y" then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify("x" + "", 20);
+    print classify("x" + "", 5);
+    print classify("y" + "", 20);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n0\n2\n",
+            "string match guard must gate the arm, not be silently ignored, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn float_match_guard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-float-guard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "float_match_guard_e2e";
+fn classify(x: f64, n: i64) -> i64 {
+    return match x {
+        1.5 if n > 10 then 1,
+        2.5 then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify(1.5, 20);
+    print classify(1.5, 5);
+    print classify(2.5, 20);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n0\n2\n",
+            "float match guard must gate the arm, not be silently ignored, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-66 residual fix (2026-08-02): a closure with a heap-owning
+// capture (moved in, not `ref`-captured) stored into a struct field
+// used to crash both backends at build/run time (LLVM: `lli` rejects
+// the emitted IR as unsized; C: double-free at runtime). The checker
+// now rejects the pattern with a clean diagnostic instead. This is an
+// execution-level (real `vanic` binary) confirmation that `check`
+// exits non-zero with a real diagnostic, not just an in-process
+// `compile_to_c` check -- mirrors the "doesn't compile with a real
+// toolchain" verification style used for BUG-22 above.
+#[test]
+fn closure_with_heap_owning_capture_in_struct_field_is_cleanly_rejected() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-closure-aff-field-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Handler { cb: Closure(i64) -> i64 }
+fn main() -> i64 {
+  let data: Vec<i64> = vec(1, 2, 3, 4);
+  let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+  let h: Handler = Handler { cb: cb };
+  let f: Closure(i64) -> i64 = h.cb;
+  print f(5);
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    let _ = fs::remove_file(&src);
+
+    assert!(
+        !output.status.success(),
+        "expected a clean rejection, got success (this pattern used to crash \
+         the backend at build/run time instead of being caught here)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("heap-owning") && stderr.contains("struct field"),
+        "expected the BUG-66-residual diagnostic to mention the heap-owning \
+         capture and struct field, got:\n{}",
+        stderr
+    );
+}

@@ -52109,6 +52109,159 @@ fn main() -> i64 {
         assert!(result.is_err(), "slice pattern on Vec<OwnedStr> (non-Copy elem) must be rejected");
     }
 
+    // BUG-20 residual fix (2026-08-02): a guarded `_` wildcard arm in a
+    // slice/array match never even read `arm.guard` (unlike the `Slice`
+    // arm, which BUG-20's original fix already wired up) -- the guard
+    // was silently dropped and the wildcard always behaved as an
+    // unconditional catch-all. Fixed by folding a guarded wildcard into
+    // the dispatch chain as an ordinary conditional entry instead of
+    // treating it as the unconditional fallback. Runtime behavior
+    // (guard is actually evaluated, not ignored) is verified end-to-end
+    // on both backends in tests/run_end_to_end.rs -- this test only
+    // covers compile-time acceptance and guard type-checking.
+    #[test]
+    fn slice_pattern_guarded_wildcard_compiles_on_both_backends() {
+        let src = r#"
+intent "slice_guarded_wildcard";
+fn classify(xs: Vec<i64>, n: i64) -> i64 {
+    return match xs {
+        [a, b] if n > 10 then a + b,
+        _ if n > 5 then 100,
+        _ then -1,
+    };
+}
+fn main() -> i64 {
+    print classify(vec(1, 2), 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded wildcard slice match should compile on C backend");
+        compile_to_llvm(src).expect("guarded wildcard slice match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn slice_pattern_guarded_wildcard_guard_must_be_bool() {
+        let src = r#"
+intent "slice_guarded_wildcard_bad_guard";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let n: i64 = 5;
+    let r: i64 = match xs {
+        _ if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a slice wildcard arm must be rejected");
+    }
+
+    #[test]
+    fn slice_pattern_guarded_wildcard_does_not_close_off_later_arms() {
+        // A guarded wildcard must NOT set the "wildcard seen" flag --
+        // an arm after it (even another wildcard) must still be reachable.
+        let src = r#"
+intent "slice_guarded_wildcard_not_terminal";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let n: i64 = 1;
+    let r: i64 = match xs {
+        _ if n > 10 then 1,
+        _ then 2,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src)
+            .expect("an arm after a guarded wildcard must not be rejected as unreachable");
+        assert!(c.contains("int64_t") || c.contains("main"), "sanity: C emitted");
+    }
+
+    // BUG-20 residual fix (2026-08-02): `check_match_str` never
+    // type-checked or wired `arm.guard` into the generated dispatch at
+    // all -- a guarded string-match arm always behaved as if its guard
+    // were `true`. Runtime behavior verified end-to-end on both
+    // backends in tests/run_end_to_end.rs.
+    #[test]
+    fn string_match_guard_compiles_and_type_checks() {
+        let src = r#"
+intent "string_match_guard";
+fn classify(s: OwnedStr, n: i64) -> i64 {
+    return match s {
+        "x" if n > 10 then 1,
+        "y" then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify("x" + "", 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded string match should compile on C backend");
+        compile_to_llvm(src).expect("guarded string match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn string_match_guard_must_be_bool() {
+        let src = r#"
+intent "string_match_guard_bad";
+fn main() -> i64 {
+    let s: OwnedStr = "x" + "";
+    let n: i64 = 5;
+    let r: i64 = match s {
+        "x" if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a string match arm must be rejected");
+    }
+
+    // BUG-20 residual fix (2026-08-02): `check_match_float` never
+    // type-checked or wired `arm.guard` into the generated dispatch at
+    // all -- same gap as the string-match case above.
+    #[test]
+    fn float_match_guard_compiles_and_type_checks() {
+        let src = r#"
+intent "float_match_guard";
+fn classify(x: f64, n: i64) -> i64 {
+    return match x {
+        1.5 if n > 10 then 1,
+        2.5 then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify(1.5, 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded float match should compile on C backend");
+        compile_to_llvm(src).expect("guarded float match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn float_match_guard_must_be_bool() {
+        let src = r#"
+intent "float_match_guard_bad";
+fn main() -> i64 {
+    let x: f64 = 1.5;
+    let n: i64 = 5;
+    let r: i64 = match x {
+        1.5 if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a float match arm must be rejected");
+    }
+
     // ── L4 Runtime integer overflow guards ────────────────────────────────────
 
     #[test]
@@ -53424,6 +53577,68 @@ fn main() -> i64 { return leak_check(); }
                 < c.find("struct Struct_Handler {").unwrap(),
             "closure typedef must precede Struct_Handler's body:\n{}",
             c
+        );
+    }
+
+    /// BUG-66 residual fix (2026-08-02): the deferred gap logged
+    /// alongside the fix above. A closure with a HEAP-OWNING capture
+    /// (moved in, not `ref`-captured) stored into a struct field
+    /// crashed on both backends -- LLVM: `lli` rejected the emitted
+    /// IR ("base element of getelementptr must be sized" -- the
+    /// synthesized env struct is referenced as an opaque/unsized type
+    /// at the point the closure is stored into and read back from the
+    /// struct field); C: `free(): double free detected in tcache 2`
+    /// at runtime. This is an affine-ownership/lifetime gap (the
+    /// closure's heap-owning env crossing a struct-field boundary),
+    /// not a missing typedef -- deliberately not attempted as a "make
+    /// it work" fix; instead the checker now rejects the pattern with
+    /// a clean diagnostic via `reject_affine_closure_into_struct_field`,
+    /// using the pre-existing `CLOSURE_AFF_REGISTRY` (populated when
+    /// the closure literal itself is checked) to detect a heap-owning
+    /// capture at the struct-literal-field / field-assignment site.
+    #[test]
+    fn struct_field_closure_with_heap_owning_capture_is_rejected_not_crashed() {
+        let source = r#"
+            struct Handler { cb: Closure(i64) -> i64 }
+            fn main() -> i64 {
+              let data: Vec<i64> = vec(1, 2, 3, 4);
+              let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+              let h: Handler = Handler { cb: cb };
+              let f: Closure(i64) -> i64 = h.cb;
+              print f(5);
+              return 0;
+            }
+        "#;
+        let result = compile_to_c(source);
+        assert!(
+            result.is_err(),
+            "a closure with a heap-owning (moved) capture stored into a \
+             struct field must be a clean compile-time rejection, not \
+             reach codegen and crash"
+        );
+    }
+
+    #[test]
+    fn struct_field_assign_closure_with_heap_owning_capture_is_rejected() {
+        let source = r#"
+            struct Handler { cb: Closure(i64) -> i64 }
+            fn main() -> i64 {
+              let data: Vec<i64> = vec(1, 2, 3, 4);
+              let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+              let zero: i64 = 0;
+              let noop = fn(x: i64) -> i64 { return x + zero; };
+              let h: Handler = Handler { cb: noop };
+              let hh: mut ref Handler = mut ref h;
+              hh.cb = cb;
+              return 0;
+            }
+        "#;
+        let result = compile_to_c(source);
+        assert!(
+            result.is_err(),
+            "assigning a heap-owning-capture closure into a struct field via \
+             `obj.field = ...;` must also be rejected, not just the struct-\
+             literal shape"
         );
     }
 

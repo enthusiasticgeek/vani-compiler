@@ -2027,8 +2027,10 @@ isn't lost):
 
 **All 4 real bugs (BUG-13/14/15/18) are now fixed** ✅ (2026-07-27,
 same session as this estimate — the ~9-15h bundled estimate above
-turned out reasonably close; DOC-4/DOC-5 not yet fixed, still open,
-~30-45 min combined). Fixing them (mostly the tutorial-verification
+turned out reasonably close; DOC-4/DOC-5 confirmed fixed 2026-08-02 —
+both tutorial files already carried the corrected examples from a
+prior pass, this was just a stale bookkeeping note; verified directly
+against the compiler). Fixing them (mostly the tutorial-verification
 work that came with each) surfaced 3 MORE bugs, none fixed, logged
 below.
 
@@ -2068,7 +2070,12 @@ verifying the four fixes above against their tutorial worked examples
   case — fixed. A separate C-backend-only struct-definition-ordering
   bug (struct/enum payloads specifically) was found, a fix attempted
   and found to regress the working i64 case, and reverted — logged as
-  open in BUG-22, not fixed.
+  open in BUG-22, not fixed. **Stale as of the next day**: BUG-22's
+  own entry below records this struct/enum-ordering gap as fully
+  fixed 2026-07-28, one day after this note was written — re-verified
+  directly 2026-08-02 (`RwLock<Point>`/`Mutex<Point>` struct payloads
+  both compile and run correctly on `--backend=c`, matching LLVM); no
+  further action needed, this note was just never updated.
 
 - [x] **BUG-20. `check_match_slice` type-checks pattern guards on
   slice/array match arms but never incorporates them into the
@@ -5656,5 +5663,109 @@ verifying the four fixes above against their tutorial worked examples
   backends, `Option<Array>` Some/None AND `Result<Tuple>` Ok/Err, all
   four paths, hand-computed values). Full `cargo test --release
   --workspace`: 13/13 binaries clean, 0 failed.
+
+---
+
+## Clearing the backlog of previously-deferred open bugs (2026-08-02)
+
+User asked for a prioritized list of every open item still on the
+books outside the BUG-68..80 sweep, approved items 1-5, ordered
+cheapest/lowest-risk first. BUG-33 (SMT `let`-then-`return` proof gap)
+and BUG-36 (`mut ref` exclusivity — missing checker subsystem) were
+deliberately left for their own dedicated sessions given soundness/
+architecture risk, per the original plan.
+
+- [x] **DOC-4 / DOC-5 — already fixed, stale bookkeeping only.** Both
+  tutorial files (`intermediate/03b_affine_deeper_primer.md`'s
+  `maybe_consume` example, `beginner/02_variables.md`'s Challenge
+  section) already carried the corrected examples from a prior pass —
+  re-verified directly against the compiler (`vanic check`): the
+  `maybe_consume` shape without an early return in the moving branch
+  is correctly rejected; `u32 * i64` widens cleanly while `u32 * i32`
+  (same width, mismatched sign) is correctly rejected. The "not yet
+  fixed, still open" note near BUG-13/14/15/18 was simply never
+  updated after the fix landed. Corrected that note in place.
+
+- [x] **BUG-22 residual — already fixed, stale bookkeeping only.**
+  The struct/enum RwLock/Mutex payload struct-definition-ordering gap
+  noted as "attempted and reverted" in BUG-19's entry was, per BUG-22's
+  own (later, more complete) entry, fully fixed the very next day
+  (2026-07-28). Re-verified directly: `RwLock<Point>`/`Mutex<Point>`
+  struct payloads both compile and run correctly on `--backend=c`,
+  matching LLVM (read/write/release cycle, guard_get/guard_set).
+  Corrected the stale note in place; no code change needed.
+
+- [x] **BUG-20 residual — real bug, fixed.** Three adjacent gaps left
+  over from BUG-20's original fix (which only wired `arm.guard` into
+  `check_match_slice`'s `Slice` arm): (1) that same function's
+  `Wildcard` arm never read `arm.guard` at all — a guarded slice/array
+  wildcard always behaved as an unconditional catch-all; (2)
+  `check_match_str` never type-checked or wired `arm.guard` into its
+  generated dispatch at all; (3) `check_match_float` had the identical
+  gap. All three are the "compiles fine, silently produces the wrong
+  answer" class of bug.
+  - Slice `Wildcard`: mirrors the M3 int/bool/enum dispatch precedent
+    — a guarded wildcard does NOT close off later arms (`wildcard_seen`
+    stays false) and its guard becomes an ordinary conditional entry in
+    the dispatch chain (`typed_arms.push((guard_expr, body))`) instead
+    of the unconditional fallback.
+  - `check_match_str` / `check_match_float`: both fold arms right-to-
+    left into a nested `IfExpr` chain; since string/float patterns bind
+    no names (unlike slice patterns), the guard has no dependency on
+    the pattern having matched, so it folds in with an eager `&&`
+    (`cond = (scr == lit) && guard`) rather than needing the slice
+    fix's "gate guard eval behind the length check first" structure.
+  - 7 new `src/lib.rs` tests (compile-time acceptance + guard-must-be-
+    Bool rejection for all three shapes) + 3 new `tests/run_end_to_end.rs`
+    execution tests (real stdout on both backends — this class of bug
+    compiles cleanly and only produces wrong output at runtime, so a
+    compile-only test can't catch it). All pre-existing `match_`-
+    filtered tests (137) and the two prior BUG-20/28 execution tests
+    (`slice_pattern_guards_example_...`, `match_guard_chain_example_...`)
+    still pass.
+
+- [x] **BUG-66 residual — real bug, fixed as a clean rejection (not a
+  "make it work" fix).** The deferred gap from BUG-66's original fix:
+  a closure with a HEAP-OWNING capture (moved in, not `ref`-captured)
+  stored into a struct field crashed both backends — LLVM: `lli`
+  rejects the emitted IR ("base element of getelementptr must be
+  sized" — the synthesized env struct is referenced as an opaque/
+  unsized type at the point the closure is stored into and read back
+  from the struct field); C: `free(): double free detected in tcache
+  2` at runtime. This is an affine-ownership/lifetime gap (the
+  closure's heap-owning env crossing a struct-field boundary), not a
+  missing typedef — implementing real cross-struct-field lifetime
+  tracking for an affine closure env is a substantial new feature, not
+  a quick fix, so (matching the BUG-64 Channel-Copy-requirement
+  precedent named in the original deferral) the fix is a clean
+  checker-time rejection instead of an attempt to make the pattern
+  sound.
+  New `reject_affine_closure_into_struct_field` helper (`checker.rs`):
+  narrow, name-based check using the pre-existing `CLOSURE_AFF_REGISTRY`
+  (keyed by a closure literal's own bind name, populated when the
+  literal itself is checked — `Type::Closure` has no Copy/affine
+  distinction in the type system itself, so this out-of-band registry
+  is the only place that information lives). If a struct-literal
+  field's declared type is `Closure` and its RHS is a bare `Var(name)`
+  found in the registry, reject with a diagnostic explaining the
+  capture-by-move + struct-field-boundary problem and pointing at the
+  `ref`-capture / pass-as-argument workarounds. Wired into both
+  struct-literal field-checking and `Stmt::FieldAssign` (`obj.field =
+  value;`) — the two places a closure value can be stored into a
+  struct field. Deliberately narrow: only catches the direct
+  `Struct { field: closure_var }` / `obj.field = closure_var;` shape
+  (matching the original bug report and the tutorial's own worked
+  example), not renamed/re-bound aliases of the closure — full alias
+  tracking would be a broader mechanism than this targeted fix.
+  Verified: the exact original repro (`Handler { cb: Vec-capturing
+  closure }`) now gets a clean `vanic check` rejection on both
+  backends instead of crashing; the pre-existing Copy-only-capture
+  case (`struct_field_closure_with_copy_only_capture_...`) still
+  compiles and runs correctly (105 = 100 + 5) — confirming the new
+  check doesn't over-reject. 2 new `src/lib.rs` tests (struct-literal
+  shape + field-assign shape) + 1 new `tests/run_end_to_end.rs` test
+  (real `vanic check` invocation, confirms the diagnostic text). 71
+  closure/struct-field-filtered `cargo test --lib` tests pass, 0
+  regressions.
 
 ---
