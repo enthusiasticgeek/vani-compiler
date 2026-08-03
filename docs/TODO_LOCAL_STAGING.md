@@ -957,3 +957,12 @@ STATUS: needs human/frontier root-cause review.
 This error occurs when the `observe` method does not correctly update the minimum and maximum values in the `Tracker` struct after each observation. Specifically, it fails to set the correct minimum value when encountering a smaller observation than the current minimum. This issue is due to an incorrect comparison inside the `observe` method, where the condition `(v < self.min)` is used instead of `(v <= self.min)`. The comparison should be for equality to include all equal values as valid minimums.
 
 This bug affects the C backend (`--backend=c`) and likely will manifest in other backends that require similar comparisons.
+
+---
+
+### Candidate: 20260803-225346-backend-divergence-5331f77dc9
+
+Repro: `tools/localfuzz/findings/20260803-225346-backend-divergence-5331f77dc9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260803-225346-backend-divergence-5331f77dc9/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
