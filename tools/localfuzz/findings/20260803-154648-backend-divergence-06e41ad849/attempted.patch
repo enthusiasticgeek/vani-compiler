@@ -1,0 +1,9 @@
+--- a/src/backend_llvm.rs
++++ b/src/backend_llvm.rs
+@@ -3369,7 +3369,7 @@
+         let t28 = load_addr(s);
+         let t29 = alloca %Struct_Bag; // Incorrect assignment operator
+-        store s, t28;
++        store %s, t29; // Correct assignment operator
+         return t28;
+     }
