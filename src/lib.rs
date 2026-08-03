@@ -50711,6 +50711,365 @@ fn main() -> i64 { return 0; }
             .expect("try with a live local Vec<Struct> across early-return must compile to LLVM");
     }
 
+    // Feature-combination gap audit (2026-08-03), category 7, row 1:
+    // iterator-style Vec builtins CHAINED together in one expression
+    // (`xs.filter(...).map(...).fold(...)`, all one expression, no
+    // intermediate `let`). Checked clean -- NOT a bug. This is an
+    // explicitly documented v1 restriction (tutorials/src/
+    // intermediate/06b_iterators_primer.md, "A style note, not just
+    // a preference"): method-call sugar only rewrites a receiver
+    // that's a plain, named `Var` (checker.rs's `if let
+    // ExprKind::Var(recv_name) = &receiver.kind` guard, right before
+    // the Vec-builtin-sugar table) -- chaining directly onto the
+    // result of another call is rejected with EXACTLY the message
+    // this test asserts, which matches the tutorial's own quoted
+    // wording verbatim. The nested free-function form (`vec_fold(ref
+    // vec_map(ref vec_filter(ref xs, ...), ...), ...)`) hits the
+    // same underlying rule from the other direction: `ref` only
+    // borrows a named place, never an arbitrary expression, so
+    // `ref vec_filter(...)` is rejected too. Each combinator step
+    // needs its own named `let` in v1 either way.
+    #[test]
+    fn iterator_combinator_chained_directly_in_one_expression_is_rejected_per_docs() {
+        let source = r#"
+            fn is_even(x: i64) -> bool { return x % 2 == 0; }
+            fn double_it(x: i64) -> i64 { return x * 2; }
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let chained: i64 = xs.filter(is_even).map(double_it).fold(0, add);
+              print chained;
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("chaining combinators directly in one expression must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("cannot call method 'map' on")
+                && format!("{:?}", c_err).contains("methods are attached to struct/enum types only in v1"),
+            "unexpected C rejection message: {:?}",
+            c_err
+        );
+        let llvm_err = compile_to_llvm(source)
+            .err()
+            .expect("chaining combinators directly in one expression must be rejected (LLVM)");
+        assert!(
+            format!("{:?}", llvm_err).contains("cannot call method 'map' on")
+                && format!("{:?}", llvm_err).contains("methods are attached to struct/enum types only in v1"),
+            "unexpected LLVM rejection message: {:?}",
+            llvm_err
+        );
+    }
+
+    #[test]
+    fn iterator_combinators_chained_via_named_lets_compile_on_both_backends() {
+        let source = r#"
+            fn is_even(x: i64) -> bool { return x % 2 == 0; }
+            fn double_it(x: i64) -> i64 { return x * 2; }
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn mul(a: i64, b: i64) -> i64 { return a * b; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+              let ys: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+              let evens: Vec<i64> = xs.filter(is_even);
+              let doubled: Vec<i64> = evens.map(double_it);
+              let total: i64 = doubled.fold(0, add);
+              print total;
+              let zipped: Vec<i64> = vec_zip_with(ref xs, ref ys, mul);
+              let zipped_evens: Vec<i64> = zipped.filter(is_even);
+              let zipped_sum: i64 = zipped_evens.fold(0, add);
+              print zipped_sum;
+              let taken: Vec<i64> = doubled.take(2);
+              print taken[0];
+              print taken[1];
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("chained combinators via named lets must compile to C");
+        compile_to_llvm(source)
+            .expect("chained combinators via named lets must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 2:
+    // `task`/`join` (the call-form, `task fn(args) -> Task<R>`) with
+    // a genuinely MULTI-BLOCK callee body (nested if/else inside a
+    // while loop) -- main.rs's own comment flags multi-block task
+    // bodies as an SSA-LLVM-reject/tree-LLVM-fallback edge case
+    // (`ssa_llvm_extra_reject`). Checked clean on both backends;
+    // verified the output by hand (not just cross-backend
+    // agreement, in case both backends shared a bug): worker(10) =
+    // 37, worker(20) = 107.
+    // Also tried the block-form `task <name> { <body> }` with a
+    // captured outer variable assignment (`result = acc;` inside the
+    // task, read after `join`) -- NOT a bug: docs (tutorials/src/
+    // advanced/03_concurrency.md, "There's also a block form...")
+    // explicitly state the block form "has no return-value payload
+    // ... since it implicitly captures the enclosing function's
+    // bindings" BY VALUE/Copy -- the assignment legitimately only
+    // mutates the task's own private copy, so the outer binding is
+    // untouched after `join`. This is intentional, not silently
+    // wrong; getting a value out of a task requires either the
+    // call-form's `Task<R>` + `join`, or an explicit `Atomic`/
+    // `Mutex`/`Channel`.
+    #[test]
+    fn task_join_callform_multiblock_body_produces_correct_output_on_both_backends() {
+        let source = r#"
+            fn worker(n: i64) -> i64 {
+              let acc: i64 = 0;
+              let i: i64 = 0;
+              while i < n {
+                if i % 3 == 0 {
+                  acc = acc + i * 2;
+                } else {
+                  if i % 2 == 0 {
+                    acc = acc + i;
+                  } else {
+                    acc = acc - i;
+                  }
+                }
+                i = i + 1;
+              }
+              return acc;
+            }
+            fn main() -> i64 {
+              let t1: Task<i64> = task worker(10);
+              let t2: Task<i64> = task worker(20);
+              let r1: i64 = join t1;
+              let r2: i64 = join t2;
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("multi-block task/join body must compile to C");
+        compile_to_llvm(source).expect("multi-block task/join body must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 4:
+    // Graph/Bst/Trie/SkipList/UnionFind/BloomFilter actually RUN
+    // end-to-end together (not just compile-checked individually --
+    // per docs/TESTING_MATRIX_TODO.md, these had 401 lib.rs
+    // compile-only hits but only 8 real e2e hits despite
+    // advanced/05b_advanced_collections.md leaning heavily on all
+    // six). Checked clean on both backends -- every value verified
+    // against the tutorial's own documented expected output.
+    #[test]
+    fn advanced_collections_graph_bst_trie_skiplist_unionfind_bloomfilter_run_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let g: Graph = graph_new(5);
+              let _ = g.add_edge(0, 1, 4);
+              let _ = g.add_edge(0, 2, 1);
+              let _ = g.add_edge(2, 1, 2);
+              let _ = g.add_edge(1, 3, 1);
+              let _ = g.add_edge(3, 4, 3);
+              print g.num_nodes();
+              print g.num_edges();
+              print g.bfs_reach(0);
+              print g.dfs_reach(0);
+              let dist: Option<i64> = g.dijkstra(0, 4);
+              print option_unwrap_or(dist, -1);
+
+              let b: Bst<i64> = bst_new();
+              let _ = b.insert(5);
+              let _ = b.insert(3);
+              let _ = b.insert(7);
+              let _ = b.insert(1);
+              print b.contains(3);
+              print b.contains(6);
+              print b.len();
+              print option_unwrap_or(b.min(), -1);
+              print option_unwrap_or(b.max(), -1);
+              let _ = b.remove(3);
+              print b.len();
+
+              let t: Trie = trie_new();
+              let _ = t.insert("hello");
+              let _ = t.insert("help");
+              let _ = t.insert("world");
+              print t.contains("hello");
+              print t.contains("hell");
+              print t.starts_with("hel");
+              print t.starts_with("wor");
+              print t.len();
+
+              let sl: SkipList = skiplist_new();
+              let _ = sl.insert(10);
+              let _ = sl.insert(5);
+              let _ = sl.insert(20);
+              let _ = sl.insert(5);
+              print sl.len();
+              print sl.contains(5);
+              print sl.contains(7);
+              print option_unwrap_or(sl.min(), -1);
+              print option_unwrap_or(sl.max(), -1);
+
+              let uf: UnionFind = union_find_new(6);
+              let _ = union_find_union(mut ref uf, 0, 1);
+              let _ = union_find_union(mut ref uf, 1, 2);
+              let _ = union_find_union(mut ref uf, 3, 4);
+              print union_find_count(ref uf);
+              print union_find_connected(mut ref uf, 0, 2);
+              print union_find_connected(mut ref uf, 0, 3);
+
+              let bf: BloomFilter = bloom_filter_new(1024, 4);
+              let _ = bf.insert(42);
+              let _ = bf.insert(100);
+              let _ = bf.insert(7);
+              print bf.contains(42);
+              print bf.contains(99);
+              print bf.len();
+              print bf.count();
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("advanced collections program must compile to C");
+        compile_to_llvm(source).expect("advanced collections program must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7 row 3
+    // neighborhood: `mmio_read_u8`/`mmio_read_u16`/`mmio_write_u8`/
+    // `mmio_write_u16` in tree-LLVM (forced by a `#[no_mangle]` fn
+    // anywhere in the program) must emit type-consistent IR --
+    // narrow load/store, no spurious i64 widen/narrow mismatch. This
+    // is a fast unit-level check (text inspection); the real e2e
+    // regression guard is `tests/run_end_to_end.rs`'s
+    // `mmio_narrow_read_write_builtins_build_and_run_correctly_under_no_mangle`,
+    // which actually runs the value through `opt`/`llc` (the only
+    // thing that catches an ill-typed-IR regression -- this
+    // `compile_to_llvm` helper just calls `LlvmBackend.emit` directly
+    // with no verifier pass). See that test's doc comment for the
+    // full root-cause writeup.
+    #[test]
+    fn mmio_narrow_read_write_builtins_emit_type_consistent_ir() {
+        let source = r#"
+            #[no_mangle]
+            fn dummy_export() -> i64 {
+              return 0;
+            }
+            fn uart_tx_ready() -> bool {
+              let sr: u16 = mmio_read_u16(0x40011000);
+              return (sr as i64) & 0x80 != 0;
+            }
+            fn uart_send(byte: u8) -> i64 {
+              let _ = mmio_write_u8(0x40011004, byte);
+              return 0;
+            }
+            fn set_ctrl_reg(v: u16) -> i64 {
+              let _ = mmio_write_u16(0x40011008, v);
+              return 0;
+            }
+            fn main() -> i64 {
+              print "ok";
+              return 0;
+            }
+        "#;
+        let ir = compile_to_llvm(source)
+            .expect("mmio narrow read/write under #[no_mangle] must compile to LLVM");
+        assert!(ir.contains("fn_uart_tx_ready"), "expected uart_tx_ready in emitted IR");
+        assert!(ir.contains("fn_uart_send"), "expected uart_send in emitted IR");
+        assert!(ir.contains("fn_set_ctrl_reg"), "expected set_ctrl_reg in emitted IR");
+        // This text-emission check can't catch the actual ill-typed-IR
+        // bug (LlvmBackend.emit never runs opt/llc's verifier) -- the
+        // real regression guard is the e2e test in
+        // tests/run_end_to_end.rs, which builds+links+runs this exact
+        // program through the full pipeline.
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 6:
+    // `Deque<Struct>` / `BinaryHeap<Struct>` -- do these collections
+    // support non-scalar (struct) elements? Checked clean on both
+    // backends -- NOT a bug. Both are scalar-i64-only in v1, cleanly
+    // rejected with a clear diagnostic identical in shape to
+    // HashMap's documented scalar-only-V restriction: "deque_push_
+    // back() only supports Deque<i64> in v1, got Deque<Item>" /
+    // "binary_heap_len() only supports BinaryHeap<i64> in v1, got
+    // BinaryHeap<Item>". Deque and BinaryHeap share the SAME
+    // restriction as each other (neither is more permissive).
+    #[test]
+    fn deque_and_binary_heap_reject_non_scalar_struct_elements() {
+        let deque_source = r#"
+            struct Item { id: i64 }
+            fn main() -> i64 {
+              let d: Deque<Item> = deque_new();
+              let _ = deque_push_back(mut ref d, Item { id: 1 });
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(deque_source)
+            .err()
+            .expect("Deque<Struct> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("only supports `Deque<i64>` in v1"),
+            "unexpected Deque rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(deque_source)
+            .err()
+            .expect("Deque<Struct> must be rejected (LLVM)");
+
+        let heap_source = r#"
+            struct Item { id: i64 }
+            fn main() -> i64 {
+              let h: BinaryHeap<Item> = binary_heap_new();
+              let _ = binary_heap_push(mut ref h, Item { id: 1 });
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(heap_source)
+            .err()
+            .expect("BinaryHeap<Struct> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("only supports `BinaryHeap<i64>` in v1")
+                || format!("{:?}", c_err).contains("binary_heap value must be assignable to i64"),
+            "unexpected BinaryHeap rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(heap_source)
+            .err()
+            .expect("BinaryHeap<Struct> must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 7:
+    // `Graph`/`Trie` with non-i64 node/edge payloads. Checked clean
+    // -- NOT a bug, and more fundamental than a runtime restriction:
+    // `Graph`/`Trie` are non-generic types in v1 (no `Type::Apply`
+    // form at all -- `Graph`/`Trie` are bare, monomorphic types
+    // whose nodes are always i64 indices / Str keys respectively).
+    // The parser itself rejects `Graph<T>`/`Trie<T>` syntax outright
+    // ("expected '='"), so the boundary can't even be expressed,
+    // let alone silently misbehave.
+    #[test]
+    fn graph_and_trie_reject_generic_type_parameter_syntax() {
+        let graph_source = r#"
+            fn main() -> i64 {
+              let g: Graph<i64> = graph_new(3);
+              return 0;
+            }
+        "#;
+        compile_to_c(graph_source)
+            .err()
+            .expect("Graph<T> generic syntax must be rejected (C)");
+        compile_to_llvm(graph_source)
+            .err()
+            .expect("Graph<T> generic syntax must be rejected (LLVM)");
+
+        let trie_source = r#"
+            fn main() -> i64 {
+              let t: Trie<i64> = trie_new();
+              return 0;
+            }
+        "#;
+        compile_to_c(trie_source)
+            .err()
+            .expect("Trie<T> generic syntax must be rejected (C)");
+        compile_to_llvm(trie_source)
+            .err()
+            .expect("Trie<T> generic syntax must be rejected (LLVM)");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {

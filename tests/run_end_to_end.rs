@@ -9016,3 +9016,378 @@ fn main() -> i64 {
     }
     let _ = fs::remove_file(&src);
 }
+
+// Feature-combination gap audit (2026-08-03), category 7 row 1:
+// iterator-style Vec builtins chained together via named `let`s
+// between each step (the v1-supported pattern -- direct one-
+// expression chaining is rejected per docs, see the matching
+// src/lib.rs test). Verifies actual output VALUES, not just that
+// it compiles.
+#[test]
+fn iterator_combinators_chained_via_named_lets_produce_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-iter-combinator-chain-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn is_even(x: i64) -> bool { return x % 2 == 0; }
+fn double_it(x: i64) -> i64 { return x * 2; }
+fn add(a: i64, b: i64) -> i64 { return a + b; }
+fn mul(a: i64, b: i64) -> i64 { return a * b; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+  let ys: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+  let evens: Vec<i64> = xs.filter(is_even);
+  let doubled: Vec<i64> = evens.map(double_it);
+  let total: i64 = doubled.fold(0, add);
+  print total;
+  let zipped: Vec<i64> = vec_zip_with(ref xs, ref ys, mul);
+  let zipped_evens: Vec<i64> = zipped.filter(is_even);
+  let zipped_sum: i64 = zipped_evens.fold(0, add);
+  print zipped_sum;
+  let taken: Vec<i64> = doubled.take(2);
+  print taken[0];
+  print taken[1];
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "60\n3850\n4\n8\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 2:
+// `task`/`join` call-form with a genuinely multi-block callee body
+// (nested if/else inside a while loop) -- main.rs flags multi-block
+// task bodies as an SSA-LLVM-reject/tree-LLVM-fallback edge case.
+// Verified by hand: worker(10) = 37, worker(20) = 107.
+#[test]
+fn task_join_callform_multiblock_body_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-task-multiblock-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn worker(n: i64) -> i64 {
+  let acc: i64 = 0;
+  let i: i64 = 0;
+  while i < n {
+    if i % 3 == 0 {
+      acc = acc + i * 2;
+    } else {
+      if i % 2 == 0 {
+        acc = acc + i;
+      } else {
+        acc = acc - i;
+      }
+    }
+    i = i + 1;
+  }
+  return acc;
+}
+fn main() -> i64 {
+  let t1: Task<i64> = task worker(10);
+  let t2: Task<i64> = task worker(20);
+  let r1: i64 = join t1;
+  let r2: i64 = join t2;
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "37\n107\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 4:
+// Graph/Bst/Trie/SkipList/UnionFind/BloomFilter actually running
+// end-to-end together, matching advanced/05b_advanced_collections.md's
+// own documented expected values for every call.
+#[test]
+fn advanced_collections_run_correctly_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-advanced-collections-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let g: Graph = graph_new(5);
+  let _ = g.add_edge(0, 1, 4);
+  let _ = g.add_edge(0, 2, 1);
+  let _ = g.add_edge(2, 1, 2);
+  let _ = g.add_edge(1, 3, 1);
+  let _ = g.add_edge(3, 4, 3);
+  print g.num_nodes();
+  print g.num_edges();
+  print g.bfs_reach(0);
+  print g.dfs_reach(0);
+  let dist: Option<i64> = g.dijkstra(0, 4);
+  print option_unwrap_or(dist, -1);
+
+  let b: Bst<i64> = bst_new();
+  let _ = b.insert(5);
+  let _ = b.insert(3);
+  let _ = b.insert(7);
+  let _ = b.insert(1);
+  print b.contains(3);
+  print b.contains(6);
+  print b.len();
+  print option_unwrap_or(b.min(), -1);
+  print option_unwrap_or(b.max(), -1);
+  let _ = b.remove(3);
+  print b.len();
+
+  let t: Trie = trie_new();
+  let _ = t.insert("hello");
+  let _ = t.insert("help");
+  let _ = t.insert("world");
+  print t.contains("hello");
+  print t.contains("hell");
+  print t.starts_with("hel");
+  print t.starts_with("wor");
+  print t.len();
+
+  let sl: SkipList = skiplist_new();
+  let _ = sl.insert(10);
+  let _ = sl.insert(5);
+  let _ = sl.insert(20);
+  let _ = sl.insert(5);
+  print sl.len();
+  print sl.contains(5);
+  print sl.contains(7);
+  print option_unwrap_or(sl.min(), -1);
+  print option_unwrap_or(sl.max(), -1);
+
+  let uf: UnionFind = union_find_new(6);
+  let _ = union_find_union(mut ref uf, 0, 1);
+  let _ = union_find_union(mut ref uf, 1, 2);
+  let _ = union_find_union(mut ref uf, 3, 4);
+  print union_find_count(ref uf);
+  print union_find_connected(mut ref uf, 0, 2);
+  print union_find_connected(mut ref uf, 0, 3);
+
+  let bf: BloomFilter = bloom_filter_new(1024, 4);
+  let _ = bf.insert(42);
+  let _ = bf.insert(100);
+  let _ = bf.insert(7);
+  print bf.contains(42);
+  print bf.contains(99);
+  print bf.len();
+  print bf.count();
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let expected = "5\n5\n5\n5\n7\ntrue\nfalse\n4\n1\n7\n3\ntrue\nfalse\ntrue\ntrue\n3\n3\ntrue\nfalse\n5\n20\n3\ntrue\nfalse\ntrue\nfalse\n1024\n3\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 3
+// neighborhood (the BUG-44 `--target`/`no_std`/`#[no_mangle]`
+// intersection was re-audited for OTHER bugs nearby): found that
+// `examples/language/english/bare_metal.vani` -- the EXACT shipped
+// example BUG-44 fixed -- had never actually been run through
+// `vanic build`/`vanic run` (only its emitted TEXT was grepped for
+// the bare symbol name). Doing so crashes `opt`/`llc` with ill-typed
+// IR from `mmio_read_u8`/`mmio_read_u16` (internally zext'd their
+// narrow load to i64, contradicting the narrow-stays-narrow-until-
+// cast convention SSA-LLVM already follows -- storing that i64 value
+// into a `u8`/`u16`-typed `let`'s i8/i16 alloca produced "defined
+// with type 'i64' but expected 'i8/i16'"). Fixing the read side
+// exposed a SECOND bug in the same builtin family: `mmio_write_u8`/
+// `mmio_write_u16` unconditionally emitted `trunc i64 {val} to i8/
+// i16` assuming `val` was always i64-typed, which is wrong whenever
+// the value being written is ALREADY narrow (any `u8`/`u16`
+// parameter or local, or `mmio_read_u8/u16` after the first fix) --
+// "defined with type 'i8' but expected 'i64'" the other way around.
+// Both only affect tree-LLVM (reached whenever a program contains a
+// `#[no_mangle]` fn anywhere, which routes the WHOLE program there
+// per BUG-44's own fix) -- SSA-LLVM already had the correct
+// convention for all four builtins, used as the reference here.
+// This test builds+links+runs (full opt/llc/cc pipeline) a program
+// combining all four builtins with a `#[no_mangle]` fn to force
+// tree-LLVM routing; `valgrind --leak-check=full` on the resulting
+// native binary: 0 errors.
+#[test]
+fn mmio_narrow_read_write_builtins_build_and_run_correctly_under_no_mangle() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir();
+    let src: PathBuf = dir.join(format!(
+        "intentc-mmio-narrow-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+#[no_mangle]
+fn dummy_export() -> i64 {
+  return 0;
+}
+fn uart_tx_ready() -> bool {
+  let sr: u16 = mmio_read_u16(0x40011000);
+  return (sr as i64) & 0x80 != 0;
+}
+fn uart_send(byte: u8) -> i64 {
+  let _ = mmio_write_u8(0x40011004, byte);
+  return 0;
+}
+fn set_ctrl_reg(v: u16) -> i64 {
+  let _ = mmio_write_u16(0x40011008, v);
+  return 0;
+}
+fn main() -> i64 {
+  print "ok";
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let bin_path = dir.join(format!(
+        "intentc-mmio-narrow-bin-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-lm",
+            "-o",
+            bin_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "vanic build failed (mmio narrow read/write under #[no_mangle]):\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run = Command::new(&bin_path).output().expect("binary runs");
+    assert!(
+        run.status.success(),
+        "binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run.status,
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        "ok\n",
+    );
+    let _ = fs::remove_file(&src);
+    let _ = fs::remove_file(&bin_path);
+}

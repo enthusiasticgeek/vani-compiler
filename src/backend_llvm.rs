@@ -11064,6 +11064,29 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return "0".to_string();
             }
             if name == "mmio_read_u8" {
+                // Gap-audit fix (2026-08-03): `mmio_read_u8`'s
+                // checker-declared return type is `u8`, so any
+                // consumer (a `let x: u8 = mmio_read_u8(...);`,
+                // an `as i64` cast, ...) expects an i8-width SSA
+                // value here -- matching the established
+                // narrow-stays-narrow-until-cast convention SSA-
+                // LLVM already follows for ordinary u8/u16
+                // arithmetic. This used to `zext i8 ... to i64`
+                // internally, producing an i64-typed temp; storing
+                // that into a `u8`-typed `let`'s `i8` alloca (tree-
+                // LLVM's generic scalar Let codegen, which expects
+                // emit_expr's result to already match the
+                // destination width) emitted ill-typed IR
+                // ("defined with type 'i64' but expected 'i8'"),
+                // caught by `opt`/`llc` on ANY program using this
+                // builtin that also routes through tree-LLVM (e.g.
+                // any program containing a `#[no_mangle]` fn
+                // elsewhere, which routes the WHOLE program to
+                // tree-LLVM) -- found via `examples/language/
+                // english/bare_metal.vani`, which `vanic run`/
+                // `vanic build` had apparently never actually been
+                // exercised through (only emission text was
+                // grepped for BUG-44's `#[no_mangle]` fix).
                 let addr = emit_expr(&args[0], ctx, out);
                 let ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -11075,14 +11098,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load volatile i8, i8* {}, align 1\n",
                     raw, ptr
                 ));
-                let result = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = zext i8 {} to i64\n",
-                    result, raw
-                ));
-                return result;
+                return raw;
             }
             if name == "mmio_read_u16" {
+                // See mmio_read_u8's comment just above -- same fix,
+                // same root cause, for the u16 width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -11094,14 +11114,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load volatile i16, i16* {}, align 2\n",
                     raw, ptr
                 ));
-                let result = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = zext i16 {} to i64\n",
-                    result, raw
-                ));
-                return result;
+                return raw;
             }
             if name == "mmio_write_u8" {
+                // Gap-audit fix (2026-08-03): the checker's
+                // `mmio_write_u8` typing (`coerce_checked(...,
+                // &Type::U8, ...)`) means `args[1]`'s checker type
+                // is unconditionally `u8` already -- so `emit_expr`
+                // here returns a value that's ALREADY i8-width
+                // (matching the narrow-stays-narrow convention:
+                // e.g. a `byte: u8` parameter loads as a native
+                // `i8`, not i64). The old blind `trunc i64 {val} to
+                // i8` assumed `val` was always i64-typed, which
+                // produced ill-typed IR ("defined with type 'i8'
+                // but expected 'i64'") the instant the write's
+                // value came from an already-narrow source (any u8
+                // parameter/local, or `mmio_read_u8` after that
+                // builtin's own over-widening was fixed just above)
+                // -- masked until now because whatever DID feed
+                // this path before happened to be genuinely i64-
+                // sourced. No conversion is needed at all: the
+                // value already matches the store's declared width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let val = emit_expr(&args[1], ctx, out);
                 let ptr = ctx.fresh_tmp();
@@ -11109,18 +11142,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = inttoptr i64 {} to i8*\n",
                     ptr, addr
                 ));
-                let trunc = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = trunc i64 {} to i8\n",
-                    trunc, val
-                ));
                 out.push_str(&format!(
                     "  store volatile i8 {}, i8* {}, align 1\n",
-                    trunc, ptr
+                    val, ptr
                 ));
                 return "0".to_string();
             }
             if name == "mmio_write_u16" {
+                // See mmio_write_u8's comment just above -- same
+                // fix, same root cause, for the u16 width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let val = emit_expr(&args[1], ctx, out);
                 let ptr = ctx.fresh_tmp();
@@ -11128,14 +11158,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = inttoptr i64 {} to i16*\n",
                     ptr, addr
                 ));
-                let trunc = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = trunc i64 {} to i16\n",
-                    trunc, val
-                ));
                 out.push_str(&format!(
                     "  store volatile i16 {}, i16* {}, align 2\n",
-                    trunc, ptr
+                    val, ptr
                 ));
                 return "0".to_string();
             }

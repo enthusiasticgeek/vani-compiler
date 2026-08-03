@@ -319,44 +319,65 @@ failed.
       nested-Let-annotation walk gap); confirmed working on both
       backends after the fix.
 
-## 7. Collections beyond Vec/HashMap (🟡 — thin coverage, flagged but never closed in the original priority list)
+## 7. Collections beyond Vec/HashMap (🟡 — thin coverage, flagged but never closed in the original priority list) -- CLOSED 2026-08-03
 
 Carried over verbatim from `TESTING_MATRIX_TODO.md`'s original
 "Priority sweep list" items 4–8, which were never actually swept
 (only items 1–3 on that list got a "done" marker):
 
-- [ ] 🟡 Iterator-style `Vec` builtins CHAINED together
+- [x] 🟡 Iterator-style `Vec` builtins CHAINED together
       (`vec_map`/`vec_fold`/`vec_filter`/`vec_zip_with`/...) in one
       expression — 73 `lib.rs` hits, only 1 real end-to-end
       execution test despite heavy tutorial reliance
-      (`06b_iterators_primer.md`, `15_math_rng.md`).
-- [ ] 🟡 `task`/`join` (the primitive itself, not `parallel for`) —
+      (`06b_iterators_primer.md`, `15_math_rng.md`). Checked clean:
+      one-expression direct chaining is correctly REJECTED per the
+      tutorial's own explicitly documented restriction; chaining via
+      named `let`s between steps (the v1-supported pattern) verified
+      correct on both backends. See BUG-92 in `docs/TODO_CURRENT.md`.
+- [x] 🟡 `task`/`join` (the primitive itself, not `parallel for`) —
       explicitly called out in `main.rs` comments as having SSA-vs-
       tree edge cases for multi-block bodies; thin real-execution
-      coverage.
-- [ ] 🟡 `--target=` cross-compile combined with `no_std`/embedded
+      coverage. Checked clean: call-form `task fn(args) -> Task<R>`
+      with a genuinely multi-block callee body verified correct on
+      both backends by hand-computed expected values.
+- [x] 🟡 `--target=` cross-compile combined with `no_std`/embedded
       AND `#[no_mangle]` FFI export, all three at once (BUG-44 was
       found exactly at this three-way intersection; the intersection
       itself was never re-swept afterward for OTHER bugs in the same
-      neighborhood).
-- [ ] 🟡 Graph/Trie/SkipList/UnionFind/BloomFilter/BST builtins
+      neighborhood). Found+fixed a real bug in this neighborhood
+      (BUG-92): the ALREADY-SHIPPED `bare_metal.vani` example (BUG-
+      44's own fix target) crashed `opt`/`llc` with ill-typed IR the
+      moment it was actually built/run (on the DEFAULT host target,
+      not even requiring the three-way combo) -- BUG-44's own
+      verification only ever grepped emitted text, never ran the
+      pipeline. Two compounding mmio_read/write_u8/u16 tree-LLVM
+      bugs, fixed; see BUG-92.
+- [x] 🟡 Graph/Trie/SkipList/UnionFind/BloomFilter/BST builtins
       actually RUN end-to-end (not just compiled) — 401 `lib.rs`
       hits, 8 e2e hits, despite `advanced/05b_advanced_collections.md`
-      leaning heavily on them.
-- [ ] 🟢 `vec_with_capacity` under `--backend=c` specifically — the
+      leaning heavily on them. Checked clean: all six run correctly
+      together, every value verified against the tutorial's own
+      documented expected output, on both backends.
+- [x] 🟢 `vec_with_capacity` under `--backend=c` specifically — the
       one documented per-backend SSA-vs-tree-fallback gap in the
       coverage table; confirm the tree-C fallback computes correct
-      VALUES, not just that it compiles.
-- [ ] 🟡 `Deque<Struct>` / `BinaryHeap<Struct>` — do these collections
+      VALUES, not just that it compiles. Checked clean: pushing past
+      initial capacity (forcing real realloc/growth) produces
+      correct values; `valgrind --leak-check=full` clean.
+- [x] 🟡 `Deque<Struct>` / `BinaryHeap<Struct>` — do these collections
       support non-scalar (struct) elements at all, and if so, is it
       tested? (HashMap explicitly documents scalar-only V; confirm
       whether Deque/BinaryHeap share or differ from that
       restriction, and that whichever is true is actually exercised
-      end-to-end.)
-- [ ] 🟢 `Graph`/`Trie` with non-`i64` node/edge payloads (if
+      end-to-end.) Checked clean: both are scalar-i64-only, cleanly
+      rejected, same restriction shape as HashMap -- not a bug.
+- [x] 🟢 `Graph`/`Trie` with non-`i64` node/edge payloads (if
       supported at all) — confirm the boundary is real and tested,
       not just assumed from the collections chapter's i64-only
-      examples.
+      examples. Checked clean: more fundamental than a runtime
+      restriction -- both are non-generic types with no `Type::Apply`
+      form at all; the parser rejects `Graph<T>`/`Trie<T>` syntax
+      outright.
 
 ## 8. FFI x generics/containers/error-handling (🟡)
 

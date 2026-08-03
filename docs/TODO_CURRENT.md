@@ -6512,3 +6512,105 @@ across all 13 binaries -- clean.
   left checked in `docs/FEATURE_COMBINATION_GAPS_TODO.md` only for
   its `try`-specific aspect (fixed); this deferred finding is noted
   inline there too.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 7
+
+- [x] **BUG-92 (found+fixed 2026-08-03). Category 7, row 3
+  neighborhood: `examples/language/english/bare_metal.vani` -- the
+  EXACT shipped example BUG-44 fixed -- crashes `opt`/`llc` with
+  ill-typed IR the instant it's actually built or run, on the
+  DEFAULT host target, no `--target`/`--no-std` needed at all.**
+  Found while re-auditing the BUG-44 neighborhood (cross-compile +
+  `no_std` + `#[no_mangle]` FFI export, three-way) per category 7
+  row 3 -- but the root cause turned out to be independent of the
+  three-way combination specifically: BUG-44's own fix was verified
+  by grepping EMITTED TEXT for the bare symbol name, never by
+  actually running the example through `opt`/`llc`/`lli`, so this
+  bug was sitting undiscovered in an already-shipped tutorial
+  example the whole time.
+  Two compounding bugs, both in `backend_llvm.rs`'s tree-LLVM
+  emitter (only reached when a program contains a `#[no_mangle]` fn
+  anywhere, which routes the WHOLE program to tree-LLVM per BUG-44's
+  own fix -- SSA-LLVM was never affected, and served as the
+  reference for the correct convention):
+  1. `mmio_read_u8`/`mmio_read_u16` internally did `zext i8`/`zext
+     i16 ... to i64` after their `load volatile`, unconditionally
+     widening the narrow hardware read to i64 -- contradicting the
+     "narrow types stay narrow until an explicit cast" convention
+     SSA-LLVM already follows for ordinary u8/u16 arithmetic
+     (confirmed directly: `let y: u16 = x + 5;` emits `add i16
+     %v_0, %v_1`, no widening, until a later `as i64` cast does an
+     explicit `zext`). Storing that i64-typed result into a `let sr:
+     u16 = mmio_read_u16(...);`'s `i16` alloca (the generic scalar
+     Let codegen, which assumes `emit_expr`'s result already matches
+     the destination width) produced ill-typed IR: "'%t2' defined
+     with type 'i64' but expected 'i16'". Fixed by removing the
+     internal zext entirely -- `mmio_read_u8`/`mmio_read_u16` now
+     return the raw narrow-width loaded value directly, matching
+     their own checker-declared `u8`/`u16` return type and mirroring
+     `ssa_backend_llvm.rs`'s already-correct implementation exactly
+     (confirmed by direct comparison).
+  2. Fixing (1) exposed a SECOND, previously-masked bug in the same
+     builtin family: `mmio_write_u8`/`mmio_write_u16` unconditionally
+     emitted `trunc i64 {val} to i8`/`i16` before the volatile store,
+     assuming `val` was always i64-typed. But the checker's own
+     typing of these builtins (`coerce_checked(..., &Type::U8, ...)`
+     / `&Type::U16`) means `args[1]`'s checker type is ALWAYS
+     `u8`/`u16` already -- so `val` is ALREADY narrow whenever it
+     comes from an already-narrow source (any `u8`/`u16` parameter or
+     local -- confirmed directly: a plain `byte: u8` parameter loads
+     as a native `i8`, `%t0 = load i8, i8* %byte.addr`, never i64).
+     `trunc i64 %t0 to i8` when `%t0` is ALREADY `i8`-typed is itself
+     ill-typed IR ("'%t0' defined with type 'i8' but expected
+     'i64'") -- the OPPOSITE mismatch direction from bug (1). This
+     was masked before bug (1)'s fix because nothing had exercised a
+     write fed by an already-narrow value without ALSO hitting the
+     read-side crash first. Fixed by removing the blind trunc
+     entirely and storing `val` directly -- again mirroring `ssa_
+     backend_llvm.rs`'s already-correct implementation exactly (it
+     never truncates either).
+  Verified: `examples/language/english/bare_metal.vani` now builds
+  (`vanic build ... -lm`) and runs cleanly end-to-end on the default
+  host target (previously crashed `opt`/`llc` before even reaching
+  the link step); `valgrind --leak-check=full` on the resulting
+  native binary for a minimal regression repro combining all four
+  builtins under a `#[no_mangle]` fn: 0 errors, all heap blocks
+  freed. New tests: 3 `src/lib.rs` + 1 `tests/run_end_to_end.rs`
+  (the e2e test is the REAL regression guard here -- it actually
+  builds+links+runs through `opt`/`llc`, which the `compile_to_llvm`
+  lib.rs helper does not exercise at all, since it calls
+  `LlvmBackend.emit` directly with no verifier pass).
+  Also swept the rest of category 7 (collections beyond Vec/
+  HashMap): (row 1) iterator-style Vec builtins chained directly in
+  ONE expression are correctly rejected per docs (`tutorials/src/
+  intermediate/06b_iterators_primer.md`'s own explicitly-documented
+  "chain directly" restriction -- method-call sugar only rewrites a
+  plain named-`Var` receiver); chaining via named `let`s between
+  each step (the documented v1 pattern) verified correct on both
+  backends. (row 2) `task`/`join` call-form with a genuinely multi-
+  block callee body (nested if/else inside a while loop) verified
+  correct on both backends by hand-computed expected values, not
+  just cross-backend agreement. Also confirmed the block-form `task
+  <name> { ... }`'s documented by-value/Copy capture semantics (a
+  write to a captured outer variable inside the task body does NOT
+  propagate back after `join` -- intentional, not a bug). (row 4)
+  Graph/Bst/Trie/SkipList/UnionFind/BloomFilter all actually run
+  end-to-end together (not just compile-checked), every value
+  verified against `advanced/05b_advanced_collections.md`'s own
+  documented expected output, on both backends. (row 5)
+  `vec_with_capacity` under `--backend=c` specifically: pushing past
+  the initial capacity (forcing a real realloc/growth) produces
+  correct VALUES (not just correct length), verified with `valgrind
+  --leak-check=full` on the native C-backend binary: 0 errors. (row
+  6) `Deque<Struct>`/`BinaryHeap<Struct>` are both cleanly rejected
+  as scalar-i64-only in v1, same restriction shape as HashMap's
+  documented scalar-only-V boundary -- not a bug. (row 7) `Graph`/
+  `Trie` with non-i64 payloads: more fundamental than a runtime
+  restriction -- both are non-generic (no `Type::Apply` form at
+  all), so the parser itself rejects `Graph<T>`/`Trie<T>` syntax
+  outright ("expected '='"); the boundary can't even be expressed.
+  New tests for rows 1/2/4/5/6/7: 6 `src/lib.rs` + 3 `tests/
+  run_end_to_end.rs`. Category 7 (all 7 rows) fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
