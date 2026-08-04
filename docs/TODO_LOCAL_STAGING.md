@@ -1920,3 +1920,12 @@ implement Eq for Point {
 
 fn main() -> i64 {
   // Tuples of primitives —
+
+---
+
+### Candidate: 20260804-151134-backend-divergence-e583602923
+
+Repro: `tools/localfuzz/findings/20260804-151134-backend-divergence-e583602923/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-151134-backend-divergence-e583602923/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
