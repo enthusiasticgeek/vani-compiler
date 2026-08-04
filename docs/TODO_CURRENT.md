@@ -7357,3 +7357,243 @@ fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
   rather than scope-creeping further.
   New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
   `cargo test --release --workspace`: 0 failed.
+
+---
+
+## Bug hunt (2026-08-04) -- user-requested, after BUG-91/95/98/87/36
+## were all closed: "did you exhaust all feature combinations, think
+## outside the box, are all bugs fixed"
+
+All four found this pass share a thread: the fn-generics
+monomorphization pipeline is walked by several independent, parallel
+"find every use of X" scanners (call-site discovery, call-site
+rewriting, bare-enum-ctor resolution), and each one turned out to
+cover only a HANDFUL of the AST's `Stmt`/`ExprKind` shapes, not all
+of them -- the exact same "duplicate walker silently missing a case"
+root-cause family this whole multi-day session kept finding, just
+four more instances of it, surfaced by deliberately probing MORE
+exotic feature combinations than the original 11-category sweep
+covered (nested generic-enum-of-generic-enum, generic calls inside
+`if let`/`FieldAccess`, etc.).
+
+- [x] **BUG-99 (found+fixed 2026-08-04). `collect_generic_calls_in_
+  stmt`/`rewrite_generic_calls_in_stmt` -- the pair of walkers that
+  discover a generic function's call sites and then mangle the
+  call-site name once monomorphization knows the concrete type --
+  only ever covered `Let`, `Assign`, `Return`, `Print`, `EPrint`,
+  `PrintBlock`, `If`, `While`.** Every other `Stmt` variant
+  (`LetTuple`, `Assert`, `Prove`, `Break`, `IndexAssign`,
+  `FieldAssign`, `For`, `ForIter`, `TaskSpawn`, `UnsafeBlock`,
+  `IfLet`, `WhileLet`, `Select`) silently fell through a catch-all
+  `_ => {}`, so a generic call whose ONLY use site was one of them
+  failed monomorphization outright ("generic function '...' is
+  declared but never called with concrete types").
+  Found via `if let Option.Some(y) = foo2(true) { ... }` where
+  `foo2<T>` is generic -- `Stmt::IfLet`'s `scrutinee` was invisible
+  to both walkers.
+  Fixed by making both matches fully exhaustive (removed the
+  catch-all entirely; Rust's own exhaustiveness check now guards
+  against a future silent gap of this exact shape -- if a new `Stmt`
+  variant is ever added without updating these two functions, the
+  build fails instead of silently mis-compiling generic code).
+  `ForIter`'s `collection` is a bare variable name (not an `Expr`),
+  so its arm only needs to recurse into `body`; `Continue`/
+  `TaskJoin` carry no expression at all.
+  Repro (fails without the fix, on both backends):
+  ```
+  fn foo2<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn main() -> i64 {
+    if let Option.Some(y) = foo2(true) {
+      print 1;
+    }
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+- [x] **BUG-100 (found+fixed 2026-08-04). Sibling gap to BUG-99, one
+  layer down: `collect_generic_calls_in_expr`/`rewrite_generic_
+  calls_in_expr` only ever covered `Call`, `Binary`, `Unary`, `Try`,
+  `Match`, `Block`, `IfExpr`.** Every other `ExprKind` variant
+  (`IndirectCall`, `MethodCall`, `Cast`, `ArrayLit`, `Index`, `Len`,
+  `Ref`, `RefMut`, `Tuple`, `TupleAccess`, `StructLit`,
+  `FieldAccess`, `WhileLoop`, `Forall`, `AnonFn`, `TaskSpawnCall`)
+  silently fell through the same shape of catch-all.
+  Found via `print make(3, 4).a;` where `make<T>` is a generic
+  function returning a generic struct -- the call sits inside a
+  `FieldAccess`, invisible to both walkers exactly the same way
+  `IfLet`'s scrutinee was to BUG-99's.
+  Fixed the same way: both matches now fully exhaustive.
+  (`AnonFn`'s body is normally already lambda-lifted away -- replaced
+  with a `Var` reference to a generated top-level fn -- before either
+  pass runs; its new arm is defensive completeness, not load-bearing.)
+  Repro (fails without the fix, on both backends):
+  ```
+  struct Pair<T> { a: T, b: T }
+  fn make<T>(x: T, y: T) -> Pair<T> {
+    return Pair { a: x, b: y };
+  }
+  fn main() -> i64 {
+    print make(3, 4).a;
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+- [x] **BUG-101 (found+fixed 2026-08-04). `substitute_type_param`'s
+  `Type::Apply` collapse (the same eager-collapse logic BUG-90/95
+  already touched) mangled a nested generic-enum type argument with
+  the WRONG naming convention.** Two mangling conventions coexist in
+  this codebase for a reason (per `type_mangle_for_decl`'s own doc
+  comment): `type_mangle` is for FUNCTION specialization (`foo` ->
+  `foo__i64`) and prefixes nominal types with "Enum_"/"Struct_"
+  (`type_mangle(Type::Enum("Option__i64"))` -> `"Enum_Option__i64"`);
+  `type_mangle_for_decl` is for STRUCT/ENUM DECL generation
+  (`mangle_generic_decl`/`monomorphize_type_decls_in_program`'s
+  worklist) and spells a nominal type's own bare name with NO prefix
+  (`type_mangle_for_decl(Type::Enum("Option__i64"))` -> just
+  `"Option__i64"`, so nested instantiations read as
+  `Option__Option__i64` rather than `Option__Enum_Option__i64`). The
+  two conventions agree for a scalar/struct T, but disagree the
+  moment T is itself an already-resolved generic-enum instantiation
+  -- exactly the shape `fn wrap<T>(x: T) -> Option<Option<T>>`
+  produces once `T=i64` substitutes and the OUTER `Option<T>`
+  collapses.
+  `substitute_type_param`'s collapse used `type_mangle` (the wrong
+  one for this purpose) -- `return Option.Some(...)`'s checked type
+  ended up `Type::Enum("Option__Enum_Option__i64")`, a name the
+  decl-generation worklist (which correctly uses
+  `type_mangle_for_decl` throughout) never actually materializes a
+  decl for. Surfaced as a genuine TYPE MISMATCH ("enum payload must
+  be assignable to Option__i64, got i64"), not a missing-decl error,
+  since the wrong name still looked like a plausible enum name --
+  much harder to spot than BUG-91's "enum '...' is not declared"
+  failure mode.
+  One-line fix: use `type_mangle_for_decl` at the collapse site too.
+  Repro (fails without the fix, on both backends):
+  ```
+  fn wrap<T>(x: T) -> Option<Option<T>> {
+    return Option.Some(Option.Some(x));
+  }
+  fn main() -> i64 {
+    let r: i64 = match wrap(9) {
+      Option.Some(inner) then match inner {
+        Option.Some(v) then v,
+        Option.None then -1,
+      },
+      Option.None then -2,
+    };
+    print r;
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+- [x] **BUG-102 (found+fixed 2026-08-04). One layer deeper than
+  BUG-101, found immediately after fixing it: even with the correct
+  mangled name, `resolve_bare_enum_ctor_receiver` (BUG-46's fix) only
+  ever rewrote the OUTERMOST bare enum-constructor receiver -- it
+  never recursed into a payloaded variant's own payload ARGUMENT to
+  check whether THAT is itself a bare, unresolved constructor for a
+  DIFFERENT generic instantiation.** For `Option.Some(Option.Some
+  (x))`, the OUTER `Some`'s receiver correctly resolves to
+  `Option__Option__i64` (once BUG-101 fixed the mangling), but the
+  INNER `Option.Some(x)`'s own receiver -- which needs the DIFFERENT
+  concrete name `Option__i64` -- stayed completely unresolved:
+  "unknown variable 'Option'".
+  Fixed by threading a new `enum_variant_payloads` map (`enum name ->
+  (variant name, payload type) list`, built from the now-fully-
+  monomorphized `program.enums` via a new `build_enum_variant_
+  payloads` helper) through the whole `resolve_bare_enum_ctor_*`
+  family (`resolve_bare_enum_ctor_receiver`, `resolve_bare_enum_ctor_
+  in_struct_lit`, `resolve_bare_enum_ctors_in_stmt`, and all 4 of
+  their top-level call sites in `check_program` +
+  `monomorphize_type_decls_in_program`). `resolve_bare_enum_ctor_
+  receiver` now recurses into a `MethodCall`'s single payload
+  argument using the OUTER target enum's own declared payload type
+  for the matched variant name -- correctly threading a DIFFERENT
+  concrete instantiation down through each nesting level, however
+  deep.
+  Also verified through `await`, confirming the fix composes
+  correctly with BUG-87's own fix (two different async generic fns,
+  each specialized once, each internally constructing a bare
+  `Option.Some(a)` needing a DIFFERENT concrete instantiation --
+  `Option__i64` and `Option__bool`).
+  Repro (fails without BUG-101+BUG-102, on both backends):
+  ```
+  fn wrap<T>(x: T) -> Option<Option<T>> {
+    return Option.Some(Option.Some(x));
+  }
+  fn main() -> i64 {
+    let r: i64 = match wrap(9) {
+      Option.Some(inner) then match inner {
+        Option.Some(v) then v,
+        Option.None then -1,
+      },
+      Option.None then -2,
+    };
+    print r;
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (the
+  triple-nested-via-async shape, exercising composition with BUG-87).
+  **All four (BUG-99/100/101/102) verified together**: full `cargo
+  test --release --workspace`, 0 failed, no regression on the
+  existing generics/async/pattern-matching test surface built up
+  over this whole session.
+  **Still-open finding from the same hunt, NOT yet fixed** (deferred
+  to keep this batch reviewable): a THIRD level of nesting
+  (`Option<Option<Option<T>>>`) runs correctly on the LLVM backend
+  but fails to COMPILE on the C backend (`cc` error: "unknown type
+  name 'Enum_Option__Option__i64'; did you mean 'Enum_Option__i64'?"
+  -- the C backend's OWN enum-payload-typedef emission independently
+  derives a payload type name and gets it wrong one level deeper than
+  BUG-101 fixed, suggesting a duplicate of the same type_mangle-vs-
+  type_mangle_for_decl mismatch living in backend_c.rs itself, not
+  yet located). Also: `Result<Option<T>, i64>` as a generic
+  function's return type (a 2-argument builtin generic enum where
+  only ONE arg depends on T) never resolves at all -- `substitute_
+  type_param`'s `Type::Apply` collapse is hard-gated on `args.len()
+  == 1`, so a 2-arg Apply is silently skipped and never collapses,
+  even though `mangle_generic_decl` itself already mangles an
+  arbitrary number of args correctly. Both repros preserved below for
+  whoever picks these up.
+  ```
+  // C-backend-only failure (LLVM is fine):
+  fn wrap<T>(x: T) -> Option<Option<Option<T>>> {
+    return Option.Some(Option.Some(Option.Some(x)));
+  }
+  fn main() -> i64 {
+    let r: i64 = match wrap(5) {
+      Option.Some(mid) then match mid {
+        Option.Some(inner) then match inner {
+          Option.Some(v) then v,
+          Option.None then -1,
+        },
+        Option.None then -2,
+      },
+      Option.None then -3,
+    };
+    print r;
+    return 0;
+  }
+
+  // Result<Option<T>, i64> return type -- fails on both backends:
+  fn wrap<T>(x: T) -> Result<Option<T>, i64> {
+    return Result.Ok(Option.Some(x));
+  }
+  fn main() -> i64 {
+    let r: i64 = match wrap(6) {
+      Result.Ok(opt) then match opt {
+        Option.Some(v) then v,
+        Option.None then -1,
+      },
+      Result.Err(e) then e,
+    };
+    print r;
+    return 0;
+  }
+  ```

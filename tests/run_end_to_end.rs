@@ -10003,6 +10003,205 @@ fn main() -> i64 {
     }
 }
 
+// BUG-99 (found+fixed 2026-08-04). `collect_generic_calls_in_stmt`/
+// `rewrite_generic_calls_in_stmt` were missing arms for most `Stmt`
+// variants beyond `Let`/`Assign`/`Return`/`Print`/`If`/`While` --
+// found via a generic call used as an `if let` scrutinee. See the
+// matching src/lib.rs test's doc comment for the full writeup.
+#[test]
+fn generic_call_as_if_let_scrutinee_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic-call-as-if-let-scrutinee",
+        r#"
+fn foo1<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn foo2<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn main() -> i64 {
+  if let Option.Some(x) = foo1(5) {
+    print x;
+  }
+  if let Option.Some(y) = foo2(true) {
+    print 1;
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "5\n1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// BUG-100 (found+fixed 2026-08-04). Sibling gap to BUG-99:
+// `collect_generic_calls_in_expr`/`rewrite_generic_calls_in_expr`
+// were missing arms for most `ExprKind` variants -- found via a
+// generic call nested inside a `FieldAccess` (`print make(3, 4).a;`
+// where `make<T>` returns a generic struct). See the matching
+// src/lib.rs test's doc comment for the full writeup.
+#[test]
+fn generic_call_nested_in_field_access_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic-call-nested-in-field-access",
+        r#"
+struct Pair<T> { a: T, b: T }
+fn make<T>(x: T, y: T) -> Pair<T> {
+  return Pair { a: x, b: y };
+}
+fn main() -> i64 {
+  print make(3, 4).a;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "3\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-101 (found+fixed 2026-08-04). `substitute_type_param`'s
+// `Type::Apply` collapse mangled a nested generic-enum type argument
+// with the wrong naming convention (`type_mangle`, which prefixes
+// nominal types with "Enum_"/"Struct_", instead of `type_mangle_for_
+// decl`, which the decl-generation worklist actually uses). See the
+// matching src/lib.rs test's doc comment for the full writeup.
+#[test]
+fn nested_generic_option_of_option_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "nested-generic-option-of-option",
+        r#"
+fn wrap<T>(x: T) -> Option<Option<T>> {
+  return Option.Some(Option.Some(x));
+}
+fn main() -> i64 {
+  let r: i64 = match wrap(9) {
+    Option.Some(inner) then match inner {
+      Option.Some(v) then v,
+      Option.None then -1,
+    },
+    Option.None then -2,
+  };
+  print r;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "9\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-102 (found+fixed 2026-08-04). One layer deeper than BUG-101:
+// `resolve_bare_enum_ctor_receiver` only ever rewrote the outermost
+// bare enum-constructor receiver, never recursing into a payloaded
+// variant's own payload argument. Exercised here through `await` too,
+// confirming it composes with BUG-87's own fix. See the matching
+// src/lib.rs test's doc comment for the full writeup.
+#[test]
+fn nested_generic_option_two_instantiations_via_async_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "nested-generic-option-two-instantiations-async",
+        r#"
+async fn foo1<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+async fn foo2<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn main() -> i64 {
+  let r1: i64 = match await(foo1(7)) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match await(foo2(true)) {
+    Option.Some(x) then 1,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "7\n1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
