@@ -465,6 +465,24 @@ Fix attempt: `tools/localfuzz/findings/20260803-144958-backend-divergence-2125e1
 }
 ```
 
+STATUS: FIXED -- BUG-108 on main (2026-08-04), but NOT as originally
+characterized in `docs/LOCALFUZZ_HANDOFF_2026-08-04.md` (which guessed
+a `mut ref Vec<T>` write-back bug specific to `topo_sort`). Re-
+investigation on a fresh rebuild found the LLVM side ALSO wrong (astar
+returns None for everything, topo[i] reads garbage) -- not "handles it
+fine" as the handoff claimed. Root cause has nothing to do with
+Graph/astar/topo_sort specifically: `graph_new(-1)` was a fuzzer-
+mutated invalid negative node count that's a red herring; the REAL bug
+is that tree-walking LLVM backend's Vec index read/write/mut-ref
+codegen has NO bounds check at all, and ANY struct-typed local in the
+program (not Graph-specific) forces the whole program off the SSA-LLVM
+fast path onto this unchecked tree path. Bisected with a minimal
+repro: `struct Foo{a:i64,b:i64} fn main()->i64{let g:Foo=Foo{a:1,b:2};
+let order:Vec<i64>=vec(); for i from 0 to 5 {print order[i];} return
+0;}` -- no Graph involved, reproduces identically. See
+`docs/TODO_CURRENT.md` BUG-108 entry on `main` for the full writeup +
+fix + tests.
+
 
 ---
 
@@ -2123,3 +2141,12 @@ Fix attempt: `tools/localfuzz/findings/20260804-201316-backend-divergence-83efda
 STATUS: needs human/frontier root-cause review.
 
 Vani compiler is running against a local staging log for the vani-lang project. A mutant was generated from the `korean` language in the `examples/language/korean/early_exit.vani` corpus file, targeting both LLVM and C backends. When attempting to run the mutant, the `llvm` backend encountered an assertion failure in a specific line of code, while the `c` backend resulted in a timing out error due to an integer constant being expected to have an integer type. These findings indicate that there is an issue with how the `fadd double 0.0, 0` operation handles integral types in the C backend, which could lead to unexpected behavior or crashes when compiled on different platforms or compilers.
+
+---
+
+### Candidate: 20260804-204024-backend-divergence-ffadfdc1f9
+
+Repro: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
