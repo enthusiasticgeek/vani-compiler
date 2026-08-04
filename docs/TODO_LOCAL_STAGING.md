@@ -1990,3 +1990,36 @@ A backend-divergence occurred when attempting to compile a specific mutant in th
   یقینی x == 42;
   یقینی y == 100;
   ی
+
+---
+
+### Candidate: 20260804-160100-backend-divergence-1f30a9e695
+
+Repro: `tools/localfuzz/findings/20260804-160100-backend-divergence-1f30a9e695/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-160100-backend-divergence-1f30a9e695/fix_attempt.md`
+
+**STATUS: needs human/frontier root-cause review.**
+
+---
+
+**Run Details:**
+
+Vani Compiler Local Fuzz Test Runner
+
+The test suite was executed against the following corpus file:
+
+```
+/home/virgo/source/vani-compiler-localfuzz/examples/language/tibetan/keywords.vani
+```
+
+Generated Source (Mutant):
+```vani
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/keywords.vani              # LLVM
+//   vanic run examples/language/tibetan/keywords.vani --backend=c  # C
+//
+// Note: Tibetan has no native struct keyword; enum + functions tested instead.
+
+
