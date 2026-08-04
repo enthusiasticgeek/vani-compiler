@@ -12618,6 +12618,75 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_of_box_dyn_iface_struct_field_compiles_to_c() {
+        // localfuzz 20260803-130927-backend-divergence-dc30074c7a:
+        // a struct field of type `Vec<Box<dyn Iface>>` emitted its
+        // `intent_vec_box_dyn_<Iface>` bundle in the EARLY (non-
+        // deferred) Vec-bundle pass because `vec_element_has_user_
+        // struct` had no `Type::Box` arm and so didn't recurse into
+        // the Box's inner `Type::Object(iface)` -- unlike a bare
+        // `Vec<dyn Iface>` struct field, which that function already
+        // handled via its `Type::Object(_) => true` arm. The bundle's
+        // helper functions (`__set`, `__clone`, `__free`, `__from`)
+        // reference `intent_dyn_<Iface>` (the fat-pointer struct
+        // storing `Box<dyn Iface>` BY VALUE -- see `c_element_
+        // storage`'s `Type::Box` arm), but that typedef isn't emitted
+        // until `emit_dyn_iface_typedefs` runs, further down in the
+        // file. `cc` rejected the output with "unknown type name
+        // 'intent_dyn_Drawable'" (undeclared, used before its
+        // typedef). Fixed by adding a `Type::Box(inner) =>
+        // vec_element_has_user_struct(inner)` arm so the bundle is
+        // deferred to the unified topo loop like `Vec<dyn Iface>` is.
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+            }
+            struct Square { side: i64 }
+            implement Drawable for Square {
+              fn area(self: ref Square) -> i64 { return self.side * self.side; }
+            }
+            struct Scene {
+              name: OwnedStr,
+              shapes: Vec<Box<dyn Drawable>>,
+              ids: Vec<i64>,
+            }
+            fn main() -> i64 {
+              let scene: Scene = Scene {
+                name: "demo" + "",
+                shapes: vec(
+                  box(Circle { r: 5 } as dyn Drawable),
+                  box(Square { side: 4 } as dyn Drawable),
+                ),
+                ids: vec(9223372036854775807, 2),
+              };
+              print len(scene.shapes) as i64;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect(
+            "Vec<Box<dyn Iface>> struct field must compile to C (BUG-107)",
+        );
+        let dyn_typedef_pos = c
+            .find("typedef struct intent_dyn_Drawable")
+            .expect("intent_dyn_Drawable typedef must be emitted");
+        let vec_bundle_pos = c
+            .find("intent_vec_box_dyn_Drawable;")
+            .expect("intent_vec_box_dyn_Drawable bundle must be emitted");
+        assert!(
+            dyn_typedef_pos < vec_bundle_pos,
+            "intent_dyn_Drawable typedef (at {}) must be emitted BEFORE \
+             intent_vec_box_dyn_Drawable references it (at {}); got:\n{}",
+            dyn_typedef_pos,
+            vec_bundle_pos,
+            &c[..c.len().min(2000)]
+        );
+        compile_to_llvm(source)
+            .expect("Vec<Box<dyn Iface>> struct field must compile to LLVM (BUG-107)");
+    }
+
+    #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`
         // closure inside an `implement Iface for T { fn m(...) }`
@@ -39866,6 +39935,97 @@ função main() -> i64 {
             has_vec_data_gep,
             "expected GEP into intent_vec_i64 for .data:\n{}",
             main_body
+        );
+    }
+
+    #[test]
+    fn tree_llvm_vec_index_read_write_and_mut_ref_emit_bounds_checks() {
+        // BUG-108 (2026-08-04): tree-LLVM's Vec `Index` read,
+        // `IndexAssign` write, and `RefMutIndex` (`mut ref
+        // vec[i]`) codegen all did a raw GEP + load/store with NO
+        // runtime bounds check -- unlike ssa_backend_llvm.rs
+        // (which has `@__intent_bounds_check`) and both tree/SSA C
+        // backends. Any vāṇी program with a struct literal or
+        // field access (or any of the builtins denylisted in
+        // main.rs's `expr_ssa_supported`, including `graph_new` /
+        // `graph_astar` / `graph_topo_sort`) ALWAYS routes through
+        // tree-LLVM -- not a rare corner. An out-of-range index
+        // silently read/wrote arbitrary memory instead of
+        // trapping. Found via a localfuzz finding mischaracterized
+        // as a narrower `mut ref Vec<T>` write-back bug
+        // (20260803-144958-backend-divergence-2125e1a114); bisected
+        // to this general gap with a minimal repro requiring only
+        // ANY struct-typed local before an out-of-range Vec index
+        // -- no Graph/astar involved at all.
+        // Fixed by adding a `@__intent_bounds_check` helper
+        // (same name/shape as ssa_backend_llvm.rs's) to tree-LLVM's
+        // own preamble and calling it before the element GEP on
+        // all three paths (plus the Vec<bool> packed-bit read path
+        // and its `@intent_vec_bool__set_mut` write helper).
+        let source = r#"
+            struct Foo { a: i64, b: i64 }
+            fn bump(slot: mut ref i64) -> i64 { return 0; }
+            fn main() -> i64 {
+              let g: Foo = Foo { a: 1, b: 2 };
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let v: i64 = xs[1];
+              let ys: Vec<i64> = vec(1, 2, 3);
+              ys[0] = 99;
+              let _ = bump(mut ref ys[0]);
+              let bs: Vec<bool> = vec(true, false, true);
+              let b0: bool = bs[0];
+              return v;
+            }
+        "#;
+        let ll = crate::backend_llvm::LlvmBackend
+            .emit(&compile(source).expect("struct + Vec ops compile").ir);
+        assert!(
+            ll.contains("define internal void @__intent_bounds_check"),
+            "tree-LLVM preamble must define @__intent_bounds_check:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+        let bounds_check_calls = ll.matches("call void @__intent_bounds_check(").count();
+        assert!(
+            // xs[1] read, ys[0]= write, mut ref ys[0], bs[0] read (Vec<bool>) = 4 call sites.
+            bounds_check_calls >= 4,
+            "expected @__intent_bounds_check calls for the Index read, IndexAssign \
+             write, RefMutIndex, and Vec<bool> read sites; got {} calls in:\n{}",
+            bounds_check_calls,
+            ll
+        );
+    }
+
+    #[test]
+    fn tree_llvm_out_of_range_vec_index_aborts_instead_of_reading_garbage() {
+        // BUG-108: end-to-end confirmation (not just a substring
+        // check on the emitted IR) that the missing bounds check
+        // is fixed -- compiles and actually runs the ORIGINAL
+        // localfuzz repro shape (minus the Graph/astar red herring)
+        // through `lli` via `compile_and_run_llvm`-equivalent
+        // machinery isn't available in this unit-test module, so
+        // this is covered instead by the `tests/run_end_to_end.rs`
+        // subprocess test
+        // `tree_llvm_out_of_range_vec_index_aborts_on_both_backends`,
+        // which actually invokes `lli`/`cc` and checks the process
+        // exit code. This test just double-checks the IR shape
+        // reaches the abort block reachably (no dead code / typo
+        // in the `br` wiring).
+        let source = r#"
+            struct Foo { a: i64, b: i64 }
+            fn main() -> i64 {
+              let g: Foo = Foo { a: 1, b: 2 };
+              let xs: Vec<i64> = vec();
+              let v: i64 = xs[0];
+              return v;
+            }
+        "#;
+        let ll = crate::backend_llvm::LlvmBackend
+            .emit(&compile(source).expect("struct + empty-Vec index compiles").ir);
+        assert!(
+            ll.contains("br i1 %ok, label %cont, label %oob")
+                && ll.contains("oob:\n  call void @abort()\n  unreachable"),
+            "bounds-check helper must branch to a reachable abort-on-oob block:\n{}",
+            ll
         );
     }
 

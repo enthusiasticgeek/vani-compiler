@@ -900,6 +900,37 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare void @exit(i32) noreturn\n");
+    // BUG-108 (2026-08-04): the tree-walking LLVM backend's Vec
+    // index read (`TypedExprKind::Index`), index write
+    // (`TypedStmt::IndexAssign`), and mut-ref-element
+    // (`TypedExprKind::RefMutIndex`) codegen all did a raw GEP +
+    // load/store with NO runtime bounds check at all -- unlike
+    // ssa_backend_llvm.rs (which has this exact helper, same name)
+    // and both tree/SSA C backends (which check via
+    // `intent_check_bounds`/inline `if (i >= len) abort()`). Any
+    // vāṇी program using a struct literal, field access, or one of
+    // several dozen builtins gated out of the SSA-LLVM fast path
+    // (see `expr_ssa_supported`/`ssa_llvm_extra_reject` in
+    // main.rs -- struct literals and field access ALWAYS route
+    // here, so this is not a rare corner) silently read/wrote
+    // arbitrary out-of-bounds memory on an out-of-range Vec index
+    // instead of trapping. Found via a localfuzz finding
+    // mischaracterized as a narrower `mut ref Vec<T>` write-back
+    // bug (20260803-144958-backend-divergence-2125e1a114); bisected
+    // down to this general gap with a minimal repro (any struct-
+    // typed local + an out-of-range Vec index, no Graph/astar
+    // involved at all). Defined here (not just declared) so the
+    // tree backend doesn't need to depend on ssa_backend_llvm.rs;
+    // the two backends never coexist in the same emitted module so
+    // there's no symbol collision from sharing the name.
+    out.push_str(
+        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
+         entry:\n  \
+           %ok = icmp ult i64 %idx, %len\n  \
+           br i1 %ok, label %cont, label %oob\n\
+         oob:\n  call void @abort()\n  unreachable\n\
+         cont:\n  ret void\n}\n",
+    );
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -4536,6 +4567,21 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ));
                 let idx_v = emit_expr(index, ctx, out);
                 let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                // BUG-108: bounds-check before the write -- same
+                // gap as the Index read path, but an OOB WRITE is
+                // strictly worse (silent heap/stack corruption
+                // instead of just an incorrect read).
+                let ia_len_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                    ia_len_p, s_ty, s_ty, addr
+                ));
+                let ia_len_v = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", ia_len_v, ia_len_p));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx_i64, ia_len_v
+                ));
                 let mut p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 {}\n",
@@ -16570,6 +16616,19 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             out.push_str(&format!("  {} = load i64*, i64** {}\n", data, data_p));
                             let idx_v = emit_expr(index, ctx, out);
                             let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                            // BUG-108: same missing-bounds-check gap
+                            // as the general Vec read path below.
+                            let bool_len_p = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                                bool_len_p, s_ty, s_ty, addr
+                            ));
+                            let bool_len_v = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = load i64, i64* {}\n", bool_len_v, bool_len_p));
+                            out.push_str(&format!(
+                                "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                                idx_i64, bool_len_v
+                            ));
                             let wi = ctx.fresh_tmp();
                             out.push_str(&format!("  {} = udiv i64 {}, 64\n", wi, idx_i64));
                             let bi = ctx.fresh_tmp();
@@ -16604,6 +16663,21 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         ));
                         let idx_v = emit_expr(index, ctx, out);
                         let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                        // BUG-108: bounds-check before the read --
+                        // see the `@__intent_bounds_check` def site
+                        // for the full writeup of why this was
+                        // missing entirely on this path.
+                        let len_p = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                            len_p, s_ty, s_ty, addr
+                        ));
+                        let len_v = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_p));
+                        out.push_str(&format!(
+                            "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                            idx_i64, len_v
+                        ));
                         let p = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = getelementptr {}, {}* {}, i64 {}\n",
@@ -16947,10 +17021,26 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             ));
             // Index into data[i].
             let idx_v = emit_expr(index, ctx, out);
+            let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+            // BUG-108: same missing-bounds-check gap as the plain
+            // Index read/write paths -- `mut ref vec[i]` (e.g. as
+            // an out-parameter to a function like `topo_sort`) is
+            // just as capable of an OOB access as a direct read.
+            let rmi_len_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                rmi_len_p, s_ty, s_ty, vec_addr
+            ));
+            let rmi_len_v = ctx.fresh_tmp();
+            out.push_str(&format!("  {} = load i64, i64* {}\n", rmi_len_v, rmi_len_p));
+            out.push_str(&format!(
+                "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                idx_i64, rmi_len_v
+            ));
             let slot = ctx.fresh_tmp();
             out.push_str(&format!(
                 "  {} = getelementptr {}, {}* {}, i64 {}\n",
-                slot, elt_ll, elt_ll, data, idx_v
+                slot, elt_ll, elt_ll, data, idx_i64
             ));
             slot
         }
@@ -39952,6 +40042,8 @@ fn emit_vec_bool_helpers_llvm(out: &mut String) {
     out.push_str(&format!(
         "define void @intent_vec_bool__set_mut({s}* %xs, i64 %i, i1 %v) alwaysinline {{\n\
          \x20 %vv   = load {s}, {s}* %xs\n\
+         \x20 %len  = extractvalue {s} %vv, 1\n\
+         \x20 call void @__intent_bounds_check(i64 %i, i64 %len)\n\
          \x20 %data = extractvalue {s} %vv, 0\n\
          \x20 %wi   = udiv i64 %i, 64\n\
          \x20 %bi   = urem i64 %i, 64\n\
