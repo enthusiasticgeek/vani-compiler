@@ -1829,3 +1829,12 @@ Repro: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/r
 Fix attempt: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-124721-backend-divergence-e1a72b3ec9
+
+Repro: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/fix_attempt.md`
+
+`vani-lang: pashto` with mutant/generated source failing in backend-divergence (`vanic-candidate-2894631-1785847639971673372`) due to assertion failure in `fn_main`. Expected behavior was `-9223372036854775808`, but got assertion error. STATUS: needs human/frontier root-cause review.

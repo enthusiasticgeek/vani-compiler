@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/pashto/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2894631-1785847639971673372: /tmp/vanic-candidate-2894631-1785847639971673372.c:354: fn_main: Assertion `(v_x == (-9223372036854775808))' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

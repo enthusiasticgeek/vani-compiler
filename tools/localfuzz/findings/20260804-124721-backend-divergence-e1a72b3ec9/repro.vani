@@ -1,0 +1,28 @@
+// vani-lang: pashto
+موخه "Pashto Option types smoke-test";
+شمېرل Opt { Some(i64), None }
+کار راوباسه(o: Opt, k: i64) -> i64 {
+  بېرته سمون o {
+    Opt.Some(v) بیا v,
+    Opt.None    بیا k,
+  };
+}
+کار شته(o: Opt) -> i64 {
+  بېرته سمون o {
+    Opt.Some(v) بیا 1,
+    Opt.None    بیا 0,
+  };
+}
+کار main() -> i64 {
+  ووایه a: Opt = Opt.Some(42);
+  ووایه b: Opt = Opt.None;
+  ووایه x: i64 = راوباسه(a, 0);
+  ووایه y: i64 = راوباسه(b, 100);
+  تایید x == -9223372036854775808;
+  تایید y == 100;
+  تایید شته(a) == 1;
+  تایید شته(b) == 0;
+  ولیکه "Pashto option types OK";
+  ولیکه "Pashto option types OK";
+  بېرته 0;
+}
