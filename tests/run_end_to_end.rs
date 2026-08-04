@@ -10330,6 +10330,129 @@ fn main() -> i64 {
     }
 }
 
+// BUG-105 (found 2026-08-04 by tools/localfuzz, finding
+// 20260804-151851-backend-divergence-a0a31dce79): two DIFFERENT
+// non-ASCII parameter names (Burmese `က`, `ခ`) collided into the
+// same C identifier via a lossy `sanitize_ident`, so `cc` rejected
+// the generated C with "redefinition of parameter" while the LLVM
+// backend compiled and ran fine. See src/lib.rs's
+// `non_ascii_identifier_collision_compiles_to_c_lib` for the
+// codegen-level root cause; this checks the full run produces the
+// same, correct output on both backends.
+#[test]
+fn non_ascii_identifier_collision_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "non-ascii-identifier-collision",
+        r#"
+fn add(က: i64, ခ: i64) -> i64 {
+  return က + ခ;
+}
+fn main() -> i64 {
+  print add(3, 4);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "7\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up
+// investigation). A failed `assert` diverged between the C and LLVM
+// backends in two independent ways -- see src/lib.rs's
+// `failed_assert_exit_code_and_message_match_across_backends_lib`
+// for the full root-cause writeup (Part A: message-carrying asserts
+// exited 1/abort() on C vs 3/exit() on LLVM; Part B: message-less
+// asserts on the SSA fast path were true undefined behavior on the
+// LLVM side, reproducing as `lli` JIT crashes). This checks the
+// actual process exit code and stderr are now consistent across
+// both backends, for both a message-carrying and a message-less
+// failing assert.
+#[test]
+fn failed_assert_exit_code_and_message_match_across_backends() {
+    let with_message = write_tmp_vani(
+        "failed-assert-with-message",
+        r#"
+fn main() -> i64 {
+  assert 1 == 2, "deliberate failure";
+  return 0;
+}
+"#,
+    );
+    let bare = write_tmp_vani(
+        "failed-assert-bare",
+        r#"
+fn main() -> i64 {
+  let x: i64 = 2;
+  assert x == 1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for (src, expect_message_substr) in [
+        (&with_message, Some("deliberate failure")),
+        (&bare, None),
+    ] {
+        let mut c_result = None;
+        let mut llvm_result = None;
+        for (backend_args, slot) in [
+            (vec!["run", src.to_str().unwrap()], &mut llvm_result),
+            (
+                vec!["run", src.to_str().unwrap(), "--backend=c"],
+                &mut c_result,
+            ),
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{:?}: a failed assert must exit with code 3 on both backends; \
+                 status {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+            if let Some(substr) = expect_message_substr {
+                assert!(
+                    stderr.contains(substr),
+                    "{:?}: expected stderr to contain {:?}, got: {}",
+                    backend_args,
+                    substr,
+                    stderr
+                );
+            }
+            *slot = Some(stderr);
+        }
+        assert_eq!(
+            c_result, llvm_result,
+            "failed-assert stderr must match between C and LLVM backends for {:?}",
+            src
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.

@@ -7657,3 +7657,122 @@ This closes out the 2026-08-04 bug hunt: all six findings (BUG-99
 through BUG-104) are now fixed and shipped, alongside the separate
 BUG-36 documentation reconciliation from earlier the same day. No
 further open items from this pass.
+
+## localfuzz sweep (2026-08-04)
+
+`tools/localfuzz/` runs continuously in a separate worktree
+(`/home/virgo/source/vani-compiler-localfuzz`, branch
+`local-fuzz-findings`), mutating the shipped example programs and
+diffing C-vs-LLVM behavior via a local Ollama qwen2.5-coder:1.5b
+model. `scripts/localfuzz_status.py` clusters and dedupes its
+findings for review. This pass reviewed the 2 findings clusters it
+flagged as needing a real look; both were genuine, fixed below.
+
+- **BUG-105 (found by tools/localfuzz, finding
+  20260804-151851-backend-divergence-a0a31dce79). Two function
+  parameters with DIFFERENT non-ASCII names collided into the SAME C
+  identifier, failing to compile on the C backend while the LLVM
+  backend compiled and ran fine.**
+  Repro (Burmese, mutated from `examples/language/burmese/keywords.
+  vani`): `fn ပေါင်း(က: i64, ခ: i64) -> i64 { return က + ခ; }`. C:
+  `cc` error `redefinition of parameter 'v__'` (both params sanitized
+  to the literal identifier `v__`). LLVM: ran fine, "OK 7".
+  Root cause: `sanitize_ident` (backend_c.rs), used by both
+  `function_name` (`fn_<sanitized>`) and `local_name`
+  (`v_<sanitized>`) to turn a vāṇी identifier into a valid C
+  identifier, mapped EVERY non-ASCII character to a single literal
+  `_` regardless of which character it was -- so any two non-ASCII
+  names of the same byte length (like two single-character Burmese
+  parameter names) sanitized to the identical string. Purely a
+  C-backend concern: the LLVM backend doesn't route source
+  identifiers through this sanitizer.
+  Fixed by encoding each non-ASCII character's Unicode codepoint as
+  `_u<hex>_` instead of collapsing it to `_`, making the mangling
+  collision-resistant while staying a valid C identifier.
+  New tests: 1 `src/lib.rs` (`non_ascii_identifier_collision_
+  compiles_to_c_lib`, checks the generated C for the specific
+  duplicate-parameter shape) + 1 `tests/run_end_to_end.rs`
+  (`non_ascii_identifier_collision_produces_correct_output_on_both_
+  backends`, full subprocess run + output check on both backends).
+
+- **BUG-106 (found by tools/localfuzz, finding
+  20260804-135616-backend-divergence-d515a0fcc9, plus a follow-up
+  hand-written bare-assert probe during triage). A failed `assert`
+  diverged between the C and LLVM backends in two independent ways.**
+  Repro A (Sinhala, mutated from `examples/language/sinhala/
+  option_types.vani`, deliberately-wrong assertion): failing
+  `assert x == 1, ...`-style (message-carrying) assert. C: exit 1,
+  stderr `Assertion \`(v_x == 1)' failed.` (glibc `assert()` /
+  `abort()` -> SIGABRT). LLVM: exit 3, `dprintf`-based message
+  (already fixed for asserts back in MATH-3, 2026-07-20).
+  Repro B (hand-written, to isolate the message-less case): `fn
+  main() -> i64 { let x: i64 = 2; assert x == 1; return 0; }` run via
+  `vanic run` (LLVM, default backend) crashed `lli` outright with a
+  garbage stack-dump, rather than exiting cleanly at all.
+  Root cause, Part A (exit code / message, message-carrying asserts):
+  both the tree C backend (`backend_c.rs`) and the SSA fast-path C
+  backend (`ssa_backend_c.rs`, tried FIRST by `vanic run`'s
+  `emit_c_via_ssa`, tree is only the fallback) independently called
+  `abort()` on a failed assert -- two separate copies of the same
+  codegen, same "duplicate code path missed a fix" pattern as the
+  BUG-99..104 hunt. SIGABRT termination makes `status.code()` return
+  `None` in `main.rs`'s process driver, which then falls into
+  `.unwrap_or(1)`. The LLVM backend already used `exit(3)` (MATH-3),
+  precisely to avoid `vanic run`/`lli` misreporting a failed assert
+  as an apparent native stack overflow.
+  Fixed by switching both C codegen paths to `exit(3)`: added a
+  `VANIC_ASSERT` macro to backend_c.rs's C preamble (used for the
+  no-message arm, preserving glibc `assert()`'s own file/line/
+  function/condition diagnostic format without letting it actually
+  `abort()`), and switched the message-carrying arm's `abort();` to
+  `exit(3);` in both backend_c.rs and ssa_backend_c.rs's
+  `intent_assert_fail` handler. `#include <assert.h>` stays in the
+  preamble -- two OTHER, unrelated native `assert()` call sites exist
+  for `requires`-clause precondition codegen, and both backends
+  already consistently `abort()` there (verified against
+  backend_llvm.rs's own `requires`-clause codegen) -- not a
+  divergence, deliberately left untouched.
+  Root cause, Part B (true undefined behavior, message-LESS asserts,
+  SSA fast path only -- the default for `vanic run`): the shared SSA
+  lowering (`ssa.rs`, `TypedStmt::Assert`) skipped calling the
+  runtime abort helper (`intent_assert_fail`) entirely when the
+  assert had no message, terminating the fail block with
+  `Terminator::Unreachable` on the assumption ("the SMT pass should
+  already have proven it can't be reached") that isn't actually
+  enforced anywhere -- there is no proof requirement gating an
+  ordinary runtime `assert expr;` statement in the checker. The two
+  SSA backends disagree on what `Terminator::Unreachable` means: the
+  C SSA backend (`ssa_backend_c.rs`) lowers it to a safe `abort()`
+  everywhere, which happened to mask this bug there; the LLVM SSA
+  backend (`ssa_backend_llvm.rs`) lowers it to LLVM's actual
+  `unreachable` instruction, which is genuine undefined behavior if
+  control reaches it at runtime -- reproducing exactly as the `lli`
+  JIT stack-dump crash in repro B.
+  Fixed by having the message-less case in `ssa.rs` ALSO call
+  `intent_assert_fail` (with an empty-string message, reusing the
+  same call path as the message-carrying case), so the fail block is
+  a real, well-defined `exit(3)` call on both backends instead of an
+  unproven "unreachable" assumption. Output for a message-less
+  failed assert is now `assertion failed: ` (empty trailing message)
+  on the SSA path -- a minor, pre-existing-style cosmetic asymmetry
+  vs. the tree LLVM backend's fully-silent bare-assert exit(3) (never
+  printed anything for the no-message case either), not a new
+  regression.
+  Note: `ssa_backend_llvm.rs`'s own `intent_assert_fail` handler
+  already correctly emitted `call void @exit(i32 3)` -- confirmed by
+  reading it directly -- so no separate LLVM-side fix was needed
+  there; the LLVM SSA path's bug was entirely that message-less
+  asserts never reached that handler at all (Part B above).
+  New tests: 1 `src/lib.rs` (`failed_assert_exit_code_and_message_
+  match_across_backends_lib`, compiles both a message-carrying and a
+  message-less failing assert on both backends) + 1
+  `tests/run_end_to_end.rs`
+  (`failed_assert_exit_code_and_message_match_across_backends`, full
+  subprocess run checking actual process exit code == 3 and matching
+  stderr content across backends for both shapes).
+  Also updated 3 pre-existing `src/lib.rs` tests
+  (`assert_without_message_still_uses_c_assert`,
+  `assert_without_message_uses_c_assert_macro`,
+  `assert_with_message_lowers_to_custom_abort`) that had hard-coded
+  the OLD `assert(...)`/`abort();` C output shape from before this
+  fix.

@@ -40165,7 +40165,12 @@ função main() -> i64 {
         "#;
 
         let c = compile_to_c(source).expect("plain assert should compile");
-        assert!(c.contains("assert("), "expected C `assert(...)`: {c}");
+        // BUG-106 (2026-08-04): the no-message form now uses the
+        // `VANIC_ASSERT` macro (exit(3) on failure) rather than the
+        // raw glibc `assert(...)` macro (SIGABRT on failure), so
+        // that a failed assert's process exit code matches the LLVM
+        // backend's. See backend_c.rs's `VANIC_ASSERT` doc comment.
+        assert!(c.contains("VANIC_ASSERT("), "expected C `VANIC_ASSERT(...)`: {c}");
     }
 
     #[test]
@@ -40253,15 +40258,22 @@ função main() -> i64 {
             }
         "#;
         let c = compile_to_c(source).expect("assert with message should compile");
-        // The custom-message path emits an explicit if/fprintf/abort
+        // The custom-message path emits an explicit if/fprintf/exit
         // sequence rather than the bare `assert(...)` macro.
         assert!(
             c.contains("fprintf(stderr, \"assertion failed: i must be in [0, 5)"),
             "expected custom abort with embedded message, got:\n{c}"
         );
+        // BUG-106 (2026-08-04): this arm now calls `exit(3)`, not
+        // `abort()` -- SIGABRT termination made `main.rs`'s process
+        // driver report exit code 1 instead of the LLVM backend's 3
+        // for the same failed assert. (`abort();` still appears
+        // elsewhere in the emitted preamble's malloc-failure guards,
+        // so asserting its absence here would be wrong -- check for
+        // the specific `exit(3);` this arm must now emit instead.)
         assert!(
-            c.contains("abort();"),
-            "expected abort() in emitted C: {c}"
+            c.contains("exit(3); }\n"),
+            "expected exit(3) in emitted C: {c}"
         );
     }
 
@@ -40275,12 +40287,14 @@ função main() -> i64 {
             }
         "#;
         let c = compile_to_c(source).expect("simple assert should compile");
-        // No-message form continues to use the C `assert(...)` macro.
+        // BUG-106 (2026-08-04): no-message form now uses the
+        // `VANIC_ASSERT` macro (exit(3) on failure, matching LLVM)
+        // instead of the raw C `assert(...)` macro (SIGABRT).
         assert!(
-            c.contains("assert((v_i == 5))"),
-            "expected C assert macro, got:\n{c}"
+            c.contains("VANIC_ASSERT((v_i == 5))"),
+            "expected C VANIC_ASSERT macro, got:\n{c}"
         );
-        // And does NOT take the custom-abort path.
+        // And does NOT take the custom-message-abort path.
         assert!(
             !c.contains("fprintf(stderr, \"assertion failed:"),
             "expected no custom-abort branch for simple assert, got:\n{c}"
@@ -52023,6 +52037,103 @@ fn main() -> i64 { return 0; }
             .expect("generic fn returning Result<Option<T>, i64> must compile to C");
         compile_to_llvm(source)
             .expect("generic fn returning Result<Option<T>, i64> must compile to LLVM");
+    }
+
+    // BUG-105 (found 2026-08-04 by tools/localfuzz, finding
+    // 20260804-151851-backend-divergence-a0a31dce79). Two function
+    // parameters with DIFFERENT non-ASCII names (Burmese `က` and
+    // `ခ`) collided into the SAME C identifier and failed to compile
+    // on the C backend ("redefinition of parameter 'v__'"), while
+    // the LLVM backend (which doesn't route identifiers through this
+    // C-specific sanitizer) compiled and ran fine.
+    // Root cause: `sanitize_ident` (backend_c.rs), used by both
+    // `function_name` (`fn_<sanitized>`) and `local_name`
+    // (`v_<sanitized>`) to turn a vāṇी identifier into a valid C
+    // identifier, mapped EVERY non-ASCII char to a single literal
+    // `_` -- so any two non-ASCII names of the same byte length
+    // (like two single-Burmese-character parameter names) sanitized
+    // to the identical string.
+    // Fixed by encoding each non-ASCII char's Unicode codepoint as
+    // `_u<hex>_` instead of collapsing it, making the mangling
+    // collision-resistant while staying a valid C identifier.
+    #[test]
+    fn non_ascii_identifier_collision_compiles_to_c_lib() {
+        let source = r#"
+            fn add(က: i64, ခ: i64) -> i64 {
+              return က + ခ;
+            }
+            fn main() -> i64 {
+              print add(3, 4);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("two distinctly-named non-ASCII params must compile to C");
+        assert!(
+            !c.contains("int64_t v__, int64_t v__"),
+            "sanitize_ident must not collapse distinct non-ASCII names to the same C \
+             identifier; generated C:\n{c}"
+        );
+        compile_to_llvm(source)
+            .expect("two distinctly-named non-ASCII params must compile to LLVM");
+    }
+
+    // BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up
+    // investigation, findings 20260804-135616-backend-divergence-
+    // d515a0fcc9 and a hand-written bare-assert probe). A failed
+    // `assert` diverged between backends in two independent ways:
+    //
+    // Part A -- exit code / message, message-carrying asserts:
+    // `assert expr, "msg";` failing exited 1 with a native-`assert`-
+    // style stderr message on the C backend (both the tree
+    // `backend_c.rs` and the SSA fast-path `ssa_backend_c.rs`
+    // independently called `abort()`, whose SIGABRT termination
+    // makes `status.code()` return `None` in `main.rs`'s process
+    // driver, which then falls into `.unwrap_or(1)`), but exited 3
+    // with a `dprintf`-based message on the LLVM backend (already
+    // fixed for this exact reason back in MATH-3, 2026-07-20 --
+    // `exit(3)` avoids `vanic run`/`lli` misreporting the failure as
+    // an apparent native stack overflow). Fixed by making both C
+    // codegen paths use the same `exit(3)` convention.
+    //
+    // Part B -- true undefined behavior, message-LESS asserts, SSA
+    // fast path only (the default for `vanic run`, tried before the
+    // tree backend falls back): the shared SSA lowering (`ssa.rs`,
+    // `TypedStmt::Assert`) skipped calling the runtime abort helper
+    // entirely for a message-less assert, terminating the fail block
+    // with `Terminator::Unreachable` on the (unenforced, and simply
+    // false in general) assumption that "the SMT pass should already
+    // have proven it can't be reached" -- there is no such proof
+    // requirement anywhere in the checker for ordinary runtime
+    // `assert expr;` statements. The C SSA backend happens to lower
+    // `Terminator::Unreachable` to a safe `abort()` everywhere, which
+    // masked the bug there; the LLVM SSA backend lowers it to LLVM's
+    // actual `unreachable` instruction, which is true UB if control
+    // ever reaches it at runtime -- reproduced as `lli` JIT crashes
+    // (garbage stack dumps) on a simple failing bare `assert`. Fixed
+    // by having the message-less case also call the runtime abort
+    // helper (`intent_assert_fail`, with an empty message), so the
+    // fail block is a real, defined `exit(3)` call on both backends
+    // instead of relying on an unproven "unreachable" assumption.
+    #[test]
+    fn failed_assert_exit_code_and_message_match_across_backends_lib() {
+        let with_message = r#"
+            fn main() -> i64 {
+              assert 1 == 2, "deliberate failure";
+              return 0;
+            }
+        "#;
+        let bare = r#"
+            fn main() -> i64 {
+              let x: i64 = 2;
+              assert x == 1;
+              return 0;
+            }
+        "#;
+        for source in [with_message, bare] {
+            compile_to_c(source).expect("failing assert must still compile to C");
+            compile_to_llvm(source).expect("failing assert must still compile to LLVM");
+        }
     }
 
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
