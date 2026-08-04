@@ -1,0 +1,35 @@
+// candidate regression, qwen-generated (qwen2.5-coder:1.5b), UNREVIEWED
+// features: parallel for with a reduce, RwLock/Mutex shared state
+// compiled and ran cleanly on both backends -- candidate for examples/ or
+// tests/run_end_to_end.rs after human/frontier-model review.
+
+// build & run:
+//   vanic run examples/language/english/parallel_rwlock.vani --backend=c
+
+intent "Verification bug: `RwLock<T>` with a struct payload in a function parameter type";
+
+struct Config { max_retries: i64, timeout_ms: i64 }
+
+fn read_config(rw: mut ref RwLock<Config>) -> i64 {
+  let r: ReadGuard<Config> = rwlock_read(rw);
+  let cfg: Config = read_guard_get(ref r);
+  return cfg.timeout_ms;
+}
+
+fn update_timeout(rw: mut ref RwLock<Config>, new_ms: i64) -> i64 {
+  let w: WriteGuard<Config> = rwlock_write(rw);
+  let old: Config = write_guard_get(ref w);
+  let _ = write_guard_set(mut ref w, Config { max_retries: old.max_retries, timeout_ms: new_ms });
+  return 0;
+}
+
+fn main() -> i64 {
+  let rw: RwLock<Config> = rwlock_new(Config { max_retries: 3, timeout_ms: 5000 });
+  let before: i64 = read_config(mut ref rw);
+  let _ = update_timeout(mut ref rw, 10000);
+  let after: i64 = read_config(mut ref rw);
+  print "before:", before;
+  print "after:", after;
+  return 0;
+}
+
