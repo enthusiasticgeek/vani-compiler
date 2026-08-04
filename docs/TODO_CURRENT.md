@@ -7544,43 +7544,19 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
   test --release --workspace`, 0 failed, no regression on the
   existing generics/async/pattern-matching test surface built up
   over this whole session.
-  **Still-open finding from the same hunt, NOT yet fixed** (deferred
-  to keep this batch reviewable): a THIRD level of nesting
-  (`Option<Option<Option<T>>>`) runs correctly on the LLVM backend
-  but fails to COMPILE on the C backend (`cc` error: "unknown type
-  name 'Enum_Option__Option__i64'; did you mean 'Enum_Option__i64'?"
-  -- the C backend's OWN enum-payload-typedef emission independently
-  derives a payload type name and gets it wrong one level deeper than
-  BUG-101 fixed, suggesting a duplicate of the same type_mangle-vs-
-  type_mangle_for_decl mismatch living in backend_c.rs itself, not
-  yet located). Also: `Result<Option<T>, i64>` as a generic
-  function's return type (a 2-argument builtin generic enum where
-  only ONE arg depends on T) never resolves at all -- `substitute_
-  type_param`'s `Type::Apply` collapse is hard-gated on `args.len()
-  == 1`, so a 2-arg Apply is silently skipped and never collapses,
-  even though `mangle_generic_decl` itself already mangles an
-  arbitrary number of args correctly. Both repros preserved below for
-  whoever picks these up.
+  **Two smaller findings from the same hunt, deferred to keep this
+  batch reviewable**: a THIRD level of nesting
+  (`Option<Option<Option<T>>>`) ran correctly on the LLVM backend
+  but failed to COMPILE on the C backend -- **FIXED separately as
+  BUG-103, see below**. Also, still OPEN: `Result<Option<T>, i64>`
+  as a generic function's return type (a 2-argument builtin generic
+  enum where only ONE arg depends on T) never resolves at all --
+  `substitute_type_param`'s `Type::Apply` collapse is hard-gated on
+  `args.len() == 1`, so a 2-arg Apply is silently skipped and never
+  collapses, even though `mangle_generic_decl` itself already
+  mangles an arbitrary number of args correctly. Repro preserved
+  below for whoever picks this up (tracked as task #45).
   ```
-  // C-backend-only failure (LLVM is fine):
-  fn wrap<T>(x: T) -> Option<Option<Option<T>>> {
-    return Option.Some(Option.Some(Option.Some(x)));
-  }
-  fn main() -> i64 {
-    let r: i64 = match wrap(5) {
-      Option.Some(mid) then match mid {
-        Option.Some(inner) then match inner {
-          Option.Some(v) then v,
-          Option.None then -1,
-        },
-        Option.None then -2,
-      },
-      Option.None then -3,
-    };
-    print r;
-    return 0;
-  }
-
   // Result<Option<T>, i64> return type -- fails on both backends:
   fn wrap<T>(x: T) -> Result<Option<T>, i64> {
     return Result.Ok(Option.Some(x));
@@ -7597,3 +7573,46 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
     return 0;
   }
   ```
+
+- [x] **BUG-103 (found+fixed 2026-08-04, task #44). Three levels of
+  nested generic enum (`Option<Option<Option<T>>>`) ran correctly on
+  LLVM but failed to COMPILE on the C backend** -- `cc` error:
+  "unknown type name 'Enum_Option__Option__i64'; did you mean
+  'Enum_Option__i64'?".
+  Root cause: `emit_c`'s "unified topological emit" loop (the system
+  deciding emission order for structs/enums whose fields/payloads
+  reference each other) has THREE parallel sub-loops -- Vec bundles,
+  structs, and deferred payloaded enums -- each checking whether ITS
+  OWN dependencies are already emitted before emitting itself. The
+  STRUCT sub-loop correctly checks struct deps (`sdeps`/`sok`),
+  Vec-bundle deps (`vdeps`/`vok`), AND enum deps (`edeps`/`eok`,
+  added 2026-06-09 per its own comment). The DEFERRED-ENUM sub-loop
+  -- which exists specifically to handle an enum whose OWN payload
+  needs a full struct/enum/tuple definition, deferred from the
+  earlier eager pre-emit pass -- computed `sdeps`/`vdeps` from its
+  payload types but NEVER `edeps`, so an enum whose payload is
+  ANOTHER deferred enum (exactly what 3+ levels of `Option<T>`
+  nesting produces: the outer two levels both defer, since a
+  `Type::Enum` payload needs a full def) could get emitted before
+  the enum it depends on. Same "duplicate walker missing a case"
+  root-cause family as BUG-99/100/101/102 (found in the SAME
+  session) -- just living in backend_c.rs's own topological-emission
+  system instead of the checker's generics-monomorphization
+  pipeline.
+  Fixed by adding the missing `edeps`/`eok` check to the deferred-
+  enum sub-loop, mirroring the struct sub-loop's existing pattern
+  exactly.
+  Considered (and reverted after confirming it wasn't needed) an
+  alternative checker-level fix that sorted `monomorphize_type_
+  decls_in_program`'s freshly-generated decls into dependency order
+  before appending them to `program.structs`/`program.enums` --
+  verified working on its own, but proven UNNECESSARY once this
+  backend_c.rs fix landed (the C backend's own topo-loop now
+  correctly self-corrects regardless of input order; LLVM never
+  needed correct input order in the first place, which is why it was
+  never affected). Kept the smaller, more targeted fix rather than
+  shipping the redundant one.
+  Verified against the original 3-level repro AND a 4-level variant
+  (`Option<Option<Option<Option<T>>>>`) on both backends, plus full
+  `cargo test --release --workspace`: 0 failed.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.

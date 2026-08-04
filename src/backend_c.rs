@@ -1006,9 +1006,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let decl = enum_by_name.get(name.as_str()).unwrap();
             let mut sdeps: Vec<String> = Vec::new();
             let mut vdeps: Vec<String> = Vec::new();
+            // Bug found 2026-08-04 (task #44): this loop computed
+            // `sdeps`/`vdeps` from the enum's own payload types but
+            // never `edeps` (enum-depends-on-enum) -- unlike the
+            // STRUCT-emission loop just above, which already checks
+            // all three (`sok`/`vok`/`eok`). A deferred enum whose
+            // OWN payload is itself another deferred enum (`Option<
+            // Option<Option<T>>>`'s outer two levels, both deferred
+            // since `Type::Enum` payloads need a full struct def per
+            // `enum_payload_needs_full_struct_def`) could therefore
+            // get emitted before the enum it depends on -- "unknown
+            // type name 'Enum_Option__Option__i64'" (referenced by
+            // `Enum_Option__Option__Option__i64`'s typedef, emitted
+            // first). Add the missing `edeps`/`eok` check, mirroring
+            // the struct loop's pattern exactly.
+            let mut edeps: Vec<String> = Vec::new();
             for pty in decl.payload_types.iter().filter_map(|t| t.as_ref()) {
                 struct_deps_in_ty(pty, &mut sdeps);
                 vec_bundle_deps_in_ty(pty, &mut vdeps);
+                enum_deps_in_ty(pty, &mut edeps);
             }
             let sok = sdeps
                 .iter()
@@ -1019,7 +1035,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let vok = vdeps
                 .iter()
                 .all(|t| emitted_vec_typedefs.contains(t) || !vec_elements_by_tag.contains_key(t));
-            if sok && vok {
+            let eok = edeps
+                .iter()
+                .all(|d| emitted_enums.contains(d) || !enum_by_name.contains_key(d.as_str()));
+            if sok && vok && eok {
                 // Inline the typedef emission (mirrors the
                 // logic in the post-emit pass below); marking
                 // the enum as emitted prevents the post-emit

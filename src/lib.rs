@@ -51876,6 +51876,72 @@ fn main() -> i64 { return 0; }
             .expect("nested/two-instantiation generic enum ctor via async must compile to LLVM");
     }
 
+    // BUG-103 (found+fixed 2026-08-04, task #44). Deferred finding
+    // from the BUG-99/100/101/102 hunt: three levels of nested
+    // generic enum (`Option<Option<Option<T>>>`) ran correctly on
+    // the LLVM backend but failed to COMPILE on the C backend --
+    // `cc` error: "unknown type name 'Enum_Option__Option__i64'; did
+    // you mean 'Enum_Option__i64'?".
+    // Root cause: `emit_c`'s "unified topological emit" loop (the
+    // system that decides emission order for structs/enums whose
+    // fields/payloads reference each other) has THREE parallel
+    // sub-loops -- Vec bundles, structs, and deferred payloaded
+    // enums -- each checking whether ITS OWN dependencies are
+    // already emitted before emitting itself. The STRUCT sub-loop
+    // correctly checks struct deps (`sdeps`/`sok`), Vec-bundle deps
+    // (`vdeps`/`vok`), AND enum deps (`edeps`/`eok`, added 2026-06-09
+    // per its own comment). The DEFERRED-ENUM sub-loop -- which
+    // exists specifically to handle an enum whose OWN payload needs
+    // a full struct/enum/tuple definition, deferred from the earlier
+    // eager pre-emit pass -- computed `sdeps`/`vdeps` from its
+    // payload types but NEVER `edeps`, so an enum whose payload is
+    // ANOTHER deferred enum (exactly what 3+ levels of `Option<T>`
+    // nesting produces: the outer two levels both defer, since a
+    // `Type::Enum` payload needs a full def) could get emitted
+    // before the enum it depends on. Same "duplicate walker missing
+    // a case" root-cause family as BUG-99/100 (found in the SAME
+    // session, in fact) -- just living in backend_c.rs's own
+    // topological-emission system instead of the checker's
+    // generics-monomorphization pipeline.
+    // Fixed by adding the missing `edeps`/`eok` check to the
+    // deferred-enum sub-loop, mirroring the struct sub-loop's
+    // existing pattern exactly.
+    // Considered (and reverted) an alternative checker-level fix
+    // that sorted `monomorphize_type_decls_in_program`'s freshly-
+    // generated decls into dependency order before appending them to
+    // `program.structs`/`program.enums` -- verified working, but
+    // proven UNNECESSARY once this backend_c.rs fix landed (the
+    // C backend's own topo-loop now correctly self-corrects
+    // regardless of input order; LLVM never needed correct input
+    // order in the first place). Kept the smaller, more targeted fix
+    // rather than shipping the redundant one.
+    #[test]
+    fn triple_nested_generic_option_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn wrap<T>(x: T) -> Option<Option<Option<T>>> {
+              return Option.Some(Option.Some(Option.Some(x)));
+            }
+            fn main() -> i64 {
+              let r: i64 = match wrap(5) {
+                Option.Some(mid) then match mid {
+                  Option.Some(inner) then match inner {
+                    Option.Some(v) then v,
+                    Option.None then -1,
+                  },
+                  Option.None then -2,
+                },
+                Option.None then -3,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("triple-nested Option<Option<Option<T>>> must compile to C");
+        compile_to_llvm(source)
+            .expect("triple-nested Option<Option<Option<T>>> must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never

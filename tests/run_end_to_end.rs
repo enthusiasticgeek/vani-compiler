@@ -10202,6 +10202,59 @@ fn main() -> i64 {
     }
 }
 
+// BUG-103 (found+fixed 2026-08-04, task #44). Three levels of nested
+// generic enum ran correctly on LLVM but failed to COMPILE on the C
+// backend: the "unified topological emit" loop's deferred-payloaded-
+// enum sub-loop checked struct/Vec-bundle dependencies but never
+// enum-depends-on-enum dependencies (unlike the sibling struct sub-
+// loop, which already did), so the outer enum's typedef could be
+// emitted before the enum it depends on. See the matching
+// src/lib.rs test's doc comment for the full writeup.
+#[test]
+fn triple_nested_generic_option_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "triple-nested-generic-option",
+        r#"
+fn wrap<T>(x: T) -> Option<Option<Option<T>>> {
+  return Option.Some(Option.Some(Option.Some(x)));
+}
+fn main() -> i64 {
+  let r: i64 = match wrap(5) {
+    Option.Some(mid) then match mid {
+      Option.Some(inner) then match inner {
+        Option.Some(v) then v,
+        Option.None then -1,
+      },
+      Option.None then -2,
+    },
+    Option.None then -3,
+  };
+  print r;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "5\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
