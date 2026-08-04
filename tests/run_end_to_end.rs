@@ -9908,6 +9908,101 @@ fn main() -> i64 {
     }
 }
 
+// BUG-87 rows 1-2 (found+fixed, task #42, 2026-08-04). `async fn`
+// combined with generics or a built-in generic enum return type was
+// broken. Row 1 (a generic async fn called directly inside
+// `await(...)`) turned out to already be fixed as a side effect of
+// an earlier gap-audit fix; row 2 (an async fn returning
+// `Option<i64>`, awaited then matched) needed a real fix -- see the
+// matching src/lib.rs tests' doc comment for the full writeup.
+#[test]
+fn async_fn_generic_call_inside_await_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "async-fn-generic-call-inside-await",
+        r#"
+async fn identity<T>(x: T) -> T {
+  return x;
+}
+fn main() -> i64 {
+  let r: i64 = await(identity(42));
+  print r;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "42\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn async_fn_returning_generic_enum_awaited_and_matched_produces_correct_output_on_both_backends()
+{
+    let src = write_tmp_vani(
+        "async-fn-returning-option-awaited-matched",
+        r#"
+async fn maybe_get(n: i64) -> Option<i64> {
+  if n > 0 {
+    return Option.Some(n);
+  }
+  return Option.None;
+}
+fn main() -> i64 {
+  let r1: i64 = match await(maybe_get(5)) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match await(maybe_get(-3)) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "5\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.

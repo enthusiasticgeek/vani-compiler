@@ -51625,6 +51625,93 @@ fn main() -> i64 { return 0; }
             .expect("bare enum ctor inside generic fn body (2 instantiations) must compile to LLVM");
     }
 
+    // BUG-87 rows 1-2 (found 2026-08-03, fixed 2026-08-04, task
+    // #42). `async fn` combined with generics or a built-in generic
+    // enum return type was broken -- two related symptoms, one root
+    // cause each, both fixed:
+    // - Row 1 (`async fn identity<T>(x: T) -> T` called directly
+    //   inside `await(identity(42))`) turned out to ALREADY be fixed
+    //   as a side effect of an earlier, unrelated gap-audit fix
+    //   (2026-08-03) that added a `Match` arm to `collect_generic_
+    //   calls_in_expr` (the fn-generics call-site scanner) for the
+    //   `try`-desugar case -- `await(...)` ALSO desugars to a
+    //   `Match` (`synthesize_await_desugar` in parser.rs), so that
+    //   fix transitively covered this row too. No new checker/
+    //   parser change was needed for row 1; verified it still works.
+    // - Row 2 (`async fn maybe_get(n: i64) -> Option<i64>`, awaited
+    //   then matched) was a genuinely separate bug: "match arm body
+    //   has type i64 but earlier arm produced Option__i64". Root
+    //   cause: `synthesize_await_desugar`'s own internal match (the
+    //   one `await(...)` desugars TO) has two arms -- `Future.Ready
+    //   (v) then v` and `Future.Pending then 0` -- and that `0`
+    //   literal is HARDCODED, only type-correct when T happens to be
+    //   i64. v1 ships purely synchronous `async fn` semantics (every
+    //   `Future<T>` is constructed via `Future.Ready(v)`), so the
+    //   Pending arm is provably unreachable at runtime -- but the
+    //   parser can't know T at desugar time to build a properly-
+    //   typed placeholder, and the checker's ordinary "every match
+    //   arm must produce the same type" rule doesn't know this
+    //   specific arm is dead code.
+    //   Fixed with a new `checked_expr_placeholder(ty, span, env)`
+    //   helper that constructs a well-typed placeholder value for a
+    //   type (scalars/Bool directly; Enum via its first variant,
+    //   recursing into the payload if any; Struct via all fields;
+    //   Tuple/Array via all elements -- returns `None`, i.e. falls
+    //   back to the ordinary mismatch diagnostic, for anything else:
+    //   Vec/Box/OwnedStr/Ref/Mutex/dyn Iface/etc., matching the
+    //   project's "unverifiable means rejected, never silently
+    //   accepted" convention). Consulted ONLY when the mismatching
+    //   arm's pattern is EXACTLY `Future.Pending` (a shape users can
+    //   never construct directly -- `Future<T>` is entirely parser-
+    //   synthesized) -- every other match in the whole language is
+    //   completely unaffected by this change.
+    // Verified `valgrind --leak-check=full` clean (0 errors) on a
+    // struct-returning async fn (exercises the Struct-placeholder
+    // branch). Full `cargo test --release --workspace`: 0 failed --
+    // no regression on the existing async test surface (rows 4-5,
+    // both already-passing shapes from this same bug's own audit).
+    #[test]
+    fn async_fn_generic_call_inside_await_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            async fn identity<T>(x: T) -> T {
+              return x;
+            }
+            fn main() -> i64 {
+              let r: i64 = await(identity(42));
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("async fn generic call inside await must compile to C");
+        compile_to_llvm(source)
+            .expect("async fn generic call inside await must compile to LLVM");
+    }
+
+    #[test]
+    fn async_fn_returning_generic_enum_awaited_and_matched_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            async fn maybe_get(n: i64) -> Option<i64> {
+              if n > 0 {
+                return Option.Some(n);
+              }
+              return Option.None;
+            }
+            fn main() -> i64 {
+              let r: i64 = match await(maybe_get(5)) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("async fn returning Option<i64>, awaited and matched, must compile to C");
+        compile_to_llvm(source)
+            .expect("async fn returning Option<i64>, awaited and matched, must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never

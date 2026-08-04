@@ -6136,12 +6136,12 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
   tests, up from 143). Category 3 (all 5 rows) now fully closed in
   `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
 
-- [ ] **BUG-87 (found 2026-08-03, NOT fixed -- async internals are
-  explicitly sensitive/partially-shipped machinery per this
-  session's own BUG-45 precedent; deferred rather than risking a
-  hasty fix). Category 4, rows 1-2: `async fn` combined with generics
-  or a built-in generic enum return type is broken -- two related
-  symptoms, one root cause.**
+- [x] **BUG-87 (found 2026-08-03, deferred, then FIXED 2026-08-04 --
+  task #42; see the fix writeup right after this entry). Category 4,
+  rows 1-2: `async fn` combined with generics or a built-in generic
+  enum return type is broken -- two related symptoms, one root cause
+  EACH (they turned out not to actually share a root cause -- see
+  the fix).**
   - **Row 1, `async fn identity<T>(x: T) -> T`**: calling it directly
     inside `await(identity(42))` fails monomorphization outright
     ("generic function 'identity' is declared but never called with
@@ -6199,6 +6199,70 @@ tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
     `i64` returns, which may be why this was never caught before), and
     whether the fix should generalize `resolve_bare_enum_ctors_in_stmt`
     (BUG-46) or take a narrower, Future-specific path.
+
+  **FIXED 2026-08-04 (task #42).** Investigated per this entry's own
+  "whoever picks this up next" note. Turned out rows 1 and 2 do NOT
+  share a root cause after all -- two independent findings:
+  - **Row 1 was ALREADY FIXED**, as a side effect of an unrelated
+    2026-08-03 gap-audit fix (documented above `collect_generic_
+    calls_in_expr`'s `Match` arm in checker.rs) that added `ExprKind
+    ::Match` handling to the fn-generics call-site scanner -- for a
+    completely different bug (`try EXPR` calling a generic fn only
+    through a desugared match). `await(...)` ALSO desugars to
+    `ExprKind::Match` (`synthesize_await_desugar` in parser.rs), so
+    that fix transitively started covering `await(identity(42))`
+    too, without anyone realizing it at the time. Verified directly:
+    `await(identity(42))` now monomorphizes and runs correctly on
+    both backends with NO code changes needed for this row.
+  - **Row 2 was a real, separate bug**, unrelated to Future<T>'s
+    `Type::Apply` never being monomorphized (the original diagnosis's
+    hypothesis) -- `Future<T>`'s Apply construction was a red
+    herring. The actual cause: `synthesize_await_desugar` builds
+    `await(expr)`'s own internal match with two arms -- `Future.Ready
+    (v) then v` and `Future.Pending then 0` -- and that `0` is a
+    HARDCODED integer literal, only type-correct when T happens to be
+    i64. v1 ships purely synchronous `async fn` semantics (every
+    `Future<T>` value is constructed via `Future.Ready(v)`), so the
+    Pending arm is PROVABLY unreachable at runtime -- but the parser
+    can't know T at desugar time to build a properly-typed
+    placeholder there, and the checker's ordinary "every match arm
+    must produce the same type" rule has no way to know this specific
+    arm is dead code, so it correctly (if unhelpfully) reported a
+    type mismatch for any T != i64.
+    Fixed with a new `checked_expr_placeholder(ty, span, env)`
+    function in checker.rs that constructs a well-typed placeholder
+    value for a type: scalars/Bool directly (reusing the same shapes
+    `CheckedExpr::fallback` already used for a different error-
+    recovery purpose); Enum via its first variant (recursing into the
+    payload, if any, with this same function); Struct via all
+    fields (recursing); Tuple/fixed-length Array via all elements
+    (recursing). Returns `None` -- falling back to the ordinary
+    mismatch diagnostic -- for anything not on that list (Vec, Box,
+    OwnedStr, Ref/RefMut, Mutex, dyn Iface, etc.), matching the
+    project's "unverifiable means rejected, never silently accepted"
+    convention (BUG-68). Bounded/terminating for any well-formed
+    program: a Struct/Enum can only cycle back to itself through a
+    `Box` indirection (direct by-value recursion is already rejected
+    at struct-declaration time), and `Type::Box` is one of the
+    rejected shapes.
+    Wired in at the ONE match-arm type-mismatch site in `check_expr`'s
+    `ExprKind::Match` handling: when a mismatch is found AND the
+    mismatching arm's pattern is EXACTLY `Pattern::Variant{enum_name:
+    "Future", variant: "Pending"}` -- a shape users can never write
+    directly, since `Future<T>` is entirely parser-synthesized --
+    try the placeholder builder against the expected (Ready arm's)
+    type before falling back to the diagnostic. Every other match in
+    the whole language (the overwhelming majority) is completely
+    unaffected: the gate only fires for this one synthesized shape.
+  Verified against both original repros (prints `42` and `5`
+  respectively) plus the `Option.None` branch of row 2 (prints `-1`)
+  and a STRUCT-returning async fn (exercises the Struct-placeholder
+  recursion) on both backends; `valgrind --leak-check=full` clean (0
+  errors) on the struct case. No regression on the existing async
+  test surface (16 pre-existing async-related unit tests, including
+  every v3.1 phase test) or the wider suite -- full `cargo test
+  --release --workspace`: 0 failed.
+  New tests: 2 `src/lib.rs` + 2 `tests/run_end_to_end.rs`.
 
 ---
 

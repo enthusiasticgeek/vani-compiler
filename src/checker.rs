@@ -495,6 +495,95 @@ impl CheckedExpr {
     }
 }
 
+/// BUG-87 row 2 fix (task #42, 2026-08-04). Constructs a well-typed
+/// placeholder value of type `ty`, used ONLY for the synthesized
+/// `Future.Pending` arm of an `await(...)` desugar (see
+/// `synthesize_await_desugar` in parser.rs). v1 ships purely
+/// synchronous `async fn` semantics -- every `Future<T>` value is
+/// constructed via `Future.Ready(v)`; `Future.Pending` is provably
+/// unreachable at runtime, so the exact value this arm produces is
+/// never actually observed. The parser can't build a type-correct
+/// placeholder at desugar time (no type information available yet);
+/// `synthesize_await_desugar` hardcodes a bare `Int(0)` literal,
+/// which only happens to type-check when T is i64 -- any other
+/// return type ("match arm body has type i64 but earlier arm
+/// produced Option__i64") is BUG-87 row 2. This builds a real value
+/// of type `ty` instead, so the match's "every arm produces the
+/// same type" check succeeds for any T.
+/// Handles the shapes expected to plausibly appear as an `async fn`
+/// return type: scalars, Bool, Enum (recurses into the FIRST
+/// variant's payload, if any), Struct (recurses into every field),
+/// Tuple, and fixed-length Array. Returns `None` for anything else
+/// (Vec, Box, OwnedStr, Ref/RefMut, Mutex, dyn Iface, etc.) -- the
+/// caller falls back to the ordinary type-mismatch diagnostic,
+/// matching the project's "unverifiable means rejected, never
+/// silently accepted" convention (BUG-68). Bounded/terminating for
+/// any well-formed program: a Struct/Enum can only cycle back to
+/// itself through a `Box` indirection (direct by-value recursion is
+/// already rejected at struct-declaration time), and `Type::Box` is
+/// one of the rejected shapes here.
+fn checked_expr_placeholder(ty: &Type, span: Span, env: &Env) -> Option<CheckedExpr> {
+    match ty {
+        Type::I8 | Type::I16 | Type::I32 | Type::I64
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+            Some(CheckedExpr::new(TypedExprKind::Int(0), ty.clone(), None, span))
+        }
+        Type::F32 | Type::F64 => {
+            Some(CheckedExpr::new(TypedExprKind::Float(0.0), ty.clone(), None, span))
+        }
+        Type::Bool => Some(CheckedExpr::new(TypedExprKind::Bool(false), ty.clone(), None, span)),
+        Type::Enum(name) => {
+            let info = env.lookup_enum(name)?;
+            let variant_name = info.variants.first()?.clone();
+            let payload_ty = info.payload_types.first().cloned().flatten();
+            match payload_ty {
+                None => Some(CheckedExpr::new(
+                    TypedExprKind::EnumVariant { enum_name: name.clone(), variant: variant_name, tag: 0 },
+                    ty.clone(), None, span,
+                )),
+                Some(pty) => {
+                    let payload = checked_expr_placeholder(&pty, span, env)?;
+                    Some(CheckedExpr::new(
+                        TypedExprKind::EnumVariantWithPayload {
+                            enum_name: name.clone(), variant: variant_name, tag: 0,
+                            payload: Box::new(payload.expr),
+                            payload_ty: pty,
+                        },
+                        ty.clone(), None, span,
+                    ))
+                }
+            }
+        }
+        Type::Struct(name) => {
+            let field_tys: Vec<(String, Type)> = env.lookup_struct(name)?.fields.clone();
+            let mut fields: Vec<(String, TypedExpr)> = Vec::new();
+            for (fname, fty) in &field_tys {
+                let f = checked_expr_placeholder(fty, span, env)?;
+                fields.push((fname.clone(), f.expr));
+            }
+            Some(CheckedExpr::new(
+                TypedExprKind::StructLit { type_name: name.clone(), fields },
+                ty.clone(), None, span,
+            ))
+        }
+        Type::Tuple(elements) => {
+            let mut typed_elements = Vec::new();
+            for e in elements {
+                typed_elements.push(checked_expr_placeholder(e, span, env)?.expr);
+            }
+            Some(CheckedExpr::new(TypedExprKind::Tuple { elements: typed_elements }, ty.clone(), None, span))
+        }
+        Type::Array { element, length } => {
+            let mut elements = Vec::new();
+            for _ in 0..*length {
+                elements.push(checked_expr_placeholder(element, span, env)?.expr);
+            }
+            Some(CheckedExpr::new(TypedExprKind::ArrayLit { elements }, ty.clone(), None, span))
+        }
+        _ => None,
+    }
+}
+
 pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
     check_impl(program, true, &std::collections::HashSet::new())
 }
@@ -19587,7 +19676,7 @@ fn check_expr(
                 };
                 // final_arm_binding may be upgraded to OwnedStr below.
                 let mut final_arm_binding = arm_binding.clone();
-                let body_checked = if let Some((bname, bty)) = &arm_binding {
+                let mut body_checked = if let Some((bname, bty)) = &arm_binding {
                     env.push_scope();
                     // M5: if the arm body is EXACTLY Var(bname) and
                     // the original payload was OwnedStr, the payload
@@ -19697,14 +19786,37 @@ fn check_expr(
                 };
                 if let Some(expected) = &result_ty {
                     if body_checked.ty() != expected {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body has type {} but earlier arm produced {}",
-                                body_checked.ty(),
-                                expected
-                            ),
-                        ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &body_checked.ty().to_string())));
+                        // BUG-87 row 2 fix (task #42, 2026-08-04): the
+                        // `Future.Pending` arm of an `await(...)` desugar
+                        // (see `synthesize_await_desugar` in parser.rs)
+                        // hardcodes a bare `Int(0)` body -- only type-
+                        // correct when T happens to be i64. Since v1 is
+                        // purely synchronous, this arm is provably
+                        // unreachable at runtime; substitute a real
+                        // placeholder value of the EXPECTED (Ready arm's)
+                        // type instead of erroring, when one can be built.
+                        let is_future_pending_arm = matches!(
+                            &arm.pattern,
+                            crate::ast::Pattern::Variant { enum_name, variant }
+                                if enum_name == "Future" && variant == "Pending"
+                        );
+                        let placeholder = if is_future_pending_arm {
+                            checked_expr_placeholder(expected, arm.body.span, env)
+                        } else {
+                            None
+                        };
+                        if let Some(replacement) = placeholder {
+                            body_checked = replacement;
+                        } else {
+                            diagnostics.push(Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body has type {} but earlier arm produced {}",
+                                    body_checked.ty(),
+                                    expected
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &body_checked.ty().to_string())));
+                        }
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
