@@ -1846,6 +1846,16 @@ Fix attempt: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b
 Repro: `tools/localfuzz/findings/20260804-135616-backend-divergence-d515a0fcc9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-135616-backend-divergence-d515a0fcc9/fix_attempt.md`
 
+**STATUS: FIXED -- BUG-106 (main, commit 79dc457, 2026-08-04).** Failed
+`assert` diverged between backends: C called `abort()` (SIGABRT ->
+process exit code 1) while LLVM already used `exit(3)` (MATH-3). Fixed
+by switching both `backend_c.rs` and `ssa_backend_c.rs` to `exit(3)`
+too. See `docs/TODO_CURRENT.md` on `main` ("## localfuzz sweep
+(2026-08-04)") for the full root-cause writeup, which also covers a
+second, more serious part of the same bug (message-less asserts on
+the SSA fast path being true undefined behavior on LLVM, not just this
+exit-code mismatch) found while triaging this finding.
+
 (ollama unavailable -- raw finding only)
 
 ```json
@@ -1937,7 +1947,13 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-151851-backend-divergence-a0a31dce79/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-151851-backend-divergence-a0a31dce79/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: FIXED -- BUG-105 (main, commit 79dc457, 2026-08-04).** Two
+distinctly-named non-ASCII parameters (Burmese `က`, `ခ`) collided into
+the same C identifier because `sanitize_ident` (backend_c.rs) mapped
+every non-ASCII character to a single literal `_`. Fixed by encoding
+each non-ASCII codepoint as `_u<hex>_` instead. See
+`docs/TODO_CURRENT.md` on `main` ("## localfuzz sweep (2026-08-04)")
+for the full root-cause writeup.
 
 ---
 
