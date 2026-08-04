@@ -1,0 +1,22 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/malayalam/async_cancel_auto.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "Malayalam async/await smoke";
+
+async കാര്യം delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  തിരികെ v;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക a: i64 = await(delay(5, 42));
+  കരുതുക b: i64 = await(delay(10, 7));
+
+  ഉറപ്പിക്കുക a == -1;
+  ഉറപ്പിക്കുക b == 7;
+  എഴുതുക "delays:", a, b;
+  തിരികെ 0;
+}
