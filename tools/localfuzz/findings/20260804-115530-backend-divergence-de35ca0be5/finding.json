@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/punjabi_shahmukhi/for_loops.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Punjabi Shahmukhi for loops OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2833305-1785844529257707633.ll:108:27: error: integer constant must have integer type\n  %v_0 = fadd double 0.0, 0\n                          ^\n\n",
+    "timed_out": false
+  }
+}

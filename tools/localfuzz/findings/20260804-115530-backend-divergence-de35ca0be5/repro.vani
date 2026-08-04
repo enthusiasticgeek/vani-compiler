@@ -1,0 +1,12 @@
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi for loops smoke-test";
+مقصد "Punjabi Shahmukhi for loops smoke-test";
+فنکشن main() -> i64 {
+  مانیں جوڑ: f64 = 0;
+  ہر i سے 1 تک 6 {
+    جوڑ = جوڑ + i;
+  }
+  یقینی جوڑ == 15;
+  لکھو "Punjabi Shahmukhi for loops OK";
+  واپس 0;
+}

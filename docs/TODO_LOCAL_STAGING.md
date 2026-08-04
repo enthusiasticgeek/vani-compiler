@@ -1780,3 +1780,43 @@ Fix attempt: `tools/localfuzz/findings/20260804-113736-backend-divergence-00bd1e
 ```
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260804-115530-backend-divergence-de35ca0be5
+
+Repro: `tools/localfuzz/findings/20260804-115530-backend-divergence-de35ca0be5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-115530-backend-divergence-de35ca0be5/fix_attempt.md`
+
+STAGING ENTRY FOR BUG REPORT:
+---
+
+**COMPILER VERSION**: <insert compiler version here>
+
+**RUN COMMAND**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/punjabi_shahmukhi/for_loops.vani`
+
+**REPROSOURCE**:
+```vani
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi for loops smoke-test";
+مقصد "Punjabi Shahmukhi for loops smoke-test";
+فنکشن main() -> i64 {
+  مانیں جوڑ: f64 = 0;
+  ہر i سے 1 تک 6 {
+    جوڑ = جوڑ + i;
+  }
+  یقینی جوڑ == 15;
+  لکھو "Punjabi Shahmukhi for loops OK";
+  واپس 0;
+}
+```
+
+**OBSERVED SYMPTOM**: The program crashes with an error message indicating that the integer constant must have integer type in the LLVM backend. This is a bug in the LLVM optimization stage.
+
+**AFFECTED BACKENDS**: LLVM
+
+**STATUS: needs human/frontier root-cause review.**
+
+---
+
+Please note that this staging entry does not provide enough information to determine the exact cause of the crash and requires a human or frontier model for root-cause analysis.

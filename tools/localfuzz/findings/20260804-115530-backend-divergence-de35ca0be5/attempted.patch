@@ -1,0 +1,8 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -254,7 +254,7 @@ fn emit_for_loop(llvm_module: &mut llvm::Module, loop_index: u32,
+         let i = llvm::ConstantFP::get(llvm_context, llvm_type, i as f64);
+         // Incorrectly adding an integer constant to a double
+-        let v0 = llvm::ConstantFP::get(llvm_context, llvm_type, 0.0 + i);
++        let v0 = llvm::ConstantFP::get(llvm_context, llvm_type, 0.0 + i as f64);
+         let loop_body = emit_block(llvm_module, "loop_body");
