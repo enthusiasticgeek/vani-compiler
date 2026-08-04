@@ -2097,3 +2097,12 @@ Fix attempt: `tools/localfuzz/findings/20260804-163203-backend-divergence-e873d1
     "rc": 1,
     "stdout": "",
     "stderr": "cc failed while compiling '/tmp/vanic-candidate-3212033-1785861122597815113.c' (left at this path for debugging):\
+
+---
+
+### Candidate: 20260804-192840-backend-divergence-05bd1b1e14
+
+Repro: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
