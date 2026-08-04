@@ -811,6 +811,8 @@ fn check_impl(
             generic_struct_templates.keys().cloned().collect();
         let enum_template_names: std::collections::HashSet<String> =
             generic_enum_templates.keys().cloned().collect();
+        let enum_variant_payloads: std::collections::HashMap<String, Vec<(String, Option<Type>)>> =
+            build_enum_variant_payloads(&program);
         for f in program.functions.iter_mut() {
             let fn_return_struct = match &f.return_type {
                 Type::Struct(n) => Some(n.clone()),
@@ -824,7 +826,7 @@ fn check_impl(
                 _ => None,
             };
             for stmt in f.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_template_names, &struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_template_names, &struct_field_types, &enum_variant_payloads);
             }
         }
     }
@@ -7325,7 +7327,81 @@ fn collect_generic_calls_in_stmt(
                 collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
             }
         }
-        _ => {}
+        // Gap-audit fix (2026-08-04): this scanner was missing arms
+        // for most `Stmt` variants beyond the handful above -- any of
+        // them containing a generic call as its ONLY use site failed
+        // monomorphization outright ("generic function '...' is
+        // declared but never called with concrete types"), the exact
+        // same failure mode `Try`/`Match`/`Block` were fixed for
+        // earlier (2026-08-03) but for statement shapes instead of
+        // expression shapes. Found via `if let Option.Some(y) =
+        // foo2(true) { ... }` (`Stmt::IfLet`'s `scrutinee` was
+        // silently unscanned) while hunting for more feature-
+        // combination gaps after the BUG-91/95/98 fixes landed.
+        Stmt::LetTuple { expr, .. } => {
+            collect_generic_calls_in_expr(expr, generics, needed, scope, diagnostics);
+        }
+        Stmt::Assert { expr, .. } | Stmt::Prove { expr, .. } => {
+            collect_generic_calls_in_expr(expr, generics, needed, scope, diagnostics);
+        }
+        Stmt::Break { value, .. } => {
+            if let Some(v) = value {
+                collect_generic_calls_in_expr(v, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::IndexAssign { index, value, .. } => {
+            collect_generic_calls_in_expr(index, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(value, generics, needed, scope, diagnostics);
+        }
+        Stmt::FieldAssign { object, value, .. } => {
+            collect_generic_calls_in_expr(object, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(value, generics, needed, scope, diagnostics);
+        }
+        Stmt::For { start, end, body, .. } => {
+            collect_generic_calls_in_expr(start, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(end, generics, needed, scope, diagnostics);
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::ForIter { body, .. } => {
+            // `collection` is a bare variable name (String), not an
+            // Expr -- nothing to scan there; still need to recurse
+            // into the body for calls nested inside the loop.
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::TaskSpawn { body, .. } | Stmt::UnsafeBlock { body, .. } => {
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+            collect_generic_calls_in_expr(scrutinee, generics, needed, scope, diagnostics);
+            for s in then_body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+            for s in else_body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::WhileLet { scrutinee, body, .. } => {
+            collect_generic_calls_in_expr(scrutinee, generics, needed, scope, diagnostics);
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+            }
+        }
+        Stmt::Select { arms, .. } => {
+            for arm in arms {
+                collect_generic_calls_in_expr(&arm.poll_call, generics, needed, scope, diagnostics);
+                for s in &arm.body {
+                    collect_generic_calls_in_stmt(s, generics, needed, scope, diagnostics);
+                }
+            }
+        }
+        // `Continue` and `TaskJoin` carry no expression to scan.
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
 }
 
@@ -7410,7 +7486,84 @@ fn collect_generic_calls_in_expr(
             collect_generic_calls_in_expr(then_value, generics, needed, scope, diagnostics);
             collect_generic_calls_in_expr(else_value, generics, needed, scope, diagnostics);
         }
-        _ => {}
+        // Gap-audit fix (2026-08-04): same missing-arm shape as
+        // `collect_generic_calls_in_stmt`'s fix above, but for
+        // `ExprKind` instead of `Stmt` -- this scanner was ALSO
+        // missing most non-Call/Binary/Unary/Try/Match/Block/IfExpr
+        // expression shapes, so a generic call sitting ONLY inside
+        // one of them (e.g. `print make(3, 4).a;` — the call is
+        // nested inside `FieldAccess`) was invisible to
+        // monomorphization. Found the same session as the `Stmt`
+        // fix, hunting for more feature-combination gaps.
+        ExprKind::IndirectCall { callee, args } => {
+            collect_generic_calls_in_expr(callee, generics, needed, scope, diagnostics);
+            for a in args {
+                collect_generic_calls_in_expr(a, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            collect_generic_calls_in_expr(receiver, generics, needed, scope, diagnostics);
+            for a in args {
+                collect_generic_calls_in_expr(a, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::Cast { expr: inner, .. } => {
+            collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
+        }
+        ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+            for e in elements {
+                collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::Index { array, index } => {
+            collect_generic_calls_in_expr(array, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(index, generics, needed, scope, diagnostics);
+        }
+        ExprKind::Len { array } => {
+            collect_generic_calls_in_expr(array, generics, needed, scope, diagnostics);
+        }
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
+        }
+        ExprKind::TupleAccess { tuple, .. } => {
+            collect_generic_calls_in_expr(tuple, generics, needed, scope, diagnostics);
+        }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, e) in fields {
+                collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            collect_generic_calls_in_expr(object, generics, needed, scope, diagnostics);
+        }
+        ExprKind::WhileLoop { cond, body, .. } => {
+            collect_generic_calls_in_expr(cond, generics, needed, scope, diagnostics);
+            let mut inner_scope = scope.clone();
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, &mut inner_scope, diagnostics);
+            }
+        }
+        ExprKind::Forall { body, .. } => {
+            collect_generic_calls_in_expr(body, generics, needed, scope, diagnostics);
+        }
+        ExprKind::AnonFn { body, .. } => {
+            // Normally already lambda-lifted away (replaced with a
+            // `Var` reference to a generated top-level fn) before
+            // this pass runs; recursing here is defensive
+            // completeness, not a load-bearing path.
+            let mut inner_scope = scope.clone();
+            for s in body {
+                collect_generic_calls_in_stmt(s, generics, needed, &mut inner_scope, diagnostics);
+            }
+        }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                collect_generic_calls_in_expr(a, generics, needed, scope, diagnostics);
+            }
+        }
+        // No sub-expression to walk.
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_)
+        | ExprKind::Var(_) | ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -7709,7 +7862,74 @@ fn rewrite_generic_calls_in_stmt(
                 rewrite_generic_calls_in_stmt(s, generics, scope);
             }
         }
-        _ => {}
+        // Gap-audit fix (2026-08-04): same missing-arm shape as
+        // `collect_generic_calls_in_stmt`'s identical fix just above
+        // -- this is the SIBLING pass that actually mangles a
+        // generic call site's name once monomorphization knows the
+        // concrete type. Without this, a call site the discovery
+        // pass now finds (thanks to that fix) would still be left as
+        // the bare, unmangled name here, since discovery and
+        // rewriting are two separate walks over the same shapes.
+        Stmt::LetTuple { expr, .. } => {
+            rewrite_generic_calls_in_expr(expr, generics, scope);
+        }
+        Stmt::Assert { expr, .. } | Stmt::Prove { expr, .. } => {
+            rewrite_generic_calls_in_expr(expr, generics, scope);
+        }
+        Stmt::Break { value, .. } => {
+            if let Some(v) = value {
+                rewrite_generic_calls_in_expr(v, generics, scope);
+            }
+        }
+        Stmt::IndexAssign { index, value, .. } => {
+            rewrite_generic_calls_in_expr(index, generics, scope);
+            rewrite_generic_calls_in_expr(value, generics, scope);
+        }
+        Stmt::FieldAssign { object, value, .. } => {
+            rewrite_generic_calls_in_expr(object, generics, scope);
+            rewrite_generic_calls_in_expr(value, generics, scope);
+        }
+        Stmt::For { start, end, body, .. } => {
+            rewrite_generic_calls_in_expr(start, generics, scope);
+            rewrite_generic_calls_in_expr(end, generics, scope);
+            for s in body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+        }
+        Stmt::ForIter { body, .. } => {
+            for s in body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+        }
+        Stmt::TaskSpawn { body, .. } | Stmt::UnsafeBlock { body, .. } => {
+            for s in body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+        }
+        Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+            rewrite_generic_calls_in_expr(scrutinee, generics, scope);
+            for s in then_body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+            for s in else_body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+        }
+        Stmt::WhileLet { scrutinee, body, .. } => {
+            rewrite_generic_calls_in_expr(scrutinee, generics, scope);
+            for s in body.iter_mut() {
+                rewrite_generic_calls_in_stmt(s, generics, scope);
+            }
+        }
+        Stmt::Select { arms, .. } => {
+            for arm in arms.iter_mut() {
+                rewrite_generic_calls_in_expr(&mut arm.poll_call, generics, scope);
+                for s in arm.body.iter_mut() {
+                    rewrite_generic_calls_in_stmt(s, generics, scope);
+                }
+            }
+        }
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
 }
 
@@ -7789,7 +8009,80 @@ fn rewrite_generic_calls_in_expr(
                 rewrite_generic_calls_in_expr(then_value, generics, scope);
                 rewrite_generic_calls_in_expr(else_value, generics, scope);
             }
-            _ => {}
+            // Gap-audit fix (2026-08-04): same missing-arm shape as
+            // `collect_generic_calls_in_expr`'s identical fix above --
+            // without these arms, a call site the discovery pass now
+            // finds (e.g. nested inside a `FieldAccess`,
+            // `print make(3, 4).a;`) would still be left as the bare,
+            // unmangled name here.
+            ExprKind::IndirectCall { callee, args } => {
+                rewrite_generic_calls_in_expr(callee, generics, scope);
+                for a in args.iter_mut() {
+                    rewrite_generic_calls_in_expr(a, generics, scope);
+                }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                rewrite_generic_calls_in_expr(receiver, generics, scope);
+                for a in args.iter_mut() {
+                    rewrite_generic_calls_in_expr(a, generics, scope);
+                }
+            }
+            ExprKind::Cast { expr: inner, .. } => {
+                rewrite_generic_calls_in_expr(inner, generics, scope);
+            }
+            ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+                for e in elements.iter_mut() {
+                    rewrite_generic_calls_in_expr(e, generics, scope);
+                }
+            }
+            ExprKind::Index { array, index } => {
+                rewrite_generic_calls_in_expr(array, generics, scope);
+                rewrite_generic_calls_in_expr(index, generics, scope);
+            }
+            ExprKind::Len { array } => {
+                rewrite_generic_calls_in_expr(array, generics, scope);
+            }
+            ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+                rewrite_generic_calls_in_expr(inner, generics, scope);
+            }
+            ExprKind::TupleAccess { tuple, .. } => {
+                rewrite_generic_calls_in_expr(tuple, generics, scope);
+            }
+            ExprKind::StructLit { fields, .. } => {
+                for (_, e) in fields.iter_mut() {
+                    rewrite_generic_calls_in_expr(e, generics, scope);
+                }
+            }
+            ExprKind::FieldAccess { object, .. } => {
+                rewrite_generic_calls_in_expr(object, generics, scope);
+            }
+            ExprKind::WhileLoop { cond, body, .. } => {
+                rewrite_generic_calls_in_expr(cond, generics, scope);
+                let mut inner_scope = scope.clone();
+                for s in body.iter_mut() {
+                    rewrite_generic_calls_in_stmt(s, generics, &mut inner_scope);
+                }
+            }
+            ExprKind::Forall { body, .. } => {
+                rewrite_generic_calls_in_expr(body, generics, scope);
+            }
+            ExprKind::AnonFn { body, .. } => {
+                let mut inner_scope = scope.clone();
+                for s in body.iter_mut() {
+                    rewrite_generic_calls_in_stmt(s, generics, &mut inner_scope);
+                }
+            }
+            ExprKind::TaskSpawnCall { args, .. } => {
+                for a in args.iter_mut() {
+                    rewrite_generic_calls_in_expr(a, generics, scope);
+                }
+            }
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_)
+            | ExprKind::Var(_) | ExprKind::TaskJoinExpr { .. } => {}
+            // The `Call` shape is handled by the `if let` above this
+            // `match`, before we ever reach this `else` branch --
+            // unreachable here, but the match must stay exhaustive.
+            ExprKind::Call { .. } => {}
         }
     }
 }
@@ -8502,6 +8795,8 @@ fn monomorphize_type_decls_in_program(
             .iter()
             .map(|s| (s.name.clone(), s.fields.clone()))
             .collect();
+    let enum_variant_payloads: std::collections::HashMap<String, Vec<(String, Option<Type>)>> =
+        build_enum_variant_payloads(program);
     for f in program.functions.iter_mut() {
         for p in f.params.iter_mut() {
             rewrite_apply_in_ty(&mut p.ty, &struct_names, &enum_names);
@@ -8556,7 +8851,7 @@ fn monomorphize_type_decls_in_program(
             _ => None,
         };
         for stmt in f.body.iter_mut() {
-            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names, &struct_field_types);
+            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names, &struct_field_types, &enum_variant_payloads);
         }
     }
     for s in program.structs.iter_mut() {
@@ -8599,7 +8894,7 @@ fn monomorphize_type_decls_in_program(
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types, &enum_variant_payloads);
             }
         }
     }
@@ -8667,7 +8962,7 @@ fn monomorphize_type_decls_in_program(
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types, &enum_variant_payloads);
             }
         }
     }
@@ -8969,20 +9264,79 @@ fn materialize_late_discovered_type_decls(
 /// initial fix landed: a payload-less variant parses as
 /// `FieldAccess`, not `MethodCall`, and was silently left
 /// unresolved.
+/// Builds the `enum_variant_payloads` map `resolve_bare_enum_ctor_
+/// receiver` needs to recurse into a payload that's itself a bare
+/// enum constructor for a DIFFERENT generic instantiation. Call
+/// AFTER `program.enums` is fully monomorphized (the map is keyed
+/// by mangled/concrete enum names).
+fn build_enum_variant_payloads(
+    program: &Program,
+) -> std::collections::HashMap<String, Vec<(String, Option<Type>)>> {
+    program
+        .enums
+        .iter()
+        .map(|e| {
+            (
+                e.name.clone(),
+                e.variants
+                    .iter()
+                    .map(|v| (v.name.clone(), v.payload.first().cloned()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// `enum_variant_payloads`: name -> `(variant name, payload type)`
+/// list, built from the now-fully-monomorphized `program.enums`.
+/// Bug found 2026-08-04 hunting for more feature-combination gaps:
+/// a payloaded variant's own payload can itself be a bare,
+/// unresolved enum constructor for a DIFFERENT generic instantiation
+/// (`Option.Some(Option.Some(x))` inside `fn wrap<T>(x: T) ->
+/// Option<Option<T>>` -- the OUTER `Some`'s receiver resolves to
+/// `Option__Option__i64`, but its payload argument is itself a bare
+/// `Option.Some(x)` needing `Option__i64`, a DIFFERENT mangled name).
+/// The original (BUG-46) version of this function only ever rewrote
+/// the outermost receiver and never looked at `args`, so the INNER
+/// constructor stayed completely unresolved ("unknown variable
+/// 'Option'"). Recurses using the OUTER target enum's own declared
+/// payload type for the matched variant, not the outer target
+/// itself -- correctly threading a DIFFERENT concrete instantiation
+/// down through each nesting level.
 fn resolve_bare_enum_ctor_receiver(
     expr: &mut Expr,
     target_enum_name: &str,
     enum_template_names: &std::collections::HashSet<String>,
+    enum_variant_payloads: &std::collections::HashMap<String, Vec<(String, Option<Type>)>>,
 ) {
-    let receiver = match &mut expr.kind {
-        ExprKind::MethodCall { receiver, .. } => receiver,
-        ExprKind::FieldAccess { object, .. } => object,
-        _ => return,
-    };
-    if let ExprKind::Var(name) = &mut receiver.kind {
-        if enum_template_names.contains(name.as_str()) {
-            *name = target_enum_name.to_string();
+    match &mut expr.kind {
+        ExprKind::MethodCall { receiver, method, args, .. } => {
+            if let ExprKind::Var(name) = &mut receiver.kind {
+                if enum_template_names.contains(name.as_str()) {
+                    *name = target_enum_name.to_string();
+                }
+            }
+            if args.len() == 1 {
+                if let Some(variants) = enum_variant_payloads.get(target_enum_name) {
+                    if let Some((_, Some(Type::Enum(inner_target)))) =
+                        variants.iter().find(|(v, _)| v == method)
+                    {
+                        let inner_target = inner_target.clone();
+                        resolve_bare_enum_ctor_receiver(
+                            &mut args[0], &inner_target, enum_template_names, enum_variant_payloads,
+                        );
+                    }
+                }
+            }
         }
+        ExprKind::FieldAccess { object, .. } => {
+            if let ExprKind::Var(name) = &mut object.kind {
+                if enum_template_names.contains(name.as_str()) {
+                    *name = target_enum_name.to_string();
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -9007,6 +9361,7 @@ fn resolve_bare_enum_ctor_in_struct_lit(
     expr: &mut Expr,
     struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
     enum_template_names: &std::collections::HashSet<String>,
+    enum_variant_payloads: &std::collections::HashMap<String, Vec<(String, Option<Type>)>>,
 ) {
     if let ExprKind::StructLit { type_name, fields, .. } = &mut expr.kind {
         if let Some(field_types) = struct_field_types.get(type_name.as_str()) {
@@ -9014,13 +9369,13 @@ fn resolve_bare_enum_ctor_in_struct_lit(
                 if let Some(sf) = field_types.iter().find(|f| &f.name == field_name) {
                     if let Type::Enum(target) = &sf.ty {
                         let target = target.clone();
-                        resolve_bare_enum_ctor_receiver(field_expr, &target, enum_template_names);
+                        resolve_bare_enum_ctor_receiver(field_expr, &target, enum_template_names, enum_variant_payloads);
                     }
                 }
             }
         }
         for (_field_name, field_expr) in fields.iter_mut() {
-            resolve_bare_enum_ctor_in_struct_lit(field_expr, struct_field_types, enum_template_names);
+            resolve_bare_enum_ctor_in_struct_lit(field_expr, struct_field_types, enum_template_names, enum_variant_payloads);
         }
     }
 }
@@ -9048,50 +9403,51 @@ fn resolve_bare_enum_ctors_in_stmt(
     fn_return_enum: Option<&str>,
     enum_template_names: &std::collections::HashSet<String>,
     struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
+    enum_variant_payloads: &std::collections::HashMap<String, Vec<(String, Option<Type>)>>,
 ) {
     match stmt {
         Stmt::Let { annotation, expr, .. } => {
             if let Some(Type::Enum(target)) = annotation {
                 let target = target.clone();
-                resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+                resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names, enum_variant_payloads);
             }
-            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names, enum_variant_payloads);
         }
         Stmt::Return { expr, .. } => {
             if let Some(target) = fn_return_enum {
-                resolve_bare_enum_ctor_receiver(expr, target, enum_template_names);
+                resolve_bare_enum_ctor_receiver(expr, target, enum_template_names, enum_variant_payloads);
             }
-            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names, enum_variant_payloads);
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
         }
         Stmt::IfLet { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
         }
         Stmt::While { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
         }
         Stmt::WhileLet { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
         }
         Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types, enum_variant_payloads);
             }
         }
         _ => {}
@@ -9893,7 +10249,36 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
             if args.iter().all(is_concrete) {
                 if let Type::Apply { name, args } = ty.clone() {
                     if args.len() == 1 {
-                        let mangled = format!("{}__{}", name, type_mangle(&args[0]));
+                        // Bug found 2026-08-04 hunting for more
+                        // feature-combination gaps after BUG-91/95/98:
+                        // this collapse used `type_mangle` (the
+                        // FUNCTION-specialization mangling convention,
+                        // which prefixes nominal types with
+                        // "Enum_"/"Struct_" -- see its own doc
+                        // comment) instead of `type_mangle_for_decl`
+                        // (the DECL-mangling convention `mangle_
+                        // generic_decl`/`monomorphize_type_decls_in_
+                        // program`'s worklist actually uses, which
+                        // spells a nominal type's own bare name with
+                        // no prefix -- see ITS doc comment: "so nested
+                        // instantiations read as `Option__Option__i64`
+                        // rather than `Option__Enum_Option__i64`").
+                        // For a nested-generic type arg (e.g. `T`
+                        // substituted with an already-resolved
+                        // `Option<i64>` while collapsing the OUTER
+                        // `Option<T>`), the two conventions disagree,
+                        // and this collapse built a `Type::Enum`
+                        // reference to a name ("Option__Enum_Option__
+                        // i64") that the decl-generation worklist
+                        // (which correctly uses `type_mangle_for_decl`
+                        // via `mangle_generic_decl`) never actually
+                        // materializes a decl for -- a genuine type
+                        // mismatch, not a missing-decl error, since
+                        // the WRONG name still happens to LOOK like a
+                        // plausible enum name. Repro: `fn wrap<T>(x:
+                        // T) -> Option<Option<T>> { return Option.Some
+                        // (Option.Some(x)); }`.
+                        let mangled = format!("{}__{}", name, type_mangle_for_decl(&args[0]));
                         let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
                             .with(|c| c.borrow().contains(&name));
                         // Gap-audit follow-up fix (2026-08-03): record

@@ -51712,6 +51712,170 @@ fn main() -> i64 { return 0; }
             .expect("async fn returning Option<i64>, awaited and matched, must compile to LLVM");
     }
 
+    // BUG-99 (found+fixed 2026-08-04). Found deliberately hunting for
+    // more feature-combination gaps after the BUG-91/95/98 fixes:
+    // `collect_generic_calls_in_stmt`/`rewrite_generic_calls_in_stmt`
+    // (the pair of walkers that discover a generic function's call
+    // sites and then mangle the call-site name once monomorphization
+    // knows the concrete type) only ever covered a handful of `Stmt`
+    // variants (`Let`, `Assign`, `Return`, `Print`, `EPrint`,
+    // `PrintBlock`, `If`, `While`) -- EVERY other `Stmt` kind
+    // (`LetTuple`, `Assert`, `Prove`, `Break`, `IndexAssign`,
+    // `FieldAssign`, `For`, `ForIter`, `TaskSpawn`, `UnsafeBlock`,
+    // `IfLet`, `WhileLet`, `Select`) silently fell through a catch-
+    // all, so a generic call whose ONLY use site was one of them
+    // failed monomorphization outright ("generic function '...' is
+    // declared but never called with concrete types"). Found via
+    // `if let Option.Some(y) = foo2(true) { ... }`. Fixed by
+    // extending both matches to be fully exhaustive (Rust's own
+    // exhaustiveness check now guards against a future silent gap
+    // the same shape).
+    #[test]
+    fn generic_call_as_if_let_scrutinee_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn foo1<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn foo2<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              if let Option.Some(x) = foo1(5) {
+                print x;
+              }
+              if let Option.Some(y) = foo2(true) {
+                print 1;
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("generic call as if-let scrutinee must compile to C");
+        compile_to_llvm(source)
+            .expect("generic call as if-let scrutinee must compile to LLVM");
+    }
+
+    // BUG-100 (found+fixed 2026-08-04). Same session/hunt as BUG-99,
+    // the sibling gap: `collect_generic_calls_in_expr`/`rewrite_
+    // generic_calls_in_expr` only ever covered `Call`, `Binary`,
+    // `Unary`, `Try`, `Match`, `Block`, `IfExpr` -- every other
+    // `ExprKind` (`IndirectCall`, `MethodCall`, `Cast`, `ArrayLit`,
+    // `Index`, `Len`, `Ref`, `RefMut`, `Tuple`, `TupleAccess`,
+    // `StructLit`, `FieldAccess`, `WhileLoop`, `Forall`, `AnonFn`,
+    // `TaskSpawnCall`) silently fell through a catch-all. Found via
+    // `print make(3, 4).a;` where `make<T>` is a generic function
+    // returning a generic struct -- the call sits inside a
+    // `FieldAccess`, which the scanner never looked inside.
+    #[test]
+    fn generic_call_nested_in_field_access_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Pair<T> { a: T, b: T }
+            fn make<T>(x: T, y: T) -> Pair<T> {
+              return Pair { a: x, b: y };
+            }
+            fn main() -> i64 {
+              print make(3, 4).a;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("generic call nested in FieldAccess must compile to C");
+        compile_to_llvm(source)
+            .expect("generic call nested in FieldAccess must compile to LLVM");
+    }
+
+    // BUG-101 (found+fixed 2026-08-04). Same hunt: `substitute_type_
+    // param`'s `Type::Apply` collapse (the same eager-collapse logic
+    // BUG-90/95 already touched) mangled a nested generic-enum type
+    // argument using `type_mangle` -- the FUNCTION-specialization
+    // mangling convention, which prefixes nominal types with
+    // "Enum_"/"Struct_" -- instead of `type_mangle_for_decl`, the
+    // DECL-mangling convention `mangle_generic_decl`/
+    // `monomorphize_type_decls_in_program`'s worklist actually uses
+    // (which spells a nominal type's own bare name with no prefix).
+    // The two conventions AGREE for a scalar/struct T, but disagree
+    // the moment T is itself an already-resolved generic-enum
+    // instantiation (`fn wrap<T>(x: T) -> Option<Option<T>>`): the
+    // collapse built a `Type::Enum` reference to "Option__Enum_
+    // Option__i64", a name the decl-generation worklist (which
+    // correctly uses `type_mangle_for_decl`) never actually
+    // materializes a decl for -- "enum payload must be assignable to
+    // Option__i64, got i64" (a type MISMATCH, not a missing-decl
+    // error, since the wrong name still looks like a plausible enum
+    // name). One-line fix: use `type_mangle_for_decl` at the
+    // collapse site too.
+    #[test]
+    fn nested_generic_option_of_option_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn wrap<T>(x: T) -> Option<Option<T>> {
+              return Option.Some(Option.Some(x));
+            }
+            fn main() -> i64 {
+              let r: i64 = match wrap(9) {
+                Option.Some(inner) then match inner {
+                  Option.Some(v) then v,
+                  Option.None then -1,
+                },
+                Option.None then -2,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("nested Option<Option<T>> must compile to C");
+        compile_to_llvm(source)
+            .expect("nested Option<Option<T>> must compile to LLVM");
+    }
+
+    // BUG-102 (found+fixed 2026-08-04). Same hunt, one layer deeper
+    // than BUG-101: even with BUG-101's mangling fix, `resolve_bare_
+    // enum_ctor_receiver` (BUG-46's fix) only ever rewrote the
+    // OUTERMOST bare enum-constructor receiver -- it never recursed
+    // into a payloaded variant's own payload argument to check
+    // whether THAT is itself a bare, unresolved constructor for a
+    // DIFFERENT generic instantiation. For `Option.Some(Option.Some
+    // (x))` inside `fn wrap<T>(x: T) -> Option<Option<T>>`, the
+    // OUTER `Some`'s receiver correctly resolves to
+    // `Option__Option__i64`, but the INNER `Option.Some(x)`'s
+    // receiver -- which needs the DIFFERENT name `Option__i64` --
+    // stayed completely unresolved ("unknown variable 'Option'").
+    // Fixed by threading a new `enum_variant_payloads` map (built
+    // from the now-monomorphized `program.enums`) through the whole
+    // resolve_bare_enum_ctor_* family, letting the recursion pick
+    // the correct target enum name at each nesting level from the
+    // OUTER enum's own declared variant-payload type. Also exercised
+    // through `await`, confirming the fix composes with BUG-87's own
+    // fix (an async fn returning a generic enum, specialized twice).
+    #[test]
+    fn nested_generic_option_two_instantiations_via_async_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            async fn foo1<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            async fn foo2<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match await(foo1(7)) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match await(foo2(true)) {
+                Option.Some(x) then 1,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("nested/two-instantiation generic enum ctor via async must compile to C");
+        compile_to_llvm(source)
+            .expect("nested/two-instantiation generic enum ctor via async must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
