@@ -213,6 +213,29 @@ def main():
     print(f"Updated {LATEST_LINK}")
     print(f"{len(clusters)} distinct signatures from {len(dirs)} findings.")
 
+    _commit(out_path, LATEST_LINK, STATE_FILE)
+
+
+def _commit(*paths):
+    """Auto-commit digest output to local-fuzz-findings, same convention as
+    harness.py's own findings commits -- never touches main."""
+    import os
+    env = dict(os.environ)
+    env.setdefault("GIT_AUTHOR_NAME", "localfuzz-digest")
+    env.setdefault("GIT_AUTHOR_EMAIL", "localfuzz@localhost")
+    env.setdefault("GIT_COMMITTER_NAME", "localfuzz-digest")
+    env.setdefault("GIT_COMMITTER_EMAIL", "localfuzz@localhost")
+    repo_root = HERE.parent.parent
+    rel = [str(p.relative_to(repo_root)) for p in paths]
+    subprocess.run(["git", "add"] + rel, cwd=repo_root, env=env, check=False)
+    diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo_root, env=env)
+    if diff.returncode == 0:
+        return  # nothing changed (e.g. --all re-run with no new findings)
+    subprocess.run(
+        ["git", "commit", "-m", f"localfuzz: digest run {paths[0].stem}"],
+        cwd=repo_root, env=env, check=False,
+    )
+
 
 if __name__ == "__main__":
     main()
