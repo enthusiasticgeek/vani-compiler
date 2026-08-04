@@ -7776,3 +7776,165 @@ flagged as needing a real look; both were genuine, fixed below.
   `assert_with_message_lowers_to_custom_abort`) that had hard-coded
   the OLD `assert(...)`/`abort();` C output shape from before this
   fix.
+  regression.
+
+## localfuzz handoff (2026-08-04) -- Issue 1 FIXED
+
+Continuation of the sweep above. `docs/LOCALFUZZ_HANDOFF_2026-08-04.md`
+handed off 4 confirmed-open findings to a fresh session. This entry
+covers the first (most contained, per the handoff's own recommended
+order); the other 3 are still open and tracked separately.
+
+- **BUG-107 (found by tools/localfuzz, finding
+  20260803-130927-backend-divergence-dc30074c7a). A struct field of
+  type `Vec<Box<dyn Iface>>` failed to compile on the C backend while
+  the LLVM backend ran it fine.**
+  Repro: `struct Scene { name: OwnedStr, shapes: Vec<Box<dyn
+  Drawable>>, ids: Vec<i64> }`, populated via `box(Circle { r: 5 } as
+  dyn Drawable)` literals. C: `cc` rejected the generated output with
+  a cascade of errors rooted in `error: unknown type name
+  'intent_dyn_Drawable'` inside the `intent_vec_box_dyn_Drawable`
+  bundle's helper functions (`__set`, `__set_mut`, `__clone`,
+  `__free`, `__from`). LLVM: ran fine (SSA values have no textual
+  forward-declaration ordering to get wrong).
+  Root cause: `backend_c.rs`'s `vec_element_has_user_struct` helper
+  decides whether a struct field's `Vec<T>` bundle must be DEFERRED
+  to the unified topo-emission loop (which runs after
+  `emit_dyn_iface_typedefs` has landed the per-Iface
+  `intent_dyn_<Iface>` fat-pointer typedef) or can be emitted in the
+  early, non-deferred pass. It already had a `Type::Object(_) => true`
+  arm so a bare `Vec<dyn Iface>` struct field correctly deferred. It
+  recursed into `Type::Vec`/`Type::Array` element types, but had NO
+  arm for `Type::Box` -- so `Vec<Box<dyn Drawable>>`'s element type
+  (`Type::Box(Type::Object("Drawable"))`) fell through to `_ =>
+  false`, was wrongly classified as having no forward-reference
+  dependency, and its bundle was emitted in the EARLY pass -- textually
+  before `intent_dyn_Drawable`'s typedef, which only lands later via
+  `emit_dyn_iface_typedefs`. (`Box<dyn Iface>`'s C storage is the
+  16-byte fat-pointer struct BY VALUE, not a pointer to it -- see
+  `c_element_storage`'s `Type::Box` arm -- so, unlike most `Box<T>`
+  uses, this really does need the full typedef, not just a forward
+  declaration, before the bundle referencing it.) Plain
+  (non-struct-field) `let xs: Vec<Box<dyn Iface>> = ...;` locals were
+  unaffected -- confirmed via manual repro -- because that path
+  doesn't route through `vec_element_has_user_struct` at all.
+  Fixed by adding a `Type::Box(inner) =>
+  vec_element_has_user_struct(inner)` arm, mirroring the existing
+  `Vec`/`Array` recursive arms, so the Box's inner type is walked and
+  its `Type::Object(_) => true` arm catches the dyn-Iface dependency
+  correctly.
+  New tests: 1 `src/lib.rs`
+  (`vec_of_box_dyn_iface_struct_field_compiles_to_c`, compiles the
+  repro shape and asserts the `intent_dyn_Drawable` typedef's byte
+  offset in the generated C precedes the
+  `intent_vec_box_dyn_Drawable` bundle's) + 1 `tests/run_end_to_end.rs`
+  (`vec_box_dyn_iface_struct_field_example_produces_correct_output_on_both_backends`,
+  full subprocess run against a new example,
+  `examples/language/english/vec_box_dyn_iface_struct_field.vani`,
+  checking real `cc`-compiled output on both backends). Existing
+  `Box<dyn Iface>` / `Vec<dyn Iface>` / `Vec<Box<dyn Iface>>` (LLVM,
+  non-struct-field) tests all still pass -- confirmed no regression.
+
+## localfuzz handoff (2026-08-04) -- Issue 2 FIXED (re-scoped, more severe than described)
+
+Continuation of the handoff sweep (see BUG-107 above). The handoff
+described this finding as a narrow `mut ref Vec<T>` write-back bug
+("C's `topo_sort` out-param doesn't write back; LLVM handles it
+fine"). Re-verifying against a fresh rebuild before trusting the
+handoff's characterization (per its own section 0) turned up something
+different and considerably worse.
+
+- **BUG-108 (found by tools/localfuzz, finding
+  20260803-144958-backend-divergence-2125e1a114 -- but NOT the bug
+  that finding was originally attributed to). The tree-walking LLVM
+  backend's Vec index read, index write, and mut-ref-element codegen
+  had NO runtime bounds check at all.**
+  Original repro (`examples/graph_algo2.vani`-derived, `graph_new(-1)`
+  fuzzer-mutated): LLVM printed `astar dijkstra-like 0->4: -1` (and 3
+  more astar calls, all wrongly `None`) followed by `topo_sort count:
+  0` then `topo[ 0 ] = 94480208184997` (garbage) instead of the
+  expected clean `index out of bounds` abort C produces for the same
+  degenerate 0-node graph. The handoff's "C's out-param write-back is
+  broken, LLVM is fine" read was backwards -- LLVM was ALSO wrong, in
+  a different and more dangerous way (silently returning garbage
+  instead of trapping, rather than cleanly aborting like C).
+  Root cause has nothing to do with `Graph`/`astar`/`topo_sort`
+  specifically -- `graph_new(-1)` was a red herring. Bisected with a
+  minimal repro requiring only ANY struct-typed local declared before
+  an out-of-range Vec index:
+  ```
+  struct Foo { a: i64, b: i64 }
+  fn main() -> i64 {
+    let g: Foo = Foo { a: 1, b: 2 };
+    let order: Vec<i64> = vec();
+    for i from 0 to 5 { print order[i]; }
+    return 0;
+  }
+  ```
+  `vanic run` on this (LLVM, default backend) silently read garbage
+  memory and exited 0; the same construct WITHOUT the `Foo` struct
+  local correctly aborted via `@__intent_bounds_check` (confirmed:
+  removing only the struct declaration flips the behavior). The
+  reason: `main.rs`'s `emit_llvm_via_ssa` routes a whole program
+  through either SSA-LLVM (`ssa_backend_llvm.rs`, which DOES have
+  `@__intent_bounds_check`) or, if `ssa_path_supports` rejects
+  anything the program uses, falls back ENTIRELY to tree-LLVM
+  (`backend_llvm.rs`). `expr_ssa_supported` unconditionally rejects
+  `TypedExprKind::StructLit` and `TypedExprKind::FieldAccess` (`=>
+  false`, no exceptions) -- so ANY struct literal or field access
+  anywhere in the program forces the WHOLE program onto tree-LLVM.
+  Tree-LLVM's `TypedExprKind::Index` (read), `TypedStmt::IndexAssign`
+  (write), and `TypedExprKind::RefMutIndex` (`mut ref vec[i]`)
+  codegen -- and the Vec<bool> packed-bit read path plus its
+  `@intent_vec_bool__set_mut` write helper -- all did a raw
+  GEP-then-load/store with no length check whatsoever. This is not a
+  rare corner: struct literals and field access are basic, extremely
+  common language features (also several dozen builtins are
+  independently denylisted from SSA in `expr_ssa_supported`,
+  including `graph_new`/`graph_astar`/`graph_topo_sort`, `push_mut`,
+  most `str_*` builtins, etc.), so any realistic program combining
+  "uses a struct" with "indexes a Vec with a non-provably-in-range
+  index" was running with silently disabled bounds checking on the
+  LLVM backend.
+  Fixed by adding a `@__intent_bounds_check(i64 %idx, i64 %len)`
+  helper to tree-LLVM's own preamble (`backend_llvm.rs`) -- same name
+  and abort-on-oob shape as `ssa_backend_llvm.rs`'s existing one (the
+  two backends never coexist in one emitted module, so sharing the
+  symbol name is safe) -- and calling it before the element
+  GEP/load/store on all 4 sites: the general-Vec `Index` read, the
+  Vec<bool> packed-bit `Index` read, the general-Vec `IndexAssign`
+  write, and `RefMutIndex`. `@intent_vec_bool__set_mut` (the one
+  write helper backing the Vec<bool> `IndexAssign` path) got the
+  check added directly inside its own body rather than at its single
+  call site, since it already receives the full Vec struct pointer.
+  `RefMutIndex`'s index value also wasn't being widened to i64 via
+  `widen_index_to_64` before this fix (a separate pre-existing gap
+  the new bounds-check call needed fixed to type-check against); now
+  is, matching the other two sites.
+  Scope note: this pass only audited and fixed the 3 codegen sites
+  directly implicated by the reproducing finding (`Index`,
+  `IndexAssign`, `RefMutIndex`, covering both the general-Vec and
+  Vec<bool> shapes for each). `backend_llvm.rs` is large and it is
+  plausible other Vec-touching call sites (e.g. inside builtin-helper
+  codegen for things like `binary_search`, `swap_remove`, etc., that
+  are ALSO tree-LLVM-only per `expr_ssa_supported`'s denylist) have
+  the same missing-check pattern -- NOT audited here for time reasons;
+  worth a dedicated follow-up sweep grepping tree-LLVM's Vec-adjacent
+  codegen for GEP-without-a-preceding-`@__intent_bounds_check`-call.
+  New tests: 2 `src/lib.rs`
+  (`tree_llvm_vec_index_read_write_and_mut_ref_emit_bounds_checks`,
+  asserts the helper is defined and called >=4 times for a program
+  exercising all 4 sites;
+  `tree_llvm_out_of_range_vec_index_aborts_instead_of_reading_garbage`,
+  asserts the emitted IR's abort block is reachable) + 1
+  `tests/run_end_to_end.rs`
+  (`tree_llvm_out_of_range_vec_index_aborts_on_both_backends`, a real
+  subprocess `lli`/`cc` run against the minimal struct-forces-tree-
+  LLVM repro above, confirming the process now exits non-zero and
+  never reaches the print statement after the OOB read -- this is a
+  genuine runtime memory-safety bug that only an actual execution
+  test catches). All 64 pre-existing Vec-index/bounds-check-related
+  `src/lib.rs` tests (SMT elision, `set_mut`, `swap_remove`, SSA
+  bounds-check tests, etc.) still pass -- confirmed no regression.
+  Full `cargo test --release --workspace` (2749+ tests) clean on both
+  BUG-107 and this fix.

@@ -10880,3 +10880,127 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-107 (2026-08-04): a struct field of type `Vec<Box<dyn Iface>>`
+// failed to compile on the C backend -- `cc` rejected the generated
+// output with "unknown type name 'intent_dyn_Drawable'" because the
+// `intent_vec_box_dyn_Drawable` bundle (referencing that typedef) was
+// emitted BEFORE the typedef itself. `compile_to_c`-only tests would
+// have caught the string, but this end-to-end run against a real `cc`
+// invocation is what the original localfuzz finding actually hit
+// (20260803-130927-backend-divergence-dc30074c7a). LLVM was unaffected;
+// run on both backends anyway to confirm parity.
+#[test]
+fn vec_box_dyn_iface_struct_field_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/vec_box_dyn_iface_struct_field.vani",
+        manifest_dir
+    );
+    let expected = "shapes: 2\nids: 2\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "Vec<Box<dyn Iface>> struct field example produced wrong output for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-108 (2026-08-04): the tree-walking LLVM backend's Vec index
+// read/write/mut-ref codegen had NO runtime bounds check at all --
+// an out-of-range index silently read/wrote arbitrary memory instead
+// of trapping. Tree-LLVM is not a rare fallback: ANY program with a
+// struct literal or field access (or several dozen builtins,
+// including `graph_new`/`graph_astar`/`graph_topo_sort`) always
+// routes there (see `expr_ssa_supported` in src/main.rs). Found via a
+// localfuzz finding originally mischaracterized as a narrower `mut
+// ref Vec<T>` write-back bug
+// (20260803-144958-backend-divergence-2125e1a114); bisected to this
+// general gap with a minimal repro needing only ANY struct-typed
+// local before an out-of-range Vec index. This is a real subprocess
+// run (not just a `compile_to_llvm` substring check) because the
+// actual bug is a runtime memory-safety violation that only shows up
+// when the generated IR is actually executed by `lli`.
+#[test]
+fn tree_llvm_out_of_range_vec_index_aborts_on_both_backends() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-bug108-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src = dir.join("oob.vani");
+    fs::write(
+        &src,
+        r#"
+struct Foo { a: i64, b: i64 }
+fn main() -> i64 {
+  // The struct literal below forces this program off the SSA-LLVM
+  // fast path and onto tree-LLVM (struct literals are always
+  // rejected by `expr_ssa_supported`), which is exactly the
+  // condition BUG-108 needed to reproduce.
+  let g: Foo = Foo { a: 1, b: 2 };
+  let xs: Vec<i64> = vec();
+  print "before oob read";
+  let v: i64 = xs[0];
+  print "unreachable:", v;
+  return 0;
+}
+"#,
+    )
+    .expect("write");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            !output.status.success(),
+            "an out-of-range Vec index must abort/exit non-zero for {:?}, but it \
+             succeeded -- stdout: {}",
+            backend_args,
+            stdout
+        );
+        // stdout is fully buffered (not a tty) and never flushed on
+        // abort()/SIGABRT, so "before oob read" won't reliably show
+        // up even when the abort fires exactly where expected --
+        // the decisive check is that "unreachable: <garbage>" (the
+        // print AFTER the OOB read) never appears, which is only
+        // possible if the read silently "succeeded" with garbage
+        // data instead of trapping (BUG-108's exact failure mode
+        // pre-fix).
+        assert!(
+            !stdout.contains("unreachable:"),
+            "the OOB read must abort before reaching the next print statement for \
+             {:?} -- got: {}",
+            backend_args,
+            stdout
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -506,7 +506,18 @@ pub fn emit_c(program: &TypedProgram) -> String {
             // this function's own caller needs it.
             Type::Tuple(elements) => tuple_shape_needs_full_struct_def(elements),
             Type::Vec(inner)
-            | Type::Array { element: inner, .. } => vec_element_has_user_struct(inner),
+            | Type::Array { element: inner, .. }
+            // `Box<dyn Iface>` stores the fat-pointer struct BY VALUE
+            // (see `c_element_storage`'s `Type::Box` arm), so
+            // `Vec<Box<dyn Iface>>` has the exact same forward-
+            // reference dependency on `emit_dyn_iface_typedefs` as
+            // `Vec<dyn Iface>` above -- recurse into the Box's inner
+            // type so `Type::Object(_)` still catches it. Without this
+            // arm, `Vec<Box<dyn Iface>>`'s bundle was emitted in the
+            // early (non-deferred) pass, landing before
+            // `intent_dyn_<Iface>`'s typedef in the generated C file
+            // and failing to compile with "unknown type name".
+            | Type::Box(inner) => vec_element_has_user_struct(inner),
             _ => false,
         }
     }

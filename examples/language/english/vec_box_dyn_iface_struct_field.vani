@@ -1,0 +1,47 @@
+// BUG-107 (2026-08-04): a struct field of type `Vec<Box<dyn Iface>>`
+// failed to compile on the C backend -- `cc` rejected the generated
+// output with "unknown type name 'intent_dyn_Drawable'". Root cause:
+// the C backend's `vec_element_has_user_struct` helper (used to decide
+// whether a Vec-bundle must be DEFERRED until after the per-Iface
+// `intent_dyn_<Iface>` fat-pointer typedef is emitted) recursed into
+// `Vec<T>`/`Array<T,N>` element types but had no arm for `Box<T>`, so
+// `Vec<Box<dyn Drawable>>`'s element type (`Box<Object("Drawable")>`)
+// fell through to `_ => false` and its bundle was emitted in the EARLY
+// (non-deferred) pass -- before `intent_dyn_Drawable`'s typedef landed
+// further down in the file. The LLVM backend was unaffected (SSA
+// values, no textual forward-declaration ordering issue).
+intent "Vec<Box<dyn Iface>> as a struct field compiles and runs on both backends (BUG-107)";
+
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+}
+
+struct Square { side: i64 }
+implement Drawable for Square {
+  fn area(self: ref Square) -> i64 { return self.side * self.side; }
+}
+
+struct Scene {
+  name: OwnedStr,
+  shapes: Vec<Box<dyn Drawable>>,
+  ids: Vec<i64>,
+}
+
+fn main() -> i64 {
+  let scene: Scene = Scene {
+    name: "demo" + "",
+    shapes: vec(
+      box(Circle { r: 5 } as dyn Drawable),
+      box(Square { side: 4 } as dyn Drawable),
+    ),
+    ids: vec(9223372036854775807, 2),
+  };
+  print "shapes:", len(scene.shapes) as i64;
+  print "ids:", len(scene.ids) as i64;
+  return 0;
+}
