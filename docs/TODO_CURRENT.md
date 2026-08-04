@@ -7548,31 +7548,10 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
   batch reviewable**: a THIRD level of nesting
   (`Option<Option<Option<T>>>`) ran correctly on the LLVM backend
   but failed to COMPILE on the C backend -- **FIXED separately as
-  BUG-103, see below**. Also, still OPEN: `Result<Option<T>, i64>`
-  as a generic function's return type (a 2-argument builtin generic
-  enum where only ONE arg depends on T) never resolves at all --
-  `substitute_type_param`'s `Type::Apply` collapse is hard-gated on
-  `args.len() == 1`, so a 2-arg Apply is silently skipped and never
-  collapses, even though `mangle_generic_decl` itself already
-  mangles an arbitrary number of args correctly. Repro preserved
-  below for whoever picks this up (tracked as task #45).
-  ```
-  // Result<Option<T>, i64> return type -- fails on both backends:
-  fn wrap<T>(x: T) -> Result<Option<T>, i64> {
-    return Result.Ok(Option.Some(x));
-  }
-  fn main() -> i64 {
-    let r: i64 = match wrap(6) {
-      Result.Ok(opt) then match opt {
-        Option.Some(v) then v,
-        Option.None then -1,
-      },
-      Result.Err(e) then e,
-    };
-    print r;
-    return 0;
-  }
-  ```
+  BUG-103, see below**. Also: `Result<Option<T>, i64>` as a generic
+  function's return type (a 2-argument builtin generic enum where
+  only ONE arg depends on T) never resolved at all -- **FIXED
+  separately as BUG-104, see below**.
 
 - [x] **BUG-103 (found+fixed 2026-08-04, task #44). Three levels of
   nested generic enum (`Option<Option<Option<T>>>`) ran correctly on
@@ -7616,3 +7595,65 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
   (`Option<Option<Option<Option<T>>>>`) on both backends, plus full
   `cargo test --release --workspace`: 0 failed.
   New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+- [x] **BUG-104 (found+fixed 2026-08-04, task #45, user-requested
+  after BUG-99..103 landed: "fix it"). `Result<Option<T>, i64>` as a
+  generic function's return type -- a 2-argument BUILTIN generic
+  enum where only ONE arg depends on the function's own T -- never
+  resolved at all.**
+  Root cause: `substitute_type_param`'s own `Type::Apply` collapse
+  (the same collapse BUG-101 already touched) was hard-gated on
+  `args.len() == 1`, so a 2-arg Apply was silently SKIPPED and never
+  collapsed to `Type::Enum`/`Type::Struct` in the first place -- the
+  checker never even attempted to resolve it, so the diagnostic
+  showed the raw, un-collapsed `Type::Apply`'s own Display output
+  ("Result<Option__i64, i64>", not a mangled name) instead of a
+  "not declared" or type-mismatch error.
+  The gate's own original comment said it "matches the v1-supported
+  `template.type_params.len() != 1` check at fn-mono" -- but that
+  restriction is about USER-DEFINED GENERIC FUNCTIONS having at most
+  one type parameter (a real, still-enforced v1 limit), which has
+  nothing to do with how many args a BUILTIN generic enum/struct
+  `Type::Apply` node this collapse fires on can have.
+  `mangle_generic_decl` -- used by the decl-generation worklist for
+  the exact same "build a mangled name from a template name +
+  concrete args" purpose -- already looped over an arbitrary number
+  of args correctly; this collapse just never matched it, both in
+  the length gate AND (per BUG-101) in which mangling convention it
+  used.
+  Fixed by removing the length gate entirely and reusing `mangle_
+  generic_decl` directly (instead of hand-building the mangled
+  name), so 1-arg (`Option<T>`), 2-arg (`Result<T,E>`), and any
+  future N-arg generic all collapse through the same unified code
+  path.
+  Verified against `Result<Option<T>, i64>` with a scalar-T `Ok`
+  payload's `Some`/`None` and a genuine `Err` path (three distinct
+  concrete tag combinations exercised in one program), plus a
+  simpler `Result<T, i64>` (no nested `Option`) Ok/Err round trip, on
+  both backends. No regression on BUG-101/102's own nested-`Option
+  <Option<T>>` tests (the same collapse site, now handling both the
+  1-arg and 2-arg shapes through one unified path instead of two).
+  Repro (fails without the fix, on both backends):
+  ```
+  fn wrap<T>(x: T) -> Result<Option<T>, i64> {
+    return Result.Ok(Option.Some(x));
+  }
+  fn main() -> i64 {
+    let r: i64 = match wrap(6) {
+      Result.Ok(opt) then match opt {
+        Option.Some(v) then v,
+        Option.None then -1,
+      },
+      Result.Err(e) then e,
+    };
+    print r;
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+This closes out the 2026-08-04 bug hunt: all six findings (BUG-99
+through BUG-104) are now fixed and shipped, alongside the separate
+BUG-36 documentation reconciliation from earlier the same day. No
+further open items from this pass.

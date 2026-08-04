@@ -51942,6 +51942,89 @@ fn main() -> i64 { return 0; }
             .expect("triple-nested Option<Option<Option<T>>> must compile to LLVM");
     }
 
+    // BUG-104 (found+fixed 2026-08-04, task #45). Deferred finding
+    // from the BUG-99..103 hunt: `Result<Option<T>, i64>` as a
+    // generic function's return type (a 2-argument BUILTIN generic
+    // enum where only ONE arg depends on the function's own T) never
+    // resolved at all -- `substitute_type_param`'s own `Type::Apply`
+    // collapse (the same collapse BUG-101 already touched) was
+    // hard-gated on `args.len() == 1`, so a 2-arg Apply was silently
+    // SKIPPED and never collapsed to `Type::Enum`/`Type::Struct` in
+    // the first place -- the checker never even attempted to
+    // resolve it, so the diagnostic showed the raw, un-collapsed
+    // `Type::Apply`'s own Display output ("Result<Option__i64,
+    // i64>", not a mangled name) rather than a "not declared" or
+    // type-mismatch error.
+    // The gate's own original comment said it "matches the v1-
+    // supported template.type_params.len() != 1 check at fn-mono" --
+    // but that restriction is about USER-DEFINED GENERIC FUNCTIONS
+    // having at most one type parameter (a real, still-enforced v1
+    // limit), which has nothing to do with how many args a BUILTIN
+    // generic enum/struct `Type::Apply` node this collapse fires on
+    // can have. `mangle_generic_decl` -- used by the decl-generation
+    // worklist for the exact same "build a mangled name from a
+    // template name + concrete args" purpose -- already looped over
+    // an arbitrary number of args correctly; this collapse just
+    // never matched it, both in the length gate AND (per BUG-101) in
+    // which mangling convention it used.
+    // Fixed by removing the length gate entirely and reusing `mangle_
+    // generic_decl` directly (instead of hand-building the mangled
+    // name), so 1-arg (`Option<T>`), 2-arg (`Result<T,E>`), and any
+    // future N-arg generic all collapse the same way.
+    // Verified against `Result<Option<T>, i64>` with a scalar-T
+    // `Ok` payload's `Some`/`None` and a genuine `Err` path (three
+    // distinct concrete tag combinations exercised in one program),
+    // plus a simpler `Result<T, i64>` (no nested `Option`) Ok/Err
+    // round trip, on both backends. No regression on BUG-101/102's
+    // own nested-`Option<Option<T>>` tests (the same collapse site,
+    // now handling both the 1-arg and 2-arg shapes through one
+    // unified code path instead of two).
+    #[test]
+    fn generic_fn_returning_two_arg_builtin_enum_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn wrap<T>(x: T, mode: i64) -> Result<Option<T>, i64> {
+              if mode == 0 {
+                return Result.Ok(Option.Some(x));
+              }
+              if mode == 1 {
+                return Result.Ok(Option.None);
+              }
+              return Result.Err(77);
+            }
+            fn main() -> i64 {
+              let r0: i64 = match wrap(6, 0) {
+                Result.Ok(opt) then match opt {
+                  Option.Some(v) then v,
+                  Option.None then -1,
+                },
+                Result.Err(e) then e,
+              };
+              let r1: i64 = match wrap(6, 1) {
+                Result.Ok(opt) then match opt {
+                  Option.Some(v) then v,
+                  Option.None then -1,
+                },
+                Result.Err(e) then e,
+              };
+              let r2: i64 = match wrap(6, 2) {
+                Result.Ok(opt) then match opt {
+                  Option.Some(v) then v,
+                  Option.None then -1,
+                },
+                Result.Err(e) then e,
+              };
+              print r0;
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("generic fn returning Result<Option<T>, i64> must compile to C");
+        compile_to_llvm(source)
+            .expect("generic fn returning Result<Option<T>, i64> must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never

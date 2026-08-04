@@ -10255,6 +10255,81 @@ fn main() -> i64 {
     }
 }
 
+// BUG-104 (found+fixed 2026-08-04, task #45). `Result<Option<T>,
+// i64>` as a generic function's return type -- a 2-argument builtin
+// generic enum where only ONE arg depends on T -- never resolved at
+// all: `substitute_type_param`'s `Type::Apply` collapse was hard-
+// gated on `args.len() == 1`, silently skipping any 2+-arg Apply.
+// See the matching src/lib.rs test's doc comment for the full
+// writeup.
+#[test]
+fn generic_fn_returning_two_arg_builtin_enum_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic-fn-returning-two-arg-builtin-enum",
+        r#"
+fn wrap<T>(x: T, mode: i64) -> Result<Option<T>, i64> {
+  if mode == 0 {
+    return Result.Ok(Option.Some(x));
+  }
+  if mode == 1 {
+    return Result.Ok(Option.None);
+  }
+  return Result.Err(77);
+}
+fn main() -> i64 {
+  let r0: i64 = match wrap(6, 0) {
+    Result.Ok(opt) then match opt {
+      Option.Some(v) then v,
+      Option.None then -1,
+    },
+    Result.Err(e) then e,
+  };
+  let r1: i64 = match wrap(6, 1) {
+    Result.Ok(opt) then match opt {
+      Option.Some(v) then v,
+      Option.None then -1,
+    },
+    Result.Err(e) then e,
+  };
+  let r2: i64 = match wrap(6, 2) {
+    Result.Ok(opt) then match opt {
+      Option.Some(v) then v,
+      Option.None then -1,
+    },
+    Result.Err(e) then e,
+  };
+  print r0;
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "6\n-1\n77\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
