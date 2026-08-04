@@ -1,0 +1,22 @@
+// vani-lang: persian
+//
+// build & run:
+//   vanic run examples/language/persian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/persian/async_cancel_auto.vani --backend=c  # C
+
+هدف "Persian async/await smoke";
+
+async تابع delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  بازگشت v;
+}
+
+تابع main() -> i64 {
+  فرض a: i64 = await(delay(5, 42));
+  فرض b: i64 = await(delay(10, 7));
+
+  ادعا a == -1;
+  ادعا b == 7;
+  چاپ "delays:", a, b;
+  بازگشت 0;
+}

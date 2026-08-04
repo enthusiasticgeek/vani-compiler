@@ -1307,3 +1307,14 @@ This issue affects all backends (LLVM and Clang) that are part of the vani compi
 ---
 
 Please provide any additional details or context that may be helpful in understanding this bug report further.
+
+---
+
+### Candidate: 20260804-050008-backend-divergence-745cdfb92d
+
+Repro: `tools/localfuzz/findings/20260804-050008-backend-divergence-745cdfb92d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-050008-backend-divergence-745cdfb92d/fix_attempt.md`
+
+STAGING ENTRY: `/home/virgo/source/vani-compiler-localfuzz/examples/language/persian/async_cancel_auto.vani` has been submitted with a backend-divergence finding for LLVM and C backends, resulting in rc=1 and rc=3 respectively. The failure was due to an assertion error `v_a == (-1)` in the main function of the generated code when running on both LLVM and C backends.
+
+STATUS: needs human/frontier root-cause review.

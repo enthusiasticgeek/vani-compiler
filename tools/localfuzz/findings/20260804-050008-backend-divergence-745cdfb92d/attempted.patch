@@ -1,0 +1,21 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -367,7 +367,14 @@ fn delay(ms: i64, v: i64) -> i64 {
+   let c = c;
+   let mut loop_index = 0;
+
++  // Initialize a counter to keep track of the sleep time
++  let mut sleep_counter = 0;
++
++  // Loop until we've slept for the specified duration
+   while sleep_counter < ms {
+     if loop_index >= ms {
+       return v; // Break out early if the sleep time is too long
+     }
++
++    // Increment the sleep counter
++    sleep_counter += 1;
+
+     // Sleep for a short duration to avoid busy-waiting
+     usleep(100); // Adjust this value as needed
+   }
