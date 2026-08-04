@@ -1415,3 +1415,14 @@ Repro: `tools/localfuzz/findings/20260804-070757-backend-divergence-76bf613726/r
 Fix attempt: `tools/localfuzz/findings/20260804-070757-backend-divergence-76bf613726/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-071117-backend-divergence-7a26100cf5
+
+Repro: `tools/localfuzz/findings/20260804-071117-backend-divergence-7a26100cf5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-071117-backend-divergence-7a26100cf5/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This mutation causes a backend-divergence issue in the vani-compiler project's C backend, specifically in the `funkce rozbalit_nebo` function. The observed symptom is that the function fails to correctly handle enums when using the LLVM backend, leading to divergent outputs with the `Opt.None` case.

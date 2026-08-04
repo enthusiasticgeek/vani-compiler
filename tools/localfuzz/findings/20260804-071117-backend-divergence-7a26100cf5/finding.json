@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/czech/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2533779-1785827476086167902: /tmp/vanic-candidate-2533779-1785827476086167902.c:340: fn_main: Assertion `(v_y == 0)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
