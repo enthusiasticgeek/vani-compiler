@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/english/iterate.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2192868-1785808277978556888: /tmp/vanic-candidate-2192868-1785808277978556888.c:992: fn_main: Assertion `(v_p == (-9223372036854775808))' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
