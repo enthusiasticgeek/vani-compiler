@@ -41,11 +41,18 @@ BUG-105's own description. Don't trust "not obviously related to any
 BUG-N" as proof something is still broken, and don't trust "no longer
 flagged in DIGEST_LATEST.md" either — always re-run the repro yourself.
 
-**State as of writing this file**: worktree rebuilt at commit
-`b21be4daf97fe9734a2f3af573da39c148486bda` (2026-08-04T14:48:10-04:00),
-which includes BUG-99 through BUG-106. Everything below was verified
-against THAT exact build. Re-verify against whatever `main` is by the
-time you read this.
+**State as of this update**: Issues 1 and 2 below (original numbering)
+are now FIXED as BUG-107 and BUG-108, landed on `main` at commit
+`744dc29f43619142127228b8d867bf63240f36c5` (2026-08-04T17:59:54-04:00),
+CI + CodeQL green. **Issue 2 turned out to be misdiagnosed** in the
+original version of this handoff — see its section below before doing
+anything with it; the real bug was much broader than "a `mut ref
+Vec<T>` write-back bug" and the fix is already in. Issues 3 and 4 are
+still open; Issue 3 got real bisection work today (one of its two
+repros turned out not to be a bug at all — see below) but no fix.
+Worktree rebuilt at commit `26f3e25033c2463e6dae6ad7d3f60ab06ebc5477`
+(2026-08-04T22:48:59-04:00), which includes BUG-107/108. Re-verify
+against whatever `main` is by the time you read this, same as always.
 
 ## 1. Before writing any BUG-N entry
 
@@ -61,86 +68,128 @@ diff against `origin/main` before pushing, same reason.
 
 ## 2. The open issues, priority order
 
-All four below are **confirmed still open** as of the build/commit
-noted in section 0 — live-tested, not just digest-matched. Each repro
-lives at `tools/localfuzz/findings/<dir>/repro.vani` in the
-`vani-compiler-localfuzz` worktree (branch `local-fuzz-findings`,
-already pushed to `origin/local-fuzz-findings` if you want it from a
-clean clone instead of this specific worktree).
+### Issue 1 — FIXED as BUG-107 (2026-08-04)
 
-### Issue 1 (recommend starting here — most contained): C backend can't compile `Vec<Box<dyn Trait>>`
+C backend couldn't compile a struct field of type `Vec<Box<dyn
+Trait>>`. Root cause: `backend_c.rs`'s `vec_element_has_user_struct`
+had no `Type::Box` arm, so it didn't recurse into `Box`'s inner type
+and missed that `Box<dyn Iface>` (stored BY VALUE, 16-byte fat
+pointer) has the same forward-reference dependency on
+`emit_dyn_iface_typedefs` that a bare `Vec<dyn Iface>` field already
+correctly deferred for. See `docs/TODO_CURRENT.md`'s BUG-107 entry for
+the full writeup. Nothing further to do here.
 
-- **Repro**: `tools/localfuzz/findings/20260803-130927-backend-divergence-dc30074c7a/repro.vani`
-- **Reproduce**: `vanic run <repro> --backend=c` (LLVM backend runs it fine — `vanic run <repro>` with no flag)
-- **Symptom**: `cc` fails to compile the generated C:
-  ```
-  error: unknown type name 'intent_dyn_Drawable'
-    248 | typedef struct { intent_dyn_Drawable* __restrict__ data; ... } intent_vec_box_dyn_Drawable;
-  error: 'intent_dyn_Drawable' undeclared (first use in this function)
-  ```
-- **Lead**: the C backend emits a `Vec<Box<dyn Drawable>>` helper struct
-  (`intent_vec_box_dyn_Drawable`) that references a type
-  (`intent_dyn_Drawable`) it never actually typedefs/emits anywhere.
-  Look in `src/backend_c.rs` for wherever `Vec<Box<dyn T>>` element
-  storage typedefs get generated (search for `intent_vec_box_dyn` /
-  the vtable-struct emission for `Box<dyn T>` — likely a case where the
-  `dyn Trait` element type's typedef is supposed to be emitted before
-  its `Vec<...>` wrapper typedef but isn't, or is gated on a condition
-  that misses this shape). Compare against how `Vec<Box<T>>` (non-dyn)
-  or `Box<dyn T>` on its own (not inside a `Vec`) are handled — one of
-  those paths likely DOES emit the missing typedef and this one just
-  doesn't reach it.
+### Issue 2 — FIXED as BUG-108 (2026-08-04), but the ORIGINAL diagnosis below was wrong
 
-### Issue 2: C backend's `mut ref Vec<T>` out-parameter doesn't write back correctly (LLVM does)
-
-- **Repro**: `tools/localfuzz/findings/20260803-144958-backend-divergence-2125e1a114/repro.vani` (this is `examples/graph_algo2.vani` — a real shipped example, not a fuzzer mutation, so this may already be reproducible today by just running the shipped example directly with `--backend=c`)
-- **Reproduce**: `vanic run <repro> --backend=c`
-- **Symptom**: runtime output `index out of bounds: 0, len 0` then a non-zero exit. Originally characterized (wrongly, in an earlier pass) as "a Rust panic inside the compiler" — it is NOT that. It's the COMPILED PROGRAM's own bounds-check runtime helper firing, from this line in the repro:
-  ```vani
+**If you're reading this because you're about to work Issue 2: don't
+trust the paragraph that used to be here.** The original version of
+this handoff characterized this finding as "C's `mut ref Vec<T>`
+out-parameter doesn't write back correctly, LLVM handles it fine."
+That was backwards and incomplete. Re-verifying on a fresh rebuild
+(per section 0's own rule) showed LLVM was ALSO wrong — `astar`
+returned `None` for every call and `topo_sort`'s `order[i]` printed
+garbage large integers instead of C's clean `index out of bounds`
+abort. The real root cause had nothing to do with `Graph`/`astar`/
+`topo_sort` at all: `graph_new(-1)` (a fuzzer-mutated invalid negative
+node count in this specific repro) was a total red herring. Bisected
+down to: **the tree-walking LLVM backend's Vec index read, write, and
+mut-ref-element codegen had NO runtime bounds check at all**, and ANY
+struct-typed local anywhere in the program (not Graph-specific) forces
+the WHOLE program off the SSA-LLVM fast path onto this unchecked tree
+path (`expr_ssa_supported` in `main.rs` unconditionally rejects
+`StructLit`/`FieldAccess`). Minimal repro that reproduced identically
+with zero `Graph` involvement:
+```vani
+struct Foo { a: i64, b: i64 }
+fn main() -> i64 {
+  let g: Foo = Foo { a: 1, b: 2 };
   let order: Vec<i64> = vec();
-  let n_appended: i64 = g.topo_sort(mut ref order);
-  ...
-  for i from 0 to 5 { print "topo[", i, "] =", order[i]; }
-  ```
-  `topo_sort(mut ref out: Vec<i64>)` is supposed to push nodes into
-  `order` and the caller should see those pushes. `order[i]` failing
-  with `len 0` means the C backend's `order` still looks EMPTY to the
-  caller after the call returns, even though `topo_sort` (per the LLVM
-  backend, which handles this fine) did populate it.
-- **Lead**: this smells like a `mut ref Vec<T>` parameter aliasing/
-  write-back bug specific to the C backend — the callee's pushes may be
-  happening on a local copy of the Vec's header (ptr/len/cap struct)
-  instead of through the pointer the caller passed. Look at how
-  `backend_c.rs` lowers a `mut ref Vec<T>` parameter — specifically
-  whether `push`/`len`-mutating operations inside the callee correctly
-  write through to the caller's own `intent_vec_*` struct, or whether
-  they mutate a stack-local copy that gets discarded on return. I did
-  NOT get further than this — no confirmed root cause, just the
-  observed symptom and this hypothesis. Worth first trying a smaller
-  repro than the full graph-algorithm file: a two-line function that
-  takes `mut ref out: Vec<i64>`, pushes into it, and checks
-  `order.len()` in the caller after the call (I attempted this and hit
-  a parser error on my own syntax guess for the parameter — check
-  `examples/language/english/` or similar for the correct `mut ref
-  Vec<T>` parameter syntax before trying to hand-write a minimal repro).
+  for i from 0 to 5 { print order[i]; }
+  return 0;
+}
+```
+Fixed by adding a `@__intent_bounds_check` helper (mirroring the one
+`ssa_backend_llvm.rs` already had) to tree-LLVM's own preamble and
+wiring it into the 4 affected sites (`Index` read, `IndexAssign`
+write, `RefMutIndex`, and the Vec<bool> packed-bit read/write
+variants). See `docs/TODO_CURRENT.md`'s BUG-108 entry for the full
+writeup, including an explicit **scope note**: only the 3 codegen
+sites directly implicated by this finding were audited/fixed.
+`backend_llvm.rs` is large; it's plausible other Vec-touching
+tree-LLVM call sites (builtin helpers like `binary_search`,
+`swap_remove`, etc. — also tree-LLVM-only per the same denylist) have
+the identical missing-check pattern and were NOT swept this pass.
+**If you have spare time before picking up Issue 3/4, a dedicated pass
+grepping tree-LLVM's Vec-adjacent codegen for a GEP not preceded by a
+`@__intent_bounds_check` call is worth doing** — this bug class is real
+and this pass only chased the one reproducing instance.
 
-### Issue 3: LLVM backend hangs (infinite loop) on two task/async examples where C completes fine
+### Issue 3: LLVM backend "hangs" on two task/async examples — re-scoped, only half-investigated
 
-- **Repro A**: `tools/localfuzz/findings/20260803-003108-run-crash-4804c21458/repro.vani` (Swedish-language task/async example)
-- **Repro B**: `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani` (an Arc-concurrency `echo_pool` server example — single-threaded server handling N concurrent client tasks)
-- **Reproduce**: `timeout 10 vanic run <repro>` (no `--backend=c`) will hang and get killed; `vanic run <repro> --backend=c` completes normally.
-- **Symptom**: no crash, no error — just never terminates under the LLVM backend.
-- **Lead**: not root-caused at all yet. Both involve `task`/async
-  scheduling constructs. Could be the same root cause (something in
-  the LLVM task-scheduling runtime/lowering that under some condition
-  spins instead of completing) or two unrelated bugs that happen to
-  both be task-related. Worth checking whether they share a specific
-  construct (e.g. both use channels, or both use a specific
-  cancellation/join pattern) — I didn't diff them closely. Look at
-  `ssa_backend_llvm.rs` / whatever handles `task`/`async`/channel
-  lowering for the LLVM path, and compare against the equivalent C
-  runtime (`backend_c.rs` / `ssa_backend_c.rs`) which handles both
-  fine.
+The original framing ("two unrelated-looking repros that are probably
+the same task/async root cause") was wrong in an interesting way: they
+turned out to be two COMPLETELY unrelated things, and repro A isn't
+even a compiler bug.
+
+- **Repro A** — `tools/localfuzz/findings/20260803-003108-run-crash-4804c21458/repro.vani`.
+  **Investigated 2026-08-04, conclusion: NOT a task/async bug, likely
+  not a fixable bug at all.** The actual repro (despite being
+  catalogued as "Swedish task/async") is `for_loops.vani` — no task/
+  async anywhere. It's a fuzzer-mutated `for i from
+  -9223372036854775808 to 5 { antal = antal + 1; }` (a ~9.223
+  quintillion-iteration loop — `5 - i64::MIN` slightly exceeds
+  `i64::MAX`) followed by `assert räkna() == 5` (a nonsensical
+  assertion given the loop's real iteration count). Modifying the
+  function to add an early-return once `antal > 20` makes BOTH
+  backends complete instantly with IDENTICAL output — proving there's
+  no arithmetic/codegen divergence in the loop itself; both backends
+  execute it correctly step-by-step. The divergence ONLY shows up when
+  the loop is left to attempt the full ~9.2-quintillion-iteration run:
+  C "completes" (with `assertion failed:`, exit 3) inside the 10s
+  timeout while LLVM doesn't. Working theory (NOT confirmed further):
+  `backend_c.rs` emits a real C `for` loop that `cc` at -O2/-O3 can
+  likely strength-reduce / recognize as a closed-form induction
+  variable and fold away, while `lli` (the LLVM interpreter/JIT this
+  project uses to `run` LLVM output) has no reason to apply the same
+  optimization and genuinely walks all ~9.2 quintillion iterations —
+  which is not completable in any practical timeout regardless of
+  backend correctness. If this theory is right, there's no bug to fix
+  here; it's a fundamental AOT-optimized-C vs. JIT-interpreted-LLVM
+  artifact on a computationally-infeasible fuzzer mutation, same
+  category as the "lower priority, not investigated further" cluster
+  at the bottom of this doc. Confirm the strength-reduction theory (or
+  find a real bug) before spending more time on this one; don't just
+  assume it's closeable, but don't expect a normal BUG-N fix either.
+
+- **Repro B** — `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani`
+  (`echo_pool.vani` — genuinely task/async: 3 real `task { }` blocks as
+  TCP clients + an `async fn handle` polled via `Task__handle`/
+  `__poll_handle` as the server, round-robin scheduler, `epoll_wait_one`
+  with a huge timeout between passes). **This one IS still open, still
+  unexplained, not root-caused.** Confirmed still hangs on the BUG-108
+  build (`timeout 10 vanic run <repro>` killed; `--backend=c` completes
+  with the correct `total bytes received across pool: 9`). One dead
+  end ruled out: I suspected `epoll_wait_one`'s `i64` huge-timeout
+  parameter truncating to `-1` (infinite wait) at the `trunc i64 …to
+  i32` / `(int)timeout_ms` cast was LLVM-specific and explained the
+  hang — it isn't; `backend_c.rs`'s Linux `intent_epoll_wait_one` does
+  the exact same C-standard-implementation-defined truncation to `-1`,
+  so both backends pass an infinite timeout to the kernel `epoll_wait`
+  the same way. That's fine functionally as long as SOMETHING eventually
+  makes the awaited fd readable. Also ruled out: `task { }` blocks are
+  NOT a cooperative/single-thread mechanism on either backend — both
+  `backend_c.rs` and `backend_llvm.rs` lower `task` to real
+  `pthread_create`/`CreateThread` OS threads, so `main`'s thread
+  blocking in `epoll_wait_one` shouldn't by itself starve `peer1`/
+  `peer2`/`peer3` on either backend. NOT yet investigated: the
+  `async fn`/`Task__handle`/`__poll_handle`/`io_recv_async` machinery
+  specifically (a separate, likely poll-based concurrency primitive
+  from `task { }`) — this is the most likely place for a genuine
+  LLVM-vs-C codegen divergence and is where I'd start next. Compare
+  `io_recv_async`/`__poll_handle`'s LLVM codegen against C's for
+  anything that could make the "Pending" (`-2`) sentinel never flip to
+  "ready" on LLVM, or make `Task__handle`'s state never get updated by
+  whatever's supposed to service the async I/O.
 
 ### Issue 4 (most severe — double bug): LLVM `lli` crashes outright AND C backend hangs, on the same input
 
