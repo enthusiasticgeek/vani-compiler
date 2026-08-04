@@ -1,0 +1,30 @@
+// candidate regression, qwen-generated (qwen2.5-coder:1.5b), UNREVIEWED
+// features: match with guards over enum payloads, clone_at on a Vec<Struct> element
+// compiled and ran cleanly on both backends -- candidate for examples/ or
+// tests/run_end_to_end.rs after human/frontier-model review.
+
+// build & run:
+//   vanic run examples/language/english/match_guard_chain_clone_at.vani
+//   vanic run examples/language/english/match_guard_chain_clone_at.vani --backend=c
+
+intent "Regression for BUG-37: clone_at() on a Vec<Struct> element, where the struct has a nested non-Copy Vec<T> field, crashed the LLVM backend with a double-free (exit 116). Two independent LLVM codegen sites deep-clone a struct's fields when building a Vec-of-structs clone -- emit_vec_bundle_functions's `__clone` bundle function (used by Vec::clone()), and clone_at's own separate inline struct-clone codegen -- and both only special-cased Type::OwnedStr as needing a real deep clone, silently falling through to a bare extractvalue/insertvalue shallow copy for any other non-Copy field type, including Vec<T>. The cloned struct's `children` field ended up aliasing the SAME heap buffer as the original still sitting in the source Vec, so once both were freed independently (one via the clone going out of scope, one via the tree being dropped), the allocator's free-list was corrupted. Fixed by adding a Type::Vec(inner) arm to both dispatch sites that calls the inner vec's own __clone function instead of falling through. The C backend (backend_c.rs) already deep-cloned nested Vec fields correctly and was never affected -- found by comparing its (correct) output to the LLVM backend's crash while auditing the cyclic-references tutorial's tree-building example.";
+
+struct Node {
+  value: i64,
+  children: Vec<i64>,
+}
+
+struct Tree {
+  nodes: Vec<Node>,
+}
+
+fn main() -> i64 {
+  let empty_children: Vec<i64> = vec();
+  let empty_nodes: Vec<Node> = vec();
+  let tree: Tree = Tree { nodes: empty_nodes };
+  let _ = push(mut ref tree.nodes, Node { value: 7, children: empty_children });
+  let node0: Node = clone_at(tree.nodes, 0 as u64);
+  print node0.value;
+  return 0;
+}
+
