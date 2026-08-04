@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/malayalam/basics.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "12\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2163343-1785807500274717618.ll:119:27: error: integer constant must have integer type\n  %v_4 = fadd double 0.0, 12\n                          ^\n\n",
+    "timed_out": false
+  }
+}

@@ -1,0 +1,6 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -102,7 +102,7 @@ fn add(a: i64, b: i64) -> i64 {
+     let result = (a as f64 + b as f64) as i64;
+     unsafe { llvm::LLVMCallDoubleToI64(result, 1) }
+ }
