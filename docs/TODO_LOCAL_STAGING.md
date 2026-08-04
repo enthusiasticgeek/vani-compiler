@@ -1742,3 +1742,30 @@ Fix attempt: `tools/localfuzz/findings/20260804-100816-backend-divergence-30f08a
 }
 ```
 
+
+---
+
+### Candidate: 20260804-101448-backend-divergence-2f33b44495
+
+Repro: `tools/localfuzz/findings/20260804-101448-backend-divergence-2f33b44495/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-101448-backend-divergence-2f33b44495/fix_attempt.md`
+
+### Staging Entry: Bounded Generics Crash in LLVM Backend
+
+**Summary:** The vani-compiler crashes when attempting to run a program with bounded generics using the LLVM backend.
+
+**Details:**
+
+- **Mutant/Generated Source:** The provided code snippet is a minimal test case that demonstrates the crash. The `min` function is called with two instances of `Score`, and it should return the smaller value, but the compiler crashes when running this in the LLVM backend.
+
+- **Observed Symptom:** The program crashes during runtime, producing an assertion failure in the LLVM backend.
+
+- **Repro Source:**
+  ```vani
+  // build & run:
+  //   vanic run examples/language/english/bounded_generics.vani                          # LLVM backend, JIT via lli
+  ```
+
+- **Backend(s) Affected:** The bug is reproducible with both the LLVM and C backends.
+
+**STATUS: needs human/frontier root-cause review.

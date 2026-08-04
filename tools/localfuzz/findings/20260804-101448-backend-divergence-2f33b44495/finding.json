@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/english/bounded_generics.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2747747-1785838487387976331: /tmp/vanic-candidate-2747747-1785838487387976331.c:342: fn_main: Assertion `((v_x).value == (-1))' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "min.value = 3\nmax.value = 9\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}

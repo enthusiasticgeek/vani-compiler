@@ -1,0 +1,11 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -1495,7 +1495,7 @@ fn emit_min<T: Cmp>(a: T, b: T) {
+         llvm::CallInst::create(a.as_ptr(), T::get_type(), "min", bb);
+         let v = llvm::CallInst::create(b.as_ptr(), T::get_type(), "max", bb);
+         let cmp = llvm::CmpInst::create_unordered(llvm::ICMP_SLE, v, a,
+-                                                 "min_cmp", bb);
++                                                 "min_cmp", bb, false);
+
+         if cmp.get_condition() {
+             llvm::ReturnInst::create(v, bb);
