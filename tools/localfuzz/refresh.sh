@@ -27,8 +27,17 @@ log "stopping harness + ollama"
 
 cd "$WORKTREE_DIR" || { log "FATAL: cannot cd to worktree $WORKTREE_DIR"; exit 1; }
 
-if [ -n "$(git status --porcelain)" ]; then
+# allowed_paths.conf / allowed_readonly_paths.conf are PERMANENTLY locally
+# modified by design (main tracks template content, this machine's real
+# absolute paths are deliberately never committed -- see README's
+# "Filesystem allowlist" section) -- excluded from the dirty-check, not a
+# sign of unexpected work sitting in the tree.
+DIRTY="$(git status --porcelain -- . \
+    ':!tools/localfuzz/allowed_paths.conf' \
+    ':!tools/localfuzz/allowed_readonly_paths.conf')"
+if [ -n "$DIRTY" ]; then
     log "ABORT: worktree has uncommitted changes -- refusing to touch it unattended. Investigate by hand."
+    log "$DIRTY"
     "$LOCALFUZZ_DIR/start.sh" >>"$LOG" 2>&1
     exit 1
 fi
