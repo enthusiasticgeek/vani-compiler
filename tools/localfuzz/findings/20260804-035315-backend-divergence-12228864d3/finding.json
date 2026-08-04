@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/punjabi_shahmukhi/control_flow.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Punjabi Shahmukhi control flow OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2369748-1785815594141673563.ll:108:27: error: integer constant must have integer type\n  %v_1 = fadd double 0.0, 0\n                          ^\n\n",
+    "timed_out": false
+  }
+}
