@@ -2034,3 +2034,50 @@ Fix attempt: `tools/localfuzz/findings/20260804-161440-backend-divergence-ec889e
 VANIC: [build] /home/virgo/source/vani-compiler-localfuzz/examples/language/english/tracker.vani --backend=c
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-163203-backend-divergence-e873d1d3ff
+
+Repro: `tools/localfuzz/findings/20260804-163203-backend-divergence-e873d1d3ff/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-163203-backend-divergence-e873d1d3ff/fix_attempt.md`
+
+```plaintext
+# Stage Entry: Local Staging Log for vani-compiler
+
+## Job Details:
+- **Job Type:** Local Fuzzing (LocalFuzz)
+- **Language:** Punjabi Shahmukhi keywords
+- **Mutation ID:** 3212033-1785861122597815113
+- **Backend(s) Affected:** GCC, Clang
+
+## Repro Source:
+```vani
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi keywords smoke-test";
+ساخت Nukta {
+  x: i64,
+  y: i64,
+}
+شمار Rang { لال, ہرا, نیلا }
+فنکشن جوڑ(ک: i64, خ: i64) -> i64 {
+  واپس ک + خ;
+}
+فنکشن main() -> i64 {
+  مانیں ن: Nukta = Nukta { x: 3, y: 4 };
+  یقینی جوڑ(2, 3) == 5;
+  لکھو "Punjabi Shahmukhi keywords OK";
+  واپس 0;
+}
+```
+
+## Observed Symptom:
+- **Crash/Hang/Divergent Output:** A crash occurred during the compilation of the generated source.
+- **Raw Result Data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "cc failed while compiling '/tmp/vanic-candidate-3212033-1785861122597815113.c' (left at this path for debugging):\
