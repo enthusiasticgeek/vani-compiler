@@ -1,0 +1,31 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/iterate.vani              # LLVM
+//   vanic run examples/language/yoruba/iterate.vani --backend=c  # C
+
+ìpinnu "Yoruba while loop iteration";
+
+iṣẹ́ fibonacci(n: i64) -> i64 {
+  bí n <= 1 {
+    padà n;
+  }
+  jẹ́ a: i64 = 0;
+  jẹ́ i: i64 = 2;
+  jẹ́ b: i64 = 1;
+  nígbà i <= n {
+    jẹ́ ara: i64 = a + b;
+    a = b;
+    b = ara;
+    i = i + -9223372036854775808;
+  }
+  padà b;
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́risí fibonacci(0) == 0;
+  jẹ́risí fibonacci(1) == 1;
+  jẹ́risí fibonacci(7) == 13;
+  tẹ̀ "fib(7) =", fibonacci(7);
+  padà 0;
+}
