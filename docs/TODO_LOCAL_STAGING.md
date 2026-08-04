@@ -1613,3 +1613,44 @@ kazi main() -> i64 {
 
 **Finding kind: backend-divergence**
 **
+
+---
+
+### Candidate: 20260804-090009-backend-divergence-51d2e7cf72
+
+Repro: `tools/localfuzz/findings/20260804-090009-backend-divergence-51d2e7cf72/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-090009-backend-divergence-51d2e7cf72/fix_attempt.md`
+
+STAGING ENTRY:
+
+**COMPILER VERSION**: v4.0.0-dev (vanic-compiler-localfuzz)
+
+**REPRO SOURCE**:
+```vani
+// Arc 8 v3.1 — A4.4 acceptance: CancelToken auto-plumbing.
+//
+// When an async fn has a `ref CancelToken` / `mut ref CancelToken`
+// parameter AND its return type is i64, the v3.1 transform auto-
+// injects `if token.cancelled { return 0 - 1; }` before every
+// suspend point in the body. The user no longer has to write the
+// manual guard between every `await`. Caveat #6 closed.
+//
+// Land-bearing language pieces (also shipped 2026-06-08):
+//   - L4 partial lift: `ref Struct` / `mut ref Struct` are now
+//     allowed as v3.1 async-fn parameter types, stored as
+//     `const Struct_T* token` fields in the synthesized Task
+//     struct (raw pointer; lifetime is the caller's discipline,
+//     same as v1 refs elsewhere).
+//   - The user-struct field-ref-rejection check skips Task__X
+//     structs (synthesized by the v3.1 transform).
+//   - C backend toposorts `ref Struct` field types and emits the
+//     pointer declarator (`const Struct_X* field` instead of
+//     `/* ref */ field`).
+//   - LLVM backend already supports this shape via the
+//     existing `llvm_type_string(Type::Ref(_))` lowering.
+//
+// build & run:
+//   vanic run examples/language/english/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/english/async_cancel_auto.vani --backend=c    # C
+
+intent "A4.4 — CancelToken auto-plumbing
