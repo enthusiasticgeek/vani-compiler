@@ -1838,3 +1838,31 @@ Repro: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/r
 Fix attempt: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/fix_attempt.md`
 
 `vani-lang: pashto` with mutant/generated source failing in backend-divergence (`vanic-candidate-2894631-1785847639971673372`) due to assertion failure in `fn_main`. Expected behavior was `-9223372036854775808`, but got assertion error. STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-135616-backend-divergence-d515a0fcc9
+
+Repro: `tools/localfuzz/findings/20260804-135616-backend-divergence-d515a0fcc9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-135616-backend-divergence-d515a0fcc9/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-3000195-1785851774981875234: /tmp/vanic-candidate-3000195-1785851774981875234.c:354: fn_main: Assertion `(v_x == 1)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
