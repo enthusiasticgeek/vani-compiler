@@ -2187,3 +2187,12 @@ The exact reproduction source for the crash is:
 The observed symptom was a crash of the C backend, with an error message indicating that an integer constant did not have an integer type.
 
 This staging entry indicates that further investigation is needed to identify the root cause of this divergence between the LLVM and C backends.
+
+---
+
+### Candidate: 20260804-222218-run-crash-d66ccbb300
+
+Repro: `tools/localfuzz/findings/20260804-222218-run-crash-d66ccbb300/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-222218-run-crash-d66ccbb300/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
