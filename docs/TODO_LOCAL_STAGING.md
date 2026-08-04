@@ -1345,3 +1345,12 @@ Repro: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/r
 Fix attempt: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-055516-backend-divergence-e911ebfd8c
+
+Repro: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

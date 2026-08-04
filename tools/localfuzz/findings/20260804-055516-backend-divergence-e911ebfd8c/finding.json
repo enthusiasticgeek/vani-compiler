@@ -1,0 +1,16 @@
+{
+  "base": "examples/edge_cases/mix_continue_outer_label.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "8\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2469205-1785822915499771717.ll:68:27: error: integer constant must have integer type\n  %v_0 = fadd double 0.0, 0\n                          ^\n\n",
+    "timed_out": false
+  }
+}
