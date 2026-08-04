@@ -215,12 +215,24 @@ struct Holder { b: Box<Point> }     // ✅ Box in struct field
 - Struct-field storage works — the outer struct's drop walker
   chains into the Box field's `free()`.
 
-**Remaining restrictions (queued follow-ups)**:
+**Remaining restrictions, as of Phase 1 (2026-06-07 -- see the
+"Superseded" note right below for what shipped since)**:
 - **`Box<dyn Iface>`** — the original documented blocker
   (`struct Drawer { r: Box<dyn Renderer> }`) needs vtable
   plumbing through the heap allocation. Phase 3.
 - **Box of affine inner type** (`Box<Vec<i64>>`, `Box<OwnedStr>`)
   — requires recursive drop walks. Queued.
+
+**Superseded (this whole "Phase 1 surface" section below is a
+frozen 2026-06-07 snapshot; not updated as later phases shipped)**:
+`Box<dyn Iface>` (Phase 3, 2026-06-08), `Box<Vec<T>>`/`Box<OwnedStr>`
+(L2 follow-up, 2026-06-08), and — as of BUG-97, 2026-08-04 — ANY
+struct type (not just Copy ones), including self-referential
+("recursive") structs like `struct Node { next: Option<Box<Node>>
+}`, all now work. `check_box_builtin`'s own doc comment in
+checker.rs and [the Box/RAII tutorial](../tutorials/src/intermediate/03a_box_raii_primer.md)
+describe the current supported surface; the still-open restrictions
+today are `Box<Box<T>>` and `Box` of a tuple.
 
 **Phase 2 add (LLVM backend codegen)** — 2026-06-07:
 - `llvm_type_string(Type::Box(inner))` → `{T}*`.

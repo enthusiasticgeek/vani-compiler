@@ -299,6 +299,19 @@ When `d` drops:
 Phase 1 + 3 + 3b of the L2 lift (described earlier in the
 session ledger) wired this end-to-end on both backends.
 
+### Boxing a non-Copy or self-referential struct
+
+`box()` accepts ANY struct type, not just Copy ones -- including
+a struct that owns heap memory itself (an `OwnedStr`/`Vec` field)
+and the self-referential ("recursive") shape from Case 2 above
+(`struct Node { next: Option<Box<Node>> }`). Dropping the box
+correctly walks the boxed struct's own owning fields before
+freeing the box's own heap slot, recursing through the whole
+chain for the self-referential case without blowing the native
+call stack, however long the chain is.
+[`examples/language/english/option_box_recursive_struct.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/option_box_recursive_struct.vani)
+is the worked, `valgrind`-verified example.
+
 ### Two things `Box<T>` does NOT support yet
 
 Two shapes that sound plausible given everything above -- but
@@ -307,17 +320,17 @@ boundary rather than guessing:
 
 - **`Box` of a tuple.** `box((42, "answer" + ""))` for a
   `Box<(i64, OwnedStr)>` fails: `box() v1 supports Copy + sized
-  element types (primitives, Copy structs), dyn Iface, Vec<T>,
+  scalar types (primitives), any struct type, dyn Iface, Vec<T>,
   and OwnedStr; got (i64, OwnedStr)`. Reach for a small named
   struct instead of a tuple if you need to box a multi-component
   value.
 - **`Box<Box<T>>` -- pointer to a pointer.** `box(inner)` where
   `inner: Box<i64>` fails with the same diagnostic, which
   explicitly calls this out: "Other owning inner types
-  (`Box<Box<T>>`, `Box<HashMap<…>>`, etc.) remain a follow-up."
-  So a second Box layer isn't available yet, even though it would
-  be a natural way to add indirection in some recursive type
-  definitions.
+  (`Box<Box<T>>`, `Box<HashMap<…>>`, tuples, etc.) remain a
+  follow-up." So a second Box layer isn't available yet -- reach
+  for a struct field of `Box<T>` instead of a bare `Box<Box<T>>`
+  if you need this shape.
 
 ### `Vec<Box<T>>` -- sequence of heap-allocated Ts
 
@@ -382,8 +395,11 @@ ownership of that heap allocation tied to my scope.
 
 That's `Box<T>`. The intermediate-track chapter on dyn
 dispatch ([5](05_dyn.md)) uses `Box<dyn Iface>` in real code;
-[`examples/language/english/box_dyn_iface.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_dyn_iface.vani)
-and [`box_recursive_drop.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_recursive_drop.vani)
+[`examples/language/english/box_dyn_iface.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_dyn_iface.vani),
+[`box_recursive_drop.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_recursive_drop.vani)
+(`Box<Vec<T>>`/`Box<OwnedStr>` recursive-drop chaining), and
+[`option_box_recursive_struct.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/option_box_recursive_struct.vani)
+(the `Node`/linked-list self-referential shape from Case 2 above)
 are the worked examples.
 
 ## Cross-reference

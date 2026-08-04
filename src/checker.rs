@@ -22384,10 +22384,9 @@ fn check_call(
     // checker, which is a follow-up.
     match name {
         // L2 Phase 1 (2026-06-07): Box<T> heap-allocating
-        // constructor. `box(expr)` â†’ `Box<typeof expr>`. v1
-        // requires expr's type to be Copy + sized â€” primitives
-        // and Copy structs. Box of an already-affine type would
-        // need recursive drop and is queued.
+        // constructor. `box(expr)` â†’ `Box<typeof expr>`. See
+        // `check_box_builtin`'s own doc comment for the current
+        // (as of BUG-97, 2026-08-04) supported-type surface.
         "box" => return check_box_builtin(args, env, signatures, name_span, span, diagnostics),
         // L2 Phase 1: read the inner value of a Box<T> by
         // copying. Takes `ref Box<T>` so the box stays valid
@@ -25618,11 +25617,15 @@ fn check_try_vec_builtin(
 }
 
 /// L2 Phase 1 (2026-06-07): `box(expr)` heap-allocating
-/// constructor. Returns `Box<typeof expr>`. v1 restricts the
-/// inner type to Copy + sized â€” primitives (`i64`, `bool`, â€¦)
-/// and Copy structs. The rationale: Box of an already-affine
-/// type (`Box<Vec<i64>>`, `Box<OwnedStr>`) would need recursive
-/// drop walks and is queued for v2.
+/// constructor. Returns `Box<typeof expr>`. v1 accepts
+/// primitives (`i64`, `bool`, â€¦), `dyn Iface`, `Vec<T>`,
+/// `OwnedStr`, and (as of BUG-97, 2026-08-04) any struct type --
+/// including non-Copy and self-referential ("recursive") ones,
+/// whose Drop is walked recursively by the backends (see
+/// `emit_box_recursive_deep_drop_helpers` in backend_c.rs for the
+/// self-referential case). Not yet supported: `Box<Box<T>>`,
+/// tuples, and a handful of other owning inner types -- queued
+/// for a follow-up.
 fn check_box_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -25697,9 +25700,10 @@ fn check_box_builtin(
             Diagnostic::new(
                 args[0].span,
                 format!(
-                    "box() v1 supports Copy + sized element types (primitives, Copy structs), \
-                     `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. Other owning inner \
-                     types (Box<Box<T>>, Box<HashMap<â€¦>>, etc.) remain a follow-up.",
+                    "box() v1 supports Copy + sized scalar types (primitives), any \
+                     struct type, `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. \
+                     Other owning inner types (Box<Box<T>>, Box<HashMap<â€¦>>, tuples, \
+                     etc.) remain a follow-up.",
                     inner_ty
                 ),
             )

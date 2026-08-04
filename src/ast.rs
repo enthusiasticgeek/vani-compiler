@@ -1074,14 +1074,16 @@ pub enum Type {
     /// `expr` into the new slot; read via `*b` unary deref;
     /// dropped via `free(b)` at scope exit.
     ///
-    /// v1 restrictions (L2 Phase 1, 2026-06-07):
-    /// - T must be Copy + sized (primitives + Copy structs). Box
-    ///   of an already-affine type would need recursive drop and
-    ///   is queued.
-    /// - C backend only — LLVM backend gates with a clear error
-    ///   directing users to `--backend=c`. Queued for L2 Phase 2.
-    /// - `Box<dyn Iface>` queued for L2 Phase 3 (the documented
-    ///   `struct Drawer { r: Box<dyn Renderer> }` blocker).
+    /// Supported inner types (both backends): primitives, `dyn
+    /// Iface` (a 16-byte fat pointer instead of a plain pointer —
+    /// see `Type::is_field_access_indirect`'s doc comment), `Vec
+    /// <T>`, `OwnedStr`, and any struct type — including non-Copy
+    /// and self-referential ("recursive") ones, e.g. `struct Node
+    /// { next: Option<Box<Node>> } ` (BUG-97, 2026-08-04; the
+    /// self-referential case's Drop is an iterative, not native-
+    /// call-recursive, generated helper — see
+    /// `emit_box_recursive_deep_drop_helpers` in backend_c.rs).
+    /// Not yet supported: `Box<Box<T>>` and `Box` of a tuple.
     Box(Box<Type>),
     /// `Condvar` — affine handle to a kernel waiter (futex on
     /// Linux, WaitOnAddress on Windows, pthread_cond_t
