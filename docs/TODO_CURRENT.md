@@ -6554,26 +6554,92 @@ across all 13 binaries -- clean.
   regression on the full existing generics/monomorphization test
   surface (BUG-90/93/95's own tests, the recursive-generic-struct
   tests, etc.) -- full `cargo test --release --workspace`: 0 failed.
-  Deferred, out-of-scope finding surfaced while probing edge cases:
-  a bare enum constructor INSIDE a generic function's OWN body (e.g.
+  Deferred, out-of-scope finding surfaced while probing edge cases,
+  now tracked separately as BUG-98 below (a different bug from
+  BUG-91: that one was about the DECL not existing; BUG-98 is about
+  a working decl not being NAMEABLE from inside a still-generic
+  function body).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+- [ ] **BUG-98 (found 2026-08-04, NOT fixed -- a BUG-46-class
+  ambiguity, but reaching a different site than BUG-46/95 cover). A
+  bare enum constructor INSIDE a generic function's OWN body (e.g.
   `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
   Option.Some(a); }`) fails to resolve ("unknown variable 'Option'")
   once 2+ DISTINCT concrete instantiations of `Option` exist
-  anywhere in the whole program (regardless of whether they come
-  from the same generic fn specialized twice, or two different
-  generic fns) -- this relies on `Env::resolve_enum_name`'s "exactly
-  one candidate" fallback at ordinary check time, which is
-  necessarily ambiguous once 2+ candidates exist, and none of
-  BUG-46/95's more targeted annotation-driven resolution passes
-  reach INTO a still-generic function template's body (their return-
-  type-driven resolution only fires once a function's return type is
-  ALREADY a concrete `Type::Enum`, which a generic template's isn't).
-  A different bug from BUG-91 (that one is about the DECL not
-  existing; this one is about a working DECL not being NAMEABLE from
-  inside the generic body), same general neighborhood. Not chased
-  further to keep this fix scoped to its own documented repro.
-  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
-  `cargo test --release --workspace`: 0 failed.
+  anywhere in the whole program** -- regardless of whether they come
+  from the SAME generic fn specialized twice (`foo(7)` and
+  `foo(true)`) or from two DIFFERENT generic fns each specialized
+  once (`foo1(7)` and `foo2(true)`, each internally constructing
+  `Option.Some(a)`). A single instantiation program-wide works fine
+  (this is exactly why BUG-91's own repro, `foo(7)` alone, never hit
+  this: only one `Option` instantiation existed in that test).
+  Root cause: `Option.Some(a)` inside a generic function's body stays
+  a bare, unqualified `Var("Option")` receiver at parse time, same as
+  everywhere else in the language. Resolving it to a concrete
+  `Option__i64`/`Option__bool` normally happens one of two ways: (1)
+  BUG-46/95's targeted, annotation-driven passes
+  (`resolve_bare_enum_ctors_in_stmt`,
+  `resolve_bare_enum_ctor_in_struct_lit`) which key off an
+  already-KNOWN concrete type at the use site (a `let`'s own
+  annotation, a function's own return type already being a concrete
+  `Type::Enum`, a struct literal field's declared type) -- none of
+  these apply to a still-generic function TEMPLATE's body, since the
+  template's return type is `Type::Apply{Option,[Param(T)]}` (or
+  similar), not yet a concrete `Type::Enum`, at the point these
+  passes run (before `monomorphize_generics_in_program` specializes
+  the body); or (2) `Env::resolve_enum_name`'s general "exactly one
+  candidate starting with `{name}__`" fallback, consulted at ordinary
+  type-check time (AFTER specialization, when the body is finally
+  checked as part of `foo__i64`/`foo__bool`) -- this is what actually
+  resolves it in the single-instantiation case, but is inherently
+  ambiguous the moment 2+ candidates exist program-wide, and fails
+  outright rather than picking one.
+  What's missing: nothing re-resolves a generic function's bare enum
+  constructors using the SPECIALIZED body's own now-concrete return
+  type, once `monomorphize_generics_in_program` has produced it. The
+  information needed (each specialized stub's own concrete return
+  type, right after substitution) is exactly what BUG-91's fix
+  (`materialize_late_discovered_type_decls`) already has on hand at
+  the point it runs -- likely the natural place to also re-run BUG-46/
+  95-style resolution against each newly-specialized function body,
+  the same way the ORIGINAL (pre-generics) pass already does for
+  ordinary concrete functions.
+  Not fixed yet: deferred to keep BUG-91's own fix scoped to its
+  documented repro and reviewed independently; a real fix likely
+  means threading `resolve_bare_enum_ctors_in_stmt` (or an equivalent
+  call) over each specialized function's body inside/right after
+  `monomorphize_generics_in_program`, using that stub's own concrete
+  return type as the annotation. Lower structural risk than BUG-36/
+  87 (touches an existing, already-understood resolution pass rather
+  than a wholly new subsystem or sensitive async internals), but
+  still touches the generics pipeline, so deserves its own focused
+  session rather than a rushed bolt-on on top of BUG-91's change.
+  Repro (fails on both backends):
+  ```
+  fn foo1<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn foo2<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn main() -> i64 {
+    let r1: i64 = match foo1(7) {
+      Option.Some(x) then x,
+      Option.None then -1,
+    };
+    let r2: i64 = match foo2(true) {
+      Option.Some(x) then 1,
+      Option.None then -1,
+    };
+    print r1;
+    print r2;
+    return 0;
+  }
+  ```
+  No regression test added (nothing to assert as passing); the repro
+  above is preserved here for whoever fixes it.
 
 ---
 
