@@ -1397,3 +1397,12 @@ Fix attempt: `tools/localfuzz/findings/20260804-064233-backend-divergence-d14882
 }
 
 കാര്യ
+
+---
+
+### Candidate: 20260804-065950-backend-divergence-e24b934c3c
+
+Repro: `tools/localfuzz/findings/20260804-065950-backend-divergence-e24b934c3c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-065950-backend-divergence-e24b934c3c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

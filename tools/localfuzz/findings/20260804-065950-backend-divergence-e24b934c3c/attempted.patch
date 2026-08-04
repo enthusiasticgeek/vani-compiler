@@ -1,0 +1,10 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -100,7 +100,7 @@ fn drop_box<T>(b: Box<T>) {
+     let ptr = &*b as *const _;
+     let size = std::mem::size_of::<T>();
+     let align = std::mem::align_of::<T>();
+-    __rust_free(ptr as *mut u8, size, align);
++    // Ensure the destructor is called in the correct order
++    drop(__rust_free(ptr as *mut u8, size, align));
+ }

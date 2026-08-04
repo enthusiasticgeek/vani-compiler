@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/swedish/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Box<Vec<i64>> skapad\nV\u00e4ska skapad\nBox<OwnedStr> skapad\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2522637-1785826789629016298.ll:617:10: error: expected '=' after name\n%Struct_V\u00e4ska = type { %intent_vec_i64* }\n\n",
+    "timed_out": false
+  }
+}
