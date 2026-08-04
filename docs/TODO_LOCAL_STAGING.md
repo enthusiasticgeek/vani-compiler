@@ -1663,3 +1663,54 @@ Repro: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-094523-backend-divergence-f5f8ca2a3b
+
+Repro: `tools/localfuzz/findings/20260804-094523-backend-divergence-f5f8ca2a3b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-094523-backend-divergence-f5f8ca2a3b/fix_attempt.md`
+
+BASE CORPUS:
+/home/virgo/source/vani-compiler-localfuzz/examples/language/persian/option_types.vani
+
+GENERATED SOURCE:
+```vani
+// vani-lang: persian
+هدف "Persian Option types smoke-test";
+شمارش Opt { Some(i64), None }
+تابع نتیجه(o: Opt, k: i64) -> i64 {
+  بازگشت تطبیق o {
+    Opt.Some(v) سپس v,
+    Opt.None    سپس k,
+  };
+}
+تابع موجود(o: Opt) -> i64 {
+  بازگشت تطبیق o {
+    Opt.Some(v) سپس 1,
+    Opt.None    سپس 0,
+  };
+}
+تابع main() -> i64 {
+  فرض a: Opt = Opt.Some(42);
+  فرض b: Opt = Opt.None;
+  فرض x: i64 = نتیجه(a, 0);
+  فرض y: i64 = نتیجه(b, 100);
+  ادعا x == 42;
+  ادعا موجود(a) == 1;
+  ادعا موجود(b) == 0;
+  چاپ "Persian option types OK";
+  بازگشت 0;
+}
+```
+
+FINDING KIND: backend-divergence
+
+RAW RESULT DATA:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "cc failed while compiling '/tmp/vanic-candidate-2723092-1785836721983330579.c' (left at this path for debugging):\n/tmp/vanic-candidate-2723092
