@@ -2150,3 +2150,40 @@ Repro: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/r
 Fix attempt: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-213005-backend-divergence-deb22ec24a
+
+Repro: `tools/localfuzz/findings/20260804-213005-backend-divergence-deb22ec24a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-213005-backend-divergence-deb22ec24a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler local staging log shows that running the mutant `for_loops.vani` with LLVM and C backends diverged in terms of output. The LLVM backend produced a successful compilation and execution, while the C backend encountered an error due to an integer constant not having an integer type.
+
+The exact reproduction source for the crash is:
+
+```vani
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/for_loops.vani              # LLVM
+//   vanic run examples/language/korean/for_loops.vani --backend=c  # C
+
+목적 "Korean for-loop smoke-test";
+
+함수 main() -> i64 {
+  정의 합계: f64 = 0;
+  각각 i 에서 1 까지 6 {
+    합계 = 합계 + i;
+  }
+  출력 "Korean for-loops OK", 합계;
+  반환 0;
+}
+
+```
+
+The observed symptom was a crash of the C backend, with an error message indicating that an integer constant did not have an integer type.
+
+This staging entry indicates that further investigation is needed to identify the root cause of this divergence between the LLVM and C backends.
