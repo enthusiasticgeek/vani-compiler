@@ -1257,3 +1257,53 @@ Repro: `tools/localfuzz/findings/20260804-035315-backend-divergence-12228864d3/r
 Fix attempt: `tools/localfuzz/findings/20260804-035315-backend-divergence-12228864d3/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-044445-backend-divergence-76db9d72d9
+
+Repro: `tools/localfuzz/findings/20260804-044445-backend-divergence-76db9d72d9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-044445-backend-divergence-76db9d72d9/fix_attempt.md`
+
+### Staging Entry
+
+**Date:** [Insert Date]
+
+**Time:** [Insert Time]
+
+**Author:** [Your Name]
+
+#### Report Title: Vani Compiler Crash in Local Fuzzing with Mixed SIMD Struct Field
+
+**Description:**
+A vani compiler process was encountered a crash during local fuzzing with the mutation test case provided. The generated code contained an error related to an invalid struct member reference.
+
+**Mutant Source:**
+
+```vani
+struct SimdPair { a: vec128<f32>, b: vec128<f32> }
+fn main() -> i64 {
+  let p: SimdPair = SimdPair {
+    a: simd_splat(1.0 as f32),
+    b: simd_splat(2.0 as f32),
+  };
+  let c: vec128<f32> = simd_add(p.a, p.b);
+  let s: f32 = simd_reduce_add(c) + 0;
+  return s as i64;
+}
+```
+
+**Observed Symptom:**
+A crash occurred during the compilation of the generated code. The error message in the log indicates a `cc` failure due to an invalid struct member reference.
+
+**Root Cause:**
+The mutation test case used in the local fuzzing process attempted to access a non-existent struct member named `a` or `b`. This was not correctly handled by the vani compiler during the compilation phase, leading to a crash.
+
+**Backend Affected:**
+This issue affects all backends (LLVM and Clang) that are part of the vani compiler suite.
+
+**Status: ** needs human/frontier root-cause review.
+
+---
+
+Please provide any additional details or context that may be helpful in understanding this bug report further.

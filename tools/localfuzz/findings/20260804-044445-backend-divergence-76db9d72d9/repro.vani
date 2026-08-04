@@ -1,0 +1,10 @@
+struct SimdPair { a: vec128<f32>, b: vec128<f32> }
+fn main() -> i64 {
+  let p: SimdPair = SimdPair {
+    a: simd_splat(1.0 as f32),
+    b: simd_splat(2.0 as f32),
+  };
+  let c: vec128<f32> = simd_add(p.a, p.b);
+  let s: f32 = simd_reduce_add(c) + 0;
+  return s as i64;
+}
