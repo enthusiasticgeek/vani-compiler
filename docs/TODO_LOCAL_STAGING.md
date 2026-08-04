@@ -1553,3 +1553,63 @@ Repro: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/r
 Fix attempt: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-080606-backend-divergence-1638c78b83
+
+Repro: `tools/localfuzz/findings/20260804-080606-backend-divergence-1638c78b83/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-080606-backend-divergence-1638c78b83/fix_attempt.md`
+
+**Staging Entry**
+
+---
+
+**Base Corpus File: /home/virgo/source/vani-compiler-localfuzz/examples/language/swahili/option_types.vani**
+
+**Mutant/generated source:**
+```vani
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/option_types.vani              # LLVM
+//   vanic run examples/language/swahili/option_types.vani --backend=c  # C
+
+
+orodha Opt { Some(i64), None }
+
+kazi fungua_au(o: Opt, kawaida: i64) -> i64 {
+  rudi linganisha o {
+    Opt.Some(v) kisha v,
+    Opt.None    kisha kawaida,
+  };
+}
+
+kazi kuna_some(o: Opt) -> i64 {
+  rudi linganisha o {
+    Opt.Some(v) kisha 1,
+    Opt.None    kisha -9223372036854775808,
+  };
+}
+
+kazi main() -> i64 {
+  acha a: Opt = Opt.Some(42);
+  acha b: Opt = Opt.None;
+
+  acha x: i64 = fungua_au(a, 0);
+  acha y: i64 = fungua_au(b, 100);
+
+  thibitisha x == 42;
+  thibitisha y == 100;
+  thibitisha kuna_some(a) == 1;
+  thibitisha kuna_some(b) == 0;
+
+  chapisha "Some(42) imefunguliwa =", x;
+  chapisha "None kawaida 100 =", y;
+  rudi 0;
+}
+
+```
+
+**Finding kind: backend-divergence**
+**

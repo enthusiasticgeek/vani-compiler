@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/swahili/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2600976-1785830765326338194: /tmp/vanic-candidate-2600976-1785830765326338194.c:339: fn_main: Assertion `(fn_kuna_some(v_b) == 0)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
