@@ -226,6 +226,100 @@ running (`./start.sh` first, or `ollama serve &` manually):
 python3 tools/localfuzz/harness.py --once
 ```
 
+## Staying current with `main` (`refresh.sh`)
+
+This worktree's `vanic` binary does NOT update itself just because
+`main` moves -- and `main` moves on its own even without you touching
+it, since a separate automated process also lands bugfixes there (see
+`docs/TODO_CURRENT.md`'s BUG-NN history and CHANGELOG.md). Confirmed
+2026-08-04: this worktree's binary was 2 days / 25 bugfix commits
+stale, and ~19 of 84 accumulated findings turned out to be bugs
+already fixed on `main` (BUG-76, BUG-88) -- the harness was silently
+re-discovering dead bugs instead of finding new ones.
+
+`refresh.sh` fixes this: stops the harness, merges `main` into
+`local-fuzz-findings`, `cargo build --release`s, restarts. Safe to run
+unattended -- refuses to touch a dirty worktree (except the two
+permanently-locally-modified allowlist configs), aborts and restores
+the prior state on a merge conflict or if no binary results, never
+force-pushes or touches `main`.
+
+```bash
+tools/localfuzz/refresh.sh                          # by hand, anytime
+journalctl --user -u vani-localfuzz-refresh -f       # if run via the timer below
+```
+
+Wired to a nightly `systemd --user` timer
+(`~/.config/systemd/user/vani-localfuzz-refresh.timer`, 03:00 by
+default) plus a second timer for the digest below
+(`vani-localfuzz-digest.timer`, 06:00 -- offset 3h later so the
+harness has had time to generate findings against the FRESH binary
+before they're summarized). Both are `Persistent=true` (catches up if
+the machine was off at the scheduled time) but only fire while this
+user's systemd instance is running -- if you log out entirely between
+runs, either accept that gap or `loginctl enable-linger $USER` so your
+user services (including these) keep running unattended. Enable with:
+
+```bash
+systemctl --user enable --now vani-localfuzz-refresh.timer vani-localfuzz-digest.timer
+systemctl --user list-timers 'vani-localfuzz*'   # confirm next-run times
+```
+
+## Deduped digest (`digest.py`)
+
+84 raw `findings/*/finding.json` files don't scale for a human or a
+model to read one at a time -- most cluster into a handful of distinct
+root causes. `digest.py` groups findings by a mechanical signature
+(exit codes, timeout flags, coarse stderr classification), cross-checks
+each cluster's stderr keywords against `main`'s current
+`docs/TODO_CURRENT.md`/`CHANGELOG.md` (via `git show main:<path>`,
+read-only through the shared `.git` dir, no working-tree access needed)
+to flag "possible match: BUG-N" clusters, and writes a compact
+`DIGEST_LATEST.md`. Tracks what it's already reported in
+`.digest_state.json`, so a bare re-run only surfaces genuinely NEW
+findings since the last digest:
+
+```bash
+python3 tools/localfuzz/digest.py          # only new findings since last run
+python3 tools/localfuzz/digest.py --all    # full re-scan (doesn't reset the "seen" marker)
+```
+
+Auto-commits its own output to `local-fuzz-findings`, same convention
+as the harness's own finding commits.
+
+## Handoff to a frontier model (nightly pipeline, human-gated)
+
+The full pipeline, in order: **fuzz continuously (harness.py) -> nightly
+refresh (main merge + rebuild, 03:00) -> nightly digest (deduped +
+already-fixed-checked, 06:00) -> human/Claude review, on demand.**
+
+The first three stages are safe to run fully unattended (mechanical,
+bounded, never touch `main`, never apply anything unreviewed). The last
+stage is deliberately NOT automated further -- e.g. an autonomous nightly
+agent that reproduces, root-causes, fixes, tests, AND commits/pushes to
+`main` with no human in the loop is a different risk tier than anything
+else in this tool. This project's own history has examples of a
+validated-looking fix later needing a follow-up regression fix (see
+BUG-31's history) -- auto-merging compiler changes unsupervised risks
+silently breaking the compiler for everyone. When you (or a Claude Code
+session) have time/tokens available:
+
+```bash
+cd ../vani-compiler-localfuzz
+cat tools/localfuzz/DIGEST_LATEST.md
+```
+
+For each cluster NOT flagged "possible match: BUG-N": reproduce against
+a freshly-refreshed `main` build (not this worktree's binary) yourself,
+root-cause it properly, and only then write a real `BUG-N` entry into
+`docs/TODO_CURRENT.md` on `main` -- same rigor as every other bug in
+this project. If you want MORE automation than "read the digest by
+hand," the `schedule` skill (Claude Code) can run a bounded nightly
+agent that reads `DIGEST_LATEST.md` and drafts (never commits) a
+root-cause writeup for unmatched clusters -- worth setting up once this
+digest has run for a few days and you've seen what its signal-to-noise
+actually looks like.
+
 ## Reviewing / promoting findings
 
 Nothing here is trusted automatically. Periodically:
