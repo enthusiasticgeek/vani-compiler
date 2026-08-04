@@ -1426,3 +1426,62 @@ Fix attempt: `tools/localfuzz/findings/20260804-071117-backend-divergence-7a2610
 STATUS: needs human/frontier root-cause review.
 
 This mutation causes a backend-divergence issue in the vani-compiler project's C backend, specifically in the `funkce rozbalit_nebo` function. The observed symptom is that the function fails to correctly handle enums when using the LLVM backend, leading to divergent outputs with the `Opt.None` case.
+
+---
+
+### Candidate: 20260804-073110-backend-divergence-e33a4476a2
+
+Repro: `tools/localfuzz/findings/20260804-073110-backend-divergence-e33a4476a2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-073110-backend-divergence-e33a4476a2/fix_attempt.md`
+
+**STAGING ENTRY**
+
+### Summary
+
+The C backend of the vani-compiler encountered a backend-divergence issue when processing the provided vani-language control flow example. The LLVM backend completed successfully, whereas the C backend resulted in a compilation error due to an integer constant having an incorrect type.
+
+### Run Details
+
+- **Base Corpus File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/danish/control_flow.vani`
+  
+- **Mutant/Generated Source**:
+  ```vani
+  // vani-lang: danish
+  //
+  // build & run:
+  //   vanic run examples/language/danish/control_flow.vani              # LLVM
+  //   vanic run examples/language/danish/control_flow.vani --backend=c  # C
+
+  formaal "Danish control flow — hvis/ellers/mens";
+
+  funktion tegn(n: f64) -> i64 {
+    hvis n > 0 {
+      returner 1;
+    } ellers hvis n < 0 {
+      returner -1;
+    } ellers {
+      returner 0;
+    }
+  }
+
+  funktion nedtaelling(fra_n: i64) -> i64 {
+    lad i: i64 = fra_n;
+    lad sum: i64 = 0;
+    mens i > 0 {
+      sum = sum + i;
+      i = i - 1;
+    }
+    returner sum;
+  }
+
+  fn main() -> i64 {
+    bekraeft tegn(5)  == 1;
+    bekraeft tegn(-3) == -1;
+    bekraeft tegn(0)  == 0;
+    bekraeft nedtaelling(4) == 10;
+    udskriv "tegn og nedtaelling ok";
+    returner 0;
+  }
+  ```
+
+

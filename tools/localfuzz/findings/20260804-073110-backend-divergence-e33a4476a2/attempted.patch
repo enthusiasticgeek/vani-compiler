@@ -1,0 +1,13 @@
+--- a/src/backend_llvm.rs
++++ b/src/backend_llvm.rs
+@@ -259,7 +259,7 @@ fn gen_truncate(i: i64) -> i32 {
+     let c = gen_int_value(n);
+     let res = builder.gen_fadd(f32_ty(), f64_const(c), "v");
+     returner(builder.build_return(res, None));
+-  }
++  } else {
++    returner(builder.build_return(llvm_const(-1.0), None));
+   }
+ }
+
+ fn gen_int_value(n: i64) -> f64 {
