@@ -1544,3 +1544,12 @@ Raw result data:
     "rc": 1,
     "stdout": "",
     "stderr": "vanic-candidate-2582133-1785829504148387617: /tmp/vanic-candidate-2582133-17858
+
+---
+
+### Candidate: 20260804-075629-backend-divergence-3fd375b0c4
+
+Repro: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/english/concurrency.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "cc failed while compiling '/tmp/vanic-candidate-2592483-1785830188107161901.c' (left at this path for debugging):\n/tmp/vanic-candidate-2592483-1785830188107161901.c: In function \u2018fn_double_in_place\u2019:\n/tmp/vanic-candidate-2592483-1785830188107161901.c:289:9: error: implicit declaration of function \u2018intent_guard_i64_get\u2019; did you mean \u2018intent_guard_int64_t_get\u2019? [-Wimplicit-function-declaration]\n  289 |   v_3 = intent_guard_i64_get(v_2);\n      |         ^~~~~~~~~~~~~~~~~~~~\n      |         intent_guard_int64_t_get\n/tmp/vanic-candidate-2592483-1785830188107161901.c:292:9: error: implicit declaration of function \u2018intent_guard_i64_set\u2019; did you mean \u2018intent_guard_int64_t_set\u2019? [-Wimplicit-function-declaration]\n  292 |   v_6 = intent_guard_i64_set(v_5, v_4);\n      |         ^~~~~~~~~~~~~~~~~~~~\n      |         intent_guard_int64_t_set\n/tmp/vanic-candidate-2592483-1785830188107161901.c: In function \u2018fn_main\u2019:\n/tmp/vanic-candidate-2592483-1785830188107161901.c:372:10: error: implicit declaration of function \u2018intent_mutex_i64_new\u2019; did you mean \u2018intent_mutex_i64_lock\u2019? [-Wimplicit-function-declaration]\n  372 |   v_26 = intent_mutex_i64_new((int64_t)3LL);\n      |          ^~~~~~~~~~~~~~~~~~~~\n      |          intent_mutex_i64_lock\n/tmp/vanic-candidate-2592483-1785830188107161901.c:372:10: error: incompatible types when assigning to type \u2018intent_mutex_i64\u2019 {aka \u2018intent_mutex_int64_t\u2019} from type \u2018int\u2019\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "7\n11\n22\n33\n6\n12\n50\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}
