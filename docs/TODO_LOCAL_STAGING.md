@@ -1354,3 +1354,46 @@ Repro: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/r
 Fix attempt: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-064233-backend-divergence-d14882510a
+
+Repro: `tools/localfuzz/findings/20260804-064233-backend-divergence-d14882510a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-064233-backend-divergence-d14882510a/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+**COMPILER REPRODUCE SOURCE:**
+
+```vani
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/malayalam/option_types.vani              # LLVM
+
+ഉദ്ദേശ്യം "Payloaded enums via Option<i64>";
+ഉദ्दേശ്യം "Payloaded enums via Option<i64>";
+
+// `എണ്ണൽ` = enum, `പൊരുത്തപ്പെടുത്തുക` = match, `പിന്നെ` = then
+
+എണ്ണൽ Opt { Some(i64), None }
+
+കാര്യം unwrap_or(o: Opt, def: i64) -> i64 {
+  തിരികെ പൊരുത്തപ്പെടുത്തുக o {
+    Opt.Some(v) പിന്നെ v,
+    Opt.None    പിന്നെ def,
+  };
+}
+
+കാര്യം is_some(o: Opt) -> i64 {
+  തിരികെ പൊരുത്തപ്പെടുത്തുക o {
+    Opt.Some(v) പിന്നെ 1,
+    Opt.None    പിന്നെ 0,
+  };
+}
+
+കാര്യ
