@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/punjabi_shahmukhi/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Punjabi Shahmukhi box recursive drop OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2361792-1785815050059458061.ll:3369:8: error: expected '=' after instruction name\n  %t29.\u062a\u06be\u06cc\u0644\u0627.addr = alloca %Struct_Bag\n\n",
+    "timed_out": false
+  }
+}

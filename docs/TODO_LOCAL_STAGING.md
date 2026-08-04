@@ -1239,3 +1239,12 @@ Running a test case on finnish async/await code:
 
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260804-034411-backend-divergence-d216d5dfa0
+
+Repro: `tools/localfuzz/findings/20260804-034411-backend-divergence-d216d5dfa0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-034411-backend-divergence-d216d5dfa0/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
