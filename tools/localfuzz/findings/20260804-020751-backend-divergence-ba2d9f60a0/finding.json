@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/danish/option_types.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2226387-1785809270479159509: /tmp/vanic-candidate-2226387-1785809270479159509.c:338: fn_main: Assertion `(v_x == 0)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
