@@ -1000,3 +1000,60 @@ A backend-divergence issue was encountered in the vani-compiler when running a s
 The raw result data shows the divergent behavior between LLVM and C backends. The LLVM backend ran successfully, but the C backend crashed due to an expected error that occurred at line 1945 of a generated LLVM IR file.
 
 **Status:** needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-001040-backend-divergence-bdea3d50d8
+
+Repro: `tools/localfuzz/findings/20260804-001040-backend-divergence-bdea3d50d8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-001040-backend-divergence-bdea3d50d8/fix_attempt.md`
+
+**Staging Entry:**
+
+---
+
+### **vani-compiler Local Fuzzing Staging Log**
+
+#### **Mutant ID:** 2051886
+
+#### **Test Case Details:**
+- **Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/hindi/iterate.vani`
+- **Fuzzer Command:** `vanic run examples/language/english/iterate.vani --backend=c`
+
+#### **Observe Symptom:**
+- The fuzzer encountered a backend-divergence issue, as indicated by the "Assertion failed" message in the log.
+
+#### **Raw Result Data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2051886-1785802239147230624: /tmp/vanic-candidate-2051886-1785802239147230624.c:1001: fn_main: Assertion `(v_total == 15)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
+#### **Affects Backends:**
+- The bug was observed in both the C backend (`c`) and LLVM backend (`llvm`).
+
+#### **Status:** needs human/frontier root-cause review.
+
+---
+
+---
+
+### **vani-compiler Local Fuzzing Staging Log**
+
+#### **Mutant ID:** 2051886
+
+#### **Test Case Details:**
+- **Corpus File:** `/home/virgo/source/vani-compiler-localf
