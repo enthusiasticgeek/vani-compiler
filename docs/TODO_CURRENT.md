@@ -7658,7 +7658,7 @@ through BUG-104) are now fixed and shipped, alongside the separate
 BUG-36 documentation reconciliation from earlier the same day. No
 further open items from this pass.
 
-## localfuzz sweep (2026-08-04)
+## localfuzz sweep (2026-08-04) -- FIXED, shipped commit 79dc457
 
 `tools/localfuzz/` runs continuously in a separate worktree
 (`/home/virgo/source/vani-compiler-localfuzz`, branch

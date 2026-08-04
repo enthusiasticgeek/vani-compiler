@@ -164,14 +164,18 @@ code alone**. If one segfaults, the cause is in linked C
 The structural guarantees above leave a small, well-named
 set of *logic-class* checks the compiler emits at runtime
 when SMT can't discharge them statically. When one fails,
-the program calls `abort()` -- a clean, deterministic, named
-termination, NOT undefined behavior.
+the program terminates via one of two clean, deterministic,
+named paths -- NOT undefined behavior. `assert` failures call
+`exit(3)` directly; every other row below calls libc's
+`abort()`. (`assert` used to also call `abort()`, but that let
+`vanic run`'s LLVM JIT occasionally misreport a failed assert
+as an apparent native crash -- see the note after the table.)
 
-### What can abort
+### What can abort (or exit)
 
-| Trigger | Source-level operation | What the abort prints |
+| Trigger | Source-level operation | What it prints |
 |---|---|---|
-| `assert(p)` fires with `p == false` | Any `assert ...;` | `"assertion failed: <expr> at <file>:<line>"` |
+| `assert(p)` fires with `p == false` | Any `assert ...;` | `"assertion failed: <expr> at <file>:<line>"`, then `exit(3)` (not `abort()`) |
 | `prove(p)` fires (strict assert) | Any `prove ...;` | `"prove failed: <expr> at <file>:<line>"` |
 | `requires` fails at function entry | Any function call where SMT couldn't prove the pre-condition | `"precondition failed: <expr> on call to <fn>"` |
 | `ensures` fails at function return | Any function return where SMT couldn't prove the post-condition | `"postcondition failed: <expr> in <fn>"` |
@@ -191,14 +195,19 @@ When one of the conditions above fires:
 
 1. The compiler-emitted check prints the diagnostic to
    stderr.
-2. `abort()` from libc is called (POSIX `SIGABRT`; on
-   Windows, `_exit(3)`).
+2. For everything except a failed `assert`: `abort()` from
+   libc is called (POSIX `SIGABRT`; on Windows, `_exit(3)`).
+   A failed `assert` instead calls `exit(3)` directly, on
+   both backends -- deliberately skipping the signal-based
+   path so `vanic run`'s LLVM JIT can't misreport it as an
+   apparent native crash.
 3. The process terminates immediately. No destructors run.
    No `finally` blocks. No cleanup beyond what the OS does
    on process exit.
-4. The exit code is platform-conventional (typically
-   non-zero; on POSIX, a signal-terminated process exits
-   with `128 + SIGABRT = 134`).
+4. The exit code is platform-conventional: a failed `assert`
+   always exits with code `3`; everything else that calls
+   `abort()` is signal-terminated, exiting with
+   `128 + SIGABRT = 134` on POSIX.
 
 This is **graceful in the diagnostic sense** -- a named,
 deterministic event with a printable cause -- but **terminal
@@ -392,8 +401,10 @@ per build.
 
 ## Row 5: what graceful abort looks like at runtime
 
-When you DO hit a `requires` / `assert` / unprovable bounds
-check in production, what the user sees:
+When you DO hit a `requires` / unprovable bounds check in
+production, what the user sees (a failed `assert` looks the
+same on stdout/stderr, but exits with code `3` instead of
+`134` -- see the note in "Row 2" above):
 
 ```
 $ ./my_program
@@ -597,11 +608,12 @@ named contract."
   hosted vāṇी. Affine ownership + bounds checks + no raw
   pointers + scope-escape analysis remove the surface.
 - **Logic-class crashes** are **compile-time when SMT can
-  prove**; otherwise a clean named `abort()` at the
-  operation with a diagnostic. The abort surface is small
-  and named: assert / prove / requires / ensures /
-  invariant / index OOB / overflow / div-by-zero / shift
-  past width.
+  prove**; otherwise a clean, named termination at the
+  operation with a diagnostic (`abort()` for everything
+  except `assert`, which uses `exit(3)` -- see "Row 2"
+  above). The surface is small and named: assert / prove /
+  requires / ensures / invariant / index OOB / overflow /
+  div-by-zero / shift past width.
 - **Recoverable failures** are always values -- `Result<T, E>`
   / `Option<T>` propagated via `?` / `try`. No exceptions,
   no unwinding, no "uncaught exception" surprise.

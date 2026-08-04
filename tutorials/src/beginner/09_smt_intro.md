@@ -186,9 +186,9 @@ fn main() -> i64 {
 
 To prove the `assert n + 1 > n;` is discharged, run
 `vanic emit ~/lesson9.vani --backend=c` and grep the C output
-for the inner assert -- you'll find no `if (...) abort()` for
-the `n + 1 > n` predicate. That's the SMT-elision pass in
-action.
+for the inner assert -- you'll find no runtime check (no
+`VANIC_ASSERT(...)`, no `if (...) exit(3)`) for the
+`n + 1 > n` predicate. That's the SMT-elision pass in action.
 
 </details>
 
