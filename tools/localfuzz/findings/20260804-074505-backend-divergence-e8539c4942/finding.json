@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/spanish/try_question_op.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2582133-1785829504148387617: /tmp/vanic-candidate-2582133-1785829504148387617.c:344: fn_main: Assertion `(fn_unwrap_or(v_a, 0) == 10)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}

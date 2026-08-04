@@ -1,0 +1,6 @@
+--- a/src/backend_llvm.rs
++++ b/src/backend_llvm.rs
+@@ -123,7 +123,8 @@ fn fn_unwrap_or(o: Opt, def: i64) -> i64 {
+         Opt.None    then def,
+     }
+ }

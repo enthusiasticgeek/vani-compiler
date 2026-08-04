@@ -1485,3 +1485,62 @@ The C backend of the vani-compiler encountered a backend-divergence issue when p
   ```
 
 
+
+---
+
+### Candidate: 20260804-074505-backend-divergence-e8539c4942
+
+Repro: `tools/localfuzz/findings/20260804-074505-backend-divergence-e8539c4942/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-074505-backend-divergence-e8539c4942/fix_attempt.md`
+
+STAGING ENTRY:
+```
+Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/spanish/try_question_op.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/try_question_op.vani              # LLVM
+//   vanic run examples/language/spanish/try_question_op.vani --backend=c  # C
+
+intención "Postfix ? early-return sugar on payloaded enums";
+
+enumeración Opt { Some(i64), None }
+
+función doubled_q(o: Opt) -> Opt {
+  let v: i64 = o?;
+  return Opt.Some(v * 2);
+}
+
+función unwrap_or(o: Opt, def: i64) -> i64 {
+  return match o {
+    Opt.Some(v) then v,
+    Opt.None    then def,
+  };
+}
+
+función main() -> i64 {
+  let a: Opt = doubled_q(Opt.Some(-1));
+  assert unwrap_or(a, 0) == 10;
+
+  let b: Opt = doubled_q(Opt.None);
+  assert unwrap_or(b, 99) == 99;
+
+  print "Some(5)? doubled =", unwrap_or(a, 0);
+  print "None? defaulted to", unwrap_or(b, 99);
+  return 0;
+}
+
+```
+
+Finding kind: backend-divergence
+Raw result data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "vanic-candidate-2582133-1785829504148387617: /tmp/vanic-candidate-2582133-17858
