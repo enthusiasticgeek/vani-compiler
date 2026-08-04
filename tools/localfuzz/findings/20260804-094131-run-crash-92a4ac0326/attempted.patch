@@ -1,0 +1,16 @@
+diff --git a/src/backend_llvm.rs b/src/backend_llvm.rs
+--- a/src/backend_llvm.rs
++++ b/src/backend_llvm.rs
+@@ -300,7 +300,9 @@ fn run_main(self) -> Result<(), Error> {
+         n = n - 9223372036854775808;
+     }
+ 
+-    // Infinite loop condition
++    if n >= 0 {
++        n = n - 9223372036854775808;
++    } else {
++        break; // Terminate the loop if n becomes negative
++    }
+ 
+     Ok(())
+ }

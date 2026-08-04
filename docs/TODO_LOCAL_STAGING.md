@@ -1654,3 +1654,12 @@ STAGING ENTRY:
 //   vanic run examples/language/english/async_cancel_auto.vani --backend=c    # C
 
 intent "A4.4 — CancelToken auto-plumbing
+
+---
+
+### Candidate: 20260804-094131-run-crash-92a4ac0326
+
+Repro: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
