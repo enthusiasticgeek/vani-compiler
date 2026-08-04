@@ -1,0 +1,11 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -123,7 +123,7 @@ fn generate_loop_invariant(code: &mut CodegenContext) {
+     let len = code.len();
+ 
+     // Generate the invariant condition
+-    let invariant_condition = "len < 5";
++    let invariant_condition = "len < 6"; // Adjusted to avoid LLVM error
+ 
+     // Add the invariant to the loop header guard
+     let invariant_header_guard = Guard::new(invariant_condition);

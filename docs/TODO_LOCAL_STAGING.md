@@ -1820,3 +1820,12 @@ STAGING ENTRY FOR BUG REPORT:
 ---
 
 Please note that this staging entry does not provide enough information to determine the exact cause of the crash and requires a human or frontier model for root-cause analysis.
+
+---
+
+### Candidate: 20260804-121128-backend-divergence-37b3466abe
+
+Repro: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.

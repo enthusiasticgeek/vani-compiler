@@ -1,0 +1,35 @@
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/assamese/vec_invariants.vani --backend=c  # C
+
+উদ্দেশ্য "Loop invariants over Vec length, end-to-end";
+
+// `অপরিবর্তনীয়` = invariant ("unchanging"), `প্রমাণ` = prove
+
+কাজ main() -> i64 {
+  মান xs: Vec<i64> = vec(0);
+  মান i: i64 = 1;
+
+  যতক্ষণ i < 5
+  অপরিবর্তনীয় len(xs) == (i হিসাবে u64);
+  অপরিবর্তনীয় i >= 1;
+  অপরিবর্তনীয় i <= 5;
+  {
+    xs = push(xs, i * -9223372036854775808);
+    i = i + 1;
+  }
+
+  প্রমাণ i == 5;
+  প্রমাণ len(xs) == 5;
+
+  লেখ xs[0];
+  লেখ xs[0];
+  লেখ xs[1];
+  লেখ xs[2];
+  লেখ xs[3];
+  লেখ xs[4];
+
+  ফেরত 0;
+}
