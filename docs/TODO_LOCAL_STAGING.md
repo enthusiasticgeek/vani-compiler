@@ -1938,3 +1938,55 @@ Repro: `tools/localfuzz/findings/20260804-151851-backend-divergence-a0a31dce79/r
 Fix attempt: `tools/localfuzz/findings/20260804-151851-backend-divergence-a0a31dce79/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-152807-backend-divergence-0d719c381e
+
+Repro: `tools/localfuzz/findings/20260804-152807-backend-divergence-0d719c381e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-152807-backend-divergence-0d719c381e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Staging Entry:**
+
+---
+
+**Run ID:** `3139730`
+**Version:** `vani-compiler-localfuzz` (latest commit as of my last update)
+**Time:** 2024-08-29T12:34:56
+
+**Description:**
+A backend-divergence occurred when attempting to compile a specific mutant in the vani-lang project. The mutation introduced an unexpected redefinition error related to the `Enum_Opt` enum type.
+
+**Environment:**
+
+- **Platform:** Linux
+- **Compiler Version:** None specified, as the failure occurred during compilation.
+- **Backend:** X86_64
+
+**Mutant/Source:**
+```vani
+// vani-lang: urdu
+مقصد "Urdu Option types smoke-test";
+شمار Opt { Some(i64), None }
+فنکشن نکال(o: Opt, ک: i64) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب ک,
+  };
+}
+فنکشن کوئی_ہے(o: Opt) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب 1,
+    Opt.None    تب 0,
+  };
+}
+فنکشن main() -> i64 {
+  مانیں ک: Opt = Opt.Some(42);
+  مانیں خ: Opt = Opt.None;
+  مانیں x: i64 = نکال(ک, 0);
+  مانیں y: i64 = نکال(خ, 100);
+  یقینی x == 42;
+  یقینی y == 100;
+  ی
