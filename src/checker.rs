@@ -742,16 +742,29 @@ fn check_impl(
     // Must run before the validation loop below, because that
     // loop calls `field.ty.is_copy()` to decide whether the
     // field type is acceptable. T1.2 phase 2b + T2.7 phase 2.
+    //
+    // BUG-96 follow-up (task #39, 2026-08-03): structs and enums
+    // are registered together in ONE fixed-point loop, not two
+    // separate passes. A struct's Copy-ness can depend on an
+    // enum-typed field's payload (`Option<Box<Node>>`), and an
+    // enum's Copy-ness can equally depend on a struct-typed
+    // payload — running "all structs" then "all enums" as two
+    // one-shot passes meant an enum whose payload is a Box (or a
+    // struct containing one) was never seen by the struct pass in
+    // time: `enum_has_non_copy_payload` was still empty when
+    // structs were checked, so a struct like `Node { next:
+    // Option<Box<Node>> }` was silently treated as Copy — no
+    // scope-exit Drop was EVER emitted for it (not even for the
+    // Box's own malloc'd slot), a straightforward heap leak on
+    // every recursively-boxed struct. Same "sibling/parallel walk
+    // needs a shared fixed point" root-cause family as the
+    // generics-monomorphization worklist bugs (BUG-90/93/95).
     {
         let mut non_copy: Vec<String> = Vec::new();
-        // Fixed-point iteration so nested-struct fields
-        // propagate the non-Copy flag: a struct that
-        // contains an already-marked struct field becomes
-        // non-Copy itself. Without this, source order
-        // would determine whether `Outer { inner: Inner }`
-        // (with Inner non-Copy) is marked.
+        let mut non_copy_enums: Vec<String> = Vec::new();
         loop {
             crate::ast::set_non_copy_structs(non_copy.clone());
+            crate::ast::set_non_copy_enums(non_copy_enums.clone());
             let mut changed = false;
             for decl in &program.structs {
                 if non_copy.iter().any(|n| n == &decl.name) {
@@ -759,6 +772,26 @@ fn check_impl(
                 }
                 if decl.fields.iter().any(|f| !f.ty.is_copy()) {
                     non_copy.push(decl.name.clone());
+                    changed = true;
+                }
+            }
+            // A payload is non-Copy exactly when `Type::is_copy()`
+            // says so — NOT a hardcoded `OwnedStr | Vec` match.
+            // That hardcoded list (T1.3 vintage) predates `Box<T>`
+            // and every other affine type added since; using
+            // `is_copy()` directly keeps this in sync automatically
+            // as new affine types are added, the same way the
+            // struct-field check above already does.
+            for decl in &program.enums {
+                if non_copy_enums.iter().any(|n| n == &decl.name) {
+                    continue;
+                }
+                let has_non_copy_payload = decl
+                    .variants
+                    .iter()
+                    .any(|v| v.payload.first().map_or(false, |t| !t.is_copy()));
+                if has_non_copy_payload {
+                    non_copy_enums.push(decl.name.clone());
                     changed = true;
                 }
             }
@@ -785,26 +818,47 @@ fn check_impl(
             }
         }
         crate::ast::set_non_copy_structs(non_copy);
+        crate::ast::set_non_copy_enums(non_copy_enums);
     }
-    // Parallel pass: register enums whose payload includes a
-    // heap-shaped type (OwnedStr in v1) so the scope-exit Drop
-    // pass treats them as affine. T1.3 + T1.2 phase 2b.
+    // BUG-97 (task #39, 2026-08-03): detect structs that directly
+    // own a `Box<Self>`, optionally through one layer of single-
+    // payload-per-variant enum wrapping (`Option<Box<Self>>`) — see
+    // `BOX_RECURSIVE_STRUCTS_REGISTRY`'s doc comment in ast.rs for
+    // why these need dedicated iterative-drop codegen instead of
+    // the ordinary inline field-walk.
     {
-        let mut non_copy_enums: Vec<String> = Vec::new();
-        for decl in &program.enums {
-            let has_heap = decl
-                .variants
-                .iter()
-                .any(|v| {
-                    v.payload
-                        .first()
-                        .map_or(false, |t| matches!(t, Type::OwnedStr | Type::Vec(_)))
-                });
-            if has_heap {
-                non_copy_enums.push(decl.name.clone());
+        fn field_is_direct_box_of(
+            field_ty: &Type,
+            target: &str,
+            enums: &[crate::ast::EnumDecl],
+        ) -> bool {
+            match field_ty {
+                Type::Box(inner) => matches!(&**inner, Type::Struct(n) if n == target),
+                Type::Enum(enum_name) => enums
+                    .iter()
+                    .find(|e| &e.name == enum_name)
+                    .map(|decl| {
+                        decl.variants.iter().any(|v| {
+                            v.payload.first().map_or(false, |p| {
+                                matches!(p, Type::Box(inner) if matches!(&**inner, Type::Struct(n) if n == target))
+                            })
+                        })
+                    })
+                    .unwrap_or(false),
+                _ => false,
             }
         }
-        crate::ast::set_non_copy_enums(non_copy_enums);
+        let box_recursive: Vec<String> = program
+            .structs
+            .iter()
+            .filter(|decl| {
+                decl.fields
+                    .iter()
+                    .any(|f| field_is_direct_box_of(&f.ty, &decl.name, &program.enums))
+            })
+            .map(|decl| decl.name.clone())
+            .collect();
+        crate::ast::set_box_recursive_structs(box_recursive);
     }
 
     let mut struct_registry: BTreeMap<String, StructInfo> = BTreeMap::new();
@@ -869,7 +923,14 @@ fn check_impl(
                 // `struct Drawer { r: Box<dyn Renderer> }`. Box
                 // is a single pointer at the machine level; the
                 // outer struct's drop chains into the Box's free.
-                || matches!(&field.ty, Type::Box(_));
+                || matches!(&field.ty, Type::Box(_))
+                // BUG-97 (task #39, 2026-08-03): Enum-typed field
+                // storage — the canonical `next: Option<Box<Node>>`
+                // recursive-struct shape. The enum's own Drop
+                // (tag-switch + per-variant payload free) chains
+                // the same way the nested-struct case above does;
+                // see `emit_enum_value_drop` in each backend.
+                || matches!(&field.ty, Type::Enum(_));
             if !field_allowed {
                 diagnostics.push(Diagnostic::new(
                     field.span,
@@ -877,8 +938,9 @@ fn check_impl(
                         "struct field '{}::{}' has non-Copy type {} â€” \
                          v1 supports Copy types, OwnedStr, Vec<T>, \
                          [T; N] of Copy elements, Task, Atomic<T>, \
-                         Mutex<T>, Channel<T, N>, and Box<T> as struct \
-                         fields; Guard<T> still needs explicit wiring",
+                         Mutex<T>, Channel<T, N>, Box<T>, and enum \
+                         types as struct fields; Guard<T> still needs \
+                         explicit wiring",
                         decl.name, field.name, field.ty
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &field.name)));
@@ -25112,7 +25174,20 @@ fn check_box_builtin(
         | Type::U8 | Type::U16 | Type::U32 | Type::U64
         | Type::F32 | Type::F64
         | Type::Bool => true,
-        Type::Struct(_) => inner_ty.is_copy(),
+        // BUG-97 (task #39, 2026-08-03): previously gated on
+        // `inner_ty.is_copy()`, rejecting any struct with an
+        // owning field (OwnedStr, Vec, Box, non-Copy enum, or a
+        // nested non-Copy struct) — including the canonical
+        // recursive `Node { next: Option<Box<Node>> }` shape the
+        // Box<T>/RAII tutorial itself demonstrates. A struct
+        // reaching this point already passed the struct-decl
+        // field-type allowlist (field_allowed, above), so its own
+        // fields are guaranteed to be one of the shapes both
+        // backends' Drop emission already knows how to walk (see
+        // `emit_struct_field_drops` / its LLVM analog, plus the new
+        // box-recursive-struct iterative-drop helper for the
+        // `Box<Self>` case) — Copy-ness is no longer the right gate.
+        Type::Struct(_) => true,
         // L2 Phase 3 (2026-06-08): Box<dyn Iface>. The inner
         // expression is expected to be a DynCoerce node (the
         // result of `value as dyn Iface`). The C backend

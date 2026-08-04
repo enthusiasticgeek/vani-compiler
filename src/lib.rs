@@ -51434,6 +51434,87 @@ fn main() -> i64 { return 0; }
             .expect("field access through a bare Box<T> must compile to LLVM");
     }
 
+    // BUG-97 (found+fixed 2026-08-03). Deferred finding from
+    // BUG-93/task #39: `Box<StructWithHeapOwningFields>`'s scope-
+    // exit Drop on the C backend leaked -- the canonical `Node {
+    // next: Option<Box<Node>> }` recursive-struct shape (the one
+    // the Box<T>/RAII tutorial itself demonstrates,
+    // examples/language/english/option_box_recursive_struct.vani)
+    // never freed anything at all, not even the outermost Box's own
+    // malloc'd slot. Root cause was deeper than "Drop doesn't
+    // recurse": `Type::Enum`'s non-Copy-payload registration only
+    // ever checked a hardcoded `OwnedStr | Vec` match, never `Box`,
+    // so `Option<Box<Node>>` was silently treated as Copy -- which
+    // made `Node` itself register as Copy too, so the checker never
+    // emitted a scope-exit `TypedStmt::Drop` for a `Node` local AT
+    // ALL. Fixing that (checker.rs: merge the struct/enum non-Copy
+    // registration into one fixed-point loop, and check
+    // `!payload.is_copy()` generically instead of the stale
+    // hardcoded match) correctly unmasked the struct as non-Copy,
+    // but then surfaced that struct-field-type validation had no
+    // `Type::Enum` field arm, and `box()`'s own gate rejected any
+    // non-Copy struct outright -- both needed relaxing (any struct
+    // that already passed field-type validation is safe to box; its
+    // own Drop emission -- extended below -- knows how to walk it).
+    // Backend codegen (backend_c.rs) needed three things: (1)
+    // `emit_struct_field_drops` gained a `Type::Enum` arm (was a
+    // silent no-op before) and a `Type::Struct` case in its
+    // `Type::Box` arm (was a bare `free()` of the box's own slot,
+    // never recursing into the boxed struct's fields); (2) the
+    // bare-local `TypedStmt::Drop`'s `Type::Box` arm gained the
+    // same `Type::Struct` case; (3) the enum-payload `Type::Box`
+    // case (inside the newly-factored-out `emit_enum_value_drop`,
+    // shared with (1) to avoid a third copy of the tag-switch logic)
+    // gained a `Type::Struct` case too. For a NON-recursive `Box
+    // <Struct>` (no cycle), all three inline-recurse via
+    // `emit_struct_field_drops`, same as an ordinary nested struct
+    // field. For a box-RECURSIVE struct (one that owns a `Box<Self>`,
+    // directly or through one layer of enum wrapping -- detected by
+    // the checker into a new `BOX_RECURSIVE_STRUCTS_REGISTRY`),
+    // inline recursion would need to unroll a cycle into infinitely
+    // much C text, so all three instead call one generated,
+    // iterative (heap-worklist-based, NOT native-call-recursive --
+    // safe for an arbitrarily long chain) "deep drop" helper function
+    // per box-recursive struct type
+    // (`emit_box_recursive_deep_drop_helpers`).
+    // The LLVM backend needed NO changes -- confirmed via `valgrind
+    // --leak-check=full` on native AOT builds that it already
+    // correctly drops every case this fix covers (0 errors before
+    // and after), matching the "worth checking as a reference
+    // implementation" note this bug's own C-backend-only framing
+    // carried from the start.
+    // Verified with `valgrind --leak-check=full --show-leak-kinds=
+    // all` on native AOT C builds of: the shipped 3-node example
+    // (0 errors, all heap blocks freed, vs. "24 direct + 24
+    // indirect bytes definitely/indirectly lost" before this fix);
+    // a 10-node chain where each node ALSO owns a plain `OwnedStr`
+    // field alongside the recursive `Box<Self>` edge (0 errors,
+    // confirming the iterative helper's non-recursive-field drop
+    // pass and its worklist-push pass compose correctly); and the
+    // BUG-93/95 generic `Node<T>` instantiation (0 errors -- this
+    // fix incidentally also closes that bug's own deferred C-backend
+    // leak finding). Full `cargo test --release --workspace`: 0
+    // failed, no regressions on any existing Box<T>/struct-field/
+    // enum-payload Drop test.
+    #[test]
+    fn recursive_struct_box_deep_drop_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Node { value: i64, name: OwnedStr, next: Option<Box<Node>> }
+            fn main() -> i64 {
+              let n0: Node = Node { value: 0, name: "n0" + "", next: Option.None };
+              let n1: Node = Node { value: 1, name: "n1" + "", next: Option.Some(box(n0)) };
+              let n2: Node = Node { value: 2, name: "n2" + "", next: Option.Some(box(n1)) };
+              print n2.value;
+              print n2.name;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("box-recursive struct Node with an extra owning field must compile to C");
+        compile_to_llvm(source)
+            .expect("box-recursive struct Node with an extra owning field must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never

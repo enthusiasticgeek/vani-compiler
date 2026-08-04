@@ -9745,6 +9745,60 @@ fn main() -> i64 {
     }
 }
 
+// BUG-97 (2026-08-03). Deferred finding from BUG-93/task #39: the
+// canonical `Node { next: Option<Box<Node>> }` recursive-struct
+// shape (the one the Box<T>/RAII tutorial itself demonstrates)
+// leaked on the C backend -- the checker never even emitted a
+// scope-exit Drop for a `Node` local at all, let alone one that
+// recursed into the Box chain. See the matching src/lib.rs test's
+// doc comment for the full root-cause writeup. This test exercises
+// a longer (3-node) chain where each node ALSO owns a plain
+// `OwnedStr` field alongside the recursive `Box<Self>` edge, to
+// cover both the generated deep-drop helper's non-recursive-field
+// pass and its worklist-push pass in the same run. Correctness
+// (not leak-freedom -- that's separately valgrind-verified, see
+// docs/TODO_CURRENT.md) is what this e2e test actually asserts.
+#[test]
+fn recursive_struct_box_deep_drop_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "recursive-struct-box-deep-drop",
+        r#"
+struct Node { value: i64, name: OwnedStr, next: Option<Box<Node>> }
+fn main() -> i64 {
+  let n0: Node = Node { value: 0, name: "n0" + "", next: Option.None };
+  let n1: Node = Node { value: 1, name: "n1" + "", next: Option.Some(box(n0)) };
+  let n2: Node = Node { value: 2, name: "n2" + "", next: Option.Some(box(n1)) };
+  print n2.value;
+  print n2.name;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\nn2\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.

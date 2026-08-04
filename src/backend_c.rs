@@ -1338,6 +1338,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if any_tuple_emitted_here {
         body.push('\n');
     }
+    // BUG-97 (task #39, 2026-08-03): box-recursive structs' deep-
+    // drop helpers. Must land here -- after every struct/enum body
+    // is fully defined (the unified topo loop above already
+    // completed) so the generated function text can reference them
+    // by name -- and before any function body that might drop one
+    // gets emitted below.
+    emit_box_recursive_deep_drop_helpers(program, &mut body);
     // The REMAINING Channel<T,N>/Mutex<T>/RwLock<T> bundles -- ones
     // whose element type needs a full struct/enum/tuple body (e.g.
     // `Channel<UserStruct, N>`) -- land here, AFTER every user
@@ -13875,6 +13882,41 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                         out.push_str(&local_name(name));
                         out.push_str(");\n");
                     }
+                    // BUG-97 (task #39, 2026-08-03): Box<Struct>
+                    // local drop. See the matching comment on
+                    // `emit_struct_field_drops`'s own `Type::Box`
+                    // arm for why box-recursive structs need the
+                    // generated iterative helper instead of inline
+                    // recursion.
+                    Type::Struct(inner_name) => {
+                        let local = local_name(name);
+                        if crate::ast::struct_is_box_recursive(inner_name) {
+                            out.push_str(&format!(
+                                "  __box_deep_drop_{}({});\n",
+                                struct_c_name(inner_name),
+                                local
+                            ));
+                        } else {
+                            let inner_fields = STRUCT_FIELDS_REGISTRY
+                                .with(|r| r.borrow().get(inner_name).cloned())
+                                .unwrap_or_default();
+                            if !inner_fields.is_empty() {
+                                let deref_path = format!("(*{})", local);
+                                let empty: std::collections::HashSet<&String> =
+                                    std::collections::HashSet::new();
+                                emit_struct_field_drops(
+                                    &deref_path,
+                                    inner_name,
+                                    &inner_fields,
+                                    &empty,
+                                    out,
+                                );
+                            }
+                            out.push_str("  free(");
+                            out.push_str(&local);
+                            out.push_str(");\n");
+                        }
+                    }
                     _ => {
                         out.push_str("  free(");
                         out.push_str(&local_name(name));
@@ -14055,114 +14097,7 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 );
             }
             Type::Enum(enum_name) => {
-                // Payloaded enums with a heap-shaped payload
-                // free the payload when the active variant
-                // matches. Closure #283: mixed-payload enums
-                // route through per-variant `.u.v_<variant>`
-                // access (one switch case per variant with
-                // owning payload); single-payload enums keep
-                // the legacy `.payload` path.
-                let variant_payloads = ENUM_VARIANT_PAYLOADS_REGISTRY
-                    .with(|r| r.borrow().get(enum_name).cloned());
-                let is_mixed_local = variant_payloads.as_ref().map(|v| {
-                    let payloads: Vec<&Type> =
-                        v.iter().filter_map(|(_, p)| p.as_ref()).collect();
-                    payloads.len() >= 2
-                        && payloads[1..].iter().any(|t| *t != payloads[0])
-                }).unwrap_or(false);
-                let local = local_name(name);
-                if is_mixed_local {
-                    let variants = variant_payloads.unwrap();
-                    let mut cases: Vec<String> = Vec::new();
-                    for (tag, (vname, pty)) in variants.iter().enumerate() {
-                        let Some(pty) = pty.as_ref() else { continue; };
-                        let free_for_variant: Option<String> = match pty {
-                            Type::OwnedStr => Some(format!(
-                                "free((void*){}.u.{})",
-                                local, enum_variant_member(vname)
-                            )),
-                            Type::Vec(element) => Some(format!(
-                                "{}({}.u.{})",
-                                vec_helper(element, "free"),
-                                local, enum_variant_member(vname)
-                            )),
-                            _ => None,
-                        };
-                        if let Some(call) = free_for_variant {
-                            cases.push(format!(
-                                "case {}: {}; break;",
-                                tag, call
-                            ));
-                        }
-                    }
-                    if !cases.is_empty() {
-                        out.push_str(&format!(
-                            "  switch ({}.tag) {{ {} default: break; }}\n",
-                            local,
-                            cases.join(" ")
-                        ));
-                    }
-                    return;
-                }
-                let payload_ty = ENUM_PAYLOAD_REGISTRY
-                    .with(|r| r.borrow().get(enum_name).cloned());
-                let free_expr: Option<String> = match &payload_ty {
-                    Some(Type::OwnedStr) => Some(format!(
-                        "free((void*){}.payload)",
-                        local
-                    )),
-                    Some(Type::Vec(element)) => Some(format!(
-                        "{}({}.payload)",
-                        vec_helper(element, "free"),
-                        local
-                    )),
-                    Some(Type::Box(inner)) => Some(match &**inner {
-                        // Box<dyn Iface>: fat-pointer struct; free the
-                        // owning .data field (the concrete heap slot).
-                        Type::Object(_iface) => format!(
-                            "free({local}.payload.data)",
-                            local = local
-                        ),
-                        // Box<Vec<T>>: free Vec's data buffer, then
-                        // free the Box's heap slot for the Vec struct.
-                        Type::Vec(element) => format!(
-                            "{{ {helper}(*{local}.payload); free({local}.payload); }}",
-                            helper = vec_helper(element, "free"),
-                            local = local
-                        ),
-                        // Box<OwnedStr>: free the string buffer, then
-                        // free the Box's heap slot for the i8* pointer.
-                        Type::OwnedStr => format!(
-                            "{{ free((void*)*{local}.payload); free({local}.payload); }}",
-                            local = local
-                        ),
-                        // Box<T> for scalar/struct T: payload is T*;
-                        // simply free the heap slot.
-                        _ => format!("free({local}.payload)", local = local),
-                    }),
-                    _ => None,
-                };
-                if let Some(free_call) = free_expr {
-                    let payload_tags: Vec<u32> =
-                        ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
-                            r.borrow()
-                                .get(enum_name)
-                                .cloned()
-                                .unwrap_or_default()
-                        });
-                    if !payload_tags.is_empty() {
-                        let cases: Vec<String> = payload_tags
-                            .iter()
-                            .map(|t| format!("case {}", t))
-                            .collect();
-                        out.push_str(&format!(
-                            "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
-                            local,
-                            cases.join(": "),
-                            free_call
-                        ));
-                    }
-                }
+                emit_enum_value_drop(&local_name(name), enum_name, out);
             }
             Type::Array { element, length } => {
                 // Closure #291 Phase 3 + 4: arrays of
@@ -15047,6 +14982,272 @@ fn emit_for_iter(
     }
 }
 
+/// Emit scope-exit drop code for an enum-typed value at `path`
+/// (already a valid C lvalue -- a bare local name or a `foo.field`
+/// chain): frees/recurses into whichever variant's payload owns
+/// heap memory, gated on the currently-stored tag. Factored out of
+/// the bare-local `TypedStmt::Drop` handler (BUG-97, task #39,
+/// 2026-08-03) so `emit_struct_field_drops`'s own `Type::Enum` arm
+/// -- needed for the `next: Option<Box<Node>>` recursive-struct-
+/// field shape -- doesn't duplicate the tag-switch logic a second
+/// time.
+fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
+    // Payloaded enums with a heap-shaped payload free the payload
+    // when the active variant matches. Closure #283: mixed-payload
+    // enums route through per-variant `.u.v_<variant>` access (one
+    // switch case per variant with owning payload); single-payload
+    // enums keep the legacy `.payload` path.
+    let variant_payloads = ENUM_VARIANT_PAYLOADS_REGISTRY
+        .with(|r| r.borrow().get(enum_name).cloned());
+    let is_mixed = variant_payloads.as_ref().map(|v| {
+        let payloads: Vec<&Type> =
+            v.iter().filter_map(|(_, p)| p.as_ref()).collect();
+        payloads.len() >= 2
+            && payloads[1..].iter().any(|t| *t != payloads[0])
+    }).unwrap_or(false);
+    if is_mixed {
+        let variants = variant_payloads.unwrap();
+        let mut cases: Vec<String> = Vec::new();
+        for (tag, (vname, pty)) in variants.iter().enumerate() {
+            let Some(pty) = pty.as_ref() else { continue; };
+            let free_for_variant: Option<String> = match pty {
+                Type::OwnedStr => Some(format!(
+                    "free((void*){}.u.{})",
+                    path, enum_variant_member(vname)
+                )),
+                Type::Vec(element) => Some(format!(
+                    "{}({}.u.{})",
+                    vec_helper(element, "free"),
+                    path, enum_variant_member(vname)
+                )),
+                // BUG-97 note: mixed-payload enums with a
+                // Box<Struct>-shaped variant payload remain a
+                // deferred gap (not needed by the recursive-struct
+                // shape this fix targets, which is single-payload);
+                // see docs/TODO_CURRENT.md.
+                _ => None,
+            };
+            if let Some(call) = free_for_variant {
+                cases.push(format!(
+                    "case {}: {}; break;",
+                    tag, call
+                ));
+            }
+        }
+        if !cases.is_empty() {
+            out.push_str(&format!(
+                "  switch ({}.tag) {{ {} default: break; }}\n",
+                path,
+                cases.join(" ")
+            ));
+        }
+        return;
+    }
+    let payload_ty = ENUM_PAYLOAD_REGISTRY
+        .with(|r| r.borrow().get(enum_name).cloned());
+    let free_expr: Option<String> = match &payload_ty {
+        Some(Type::OwnedStr) => Some(format!(
+            "free((void*){}.payload)",
+            path
+        )),
+        Some(Type::Vec(element)) => Some(format!(
+            "{}({}.payload)",
+            vec_helper(element, "free"),
+            path
+        )),
+        Some(Type::Box(inner)) => Some(match &**inner {
+            // Box<dyn Iface>: fat-pointer struct; free the
+            // owning .data field (the concrete heap slot).
+            Type::Object(_iface) => format!(
+                "free({path}.payload.data)",
+                path = path
+            ),
+            // Box<Vec<T>>: free Vec's data buffer, then
+            // free the Box's heap slot for the Vec struct.
+            Type::Vec(element) => format!(
+                "{{ {helper}(*{path}.payload); free({path}.payload); }}",
+                helper = vec_helper(element, "free"),
+                path = path
+            ),
+            // Box<OwnedStr>: free the string buffer, then
+            // free the Box's heap slot for the i8* pointer.
+            Type::OwnedStr => format!(
+                "{{ free((void*)*{path}.payload); free({path}.payload); }}",
+                path = path
+            ),
+            // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
+            // payload -- the `Option<Box<Node>>` recursive-struct
+            // shape. A box-recursive inner struct calls its
+            // generated iterative deep-drop helper (inlining would
+            // need infinitely much C text to unroll the cycle); a
+            // non-recursive inner struct's owning fields are freed
+            // inline before the box's own slot.
+            Type::Struct(inner_name) => {
+                if crate::ast::struct_is_box_recursive(inner_name) {
+                    format!(
+                        "__box_deep_drop_{}({path}.payload)",
+                        struct_c_name(inner_name),
+                        path = path
+                    )
+                } else {
+                    let inner_fields = STRUCT_FIELDS_REGISTRY
+                        .with(|r| r.borrow().get(inner_name).cloned())
+                        .unwrap_or_default();
+                    if inner_fields.is_empty() {
+                        format!("free({path}.payload)", path = path)
+                    } else {
+                        let deref_path = format!("(*{}.payload)", path);
+                        let mut field_drops = String::new();
+                        let empty: std::collections::HashSet<&String> =
+                            std::collections::HashSet::new();
+                        emit_struct_field_drops(
+                            &deref_path,
+                            inner_name,
+                            &inner_fields,
+                            &empty,
+                            &mut field_drops,
+                        );
+                        format!(
+                            "{{ {} free({path}.payload); }}",
+                            field_drops.trim(),
+                            path = path
+                        )
+                    }
+                }
+            }
+            // Box<T> for scalar T: payload is T*;
+            // simply free the heap slot.
+            _ => format!("free({path}.payload)", path = path),
+        }),
+        _ => None,
+    };
+    if let Some(free_call) = free_expr {
+        let payload_tags: Vec<u32> =
+            ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
+                r.borrow()
+                    .get(enum_name)
+                    .cloned()
+                    .unwrap_or_default()
+            });
+        if !payload_tags.is_empty() {
+            let cases: Vec<String> = payload_tags
+                .iter()
+                .map(|t| format!("case {}", t))
+                .collect();
+            out.push_str(&format!(
+                "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
+                path,
+                cases.join(": "),
+                free_call
+            ));
+        }
+    }
+}
+
+/// BUG-97 (task #39, 2026-08-03). Emit one iterative, heap-
+/// worklist-based "deep drop" function per box-recursive struct
+/// (see `BOX_RECURSIVE_STRUCTS_REGISTRY`'s doc comment in ast.rs
+/// for why this can't just be inline-recursive codegen). Must run
+/// after every struct/enum typedef body is already emitted into
+/// `body` — the generated function text references them by name.
+///
+/// The generated function drains a dynamically-growing pointer
+/// stack instead of recursing at the native C call-stack level, so
+/// an arbitrarily long chain (a long linked list, say) can't blow
+/// the stack the way a naive `free(node->next); free(node);`
+/// recursive C function would.
+fn emit_box_recursive_deep_drop_helpers(program: &TypedProgram, body: &mut String) {
+    for decl in &program.structs {
+        if !crate::ast::struct_is_box_recursive(&decl.name) {
+            continue;
+        }
+        let struct_c = struct_c_name(&decl.name);
+        let fields = STRUCT_FIELDS_REGISTRY
+            .with(|r| r.borrow().get(&decl.name).cloned())
+            .unwrap_or_default();
+        // Split fields into the direct-recursive edge(s) (pushed
+        // onto the worklist instead of freed inline) and everything
+        // else (freed the ordinary way via `emit_struct_field_drops`,
+        // operating on the popped node's `(*__cur)`).
+        let mut push_snippets: Vec<String> = Vec::new();
+        let mut non_recursive_fields: Vec<(String, Type)> = Vec::new();
+        for (field_name, field_ty) in &fields {
+            let mut is_recursive_edge = false;
+            match field_ty {
+                Type::Box(inner) if matches!(&**inner, Type::Struct(n) if n == &decl.name) => {
+                    is_recursive_edge = true;
+                    push_snippets.push(format!(
+                        "    if (__cur->{f}) {{ __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, __cur->{f}); }}\n",
+                        f = field_name, sc = struct_c,
+                    ));
+                }
+                Type::Enum(enum_name) => {
+                    let variants = ENUM_VARIANT_PAYLOADS_REGISTRY
+                        .with(|r| r.borrow().get(enum_name).cloned())
+                        .unwrap_or_default();
+                    let is_mixed = {
+                        let payloads: Vec<&Type> =
+                            variants.iter().filter_map(|(_, p)| p.as_ref()).collect();
+                        payloads.len() >= 2
+                            && payloads[1..].iter().any(|t| *t != payloads[0])
+                    };
+                    for (tag, (vname, pty)) in variants.iter().enumerate() {
+                        if let Some(Type::Box(inner)) = pty {
+                            if matches!(&**inner, Type::Struct(n) if n == &decl.name) {
+                                is_recursive_edge = true;
+                                let member = if is_mixed {
+                                    format!("__cur->{f}.u.{m}", f = field_name, m = enum_variant_member(vname))
+                                } else {
+                                    format!("__cur->{f}.payload", f = field_name)
+                                };
+                                push_snippets.push(format!(
+                                    "    if (__cur->{f}.tag == {tag}) {{ __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, {member}); }}\n",
+                                    f = field_name, tag = tag, sc = struct_c, member = member,
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if !is_recursive_edge {
+                non_recursive_fields.push((field_name.clone(), field_ty.clone()));
+            }
+        }
+        let mut field_drops = String::new();
+        let empty: std::collections::HashSet<&String> = std::collections::HashSet::new();
+        emit_struct_field_drops(
+            "(*__cur)",
+            &decl.name,
+            &non_recursive_fields,
+            &empty,
+            &mut field_drops,
+        );
+        body.push_str(&format!(
+            "static void __box_deep_drop_push_{sc}({sc}*** __stackp, size_t* __spp, size_t* __capp, {sc}* __p) {{\n\
+            \x20 if (*__spp == *__capp) {{ *__capp = *__capp ? *__capp * 2 : 8; *__stackp = ({sc}**)realloc(*__stackp, (*__capp) * sizeof({sc}*)); }}\n\
+            \x20 (*__stackp)[(*__spp)++] = __p;\n\
+            }}\n",
+            sc = struct_c,
+        ));
+        body.push_str(&format!(
+            "static void __box_deep_drop_{sc}({sc}* __n0) {{\n\
+            \x20 {sc}** __stack = NULL; size_t __sp = 0, __cap = 0;\n\
+            \x20 __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, __n0);\n\
+            \x20 while (__sp > 0) {{\n\
+            \x20\x20 {sc}* __cur = __stack[--__sp];\n\
+            {field_drops}{pushes}\
+            \x20\x20 free(__cur);\n\
+            \x20 }}\n\
+            \x20 free(__stack);\n\
+            }}\n\n",
+            sc = struct_c,
+            field_drops = field_drops,
+            pushes = push_snippets.concat(),
+        ));
+    }
+}
+
 /// Emit per-field free calls for a struct binding at the
 /// given C path (e.g. `v_o` or `v_o.inner`). Recursively
 /// descends into nested struct fields. Heap fields
@@ -15126,6 +15327,44 @@ fn emit_struct_field_drops(
                     out.push_str(field_name);
                     out.push_str(");\n");
                 }
+                // BUG-97 (task #39, 2026-08-03): Box<Struct> field
+                // drop. A non-box-recursive inner struct's own
+                // owning fields are freed inline (safe: DAG-shaped,
+                // so this bottoms out); a box-recursive inner
+                // struct (owns a `Box<Self>` transitively) instead
+                // calls its generated iterative deep-drop helper --
+                // inlining would need infinitely much C text to
+                // unroll a cycle. See `emit_box_recursive_deep_drop_
+                // helpers` and `BOX_RECURSIVE_STRUCTS_REGISTRY`.
+                Type::Struct(inner_name) => {
+                    let field_path = format!("{}.{}", path, field_name);
+                    if crate::ast::struct_is_box_recursive(inner_name) {
+                        out.push_str(&format!(
+                            "  __box_deep_drop_{}({});\n",
+                            struct_c_name(inner_name),
+                            field_path
+                        ));
+                    } else {
+                        let inner_fields = STRUCT_FIELDS_REGISTRY
+                            .with(|r| r.borrow().get(inner_name).cloned())
+                            .unwrap_or_default();
+                        if !inner_fields.is_empty() {
+                            let deref_path = format!("(*{})", field_path);
+                            let empty: std::collections::HashSet<&String> =
+                                std::collections::HashSet::new();
+                            emit_struct_field_drops(
+                                &deref_path,
+                                inner_name,
+                                &inner_fields,
+                                &empty,
+                                out,
+                            );
+                        }
+                        out.push_str("  free(");
+                        out.push_str(&field_path);
+                        out.push_str(");\n");
+                    }
+                }
                 _ => {
                     out.push_str("  free(");
                     out.push_str(path);
@@ -15151,6 +15390,15 @@ fn emit_struct_field_drops(
                         out,
                     );
                 }
+            }
+            // BUG-97 (task #39, 2026-08-03): Enum-typed field drop
+            // (e.g. the `next: Option<Box<Node>>` recursive-struct
+            // shape). Shares the tag-switch + per-variant payload
+            // free logic with the bare-local `TypedStmt::Drop`
+            // handler via `emit_enum_value_drop`.
+            Type::Enum(inner_name) => {
+                let field_path = format!("{}.{}", path, field_name);
+                emit_enum_value_drop(&field_path, inner_name, out);
             }
             _ => {}
         }

@@ -7073,3 +7073,104 @@ fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
   lvalue-chaining path, e.g. `n.next.x`).
   New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
   `cargo test --release --workspace`: 0 failed.
+
+- [x] **BUG-97 (found+fixed 2026-08-03). Deferred finding from
+  BUG-93/task #39: the canonical `Node { next: Option<Box<Node>> }`
+  recursive-struct shape (the one the Box<T>/RAII tutorial itself
+  demonstrates, `examples/language/english/
+  option_box_recursive_struct.vani`) leaked on the C backend --
+  root cause was much deeper than "Drop doesn't recurse into the
+  Box".** `valgrind` on the shipped example showed 2 of 3 mallocs
+  (48 of 72 bytes) never freed even at the OUTERMOST Box; the
+  generated C for `fn_main` contained ZERO `free()` calls at all for
+  any of the three `Node` locals.
+  Root cause, found by dumping generated C and checking `is_copy()`
+  by hand: `Type::Enum`'s non-Copy-payload registration (checker.rs)
+  only ever checked a hardcoded `matches!(t, Type::OwnedStr |
+  Type::Vec(_))` -- predating `Box<T>` and every other affine type
+  added since -- so `Option<Box<Node>>` was silently treated as
+  Copy. That made `Node`'s own field check (`!f.ty.is_copy()`) pass
+  too, so `Node` itself registered as Copy, so the checker never
+  emitted a scope-exit `TypedStmt::Drop` for a `Node` local AT ALL --
+  not a "doesn't recurse" bug, a "never even starts" bug. Compounded
+  by a second, independent gap: the struct-non-Copy pass and the
+  enum-non-Copy pass ran as two separate ONE-SHOT passes (structs
+  first, enums second), so even a corrected enum check would have
+  been invisible to the struct pass on the same run -- a struct
+  whose Copy-ness depends on an enum field, and an enum whose Copy-
+  ness depends on a struct payload, are mutually dependent and need
+  a SHARED fixed point, same "sibling/parallel walk needs a shared
+  fixed point" root-cause family as the generics-monomorphization
+  worklist bugs (BUG-90/93/95).
+  Fixed in three layers:
+  1. checker.rs: merged the struct and enum non-Copy registration
+     into one fixed-point loop (was two separate one-shot passes),
+     and switched the enum-payload check from the hardcoded
+     `OwnedStr | Vec` match to `!payload.is_copy()` (self-updating
+     as new affine types are added, matching how the struct-field
+     check already worked).
+  2. checker.rs: correctly-classified `Node` then hit TWO more
+     gaps this had been masking: the struct-field-type allowlist had
+     no `Type::Enum` arm (rejecting the field outright), and `box()`
+     rejected any non-Copy struct argument outright (rejecting
+     `box(tail)`). Both relaxed: `Type::Enum(_)` added to the field
+     allowlist (Drop chains through it the same way a nested struct
+     field already does); `box()`'s struct gate changed from
+     requiring `is_copy()` to unconditional `true` (any struct
+     reaching this point already passed the field-type allowlist, so
+     its Drop is guaranteed to be a shape both backends know how to
+     walk).
+  3. backend_c.rs codegen, once the checker correctly asked for a
+     `Node` Drop: `emit_struct_field_drops` had NO `Type::Enum` arm
+     (silent no-op) and its `Type::Box` arm's fallback case for
+     `Type::Struct` inner types just did `free(box)` -- the box's OWN
+     slot, never the boxed struct's OWN owning fields. Same gap
+     independently existed in the bare-local `TypedStmt::Drop`'s
+     `Type::Box` arm AND in its `Type::Enum` arm's Box-payload case
+     (three separate copies of "Box<T> Drop chaining," all missing
+     the same `Type::Struct` case). Fixed by adding the `Type::Enum`
+     arm (factored `emit_enum_value_drop` out of the bare-local
+     handler so the tag-switch + per-variant-payload-free logic
+     isn't tripled), and adding a `Type::Struct` case to all three
+     `Type::Box` sites. For a NON-recursive `Box<Struct>` (no cycle
+     back to itself), this inline-recurses via
+     `emit_struct_field_drops`, same as an ordinary nested struct
+     field -- safe, since a DAG always bottoms out. For a
+     box-RECURSIVE struct (owns a `Box<Self>`, directly or through
+     one layer of enum wrapping -- detected into a new
+     `BOX_RECURSIVE_STRUCTS_REGISTRY` in ast.rs, populated by the
+     checker), inline recursion would need infinitely much generated
+     C text to unroll a cycle, so all three sites instead call one
+     generated, ITERATIVE (heap-worklist-based, not native-call-
+     recursive -- won't blow the C stack on a long chain) "deep drop"
+     helper function per box-recursive struct type
+     (`emit_box_recursive_deep_drop_helpers`), emitted once every
+     struct/enum body is defined and before any function body that
+     might drop one.
+  The LLVM backend needed NO changes -- confirmed via `valgrind
+  --leak-check=full` on native AOT builds that it already correctly
+  drops every case this fix covers, both before and after (0 errors
+  throughout), matching this bug's own original "LLVM backend is
+  unaffected -- worth checking as a reference implementation" framing.
+  Verified with `valgrind --leak-check=full --show-leak-kinds=all` on
+  native AOT C builds of: the shipped 3-node example (0 errors, all
+  heap blocks freed -- vs. "24 direct + 24 indirect bytes
+  definitely/indirectly lost" before this fix); a 10-node chain where
+  each node ALSO owns a plain `OwnedStr` field alongside the
+  recursive `Box<Self>` edge (0 errors, 21/21 allocs freed --
+  confirms the generated helper's non-recursive-field-drop pass and
+  its worklist-push pass compose correctly); and the BUG-93/95
+  generic `Node<T>` instantiation (0 errors -- this fix incidentally
+  also closes THAT bug's own deferred C-backend leak finding, a nice
+  two-for-one). No regression on any existing Box<T>/struct-field/
+  enum-payload Drop test (166+31+... across the full suite, 0
+  failed).
+  Deferred, smaller finding along the way: a MIXED-payload enum
+  (2+ variants with owning-but-different payload types) with a
+  Box<Struct>-shaped variant payload still isn't handled in
+  `emit_enum_value_drop`'s mixed-payload branch (only OwnedStr/Vec
+  there) -- not needed by this bug's actual repro (`Option` is
+  single-payload: only `Some` carries one), left as a documented gap
+  rather than scope-creeping further.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
