@@ -1769,3 +1769,14 @@ Fix attempt: `tools/localfuzz/findings/20260804-101448-backend-divergence-2f33b4
 - **Backend(s) Affected:** The bug is reproducible with both the LLVM and C backends.
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-113736-backend-divergence-00bd1ebcda
+
+Repro: `tools/localfuzz/findings/20260804-113736-backend-divergence-00bd1ebcda/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-113736-backend-divergence-00bd1ebcda/fix_attempt.md`
+
+```
+STATUS: needs human/frontier root-cause review.
+```

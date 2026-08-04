@@ -1,0 +1,21 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/for_loops.vani              # LLVM
+//   vanic run examples/language/amharic/for_loops.vani --backend=c  # C
+//
+// Note: Amharic has no from/to keywords; loop simulated with ሲ (while).
+
+ዓላማ "Amharic for-loop smoke-test";
+
+ተግባር main() -> i64 {
+  ይሁን ጠቅላላ: f64 = 0;
+  ይሁን i: i64 = 1;
+  ሲ i < 6 {
+    ጠቅላላ = ጠቅላላ + i;
+    i = i + 1;
+  }
+  አረጋግጥ ጠቅላላ == 15;
+  ህትመት "Amharic for-loops OK", ጠቅላላ;
+  መልስ 0;
+}
