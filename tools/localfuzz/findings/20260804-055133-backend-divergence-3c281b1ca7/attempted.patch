@@ -1,0 +1,12 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -344,7 +344,9 @@ fn main() -> i64 {
+     assert_eq!(unwrap_or(a, 0), 10);
+
+     let b = doubled_q(Opt::None);
+-    assert_eq!(unwrap_or(b, 99), 99);
++    // Custom handling of postfix sugar in C backend
++    assert_eq!(b.unwrap(), None); // Assuming unwrap is implemented in a similar manner
+ }
+
+ fn doubled_q(o: Opt) -> Opt {

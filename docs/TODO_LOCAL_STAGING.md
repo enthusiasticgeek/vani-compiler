@@ -1336,3 +1336,12 @@ Fix attempt: `tools/localfuzz/findings/20260804-053000-backend-divergence-93add3
   "status": "needs human/frontier root-cause review."
 }
 ```
+
+---
+
+### Candidate: 20260804-055133-backend-divergence-3c281b1ca7
+
+Repro: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
