@@ -406,9 +406,15 @@ Fix attempt: `tools/localfuzz/findings/20260803-124546-backend-divergence-c6018c
 Repro: `tools/localfuzz/findings/20260803-130927-backend-divergence-dc30074c7a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-130927-backend-divergence-dc30074c7a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-107 on main (2026-08-04).
 
-The `/tmp/vanic-candidate-1314865-1785762566110443268.c` file contains a compilation error due to unknown type names `intent_dyn_Drawable`. This error occurs in the `vani_compiler_localfuzz/examples/edge_cases/mix_box_dyn_in_struct.vani` code, which introduces a user-defined struct with a `Vec<Box<dyn Drawable>>`. The backend diverges because the compiler cannot find the correct definitions for `Box<dyn Drawable>`, leading to a compilation failure.
+Root cause: `backend_c.rs`'s `vec_element_has_user_struct` had no
+`Type::Box` arm, so `Vec<Box<dyn Iface>>` struct fields weren't
+deferred past `emit_dyn_iface_typedefs` like bare `Vec<dyn Iface>`
+fields already were -- the `intent_vec_box_dyn_Drawable` bundle landed
+in the C file before `intent_dyn_Drawable`'s typedef. See
+`docs/TODO_CURRENT.md` BUG-107 entry on `main` for full writeup + new
+tests.
 
 ---
 
@@ -2106,3 +2112,14 @@ Repro: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/r
 Fix attempt: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-201316-backend-divergence-83efda749b
+
+Repro: `tools/localfuzz/findings/20260804-201316-backend-divergence-83efda749b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-201316-backend-divergence-83efda749b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Vani compiler is running against a local staging log for the vani-lang project. A mutant was generated from the `korean` language in the `examples/language/korean/early_exit.vani` corpus file, targeting both LLVM and C backends. When attempting to run the mutant, the `llvm` backend encountered an assertion failure in a specific line of code, while the `c` backend resulted in a timing out error due to an integer constant being expected to have an integer type. These findings indicate that there is an issue with how the `fadd double 0.0, 0` operation handles integral types in the C backend, which could lead to unexpected behavior or crashes when compiled on different platforms or compilers.
