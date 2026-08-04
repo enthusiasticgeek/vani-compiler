@@ -6422,7 +6422,8 @@ across all 13 binaries -- clean.
   surfaced a SEPARATE, deeper, pre-existing bug independent of `try`
   entirely -- see BUG-91 below, found but deferred.
 
-- [ ] **BUG-91 (found 2026-08-03, NOT fixed -- deferred).** A bare
+- [x] **BUG-91 (found 2026-08-03, deferred, then FIXED 2026-08-04 --
+  task #40; see the fix writeup right after this entry).** A bare
   call to a GENERIC function returning `Option<T>`/`Result<T,E>`,
   used DIRECTLY as a `match` scrutinee with no intermediate `let`
   binding (`match foo(7) { Option.Some(x) then x, Option.None then
@@ -6512,6 +6513,67 @@ across all 13 binaries -- clean.
   left checked in `docs/FEATURE_COMBINATION_GAPS_TODO.md` only for
   its `try`-specific aspect (fixed); this deferred finding is noted
   inline there too.
+
+  **FIXED 2026-08-04 (task #40).** Took direction (a) from this
+  entry's own "whoever picks this up next" note: fed newly-collapsed
+  `Type::Apply` instantiations back into a queue that a final
+  materialization pass drains once fn-generics' own worklist
+  stabilizes -- reusing the `NEWLY_COLLAPSED_GENERIC_APPLIES` queue
+  BUG-95 already introduced (that queue is populated by
+  `substitute_type_param`'s collapse site itself, so it fires
+  identically whether the collapse happens during
+  `monomorphize_type_decls_in_program`'s own struct/enum field
+  substitution -- BUG-95's case -- or during `monomorphize_generics_
+  in_program`'s fn-signature substitution -- this bug's case; no
+  changes needed at the collapse site at all).
+  The one genuinely new piece direction (a) required: the original
+  generic templates are gone (dropped) by the time fn-generics
+  finishes, so `check_program` now snapshots `struct_templates`/
+  `enum_templates` into local variables BEFORE calling
+  `monomorphize_type_decls_in_program` (which still drops them from
+  `program.structs`/`program.enums` exactly as before -- unchanged),
+  and a new `materialize_late_discovered_type_decls` function runs
+  right after `monomorphize_generics_in_program`: drains whatever the
+  queue collected, and -- using the snapshots -- runs one more small,
+  self-contained fixed-point round (mirroring `monomorphize_type_
+  decls_in_program`'s own worklist loop's shape, but a fresh,
+  parallel copy rather than a factored-out shared function, to avoid
+  restructuring an 800+ line, heavily load-bearing pipeline stage
+  this late -- yet another instance of the "duplicate walker" pattern
+  already common in this file, e.g. `collect_apply_in_stmt` vs.
+  `collect_apply_in_ty`) to materialize any still-missing decls. A
+  no-op in the overwhelmingly common case where nothing new was
+  discovered (checked via a cheap emptiness check on the drained
+  queue before doing any other work).
+  Verified against the exact repro above on both backends (prints
+  `7`), plus a two-generic-function variant where two DIFFERENT
+  generic fns each need a DIFFERENT concrete `Option<T>` instantiated
+  purely through this late-discovery path in the same program
+  (`Option__i64` and `Option__bool`), confirming the fixed-point loop
+  correctly materializes more than one late-discovered decl. No
+  regression on the full existing generics/monomorphization test
+  surface (BUG-90/93/95's own tests, the recursive-generic-struct
+  tests, etc.) -- full `cargo test --release --workspace`: 0 failed.
+  Deferred, out-of-scope finding surfaced while probing edge cases:
+  a bare enum constructor INSIDE a generic function's OWN body (e.g.
+  `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+  Option.Some(a); }`) fails to resolve ("unknown variable 'Option'")
+  once 2+ DISTINCT concrete instantiations of `Option` exist
+  anywhere in the whole program (regardless of whether they come
+  from the same generic fn specialized twice, or two different
+  generic fns) -- this relies on `Env::resolve_enum_name`'s "exactly
+  one candidate" fallback at ordinary check time, which is
+  necessarily ambiguous once 2+ candidates exist, and none of
+  BUG-46/95's more targeted annotation-driven resolution passes
+  reach INTO a still-generic function template's body (their return-
+  type-driven resolution only fires once a function's return type is
+  ALREADY a concrete `Type::Enum`, which a generic template's isn't).
+  A different bug from BUG-91 (that one is about the DECL not
+  existing; this one is about a working DECL not being NAMEABLE from
+  inside the generic body), same general neighborhood. Not chased
+  further to keep this fix scoped to its own documented repro.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
 
 ---
 

@@ -622,6 +622,35 @@ fn check_impl(
         validate_no_nested_ref_in_return_type(function, &mut diagnostics);
     }
 
+    // BUG-91 fix (task #40, 2026-08-04): snapshot the generic
+    // struct/enum templates BEFORE `monomorphize_type_decls_in_
+    // program` drops them from `program.structs`/`program.enums`
+    // (its own last step). `monomorphize_generics_in_program`, which
+    // runs next, can discover a further concrete instantiation need
+    // (via `substitute_type_param`'s eager collapse -- see
+    // `NEWLY_COLLAPSED_GENERIC_APPLIES`) that's invisible to the
+    // decl-mono pass above because it's ONLY discoverable through
+    // fn-generics' own type inference at a call site (no textual
+    // concrete annotation anywhere else in the source). Without a
+    // surviving template to re-specialize from, that need could
+    // never be materialized into an actual decl -- see
+    // `materialize_late_discovered_type_decls`'s doc comment for the
+    // full repro/writeup.
+    let generic_struct_templates: HashMap<String, StructDecl> = program
+        .structs
+        .iter()
+        .filter(|s| !s.type_params.is_empty())
+        .cloned()
+        .map(|s| (s.name.clone(), s))
+        .collect();
+    let generic_enum_templates: HashMap<String, EnumDecl> = program
+        .enums
+        .iter()
+        .filter(|e| !e.type_params.is_empty())
+        .cloned()
+        .map(|e| (e.name.clone(), e))
+        .collect();
+
     // Closure #281: monomorphize generic struct/enum decls.
     // Must run BEFORE the fn-generic monomorphizer because
     // fn signatures can reference `Option<T>` / `Result<T,E>`
@@ -641,6 +670,17 @@ fn check_impl(
     // the original generic functions so downstream type-check
     // sees a fully-concrete program.
     monomorphize_generics_in_program(&mut program, &mut diagnostics);
+
+    // BUG-91 fix (task #40, 2026-08-04): materialize any concrete
+    // struct/enum decl that ONLY became discoverable through the
+    // fn-generics pass just above (see the doc comment on
+    // `materialize_late_discovered_type_decls`). A no-op in the
+    // overwhelmingly common case where nothing new was discovered.
+    materialize_late_discovered_type_decls(
+        &mut program,
+        &generic_struct_templates,
+        &generic_enum_templates,
+    );
 
     // T1.5 phase 2: hoist `implement Iface for Type { fn m â€¦ }`
     // method bodies into regular functions named
@@ -8484,6 +8524,282 @@ fn monomorphize_type_decls_in_program(
             }
         }
     }
+}
+
+/// BUG-91 fix (task #40, 2026-08-04). `monomorphize_generics_in_
+/// program` runs AFTER `monomorphize_type_decls_in_program` has
+/// already finished and dropped the original generic struct/enum
+/// templates from `program.structs`/`program.enums`. It substitutes
+/// each specialized fn's own params/return type via `substitute_
+/// type_param` -- and THAT function's eager `Type::Apply` ->
+/// `Type::Enum`/`Type::Struct` collapse (see `NEWLY_COLLAPSED_
+/// GENERIC_APPLIES`'s doc comment) can be the ONLY place a concrete
+/// instantiation is discoverable in the whole program: `match
+/// foo(7) { Option.Some(x) then x, ... }` with no intermediate
+/// annotated `let` never writes `Option<i64>` out literally anywhere
+/// else for the earlier decl-mono pass to see. Without this, the
+/// specialized `foo__i64`'s return type correctly reads
+/// `Type::Enum("Option__i64")`, but no matching `EnumDecl` was ever
+/// materialized -- "enum 'Option__i64' is not declared" the instant
+/// the match tries to resolve it.
+///
+/// Drains whatever `NEWLY_COLLAPSED_GENERIC_APPLIES` collected
+/// during fn-mono and, using template snapshots the caller took
+/// BEFORE `monomorphize_type_decls_in_program` dropped them, runs
+/// one more small fixed-point round (mirroring that same function's
+/// own worklist loop, but self-contained here rather than factored
+/// out of it -- lower risk than restructuring an 800+ line, heavily
+/// load-bearing function this late in a long session) to materialize
+/// any still-missing decls. No-ops cleanly when nothing new was
+/// discovered -- the overwhelmingly common case, since most generic-
+/// enum instantiations ARE discoverable by the earlier pass (a
+/// concrete return-type/let annotation, a struct field, etc.).
+fn materialize_late_discovered_type_decls(
+    program: &mut Program,
+    struct_templates: &HashMap<String, StructDecl>,
+    enum_templates: &HashMap<String, EnumDecl>,
+) {
+    let (mut pending_structs, mut pending_enums): (
+        Vec<(String, Vec<Type>)>,
+        Vec<(String, Vec<Type>)>,
+    ) = (Vec::new(), Vec::new());
+    NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+        for (n, a, is_enum) in q.borrow_mut().drain(..) {
+            if is_enum {
+                pending_enums.push((n, a));
+            } else {
+                pending_structs.push((n, a));
+            }
+        }
+    });
+    if pending_structs.is_empty() && pending_enums.is_empty() {
+        return;
+    }
+    let mut existing_structs: std::collections::HashSet<String> =
+        program.structs.iter().map(|s| s.name.clone()).collect();
+    let mut existing_enums: std::collections::HashSet<String> =
+        program.enums.iter().map(|e| e.name.clone()).collect();
+    let all_enum_names: std::collections::HashSet<String> = existing_enums
+        .iter()
+        .cloned()
+        .chain(enum_templates.keys().cloned())
+        .collect();
+
+    fn normalize_one_late(
+        ty: &mut Type,
+        st: &HashMap<String, StructDecl>,
+        en: &HashMap<String, EnumDecl>,
+        all_enum_names: &std::collections::HashSet<String>,
+    ) {
+        match ty {
+            Type::Apply { name, args } => {
+                for a in args.iter_mut() {
+                    normalize_one_late(a, st, en, all_enum_names);
+                }
+                let mangled = mangle_generic_decl(name, args);
+                *ty = if st.contains_key(name) {
+                    Type::Struct(mangled)
+                } else if en.contains_key(name) {
+                    Type::Enum(mangled)
+                } else {
+                    return;
+                };
+            }
+            Type::Struct(name) => {
+                if all_enum_names.contains(name) {
+                    let n = name.clone();
+                    *ty = Type::Enum(n);
+                }
+            }
+            Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => normalize_one_late(i, st, en, all_enum_names),
+            Type::Array { element, .. } => normalize_one_late(element, st, en, all_enum_names),
+            Type::Channel(element, _) => normalize_one_late(element, st, en, all_enum_names),
+            Type::Tuple(elements) => {
+                for e in elements.iter_mut() {
+                    normalize_one_late(e, st, en, all_enum_names);
+                }
+            }
+            Type::FnPtr(params, ret) => {
+                for p in params.iter_mut() {
+                    normalize_one_late(p, st, en, all_enum_names);
+                }
+                normalize_one_late(ret, st, en, all_enum_names);
+            }
+            _ => {}
+        }
+    }
+    fn collect_apply_late(
+        ty: &Type,
+        struct_templates: &HashMap<String, StructDecl>,
+        enum_templates: &HashMap<String, EnumDecl>,
+        needed_structs: &mut Vec<(String, Vec<Type>)>,
+        needed_enums: &mut Vec<(String, Vec<Type>)>,
+    ) {
+        match ty {
+            Type::Apply { name, args } => {
+                for a in args {
+                    collect_apply_late(a, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+                if struct_templates.contains_key(name) {
+                    if !needed_structs.iter().any(|(n, a)| n == name && a == args) {
+                        needed_structs.push((name.clone(), args.clone()));
+                    }
+                } else if enum_templates.contains_key(name) {
+                    if !needed_enums.iter().any(|(n, a)| n == name && a == args) {
+                        needed_enums.push((name.clone(), args.clone()));
+                    }
+                }
+            }
+            Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => collect_apply_late(
+                i, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Array { element, .. } => collect_apply_late(
+                element, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Channel(element, _) => collect_apply_late(
+                element, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Tuple(elements) => {
+                for e in elements {
+                    collect_apply_late(e, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+            }
+            Type::FnPtr(params, ret) => {
+                for p in params {
+                    collect_apply_late(p, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+                collect_apply_late(ret, struct_templates, enum_templates, needed_structs, needed_enums);
+            }
+            _ => {}
+        }
+    }
+
+    for (_n, args) in pending_structs.iter_mut() {
+        for a in args.iter_mut() {
+            normalize_one_late(a, struct_templates, enum_templates, &all_enum_names);
+        }
+    }
+    for (_n, args) in pending_enums.iter_mut() {
+        for a in args.iter_mut() {
+            normalize_one_late(a, struct_templates, enum_templates, &all_enum_names);
+        }
+    }
+
+    let mut new_structs: Vec<StructDecl> = Vec::new();
+    let mut new_enums: Vec<EnumDecl> = Vec::new();
+    let mut processed_structs: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut processed_enums: Vec<(String, Vec<Type>)> = Vec::new();
+    while !pending_structs.is_empty() || !pending_enums.is_empty() {
+        let mut discovered_structs: Vec<(String, Vec<Type>)> = Vec::new();
+        let mut discovered_enums: Vec<(String, Vec<Type>)> = Vec::new();
+        for (name, args) in pending_structs.drain(..) {
+            let key = (name.clone(), args.clone());
+            if processed_structs.contains(&key) {
+                continue;
+            }
+            processed_structs.push(key);
+            let mangled = mangle_generic_decl(&name, &args);
+            if existing_structs.contains(&mangled) {
+                continue;
+            }
+            let Some(template) = struct_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                continue;
+            }
+            let mut mono = template.clone();
+            mono.name = mangled.clone();
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for fld in mono.fields.iter_mut() {
+                    substitute_type_param(&mut fld.ty, tp, concrete);
+                }
+            }
+            for fld in &mono.fields {
+                collect_apply_late(
+                    &fld.ty, struct_templates, enum_templates,
+                    &mut discovered_structs, &mut discovered_enums,
+                );
+            }
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            existing_structs.insert(mangled);
+            new_structs.push(mono);
+        }
+        for (name, args) in pending_enums.drain(..) {
+            let key = (name.clone(), args.clone());
+            if processed_enums.contains(&key) {
+                continue;
+            }
+            processed_enums.push(key);
+            let mangled = mangle_generic_decl(&name, &args);
+            if existing_enums.contains(&mangled) {
+                continue;
+            }
+            let Some(template) = enum_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                continue;
+            }
+            let mut mono = template.clone();
+            mono.name = mangled.clone();
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for variant in mono.variants.iter_mut() {
+                    for p_ty in variant.payload.iter_mut() {
+                        substitute_type_param(p_ty, tp, concrete);
+                    }
+                }
+            }
+            for variant in mono.variants.iter_mut() {
+                for p_ty in variant.payload.iter_mut() {
+                    normalize_one_late(p_ty, struct_templates, enum_templates, &all_enum_names);
+                }
+            }
+            for variant in &mono.variants {
+                for p_ty in &variant.payload {
+                    collect_apply_late(
+                        p_ty, struct_templates, enum_templates,
+                        &mut discovered_structs, &mut discovered_enums,
+                    );
+                }
+            }
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            existing_enums.insert(mangled);
+            new_enums.push(mono);
+        }
+        pending_structs = discovered_structs
+            .into_iter()
+            .filter(|k| !processed_structs.contains(k))
+            .collect();
+        pending_enums = discovered_enums
+            .into_iter()
+            .filter(|k| !processed_enums.contains(k))
+            .collect();
+    }
+    program.structs.extend(new_structs);
+    program.enums.extend(new_enums);
 }
 
 /// BUG-46 fix. Rewrites a bare `EnumName.Variant(payload)`

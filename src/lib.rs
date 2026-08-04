@@ -51515,6 +51515,60 @@ fn main() -> i64 { return 0; }
             .expect("box-recursive struct Node with an extra owning field must compile to LLVM");
     }
 
+    // BUG-91 (found 2026-08-03, fixed 2026-08-04, task #40). A bare
+    // call to a GENERIC function returning `Option<T>`, used
+    // DIRECTLY as a `match` scrutinee with no intermediate `let`
+    // binding, failed with "enum 'Option__i64' is not declared" --
+    // even though the exact same generic fn + call, first bound via
+    // an explicitly-annotated `let`, compiled fine. Root cause:
+    // `monomorphize_type_decls_in_program` (materializes concrete
+    // `EnumDecl`s for every `Type::Apply` it finds) runs BEFORE
+    // `monomorphize_generics_in_program` (the fn-level pass that
+    // infers `T=i64` for `foo(7)`), and unconditionally drops the
+    // generic templates it monomorphized from right after running.
+    // When the ONLY place a concrete `Option<i64>` instantiation is
+    // discoverable is through fn-generics' own type inference at a
+    // call site -- no textual `Option<i64>` annotation anywhere
+    // else in the source -- the decl-mono pass has already finished
+    // AND thrown away the template needed to re-specialize from.
+    // `substitute_type_param`'s eager collapse (BUG-90/95) DOES
+    // still produce a correct `Type::Enum("Option__i64")` reference
+    // for the specialized fn's return type, but nothing materialized
+    // an actual `EnumDecl` for it.
+    // Fixed by snapshotting the generic struct/enum templates in
+    // `check_program` BEFORE `monomorphize_type_decls_in_program`
+    // drops them, and adding a new `materialize_late_discovered_
+    // type_decls` pass that runs right after `monomorphize_generics_
+    // in_program`: it drains whatever `NEWLY_COLLAPSED_GENERIC_
+    // APPLIES` collected during fn-mono's own substitution calls
+    // and, using the template snapshots, runs one more small fixed-
+    // point round (mirroring `monomorphize_type_decls_in_program`'s
+    // own worklist loop, self-contained rather than factored out of
+    // it, to keep the change small and low-risk against an 800+
+    // line, heavily load-bearing shared pipeline stage) to
+    // materialize any still-missing decls. A no-op in the
+    // overwhelmingly common case (nothing new discovered).
+    #[test]
+    fn bare_generic_call_as_match_scrutinee_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn foo<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match foo(7) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("bare generic call as match scrutinee must compile to C");
+        compile_to_llvm(source)
+            .expect("bare generic call as match scrutinee must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
