@@ -682,6 +682,64 @@ fn check_impl(
         &generic_enum_templates,
     );
 
+    // BUG-98 fix (task #41, 2026-08-04): a bare enum/struct
+    // constructor INSIDE a generic function's OWN body (e.g.
+    // `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+    // Option.Some(a); }`) is a bare, unqualified `Var("Option")`
+    // receiver, same as everywhere else -- resolving it normally
+    // happens via `monomorphize_type_decls_in_program`'s own
+    // `resolve_bare_enum_ctors_in_stmt`/`resolve_bare_struct_lits_
+    // in_stmt` pass (BUG-46/95), keyed off the function's OWN return
+    // type. But that pass runs BEFORE fn-generics specializes the
+    // body, so for a still-generic template the return type is
+    // `Type::Apply{Option,[Param(T)]}`, not yet a concrete
+    // `Type::Enum` -- the pass silently does nothing for it. The
+    // ONLY thing left to resolve it is `Env::resolve_enum_name`'s
+    // general "exactly one candidate" fallback at ordinary check
+    // time, which fails the moment 2+ instantiations of the same
+    // enum exist anywhere in the program (each specialized copy of
+    // `foo`'s body still carries the SAME bare "Option" name).
+    // Fixed by re-running that exact same BUG-46/95 resolution pass
+    // over every function body again, now that fn-generics has
+    // finished and each specialized stub's OWN return type is
+    // concrete -- mirroring the identical pass inside
+    // `monomorphize_type_decls_in_program`, just re-run against the
+    // POST-fn-generics program instead of the pre-fn-generics one.
+    // Idempotent/harmless for already-resolved (ordinary, non-
+    // generic) function bodies: their bare receivers, if any, were
+    // already rewritten to a concrete mangled name by the earlier
+    // pass, which no longer matches a generic template name, so the
+    // template-name gate below silently skips them on this second
+    // pass.
+    {
+        let struct_field_types: std::collections::HashMap<String, Vec<crate::ast::StructField>> =
+            program
+                .structs
+                .iter()
+                .map(|s| (s.name.clone(), s.fields.clone()))
+                .collect();
+        let struct_template_names: std::collections::HashSet<String> =
+            generic_struct_templates.keys().cloned().collect();
+        let enum_template_names: std::collections::HashSet<String> =
+            generic_enum_templates.keys().cloned().collect();
+        for f in program.functions.iter_mut() {
+            let fn_return_struct = match &f.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in f.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, fn_return_struct.as_deref(), &struct_template_names);
+            }
+            let fn_return_enum = match &f.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in f.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_template_names, &struct_field_types);
+            }
+        }
+    }
+
     // T1.5 phase 2: hoist `implement Iface for Type { fn m â€¦ }`
     // method bodies into regular functions named
     // `<TypeName>_<method>` (same convention as `methods on

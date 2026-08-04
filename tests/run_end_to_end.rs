@@ -9848,6 +9848,66 @@ fn main() -> i64 {
     }
 }
 
+// BUG-98 (found+fixed 2026-08-04, task #41). A bare enum
+// constructor INSIDE a generic function's OWN body failed to
+// resolve once 2+ distinct concrete instantiations of the same
+// generic enum existed anywhere in the program (here, two
+// DIFFERENT generic fns each internally constructing
+// `Option.Some(a)`, specialized to `Option__i64` and `Option__bool`
+// respectively). See the matching src/lib.rs test's doc comment for
+// the full root-cause writeup.
+#[test]
+fn bare_enum_ctor_inside_generic_fn_body_with_two_instantiations_produces_correct_output_on_both_backends()
+{
+    let src = write_tmp_vani(
+        "bare-enum-ctor-inside-generic-fn-body",
+        r#"
+fn foo1<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn foo2<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn main() -> i64 {
+  let r1: i64 = match foo1(7) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match foo2(true) {
+    Option.Some(x) then 1,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "7\n1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.

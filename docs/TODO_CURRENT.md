@@ -6562,7 +6562,7 @@ across all 13 binaries -- clean.
   New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
   `cargo test --release --workspace`: 0 failed.
 
-- [ ] **BUG-98 (found 2026-08-04, NOT fixed -- a BUG-46-class
+- [x] **BUG-98 (found+fixed 2026-08-04 -- task #41 -- a BUG-46-class
   ambiguity, but reaching a different site than BUG-46/95 cover). A
   bare enum constructor INSIDE a generic function's OWN body (e.g.
   `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
@@ -6606,17 +6606,28 @@ across all 13 binaries -- clean.
   95-style resolution against each newly-specialized function body,
   the same way the ORIGINAL (pre-generics) pass already does for
   ordinary concrete functions.
-  Not fixed yet: deferred to keep BUG-91's own fix scoped to its
-  documented repro and reviewed independently; a real fix likely
-  means threading `resolve_bare_enum_ctors_in_stmt` (or an equivalent
-  call) over each specialized function's body inside/right after
-  `monomorphize_generics_in_program`, using that stub's own concrete
-  return type as the annotation. Lower structural risk than BUG-36/
-  87 (touches an existing, already-understood resolution pass rather
-  than a wholly new subsystem or sensitive async internals), but
-  still touches the generics pipeline, so deserves its own focused
-  session rather than a rushed bolt-on on top of BUG-91's change.
-  Repro (fails on both backends):
+  **FIXED 2026-08-04 (task #41), same session as BUG-91.** Exactly
+  the fix this entry's own "what's missing" paragraph anticipated:
+  re-run `resolve_bare_struct_lits_in_stmt`/`resolve_bare_enum_ctors_
+  in_stmt` over every function body in `check_program`, right after
+  `monomorphize_generics_in_program` AND BUG-91's own `materialize_
+  late_discovered_type_decls` have both finished -- at that point
+  each specialized stub's own return type IS concrete, so the exact
+  same BUG-46/95 resolution logic that already handles ordinary
+  functions correctly resolves the generic body's bare receiver too.
+  Uses the SAME template-name snapshots (`generic_struct_templates`/
+  `generic_enum_templates`) BUG-91's fix already introduced. A no-op
+  for already-resolved ordinary function bodies: their receivers, if
+  any were bare, were already rewritten to a concrete mangled name by
+  the FIRST (pre-fn-generics) pass, which no longer matches a generic
+  template name on this second pass, so nothing double-rewrites.
+  Verified against the repro below (prints `7` then `1`) plus the
+  same-generic-fn-specialized-twice variant (`foo(7)` and `foo(true)`
+  from the SAME `foo<T>`) on both backends, and confirmed no
+  regression on BUG-91's own repro or the wider generics/
+  monomorphization test surface. Full `cargo test --release
+  --workspace`: 0 failed.
+  Repro (previously failed on both backends, now passes):
   ```
   fn foo1<T>(a: T) -> Option<T> {
     return Option.Some(a);
@@ -6638,8 +6649,7 @@ across all 13 binaries -- clean.
     return 0;
   }
   ```
-  No regression test added (nothing to assert as passing); the repro
-  above is preserved here for whoever fixes it.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
 
 ---
 

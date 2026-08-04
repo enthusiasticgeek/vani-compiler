@@ -51569,6 +51569,62 @@ fn main() -> i64 { return 0; }
             .expect("bare generic call as match scrutinee must compile to LLVM");
     }
 
+    // BUG-98 (found 2026-08-04, fixed 2026-08-04, task #41). A bare
+    // enum constructor INSIDE a generic function's OWN body (e.g.
+    // `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+    // Option.Some(a); }`) failed to resolve ("unknown variable
+    // 'Option'") once 2+ distinct concrete instantiations of
+    // `Option` existed anywhere in the program -- whether from the
+    // SAME generic fn specialized twice or two DIFFERENT generic
+    // fns each specialized once. A single instantiation program-wide
+    // (BUG-91's own repro) worked fine, which is why this stayed
+    // hidden until BUG-91's fix started probing multi-instantiation
+    // shapes. Root cause: BUG-46/95's targeted, annotation-driven
+    // resolution pass (`resolve_bare_enum_ctors_in_stmt`, run inside
+    // `monomorphize_type_decls_in_program`) only ever sees a still-
+    // generic function TEMPLATE's return type as `Type::Apply{
+    // Option,[Param(T)]}`, not yet a concrete `Type::Enum` -- so it
+    // silently does nothing for a generic body. The only thing left
+    // to resolve the bare receiver was `Env::resolve_enum_name`'s
+    // general "exactly one candidate" fallback at ordinary check
+    // time, inherently ambiguous once 2+ candidates exist.
+    // Fixed by re-running that exact same BUG-46/95 resolution pass
+    // over every function body again in `check_program`, right after
+    // `monomorphize_generics_in_program` (and BUG-91's own late-decl-
+    // materialization pass) have both finished -- at that point each
+    // specialized function's own return type IS concrete, so the
+    // pass can finally resolve it. A no-op for already-resolved
+    // ordinary function bodies (their receivers no longer match a
+    // generic template name on the second pass).
+    #[test]
+    fn bare_enum_ctor_inside_generic_fn_body_with_two_instantiations_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn foo1<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn foo2<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match foo1(7) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match foo2(true) {
+                Option.Some(x) then 1,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("bare enum ctor inside generic fn body (2 instantiations) must compile to C");
+        compile_to_llvm(source)
+            .expect("bare enum ctor inside generic fn body (2 instantiations) must compile to LLVM");
+    }
+
     // Feature-combination gap audit (2026-08-03), category 9, row 3:
     // `Box<T>` through a generic function boundary (`fn identity<T>
     // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
