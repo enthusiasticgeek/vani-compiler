@@ -1,0 +1,13 @@
+diff --git a/src/backend_c.rs b/src/backend_c.rs
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -32,6 +32,10 @@ pub fn push(vec_ptr: *const i64, value: i64) -> *const i64 {
+     let size = (*vec).len() as usize;
+     let new_size = size + 1;
+     let new_vec = realloc(vec, size_of::<i64>() * new_size);
++
++    // Ensure the inner vector is properly initialized with zero
++    memset(new_vec, 0, size_of::<i64>() * new_size);
++
+     let new_ptr = &mut *(new_vec as *mut i64);
+     *new_ptr = value;

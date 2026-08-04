@@ -1,0 +1,16 @@
+{
+  "base": "examples/language/maithili/box_recursive_drop.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "Maithili box recursive drop OK\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "lli: lli: /tmp/vanic-candidate-2322068-1785812110485099368.ll:3371:8: error: expected '=' after instruction name\n  %t28.\u0925\u0948\u0932\u093e.addr = alloca %Struct_Bag\n\n",
+    "timed_out": false
+  }
+}
