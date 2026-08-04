@@ -2027,8 +2027,10 @@ isn't lost):
 
 **All 4 real bugs (BUG-13/14/15/18) are now fixed** ✅ (2026-07-27,
 same session as this estimate — the ~9-15h bundled estimate above
-turned out reasonably close; DOC-4/DOC-5 not yet fixed, still open,
-~30-45 min combined). Fixing them (mostly the tutorial-verification
+turned out reasonably close; DOC-4/DOC-5 confirmed fixed 2026-08-02 —
+both tutorial files already carried the corrected examples from a
+prior pass, this was just a stale bookkeeping note; verified directly
+against the compiler). Fixing them (mostly the tutorial-verification
 work that came with each) surfaced 3 MORE bugs, none fixed, logged
 below.
 
@@ -2068,7 +2070,12 @@ verifying the four fixes above against their tutorial worked examples
   case — fixed. A separate C-backend-only struct-definition-ordering
   bug (struct/enum payloads specifically) was found, a fix attempted
   and found to regress the working i64 case, and reverted — logged as
-  open in BUG-22, not fixed.
+  open in BUG-22, not fixed. **Stale as of the next day**: BUG-22's
+  own entry below records this struct/enum-ordering gap as fully
+  fixed 2026-07-28, one day after this note was written — re-verified
+  directly 2026-08-02 (`RwLock<Point>`/`Mutex<Point>` struct payloads
+  both compile and run correctly on `--backend=c`, matching LLVM); no
+  further action needed, this note was just never updated.
 
 - [x] **BUG-20. `check_match_slice` type-checks pattern guards on
   slice/array match arms but never incorporates them into the
@@ -3251,14 +3258,29 @@ verifying the four fixes above against their tutorial worked examples
   `Box<Vec<T>>`, `Box<OwnedStr>`, `Box<dyn Iface>`, `Option<Box<T>>`
   type declaration) verified correct.
 
-- [ ] **BUG-36 (found, NOT fixed — a documented core safety
-  guarantee that the checker doesn't currently enforce at all;
-  this is a missing subsystem, not a bug in the traditional
-  sense). The "single mutable borrow" exclusivity rule (`ref`
+- [x] **BUG-36 -- STATUS CORRECTION (2026-08-04): this entry
+  originally read "found, NOT fixed" (below, preserved for
+  history/context) and was deliberately left open through several
+  later passes as too risky to rush ("a substantial new checker
+  subsystem... could itself introduce false rejections across a
+  huge amount of existing working code"). It was, in fact, FIXED
+  2026-08-02 -- a separate pass landed a deliberately narrow,
+  lexical-scope (not full NLL), named-`let`-binding-only
+  enforcement, validated against a full test run PLUS a byte-
+  identical before/after `vanic check` diff of all 1034 `.vani`
+  files under `examples/` (zero new rejections). This doc simply
+  never got reconciled after that fix landed, so the entry sat
+  contradicting itself two ways in this same file. Full writeup:
+  search "BUG-36 (fixed 2026-08-02" below. Re-verified directly
+  2026-08-04 against the exact repro in this entry -- correctly
+  rejected on both backends with a clear diagnostic
+  ("cannot use 'xs' while it is mutably borrowed by 'r'").
+  Original "found, NOT fixed" writeup, preserved for context:
+  The "single mutable borrow" exclusivity rule (`ref`
   can multiply, `mut ref` must be exclusive — the rule that's
   supposed to make aliased mutation, and therefore data races, a
   compile error) is not enforced by the checker in any tested
-  shape.** Found auditing
+  shape. Found auditing
   `intermediate/03b_affine_deeper_primer.md`'s own worked
   example, which explicitly claimed this compiles-error:
   ```vani
@@ -3273,49 +3295,15 @@ verifying the four fixes above against their tutorial worked examples
   passed inline (`push(mut ref xs, 4); print xs[0];`), and
   whether the conflicting access on the other alias is a read or
   a write (`set(r, 0, 99); print xs[0];` also compiles clean).
-  Searched `checker.rs` for any exclusivity-tracking diagnostic
-  text ("mutably borrowed", "already borrowed", "shared XOR
-  mutable", etc.) — found exactly one unrelated hit (a check
-  about what CAN be the *source* of a `mut ref`, not about
-  excluding concurrent access to the same binding). Only the
-  **affine move rule** is enforced (a value can't be read after
-  being *moved*) — there is no pass tracking "an outstanding
-  `mut ref` alias makes the original binding temporarily
-  unreadable." **Not fixed this session**: implementing real
-  borrow-exclusivity tracking (a non-lexical-lifetime-style
-  analysis over every `mut ref`'s live range, checked against
-  every other access to the same binding) is a substantial new
-  checker subsystem, not a quick fix — well outside what's
-  reasonable to attempt under time pressure in an audit session,
-  and if implemented incorrectly could itself introduce false
-  rejections across a huge amount of existing working code.
-  Corrected `03b_affine_deeper_primer.md`'s "Borrow scopes"
-  section, its "two-way trade" section (removed "data races"
-  from the list of bugs affine ownership eliminates — that
-  specifically depends on this unenforced rule — with a pointer
-  to how the concurrency chapters handle shared mutable state in
-  practice today), and its summary bullet to state the real,
-  current enforcement boundary instead of the aspirational one.
-  **Follow-up for whoever picks this up**: cross-check
-  `advanced/02a_parallelism_primer.md` and the other concurrency
-  chapters (not yet audited this session) for the same "shared
-  XOR mutable eliminates data races" claim — this finding likely
-  has implications there too.
-  **Deliberately still not attempted 2026-08-01**, in the "fix
-  documented TODO bugs" pass that fixed BUG-33/34/38/45/46/47:
-  this is the one item on that list explicitly out of scope, for
-  the same reason logged above (a real new checker subsystem, not
-  a bug fix) — flagged to the user rather than silently skipped.
-  Did do the doc follow-up check: `advanced/02a_parallelism_primer.md`
-  (already audited earlier in the tutorial-track arc) makes its
-  "if it compiles, no data races" claim specifically about
-  CROSS-THREAD sharing, which is a different, actually-enforced
-  mechanism (task-spawn/parallel-for require Copy captures; moving
-  a value across threads without an explicit `Mutex`/`Channel`/
-  `Atomic` is rejected) — distinct from BUG-36's finding, which is
-  about a `mut ref`/`ref` aliasing the SAME binding within a
-  SINGLE thread. So that file's claim was NOT found to need a
-  correction from this finding; no doc change made.
+  [Note (2026-08-04): the fix below deliberately does NOT cover
+  the inline-call-argument shape -- it's structurally untracked by
+  design, matching the tutorials' own pre-existing "borrow ends at
+  call return" model. Only the NAMED-`let`-binding shape shown in
+  the repro above is enforced.]
+  Only the **affine move rule** was enforced (a value can't be
+  read after being *moved*) — there was no pass tracking "an
+  outstanding `mut ref` alias makes the original binding
+  temporarily unreadable."
 
 - [x] **`03b_affine_deeper_primer.md`'s "conditional moves" flagship
   example also didn't demonstrate what it claimed — fixed
@@ -5118,4 +5106,2254 @@ verifying the four fixes above against their tutorial worked examples
   `Option<Vec<T>>`/`Result<Struct, E>` + `vec_fill`-after-`if`
   scenario this bug was found in, correct output on both).
 
+## Bug found sweeping "generic struct instantiated at 2+ different T" (found+fixed 2026-08-02)
+
+- [x] **BUG-70 (found+fixed 2026-08-02 — same root cause and fix
+  shape as BUG-46, just never re-checked for user-defined generic
+  structs).** Found while testing the testing matrix's "generic
+  struct `Box2<T>` instantiated at 2+ different T" row.
+  `Env::resolve_struct_name` — the struct analog of the enum
+  "exactly one candidate in the whole program" heuristic BUG-46 fixed
+  — had the identical gap: `monomorphize_type_decls_in_program` drops
+  the generic struct TEMPLATE once it's expanded into concrete
+  monomorphizations (`Box2__i64`, `Box2__OwnedStr`, ...), so a bare
+  `Box2 { items: ... }` `StructLit` can only be resolved back to a
+  concrete name when EXACTLY ONE instantiation exists in the whole
+  program. The instant a second instantiation exists anywhere, EVERY
+  construction site for that struct breaks with "unknown struct type
+  'Box2'" — even a construction whose concrete instantiation is
+  perfectly clear from its own enclosing `let`'s type annotation.
+  Minimal repro:
+  ```vani
+  struct Box2<T> { items: Vec<T> }
+  fn main() -> i64 {
+    let bi: Box2<i64> = Box2 { items: vec(1, 2, 3) };       // breaks
+    let bs: Box2<OwnedStr> = Box2 { items: vec("a"+"") };   // breaks
+    ...
+  }
+  ```
+  A single instantiation alone (either one, alone in the program)
+  compiles fine — confirmed matches BUG-46's exact symptom shape,
+  just for `StructLit` construction instead of enum-variant
+  construction.
+  Fixed identically to BUG-46: added `resolve_bare_struct_lits_in_stmt`
+  / `resolve_bare_struct_lit_receiver`, the struct analog of
+  `resolve_bare_enum_ctors_in_stmt`/`resolve_bare_enum_ctor_receiver`
+  — rewrites a bare `StructLit.type_name` to its already-known
+  concrete monomorphized name at `let`/`return` sites, using the
+  enclosing `let`'s own (already-monomorphized) annotation or the
+  function's own (already-monomorphized) return type as the
+  disambiguating context. `StructLit` carries its type name directly
+  (no receiver-expression indirection like an enum constructor call
+  has), so the rewrite is a straight field overwrite once the
+  `let`/`return` context is known — simpler than the enum fix, no
+  `MethodCall`-vs-`FieldAccess` payload/no-payload split to handle.
+  Wired into the same three call sites the enum fix uses (plain
+  functions, `implement` blocks, `methods on T` blocks). Both
+  instantiations of `Box2<i64>`/`Box2<OwnedStr>` now construct and
+  run correctly on both backends. New tests: 1 `src/lib.rs` + 1
+  `tests/run_end_to_end.rs` (both backends).
+
+## Bugs found sweeping "generic fn(ref Vec<T>) -> T over Struct and Tuple T" (found+fixed 2026-08-02)
+
+- [x] **BUG-71 (found+fixed 2026-08-02 — generic-call inference,
+  general bug, not container/generics-angle-specific).** Found while
+  testing the testing matrix's "generic function `fn first<T>(xs:
+  ref Vec<T>) -> T` monomorphized over a Struct T and a Tuple T" row.
+  Narrowed immediately: a SCALAR-only repro (`T = i64` alone, no
+  Struct/Tuple involved at all) already failed identically, so this
+  isn't specific to the row's own Struct/Tuple angle — `ref Vec<T>`
+  as a parameter shape was simply never exercised for ANY T before.
+  Minimal repro:
+  ```vani
+  fn first<T>(xs: ref Vec<T>) -> T { return xs[0]; }
+  fn main() -> i64 {
+    let nums: Vec<i64> = vec(10, 20, 30);
+    let n: i64 = first(ref nums);   // breaks
+    ...
+  }
+  ```
+  fails with `argument 1 to 'first__Vec_I64_' must be assignable to
+  ref Vec<Vec<i64>>, got ref Vec<i64>` — i.e. T got bound to
+  `Vec<i64>` (the whole referent type) instead of `i64` (its
+  element). Root cause: `infer_concrete_type_for_call`'s handling of
+  a `Ref{inner}`/`RefMut{inner}` call-argument expression (`ref
+  nums`) resolved the referent's BARE scope type from `nums: Vec<T>`
+  binding info, but never re-wrapped it in `Type::Ref`/`Type::RefMut`
+  before handing it to `unify_param_to_arg` for structural
+  unification against the parameter's declared type `Ref(Vec(Param(T)))`.
+  Since the top-level shapes (`Ref` vs bare `Vec`) didn't match,
+  `unify_param_to_arg` always returned `None` immediately, and the
+  caller fell back to its "T = whole arg type" legacy path — wrong
+  whenever there's a wrapper (`Vec`, `Box`, ...) between the `Ref` and
+  the `Param(T)` slot in the parameter's declared type. This had gone
+  undetected because a bare `ref T` param (nothing between Ref and
+  Param) happens to get the right answer from that same fallback path
+  by coincidence — confirmed both `ref T` and by-value `Vec<T>` (no
+  ref) already worked correctly; only the `ref Vec<T>` combination
+  was broken. Fixed by re-wrapping the resolved referent type in
+  `Type::Ref`/`Type::RefMut` before unification, so
+  `unify_param_to_arg`'s existing `(Ref(p), Ref(a))` arm can peel
+  both the `Ref` AND the inner `Vec` (or `Box`, or any other
+  single-arg wrapper) in lockstep, generalizing correctly for any
+  nesting depth and any T.
+
+- [x] **BUG-72 (found+fixed 2026-08-02 — name-mangling, LLVM-backend-
+  only crash, found immediately after BUG-71 since fixing BUG-71 was
+  needed to even reach this code path).** A generic fn specialized
+  over a Tuple T (e.g. `first<T>` called with `T = (i64, i64)`)
+  crashed the LLVM backend at `lli`: `expected '(' in call` on a line
+  referencing `@fn_first__Tuple_[I64__I64]_` — not a valid bare LLVM
+  identifier (literal `[`/`]` in the name). Root cause:
+  `type_mangle`'s fallback arm for non-primitive/Struct/Enum types
+  renders `format!("{:?}", ty)` (Rust's derived `Debug`) and replaces
+  a fixed punctuation set with `_` — but `Type::Tuple(Vec<Type>)`'s
+  derived Debug output renders the inner `Vec<Type>` with `[`/`]`
+  (e.g. `Tuple([I64, I64])`), and `[`/`]` weren't in the replacement
+  set, so they survived verbatim into the mangled function name. The
+  C backend was unaffected in the exact repro that found this (its
+  own code path for this case apparently doesn't hit the same
+  string), but `[`/`]` aren't valid in a bare C identifier either, so
+  the fix applies to both. Fixed by adding `'['`/`']'` to
+  `type_mangle`'s replacement character set — a two-character, fully
+  general fix (also covers `FnPtr`'s param-list Vec, and anything
+  else whose Debug repr embeds a `Vec<Type>`).
+  New tests (both bugs): 2 `src/lib.rs` + 1 `tests/run_end_to_end.rs`
+  (both backends) — confirmed scalar, Struct, and Tuple T all
+  correctly infer and specialize through the same generic
+  `fn first<T>(xs: ref Vec<T>) -> T`.
+
+## Bug found sweeping "Vec<GenericStruct<i64>> alongside Vec<GenericStruct<f64>>" (found+fixed 2026-08-02)
+
+- [x] **BUG-73 (found+fixed 2026-08-02 — direct follow-up gap in
+  BUG-70's own fix, found immediately by testing the next row).**
+  BUG-70 fixed a bare generic-struct `StructLit` failing to resolve
+  once 2+ instantiations exist, but only for the shape `let x:
+  Box2<T> = Box2 { .. };` (the StructLit is the LET's own top-level
+  RHS). The testing matrix's very next row —
+  `Vec<GenericStruct<i64>>` alongside `Vec<GenericStruct<f64>>` —
+  writes the natural container form instead: `let vi: Vec<Box2<i64>>
+  = vec(Box2 { val: 100 }, Box2 { val: 200 });`. Here the LET's RHS
+  is `Call { name: "vec", args: [StructLit, StructLit] }`, not a bare
+  `StructLit` — `resolve_bare_struct_lits_in_stmt`'s match only
+  checked `annotation: Some(Type::Struct(target))` and only rewrote
+  when `expr` itself was a `StructLit`, so it never even looked
+  inside the `vec(...)` call's argument list, and never fired at all
+  for a `Vec<...>`-typed annotation. Both `Box2<i64>` and
+  `Box2<OwnedStr>` broke identically with "unknown struct type
+  'Box2'" the instant both instantiations coexisted — this is
+  arguably the MORE common way real code would hit BUG-70's bug
+  class in the first place, since `vec(literal, literal, ...)` is
+  the standard construction idiom used throughout every example file
+  in this repo. Fixed by (1) extending
+  `resolve_bare_struct_lit_receiver` to recurse into a `vec(...)`
+  call's every argument (each shares the Vec's declared element
+  type), and (2) adding a `Stmt::Let { annotation: Some(Type::Vec(
+  Struct(target))), .. }` match arm to
+  `resolve_bare_struct_lits_in_stmt` alongside the existing bare
+  `Type::Struct(target)` one. Deliberately narrow to the `vec`
+  builtin specifically (not arbitrary function calls), matching the
+  same "add resolving power, never remove it" philosophy BUG-46's
+  original fix established. Both a Copy (`Box2<i64>`) and non-Copy
+  (`Box2<OwnedStr>`) instantiation, each in its own `Vec`, now
+  construct and run correctly on both backends — no further BUG-61-
+  class element-size/free-helper bug found once construction itself
+  worked (confirmed via a non-Copy `OwnedStr` instantiation
+  specifically, the shape most likely to expose a wrong-element-size
+  bug). New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+  backends).
+
+## Bug found sweeping "enum variant payload is Vec<Struct> or Tuple<Array>" (found+fixed 2026-08-02)
+
+- [x] **BUG-74 (found+fixed 2026-08-02 — three layered bugs: one
+  checker-level admission gap, two C-backend-only codegen gaps).**
+  `Vec<Struct>` as an enum payload was already fine (checked, no
+  bug). A `Tuple` containing an `Array` as an enum payload (e.g.
+  `(i64, [i64; 3])`) was not:
+
+  1. **Checker gate too conservative.** The enum-payload admission
+     check computed `payload_ty.is_copy()` for the whole `Tuple`,
+     and `Type::Array::is_copy()` returns `false` unconditionally
+     (a deliberate design choice for reasons unrelated to payload
+     safety — array-of-Copy-elements is handled via an ad-hoc
+     `array_of_copy` special case everywhere it's needed instead,
+     e.g. struct fields already have their own `[T;N] of Copy`
+     arm). So `Type::Tuple([I64, Array{I64,3}]).is_copy()` — which
+     recurses element-wise — returned `false`, and `(i64, [i64;3])`
+     was rejected with "payload type ... is not admitted in v1"
+     even though it's exactly as safe as any Copy payload (no heap
+     pointers, all stack/inline data). Fixed with a
+     `tuple_of_admitted` check that mirrors `array_of_copy` one
+     level deeper: a Tuple whose every element is either `is_copy()`
+     or itself an array-of-Copy-elements is admitted.
+  2. **C backend: typedef never emitted (found immediately after
+     relaxing the gate).** `emit_tuple_bundle`'s C emission spells
+     an `Array` element via `intent_arr3_int64_t` (the wrapped-array
+     typedef `c_element_storage` produces for aggregate contexts),
+     but `emit_array_typedefs_for` — the pass responsible for
+     actually declaring that typedef — never recursed into
+     `Type::Tuple` elements, and its one call site only fed it the
+     "Vec element" axis, never enum payloads or bare tuple shapes:
+     `cc` rejected the file with "unknown type name
+     'intent_arr3_int64_t'". Fixed by (a) adding a `Type::Tuple`
+     recursion arm to `emit_array_typedefs_for`, and (b) moving the
+     array-typedef emission pass earlier in `backend_c.rs`'s emit
+     function — before the "early tuple bundle" emission loop that
+     now needs it declared first — sharing the SAME `seen` set with
+     the original later Vec-element-only call site so neither pass
+     double-emits a shape the other already covered.
+  3. **C backend: initializer syntax (found immediately after fixing
+     #2).** Even with the typedef correctly declared, `cc` then
+     rejected the generated compound literal with "array initialized
+     from non-constant array expression" — `TypedExprKind::Tuple`'s
+     C emission called `emit_expr` uniformly for every element,
+     which for an inline `[1,2,3]` `ArrayLit` produces a CAST
+     compound literal (`((int64_t[3]){1,2,3})`) — C forbids assigning
+     that to a struct member of array type. `TypedExprKind::StructLit`
+     already had the correct special case (a bare-brace `{1,2,3}`
+     form) for exactly this situation; `Tuple`'s emission just never
+     got the matching arm. Fixed by mirroring StructLit's special
+     case.
+  Bug #3 turned out to be entirely general, not enum-specific:
+  confirmed a bare local `let x: (i64, [i64;3]) = (42, [1,2,3]);`
+  (no enum anywhere) hit the identical C-backend crash before the
+  fix — a pre-existing gap this sweep row happened to be the first
+  thing to actually exercise. All three fixes together: `Tuple<Array>`
+  enum payloads now construct, dispatch, and destructure correctly on
+  both backends; the LLVM backend was unaffected throughout (it
+  already handled this shape correctly once the checker gate
+  allowed it through). New tests: 4 `src/lib.rs` + 3
+  `tests/run_end_to_end.rs` (both backends). Full `cargo test
+  --release --workspace`: 13/13 binaries clean, 0 failed (both
+  before adding these new tests and after running them individually).
+
+## Bug found sweeping "match over Vec<Enum> with 3+ variants, mixed Copy/non-Copy payloads" (found+fixed 2026-08-02)
+
+- [x] **BUG-75 (found+fixed 2026-08-02 — real LLVM/C backend
+  divergence, silent scalar-payload corruption, two layered root
+  causes).** Found while testing the testing matrix's "match over
+  `Vec<Enum>` with 3+ variants, mixed Copy/non-Copy payloads" row.
+  Minimal repro:
+  ```vani
+  enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+  fn main() -> i64 {
+    let items: Vec<Item> = vec(Item.Num(7), Item.Flag(true));
+    let it0: Item = clone_at(ref items, 0);   // becomes Num(0) on LLVM!
+    let it1: Item = clone_at(ref items, 1);   // becomes Flag(false) on LLVM!
+    ...
+  }
+  ```
+  C backend: correct (7, true). LLVM backend: `it0` reads as `Num(0)`,
+  `it1` reads as `Flag(false)` — every SCALAR payload silently
+  zeroed/defaulted. Isolated with a narrowing sequence: no-Vec direct
+  match (correct on both) → single clone_at, no loop (broken on
+  LLVM) → confirmed the bug is in `clone_at`'s LLVM codegen for
+  `Type::Enum` elements specifically.
+
+  **Root cause #1**: `LLVM_ENUM_PAYLOAD_REGISTRY` (populated via
+  `decl.payload_types.iter().find_map(|p| p.clone())`) stores the
+  FIRST payload type found across a enum's variants, used by
+  `clone_at`'s `heap_kind` detection (`Some(Type::OwnedStr) =>
+  Some("owned_str"), _ => None`) to decide whether the enum needs
+  deep-string-cloning. For `Item`, `Num`'s `i64` payload is declared
+  FIRST, so `payload_ty = Some(Type::I64)`, `heap_kind = None` — even
+  though `Item` genuinely has an OwnedStr-payloaded variant (`Text`).
+  `clone_at` therefore always took the "tag-only" fallback path,
+  which round-trips ONLY the tag via `insertvalue {} undef, i32 tag,
+  0` and leaves the payload's `[N x i8]` byte-buffer field `undef` —
+  discarding the payload for EVERY variant, not just the missed
+  OwnedStr one.
+
+  **Root cause #2** (found immediately after fixing #1 — the fix
+  newly reached a second, previously-dormant code path): for a
+  genuinely mixed-payload-type enum (3+ distinct payload types
+  across variants), `%Enum_<Name>`'s field 1 is declared `[N x i8]`
+  (a byte buffer sized to the largest variant, see
+  `llvm_enum_has_mixed_payloads`/`llvm_enum_payload_buffer_size`) —
+  NOT `i8*`. The pre-existing OwnedStr-deep-clone code
+  (`extractvalue`/`insertvalue` at the SSA-value level, assuming
+  field 1 was always `i8*`) had never actually been exercised for a
+  TRULY mixed enum before (bug #1 always routed around it), so its
+  type mismatch went undetected until now: `lli` rejected the IR
+  with `'%tN' defined with type '[8 x i8]' but expected 'ptr'`.
+
+  Fixed both:
+  1. Compute the OwnedStr-tag set directly from the per-variant
+     registry (`LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`, which already
+     exists and is correctly per-variant — used elsewhere for enum
+     drop dispatch) instead of the single-payload-type registry, so
+     detection is correct regardless of variant declaration order,
+     and so a scalar-payloaded tag can never be misrouted into the
+     string-clone branch (which would have reinterpreted its raw
+     bits as an `i8*` and handed that to `intent_str_concat` — an
+     out-of-bounds read/crash, worse than the original bug).
+  2. Rewrote the deep-clone-as-string path to operate entirely
+     through pointers: `alloca` a destination slot, `store` the
+     freshly-loaded source value into it whole (this alone already
+     preserves every tag's raw payload bytes, scalar or not), then —
+     only for a tag matching the OwnedStr set — `getelementptr` +
+     `bitcast` BOTH the source and destination payload fields to
+     `i8**` (using the correct field-1 type string, `[N x i8]` for a
+     mixed enum or `i8*` for a uniform one, computed the same way
+     the struct typedef itself is) and overwrite just the destination
+     with a freshly-cloned string pointer. This works for both field-1
+     representations and eliminates the SSA-value type-mismatch
+     entirely, since bitcasts operate on pointers, not aggregate
+     values.
+
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+  backends, hand-computed expected sum: `7 + 1000 + 2000 + 3000 + 0 =
+  6007` across all 4 variant shapes in one `Vec<Item>`). Full `cargo
+  test --release --workspace`: 13/13 binaries clean, 0 failed.
+
+## Bug found sweeping "nested if let 2 levels deep on a Vec element" (found+fixed 2026-08-02)
+
+- [x] **BUG-76 (found+fixed 2026-08-02 — same bug class as BUG-29/
+  BUG-35, LLVM-only, `Type::Enum` payload never covered).** Found
+  while testing the testing matrix's "nested if let 2 levels deep on
+  a Vec element" row. A genuinely nested pattern (`if let
+  Option.Some(Result.Ok(v)) = ...`) is cleanly rejected at PARSE
+  time on both backends, matching the already-documented v1 "no
+  nested patterns" limitation — not a bug. Testing the flattened
+  two-level form (the doc's own suggested workaround) combined with
+  `clone_at` sourcing the outer binding from a `Vec<Option<UserEnum>>`
+  found BUG-76, but the minimal repro had nothing to do with any of
+  that:
+  ```vani
+  enum MyResult { Ok(i64), Err(i64) }
+  fn main() -> i64 {
+    let z: Option<MyResult> = Option.None;   // crashes LLVM
+    return 0;
+  }
+  ```
+  Crashed `lli` with `insertvalue %Enum_Option__MyResult %t,
+  %Enum_MyResult 0, 1` — "integer constant must have integer type".
+  Root cause: constructing a payload-less variant (`None`) of an
+  enum whose SIBLING variant carries a payload (`Some(T)`) needs a
+  correctly-typed LLVM zero-value placeholder for that unused
+  payload slot — a per-`T`-type match already existed for exactly
+  this purpose (with two prior fixes documented right there in the
+  source: BUG-29 added `Str`, BUG-35 added `Box<T>`/raw pointers,
+  both found the same way — a payload-less sibling variant of an
+  enum whose OTHER variant carries that type crashed with this exact
+  message), but `Type::Enum(_)` was never added to the
+  `zeroinitializer` arm (alongside `Vec`/`Tuple`/`Struct`/`Array`/
+  `Task`/`Mutex`/`Channel`), so it fell through to the numeric-only
+  default (`"0"`) — invalid IR for an aggregate type. This is
+  exactly the "not tested for this specific payload type yet"
+  pattern BUG-29/35 already both hit, just never re-swept for `T` =
+  a user-defined enum until now. Fixed by adding `Type::Enum(_)` to
+  the existing `zeroinitializer` arm. New tests: 1 `src/lib.rs` + 1
+  `tests/run_end_to_end.rs` (both backends, the full flattened-
+  nesting scenario this row was actually testing). Full `cargo test
+  --release --workspace`: 13/13 binaries clean, 0 failed.
+
+## Bug found sweeping "extern C fn taking/returning a Struct BY VALUE" (found+fixed 2026-08-02)
+
+- [x] **BUG-77 (found+fixed 2026-08-02 — LLVM-only, System V x86-64
+  ABI lowering missing its mirror-image step on the return side).**
+  Found while testing the testing matrix's "`extern \"C\" fn` taking
+  or returning a Struct BY VALUE" row against a REAL linked C
+  function (not just a compile-only declaration check — the existing
+  test suite already covered that half). A small struct passed BY
+  VALUE as a parameter worked correctly (Closure #288's ABI
+  lowering). A small struct RETURNED by value crashed the LLVM
+  backend the instant the function was actually called:
+  ```vani
+  struct Point { x: i32, y: i32 }
+  extern "C" fn make_point(x: i32, y: i32) -> Point;
+  fn main() -> i64 {
+    let p: Point = make_point(3 as i32, 4 as i32);   // crashes LLVM
+    ...
+  }
+  ```
+  `llc`/`opt` rejected the IR: `'%t2' defined with type 'i64' but
+  expected '%Struct_Point'`. Root cause: the call-site codegen
+  correctly used the ABI-lowered return type (`i64`, matching cc's
+  actual System V x86-64 calling convention for a small all-integer
+  struct) for the `call` instruction itself — but the resulting SSA
+  value was then returned to every downstream consumer (a `let`
+  binding's `store`, a struct-field read, ...) unchanged, as if it
+  already had the real `%Struct_Point` type. The param-passing side
+  of this SAME ABI-lowering feature already had the matching "lower
+  the value before the call" step (spill to alloca, bitcast to the
+  lowered pointer type, load); the return side simply never got the
+  mirror-image "un-lower the value after the call" step. C backend
+  was unaffected throughout — its own ABI handling is per-value, not
+  keyed to this LLVM-specific lowered-type SSA representation.
+  Fixed by adding exactly that missing mirror step right after the
+  `call` instruction: spill the lowered SSA value to an alloca,
+  bitcast the pointer to the real struct type, and load — producing
+  a correctly-typed struct value for every downstream use, the same
+  way the param-passing side already does it in reverse.
+  Confirmed against a REAL linked C shim (`vanic build --link-with`
+  for LLVM, `vanic run --backend=c --link-with` for C) exercising
+  BOTH directions in one program (a function taking a struct by
+  value feeding into one returning a struct by value) — not just a
+  compile-only check, which is what let this bug hide behind the
+  pre-existing test suite's coverage gap (that suite only ever
+  compiled a struct-returning extern declaration, never actually
+  called one against a real linked symbol). New tests: 1
+  `src/lib.rs` (LLVM IR shape assertion: the un-lowering bitcast
+  sequence appears after the call) + 1 `tests/run_end_to_end.rs`
+  (both backends, real linked C shim, correct runtime value `7` =
+  `3+4`). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed.
+
+## Bug found sweeping "#[complexity(...)] fn on Vec<Struct>/Array<Tuple,N>" (found+fixed 2026-08-02)
+
+- [x] **BUG-78 (found+fixed 2026-08-02 — C-backend-only declarator
+  bug, same class as BUG-61's many follow-ups: a caller of
+  `c_leaf_type` that should have routed through `c_element_storage`
+  instead).** Found while testing the testing matrix's Big-O row —
+  the `--big-o` analyzer itself handled `Vec<Struct>` loops correctly
+  (not a bug), but writing a natural Big-O-relevant helper taking a
+  fixed-size `Array<Tuple,N>` parameter crashed the C backend
+  entirely unrelated to Big-O:
+  ```vani
+  fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+    return arr[0].0;
+  }
+  ```
+  `cc` rejected the generated C: `unknown type name 'v_arr'` — the
+  emitted parameter declaration was `/* tuple */ v_arr[5]`. Root
+  cause: `format_declarator`'s `Type::Array { element, length }` arm
+  called `c_leaf_type(element)` to spell the element type — but
+  `c_leaf_type` is documented as a LEAF-only spelling table:
+  Tuple/Struct/Vec/Channel/Mutex/etc. all deliberately return a
+  placeholder comment there ("hitting this arm means a caller forgot
+  to special-case X"), with `c_element_storage` existing specifically
+  to give the correct per-shape spelling for exactly these types (and
+  already used correctly elsewhere — struct/tuple fields, `Vec`
+  bundle element storage, `emit_array_typedefs_for`'s inner spelling).
+  The array-parameter/local declarator path was simply never updated
+  to route through it. Same bug also present (found by inspection,
+  same fix) in the sibling `Type::Ref(Array)` / `Type::RefMut(Array)`
+  arms of the same function, for `ref [Tuple;N]` / `mut ref
+  [Struct;N]` parameters. Fixed by changing all three arms to call
+  `c_element_storage(element)` instead of `c_leaf_type(element)`.
+  LLVM backend was unaffected throughout (its own array-parameter
+  lowering already spells element types correctly). New tests: 1
+  `src/lib.rs` (asserts no placeholder comment leaks into the
+  declarator, and the real `intent_tuple_...`/`Struct_...` names
+  appear) + 1 `tests/run_end_to_end.rs` (both backends, hand-computed
+  sums over both an `Array<Tuple,N>` and an `Array<Struct,N>`
+  parameter). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed.
+
+## Bug found sweeping "struct with a SIMD Vec128/Vec256 field AND a plain Vec field" (found+fixed 2026-08-02)
+
+- [x] **BUG-79 (found+fixed 2026-08-02 — same "missing arm in
+  `c_element_storage`" class as several earlier fixes this session:
+  Closure, Channel, Mutex/Guard/RwLock, HashMap all got this exact
+  fix before; `vec128`/`vec256`/`vec512` never did).** Found while
+  testing the testing matrix's row about a struct holding both a
+  SIMD `vec128`/`vec256` field and a plain `Vec` field — the row's
+  own hypothesis (a helper-naming collision between the two Vec
+  families) turned out not to be the actual bug:
+  ```vani
+  struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+  ```
+  `cc` rejected the generated C: `expected specifier-qualifier-list
+  before 'lane'` — the field declared itself as `/* vec128<T> */
+  lane;`. Root cause: `c_element_storage` — the function that gives
+  struct fields, Vec elements, and similar positions their REAL
+  per-shape C type spelling, specifically so callers don't fall back
+  to `c_leaf_type`'s deliberate placeholder-comment stubs for
+  aggregate types ("hitting this arm means a caller forgot to
+  special-case X") — simply never had arms for `Type::Vec128`,
+  `Type::Vec256`, or `Type::Vec512`. The real spelling helpers
+  (`c_vec128_type`/`c_vec256_type`/`c_vec512_type`, producing the
+  GCC/Clang `__attribute__((vector_size(N)))` GNU vector-extension
+  type) already existed and were already used correctly for the
+  LOCAL-variable case (`let v: vec128<f64> = ...;`) — this was
+  purely a missing arm in the struct-field/general "element storage"
+  path, not a design gap. Fixed by adding the three missing arms.
+  LLVM backend was unaffected throughout (its own field-type lowering
+  already handled these types correctly). New tests: 1 `src/lib.rs`
+  (placeholder-comment absence + real vector-extension type
+  assertion) + 1 `tests/run_end_to_end.rs` (both backends,
+  hand-computed SIMD `reduce_add` + plain `Vec` field values,
+  vec128 AND vec256 in the same program). Full `cargo test --release
+  --workspace`: 13/13 binaries clean, 0 failed.
+
+## Bug found sweeping "Option<Array<T,N>>/Result<Tuple,E>" (found+fixed 2026-08-02)
+
+- [x] **BUG-80 (found+fixed 2026-08-02 — two layered C-backend-only
+  bugs: wrong match-arm binding type spelling, then a genuine "C
+  arrays aren't assignable" language constraint).** Found while
+  testing the testing matrix's `Option<Array<T,N>>`/`Result<Tuple,E>`
+  row. `Result<(i64,i64), i64>` already worked correctly on both
+  backends (Tuple's match-arm binding path was already correct).
+  `Option<[i64; 3]>` crashed the C backend (LLVM was correct
+  throughout):
+  ```vani
+  fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+    if has { return Option.Some([1, 2, 3]); }
+    return Option.None;
+  }
+  fn main() -> i64 {
+    let oa: Option<[i64; 3]> = maybe_arr(true);
+    let total: i64 = match oa {
+      Option.Some(arr) then arr[0] + arr[1] + arr[2],   // crashes C
+      Option.None then 0 - 999,
+    };
+    ...
+  }
+  ```
+  1. **Wrong type spelling for the match-arm local.** The codegen
+     that declares a match arm's payload binding
+     (`{TYPE} v_arr = __scr.payload;`) called `c_type_name(bty)` for
+     `TYPE`. `c_type_name`'s `Type::Array` arm deliberately spells an
+     array as the RETURN-POSITION wrapper struct
+     (`intent_arr_ret_<N>_<T>`, Closure #239) — its own doc comment
+     already says as much: "the Let path passes through
+     `format_declarator` instead so the array declarator form keeps
+     working for locals." This match-arm binding IS exactly such a
+     Let-like local-binding position, but was never routed through
+     the correct helper. Symptom: `unknown type name
+     'intent_arr_ret_3_int64_t'` (the wrapper typedef isn't even
+     emitted for this position), and even if it had been, it's a
+     struct (`{ T data[N]; }`), so `v_arr[0]` wouldn't subscript
+     correctly either way ("subscripted value is neither array nor
+     pointer nor vector").
+  2. **C arrays can't be copy-assigned (found immediately after fixing
+     #1).** Switching to `c_element_storage` (the correct per-shape
+     helper already used for every OTHER payload shape at this call
+     site — Tuple, Struct, Vec, Closure, ...) fixed the type NAME
+     (`intent_arr3_int64_t`) but exposed a second, more fundamental
+     issue: C arrays — even through a raw-array typedef alias — can't
+     be initialized via plain `=` assignment at all ("invalid
+     initializer"; this is a real C-language constraint, not a naming
+     bug). Fixed by declaring the binding as a POINTER to the element
+     type instead (`int64_t* v_arr = __scr.payload;`) — the raw array
+     struct member naturally array-decays to a pointer to its first
+     element in this expression context (valid C), and `v_arr[0]`/
+     etc. in the arm body keeps working completely unchanged (pointer
+     subscripting uses the identical syntax to array subscripting).
+  3. **Typedef-emission gap (a narrower repeat of BUG-74's class).**
+     Even with both codegen fixes, `intent_arr3_int64_t` still wasn't
+     declared anywhere in the file — BUG-74's fix walked `tuple_shapes`
+     for nested `Array`-inside-`Tuple` payloads, but an enum payload
+     that's DIRECTLY `Array<T,N>` (no Tuple wrapper) was never fed
+     into the array-typedef pass at all. Fixed by walking
+     `program.enums`'s payload types directly through the existing
+     `emit_array_typedefs_for` pass (which already recurses correctly
+     once fed the right root type).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (both
+  backends, `Option<Array>` Some/None AND `Result<Tuple>` Ok/Err, all
+  four paths, hand-computed values). Full `cargo test --release
+  --workspace`: 13/13 binaries clean, 0 failed.
+
 ---
+
+## Clearing the backlog of previously-deferred open bugs (2026-08-02)
+
+User asked for a prioritized list of every open item still on the
+books outside the BUG-68..80 sweep, approved items 1-5, ordered
+cheapest/lowest-risk first. BUG-33 (SMT `let`-then-`return` proof gap)
+was listed as still-open in that prioritization pass, deliberately
+left for its own dedicated session given soundness risk — this was a
+mistake in the audit that produced the list: BUG-33's own entry above
+already carries a "✅ Fixed 2026-08-01" resolution (commit `304c922`),
+predating this session entirely. Re-verified directly (2026-08-02):
+the entry's exact repro (`let r: i64 = n * 2; return r;` with
+`ensures _return == n * 2;`) proves cleanly, and a genuinely wrong
+`ensures` on the same shape is still correctly rejected — no work
+needed, BUG-33 was never actually open this session. BUG-36 (`mut ref`
+exclusivity — missing checker subsystem) remains genuinely open and
+was correctly deferred to its own dedicated session.
+
+- [x] **DOC-4 / DOC-5 — already fixed, stale bookkeeping only.** Both
+  tutorial files (`intermediate/03b_affine_deeper_primer.md`'s
+  `maybe_consume` example, `beginner/02_variables.md`'s Challenge
+  section) already carried the corrected examples from a prior pass —
+  re-verified directly against the compiler (`vanic check`): the
+  `maybe_consume` shape without an early return in the moving branch
+  is correctly rejected; `u32 * i64` widens cleanly while `u32 * i32`
+  (same width, mismatched sign) is correctly rejected. The "not yet
+  fixed, still open" note near BUG-13/14/15/18 was simply never
+  updated after the fix landed. Corrected that note in place.
+
+- [x] **BUG-22 residual — already fixed, stale bookkeeping only.**
+  The struct/enum RwLock/Mutex payload struct-definition-ordering gap
+  noted as "attempted and reverted" in BUG-19's entry was, per BUG-22's
+  own (later, more complete) entry, fully fixed the very next day
+  (2026-07-28). Re-verified directly: `RwLock<Point>`/`Mutex<Point>`
+  struct payloads both compile and run correctly on `--backend=c`,
+  matching LLVM (read/write/release cycle, guard_get/guard_set).
+  Corrected the stale note in place; no code change needed.
+
+- [x] **BUG-20 residual — real bug, fixed.** Three adjacent gaps left
+  over from BUG-20's original fix (which only wired `arm.guard` into
+  `check_match_slice`'s `Slice` arm): (1) that same function's
+  `Wildcard` arm never read `arm.guard` at all — a guarded slice/array
+  wildcard always behaved as an unconditional catch-all; (2)
+  `check_match_str` never type-checked or wired `arm.guard` into its
+  generated dispatch at all; (3) `check_match_float` had the identical
+  gap. All three are the "compiles fine, silently produces the wrong
+  answer" class of bug.
+  - Slice `Wildcard`: mirrors the M3 int/bool/enum dispatch precedent
+    — a guarded wildcard does NOT close off later arms (`wildcard_seen`
+    stays false) and its guard becomes an ordinary conditional entry in
+    the dispatch chain (`typed_arms.push((guard_expr, body))`) instead
+    of the unconditional fallback.
+  - `check_match_str` / `check_match_float`: both fold arms right-to-
+    left into a nested `IfExpr` chain; since string/float patterns bind
+    no names (unlike slice patterns), the guard has no dependency on
+    the pattern having matched, so it folds in with an eager `&&`
+    (`cond = (scr == lit) && guard`) rather than needing the slice
+    fix's "gate guard eval behind the length check first" structure.
+  - 7 new `src/lib.rs` tests (compile-time acceptance + guard-must-be-
+    Bool rejection for all three shapes) + 3 new `tests/run_end_to_end.rs`
+    execution tests (real stdout on both backends — this class of bug
+    compiles cleanly and only produces wrong output at runtime, so a
+    compile-only test can't catch it). All pre-existing `match_`-
+    filtered tests (137) and the two prior BUG-20/28 execution tests
+    (`slice_pattern_guards_example_...`, `match_guard_chain_example_...`)
+    still pass.
+
+- [x] **BUG-66 residual — real bug, fixed as a clean rejection (not a
+  "make it work" fix).** The deferred gap from BUG-66's original fix:
+  a closure with a HEAP-OWNING capture (moved in, not `ref`-captured)
+  stored into a struct field crashed both backends — LLVM: `lli`
+  rejects the emitted IR ("base element of getelementptr must be
+  sized" — the synthesized env struct is referenced as an opaque/
+  unsized type at the point the closure is stored into and read back
+  from the struct field); C: `free(): double free detected in tcache
+  2` at runtime. This is an affine-ownership/lifetime gap (the
+  closure's heap-owning env crossing a struct-field boundary), not a
+  missing typedef — implementing real cross-struct-field lifetime
+  tracking for an affine closure env is a substantial new feature, not
+  a quick fix, so (matching the BUG-64 Channel-Copy-requirement
+  precedent named in the original deferral) the fix is a clean
+  checker-time rejection instead of an attempt to make the pattern
+  sound.
+  New `reject_affine_closure_into_struct_field` helper (`checker.rs`):
+  narrow, name-based check using the pre-existing `CLOSURE_AFF_REGISTRY`
+  (keyed by a closure literal's own bind name, populated when the
+  literal itself is checked — `Type::Closure` has no Copy/affine
+  distinction in the type system itself, so this out-of-band registry
+  is the only place that information lives). If a struct-literal
+  field's declared type is `Closure` and its RHS is a bare `Var(name)`
+  found in the registry, reject with a diagnostic explaining the
+  capture-by-move + struct-field-boundary problem and pointing at the
+  `ref`-capture / pass-as-argument workarounds. Wired into both
+  struct-literal field-checking and `Stmt::FieldAssign` (`obj.field =
+  value;`) — the two places a closure value can be stored into a
+  struct field. Deliberately narrow: only catches the direct
+  `Struct { field: closure_var }` / `obj.field = closure_var;` shape
+  (matching the original bug report and the tutorial's own worked
+  example), not renamed/re-bound aliases of the closure — full alias
+  tracking would be a broader mechanism than this targeted fix.
+  Verified: the exact original repro (`Handler { cb: Vec-capturing
+  closure }`) now gets a clean `vanic check` rejection on both
+  backends instead of crashing; the pre-existing Copy-only-capture
+  case (`struct_field_closure_with_copy_only_capture_...`) still
+  compiles and runs correctly (105 = 100 + 5) — confirming the new
+  check doesn't over-reject. 2 new `src/lib.rs` tests (struct-literal
+  shape + field-assign shape) + 1 new `tests/run_end_to_end.rs` test
+  (real `vanic check` invocation, confirms the diagnostic text). 71
+  closure/struct-field-filtered `cargo test --lib` tests pass, 0
+  regressions.
+
+- [x] **BUG-36 (fixed 2026-08-02 -- the missing checker subsystem,
+  attempted despite being flagged as highest-risk/dedicated-session
+  material).** The "single mutable borrow" exclusivity rule (`ref`
+  can multiply, `mut ref` must be exclusive) had NO enforcement at
+  all -- only affine move tracking existed. `let r: mut ref Vec<i64>
+  = mut ref xs; push(r, 4); print xs[0];` compiled and ran cleanly on
+  both backends with no diagnostic.
+  **Design, deliberately narrow to keep the false-rejection risk
+  low**: a lexical (NOT full non-lexical-lifetime) approximation,
+  scoped only to NAMED `let`-bound `ref`/`mut ref` bindings:
+  - A tracked borrow's "lifetime" is exactly its owning binding's own
+    lexical scope (`env.scopes` in `checker.rs` only contains
+    bindings whose enclosing block hasn't exited yet, so this falls
+    out for free from the existing scope-stack machinery -- no new
+    "borrow end" bookkeeping needed).
+  - An inline `foo(mut ref xs)` call argument is NEVER stored in
+    `env` (confirmed by reading `check_ref_mut`: a `TypedExprKind::
+    RefMut` value passed directly as a call argument doesn't go
+    through `Stmt::Let`), so it's structurally invisible to this
+    check -- exactly matching the tutorials' own pre-existing
+    documented model ("the compiler doesn't track them across the
+    call -- once the call returns, the borrow ends"). This is the
+    single biggest reason the false-rejection risk stayed low: the
+    dangerous, trackable shape (a persisted named binding) and the
+    safe, untracked shape (an ephemeral call-argument borrow) are
+    already syntactically distinct in the AST.
+  - Reuses the pre-existing `ref_aliases` field on `VarInfo`
+    (populated by `compute_ref_aliases_from_let_rhs`, built for the
+    unrelated L4 scope-escape checks) rather than adding new state --
+    a live `Ref`/`RefMut`-typed binding whose `ref_aliases` contains
+    `target` IS the borrow. Two new helpers, `find_live_mut_borrow_of`
+    / `find_live_borrow_of` (`checker.rs`), scan all open scopes for
+    a conflicting live borrow.
+  **Enforcement points** (four call sites, all reusing the two
+  helpers above): (1) `check_expr`'s `ExprKind::Var` read arm --
+  reading a binding directly while a `mut ref` of it is live is
+  rejected (this alone also covers `Stmt::FieldAssign`'s writes for
+  free, since that handler already routes its `object` expression
+  through `check_expr`); (2) `Stmt::Assign` -- a direct `x = ...;`
+  write is rejected the same way, gated on `!existing.ty.is_any_ref()`
+  so writing THROUGH a ref binding itself is correctly exempt; (3)
+  `Stmt::IndexAssign` -- `xs[i] = v;` rejected when `!through_ref`
+  (mirrors (2)); (4) `check_ref` / `check_ref_mut`'s bare-`Var`
+  branches -- creating a NEW `ref`/`mut ref` of an already-borrowed
+  binding is rejected at the creation site itself, for an earlier,
+  clearer diagnostic than waiting for the first conflicting access.
+  **Soundness follow-up found and fixed in the same pass**:
+  `Stmt::Assign` reassigning a ref-typed LOCAL to a new source
+  (`r = mut ref ys;`) previously left `ref_aliases` stale (confirmed
+  this shape already type-checked before this fix, so it's a real,
+  reachable gap) -- would have both incorrectly kept the OLD target
+  locked forever (usability bug, still sound) AND, the actual
+  soundness gap, never recognized the NEW target as borrowed at all.
+  Fixed by recomputing `ref_aliases` via the same
+  `compute_ref_aliases_from_let_rhs` the `Let` path already uses,
+  whenever the reassigned binding's own type is a ref.
+  **Verification, given the explicit "could introduce false
+  rejections across a huge amount of existing working code" risk
+  flagged when this was first deferred**: (1) a full `cargo test
+  --release --workspace` run, 0 failures; (2) an exhaustive
+  before/after `vanic check` sweep of all 1034 `.vani` files under
+  `examples/` (stashed the fix, built a baseline binary, ran `check`
+  on every file, restored the fix, rebuilt, ran `check` on every file
+  again, `diff`'d the two pass/fail sets) -- **byte-identical, zero
+  differences** across the entire corpus; (3) directly extracted and
+  re-verified the two tutorial code blocks using a NAMED `mut ref`
+  binding found by grepping every tutorial for the pattern
+  (`intermediate/03d_cyclic_references_primer.md`'s `register`/`sub`
+  pattern -- confirmed unaffected, since nothing reads the borrowed
+  binding directly after the named borrow is taken; and
+  `intermediate/03b_affine_deeper_primer.md`'s own repro, which is
+  the bug itself and is now correctly rejected).
+  **Docs updated**: `03b_affine_deeper_primer.md`'s "Borrow scopes"
+  section (previously documented the gap as "as of this writing, not
+  enforced" -- now shows the real enforced diagnostic and explains
+  the lexical/named-binding-only scope precisely), its "two-way
+  trade" section and summary bullet (both previously downplayed the
+  exclusivity rule as unenforced design-intent -- now state the real,
+  current enforcement boundary).
+  New tests: 10 checker-level (`src/lib.rs` -- read/write/reassign/
+  index-assign violations rejected; second-borrow-while-live rejected
+  both directions shared-then-mut and mut-then-shared; inline call-
+  argument borrow correctly NOT tracked; multiple named shared refs
+  coexist; scope-ended borrow correctly releases; reassigning a ref
+  binding correctly retargets the tracked alias) + 2 end-to-end
+  (`tests/run_end_to_end.rs` -- real `vanic check`/`run` invocations,
+  one confirming the clean rejection, one confirming a legitimate
+  scope-bounded usage still compiles and runs correctly on both
+  backends). Full `cargo test --release --workspace` after the tests
+  landed: 13/13 binaries clean, 0 failed (2688 lib tests, up from
+  2678; 139 end-to-end tests, up from 137).
+  **Known, deliberately-accepted residual gap** (documented in the
+  new `find_live_mut_borrow_of` doc comment and in the updated
+  tutorial section): this is a lexical approximation, not real
+  liveness analysis -- a borrow is considered live for the REST of
+  its declaring scope even past its actual last use, and only NAMED
+  bindings are tracked at all. Anything beyond that (interprocedural
+  aliasing, non-lexical patterns) remains unchecked exactly as
+  before this fix -- a false negative, never a false positive, which
+  is the required direction for a checker that must never reject
+  sound code.
+
+## Feature-combination gap audit sweep (2026-08-03)
+
+Working through `docs/FEATURE_COMBINATION_GAPS_TODO.md` (49-row TODO
+created 2026-08-02 for exactly this purpose). User authorized fully
+autonomous operation ("proceed without any inputs from me... automate
+and fix automatically without asking") for this pass.
+
+- [x] **BUG-81 (found+fixed 2026-08-03 -- two independent bugs, one
+  per backend, same "container element with its own codegen path
+  forgot this case" class as BUG-61/79). `Vec<vec128<T>>` (a SIMD
+  lane type as a Vec ELEMENT, not a struct field) crashed both
+  backends.** Category 1, row 1 of the gap audit -- the top-priority
+  row, flagged in advance as the closest unswept analog of BUG-61.
+  - **C backend**: `element_tag` (`backend_c.rs`) -- the function
+    that names Vec BUNDLE typedefs/helpers -- is a SEPARATE function
+    from `c_element_storage` (which BUG-79 already fixed for the
+    struct-FIELD case) and never got the matching arm. Its `_ =>
+    c_leaf_type(element).replace(' ', "_")` fallback returned
+    `c_leaf_type`'s placeholder comment `"/* vec128<T> */"`, and the
+    space-replace turned it into `/*_vec128<T>_*/` -- embedded into
+    every generated `intent_vec_<tag>__*` identifier, corrupting the
+    entire bundle. `cc` rejected the output with a cascade of
+    "expected '=', ',', ';'..." errors, one per corrupted identifier.
+    Fixed by adding explicit `Vec128`/`Vec256`/`Vec512` arms
+    (recursive composition, mirroring the Atomic/Channel/Box arms
+    already in the same function).
+  - **LLVM backend, layered**: (1) `vec_struct_tag` (the LLVM analog
+    of `element_tag`) had the identical missing-arm gap, causing a
+    Rust panic on compile ("llvm_type: use llvm_type_string for
+    aggregate / ref type Vec128(F64)") -- fixed the same way. (2)
+    Fixing that alone revealed a SECOND, more severe bug underneath:
+    `vec_element_byte_size` (drives the Vec's malloc/realloc SIZE
+    calculation for push/growth, a sibling of the already-correct
+    `llvm_byte_size`) has a final fallback `element.bits().
+    unwrap_or(64) / 8` -- `Type::bits()` returns `None` for SIMD lane
+    types (they're not in its bits-classified match), so this
+    silently computed 8 bytes for what's actually a 16-byte
+    `vec128`/32-byte `vec256`/64-byte `vec512` register --
+    under-allocating the buffer by half to 1/8th of what it needs.
+    Confirmed via the exact failure signature every prior BUG-6x
+    under-allocation fix describes: `realloc(): invalid next size` at
+    runtime, corrupting the heap on the second element's `push`.
+    Fixed by adding explicit 16/32/64-byte arms, matching
+    `llvm_byte_size`'s already-correct constants.
+  - **Verification**: beyond the usual both-backend stdout check, ran
+    `valgrind --leak-check=full` against a native AOT LLVM build
+    (`vanic build ... -lm`, since `--backend=c`/JIT paths don't
+    produce a persistent native binary for LLVM the same way) --
+    0 errors, all heap blocks freed, confirming the fix isn't just
+    "happened not to crash this time" on a heap-layout-dependent bug.
+  - Also swept the REST of category 1 (rows 2-8: `Array<vec128,N>`,
+    `struct { Vec<vec256<T>> }`, `(vec128<T>, i64)` tuple, generic
+    struct at `T=vec128<T>`, `Option<vec128<T>>`, `HashMap<i64,
+    vec128<T>>`, `clone_at` on `Vec<Struct>` with a SIMD field) --
+    all correct on both backends except `HashMap<i64, vec128<T>>`,
+    which is a clean, consistent rejection matching the documented
+    "hashmap_insert() supports scalar V in v1" restriction (not a
+    bug). New tests: 8 `src/lib.rs` (one per row) + 2
+    `tests/run_end_to_end.rs` (real stdout, both backends -- one for
+    the bug itself, one covering the array/generic-wrapper rows).
+
+- [x] **BUG-82 (found+fixed 2026-08-03, same sweep, LLVM-only). While
+  testing category 1's `Option<vec128<f64>>`/`Result<vec128<f64>,
+  E>` row, `Result<vec128<f64>, i64>` -- a MIXED-payload-type enum
+  (unlike `Option<vec128<f64>>`, which has only ONE payloaded
+  variant) -- segfaulted `lli` with no diagnostic, on both
+  construction and match-arm extraction.** Root cause: mixed-payload
+  enums store their payload in an `{i32, [N x i8]}` byte buffer;
+  reading/writing the real payload type through it requires a
+  `bitcast i8* ... to <payload_llvm_type>*` then load/store. Neither
+  the construction site (`TypedExprKind::EnumVariantWithPayload`) nor
+  the match-arm extraction site had an explicit `align` on that
+  load/store -- LLVM defaults to the pointee type's ABI alignment
+  (16 bytes for `<2 x double>`/vec128, more for vec256/512), but the
+  buffer itself only guarantees 4-byte alignment (from the struct's
+  leading `i32` tag) -- an ALIGNED SSE/AVX move against actually-
+  unaligned memory is a hard segfault, not a compile error. `Option
+  <T>` never hits this: single-payload-type enums use
+  `insertvalue`/`extractvalue` directly on the SSA struct, never
+  touching the byte buffer. Fixed by adding an explicit `align 1` to
+  both sites -- unaligned move instructions are always correct
+  regardless of the buffer's real alignment, for every payload type
+  this path handles, not just SIMD ones (a strictly safer, simpler
+  fix than trying to compute and thread through the real per-enum
+  alignment requirement). Verified with `valgrind --leak-check=full`
+  on a native AOT LLVM build covering BOTH variants (`Result.Ok` and
+  `Result.Err`): 0 errors, all heap blocks freed. New tests: 1
+  `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real stdout, both
+  variants exercised, both backends -- this is a RUNTIME crash a
+  compile-only test can't catch, since LLVM compilation itself
+  succeeded before the fix).
+
+Full `cargo test --release --workspace` after both BUG-81 and BUG-82
+landed: 13/13 binaries clean, 0 failed (2697 lib tests, up from 2688;
+142 end-to-end tests, up from 139). Category 1 (all 8 rows) now fully
+closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+- [x] **BUG-83 (found+fixed 2026-08-03 -- two layered bugs, plus a
+  self-inflicted regression caught and fixed in the same pass).
+  Category 2, row 1: `struct Cache<T> { lock: Mutex<T> }` -- a
+  struct field holding a concurrency-handle type that's ONLY ever
+  used through that field (never as a bare local/param elsewhere in
+  the program) -- crashed both backends.** Root cause:
+  `collect_mutex_specs`/`collect_rwlock_specs`/`collect_channel_specs`
+  (the passes that discover which concrete T's need a bundle
+  emitted) only ever recursed into `Vec`/`Atomic`/`Array`/`Ref`/
+  `RefMut` -- never a nominal struct's OWN field types. The pre-
+  existing `struct_field_mutex_alongside_vec_field_...` test never
+  caught this: it ALSO declares a bare `let m: Mutex<i64> = ...;`
+  elsewhere, which the existing `TypedStmt::Let` arm already
+  discovers directly, masking the gap. Confirmed via `cc`: "implicit
+  declaration of function 'intent_mutex_int64_t_new'" -- the bundle
+  was simply never emitted. Fixed by adding a `Type::Struct(name)`
+  arm to all three collector functions.
+  **LLVM-specific second layer**: these three collectors live in
+  `backend_c.rs` and are directly REUSED by `backend_llvm.rs` (no
+  duplicate LLVM versions) -- but each backend populates its own
+  independent struct-fields registry (`backend_c::
+  STRUCT_FIELDS_REGISTRY` vs. `backend_llvm::
+  LLVM_STRUCT_FIELDS_REGISTRY`), and only one is ever populated per
+  compile run. The initial fix (reading only the C-side registry)
+  made C correct while LLVM kept failing ("Cannot allocate unsized
+  type" -- the mutex struct type was silently never emitted). Fixed
+  with a new `lookup_struct_fields_any_backend` helper that checks
+  both registries.
+  **Self-inflicted regression, found verifying the fix and fixed in
+  the same pass**: the `Type::Struct` recursion assumed a struct's
+  field graph is always a DAG -- true for BY-VALUE nesting (can't be
+  infinite-sized), false for `Vec<Self>` (legal and common --
+  `struct Node { children: Vec<Node> }`, the shape every tree/
+  recursive-walk example needs, since `Vec` is pointer-indirected).
+  Without a cycle guard, `collect_mutex_specs(Struct(Node))` walked
+  Node's `Vec<Node>` field straight back into itself, forever --
+  confirmed as a REAL stack overflow: the pre-existing, pinned
+  `self_referential_struct_vec_example_produces_correct_output_on_
+  c_backend` end-to-end test (a regression test for a DIFFERENT,
+  already-fixed bug, BUG-31) started crashing with "thread 'main' has
+  overflowed its stack" the moment the naive fix landed. Fixed with a
+  new `STRUCT_RECURSION_GUARD` thread-local tracking which struct
+  names are currently being expanded on the current walk -- already-
+  in-progress structs are skipped rather than re-entered.
+  Also found a completely separate, general (not struct/generic-
+  specific) bug while testing `Cache<bool>` (the second monomorphic
+  instantiation) alongside `Cache<i64>` -- logged as BUG-84 below.
+  Category 2 rows 2 and 4 (a generic function constructing a
+  `Mutex<T>` from its own type parameter; the task-capture Copy
+  check applying correctly PER MONOMORPHIZATION, accepting T=i64 and
+  rejecting T=OwnedStr within the same program) both checked clean,
+  no bug found. Row 3 (`Task<T>` as a generic function's return type)
+  is blocked by the pre-existing, correctly-enforced "spawn and join
+  must be in the same block" v1 architectural limitation -- applies
+  identically regardless of generics, not a new finding.
+  New tests: 6 `src/lib.rs` (struct-field discovery both directions,
+  the recursion-guard regression, the generic-fn-constructs-lock row,
+  both directions of the task-capture-Copy-check row) + 1
+  `tests/run_end_to_end.rs` (real stdout, both `Cache<i64>`/
+  `Cache<bool>` instantiations, both backends).
+
+- [x] **BUG-84 (found+fixed 2026-08-03, same pass, LLVM-only).
+  `Mutex<bool>` -- ANY `Mutex<bool>`, confirmed with a bare top-
+  level one too, not just the struct-field/generic case that
+  surfaced it -- crashed `lli` with a type-mismatch verifier error
+  ("defined with type 'i8' but expected 'i1'").** Root cause:
+  `Mutex<bool>`'s payload is stored as `i8` (the same `Atomic<bool>`
+  shadow-storage trick `atomic_storage_llvm` already uses -- `i1`
+  isn't byte-addressable), but `guard_get`'s codegen returned the
+  raw loaded `i8` value directly instead of converting it back to
+  `i1`; `guard_set` had the mirror gap on the write side. Fixed by
+  mirroring `atomic_load`/`atomic_store`'s existing Bool handling
+  (`icmp ne i8 X, 0` for the read direction -- not `trunc`, which
+  would only look at the low bit; `zext i1 to i8` for the write
+  direction).
+  Verified (both BUG-83 and BUG-84) with `valgrind --leak-check=full`
+  on a native AOT LLVM build: 0 errors, all heap blocks freed.
+
+Full `cargo test --release --workspace` after BUG-83/84 and the
+recursion-guard fix landed: 13/13 binaries clean, 0 failed (2703 lib
+tests, up from 2697; 143 end-to-end tests, up from 142). Category 2
+(all 4 rows) now fully closed in
+`docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+- [x] **BUG-85 (found+fixed 2026-08-03, SSA-C only). Category 3, row 3
+  ("invariant with task/Mutex in loop"): investigating this row
+  required a BARE, SSA-eligible `Mutex<i64>` (no structs, no block
+  expressions -- both of which force the tree backend) for the first
+  time all session. It failed to compile on the C backend at all.**
+  Root cause: `ssa_backend_c.rs` has its own, entirely SEPARATE
+  `mutex_new`/`mutex_lock`/`guard_get`/`guard_set` implementation
+  (and its own `c_declarator` type-spelling function) from the TREE
+  emitter in `backend_c.rs` -- and this SSA-specific copy was
+  hardcoded to the literal name `intent_mutex_i64`/`intent_guard_i64`,
+  stale since BUG-19 (2026-07-27) made the preamble bundle ALWAYS use
+  the parametric name (`intent_mutex_int64_t`, even for the plain i64
+  case) on both backends. The tree emitter was updated at the time;
+  this sibling SSA implementation never was -- nobody had run a
+  purely-SSA-eligible Mutex program through the real C backend
+  end-to-end before. `cc` rejected the output: "implicit declaration
+  of function 'intent_mutex_i64_new'". Fixed by routing all four
+  builtins plus the six `c_declarator` arms (bare/`&`/`&mut` x
+  Mutex/Guard) through `c_mutex_storage`/`c_guard_storage`
+  (extracting the real element type from `instr.ty` or the argument's
+  type via `value_types`), mirroring the pattern
+  `channel_new`/`channel_send`/`channel_recv` already used in the same
+  file.
+
+- [x] **BUG-86 (found+fixed 2026-08-03, same investigation, tree-C
+  only -- a REAL SILENT DEADLOCK, not a compile failure). Once
+  BUG-85's fix made the bare Mutex compile, testing TWO SEQUENTIAL
+  (non-overlapping) lock/unlock cycles on the same mutex through a
+  block-expression (the tutorial's own idiom, `let v: i64 = { let g =
+  mutex_lock(ref m); guard_get(ref g) };`) hung FOREVER on the second
+  `mutex_lock` call.** Root cause: the block-expression-specific
+  `TypedStmt::Drop` emitter in `backend_c.rs` -- a completely separate,
+  incomplete reimplementation of the correct TOP-LEVEL statement Drop
+  emitter a few thousand lines earlier in the same file -- has
+  explicit arms for OwnedStr/Vec/Struct/Enum but NONE for
+  Guard/ReadGuard/WriteGuard; it silently fell through to a `_ => {}`
+  no-op, so the guard's RAII unlock never fired. The first lock was
+  never released, so the second `mutex_lock` spun forever waiting for
+  a lock that (from the runtime's point of view) was still
+  legitimately held -- no diagnostic, no crash, just a hang: the
+  worst possible failure mode for a concurrency primitive. Confirmed
+  this is TREE-C-only (LLVM's block-expression codegen handles this
+  correctly already) and confirmed PRE-EXISTING, not a session
+  regression: reproduced identically against commit `08f38c2` (the
+  last commit before this gap-audit sweep even started), verified in
+  an isolated `git worktree` so the main working tree was never at
+  risk. Fixed by adding the three missing arms, mirroring the
+  already-correct top-level statement Drop handler exactly.
+  **Verification, given the severity (silent deadlock)**: real
+  execution on both backends (not just compile success) for the
+  tutorial-verbatim single-lock-cycle case AND a two-sequential-
+  cycles case; `valgrind --leak-check=full` on BOTH a native AOT LLVM
+  build and a directly-`cc`-compiled native binary of the generated C
+  (0 errors, all heap blocks freed, on both). The new
+  `tests/run_end_to_end.rs` regression test wraps the sequential-
+  cycles invocation in the real `timeout` command specifically so a
+  FUTURE regression of this exact bug fails the test (and CI) after
+  20s instead of hanging the test suite itself forever.
+  Also swept the rest of category 3 (SMT contracts x generics/
+  concurrency/enums): a generic function's `requires`/`ensures`
+  proves correctly per-monomorphization (scalar T) and cleanly
+  rejects (non-scalar T, matching BUG-68's fix) rather than silently
+  skipping; `--big-o` analysis and SMT verification coexist correctly
+  on the same function with no interference in either direction; an
+  `ensures`/`prove` referencing an enum's variant tag directly, or a
+  `dyn Iface` method's return value, are both cleanly and
+  consistently rejected on both backends (`Eq`-required / "method
+  calls not supported in SMT v1" respectively) -- matching the
+  documented v1 SMT boundary, not bugs.
+  New tests: 2 `src/lib.rs` (SSA-C naming, block-expr guard-unlock
+  presence) + 2 `tests/run_end_to_end.rs` (tutorial-verbatim single
+  cycle; sequential two-cycle deadlock guard with the `timeout`
+  wrapper). Full `cargo test --release --workspace`: 13/13 binaries
+  clean, 0 failed (2705 lib tests, up from 2703; 145 end-to-end
+  tests, up from 143). Category 3 (all 5 rows) now fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+- [x] **BUG-87 (found 2026-08-03, deferred, then FIXED 2026-08-04 --
+  task #42; see the fix writeup right after this entry). Category 4,
+  rows 1-2: `async fn` combined with generics or a built-in generic
+  enum return type is broken -- two related symptoms, one root cause
+  EACH (they turned out not to actually share a root cause -- see
+  the fix).**
+  - **Row 1, `async fn identity<T>(x: T) -> T`**: calling it directly
+    inside `await(identity(42))` fails monomorphization outright
+    ("generic function 'identity' is declared but never called with
+    concrete types") -- the call-site scanner that discovers which
+    concrete `T`'s a generic function is used at doesn't look inside
+    `await(...)`'s argument expression. Pre-extracting to a `let f =
+    identity(42);` first works around THIS half (monomorphization
+    then succeeds, correctly producing `Future__i64`) but hits a
+    SECOND bug: `await(f)`'s desugared match ("match scrutinee must
+    be an enum, integer, or bool type, got Future__i64") --
+    `Future__i64` prints identically to a real registered enum name
+    but isn't actually resolving to `Type::Enum("Future__i64")` by
+    the time the match-dispatch check runs, strongly suggesting
+    `Future<T>`'s return type stays as an unresolved `Type::Apply`
+    wrapper (built directly in `parser.rs`'s async desugar, `name:
+    "Future".to_string()`) rather than going through the SAME
+    generic-enum monomorphization pipeline `Option<T>`/`Result<T,E>`
+    use (the one BUG-46 already fixed for bare-name resolution) --
+    `Future<T>` appears to be a special-cased, parallel mechanism
+    that was never wired into that pipeline at all.
+  - **Row 2, `async fn maybe_get(n: i64) -> Option<i64>`**: same root
+    cause, different surface -- "match arm body has type i64 but
+    earlier arm produced Option__i64" when `await`'s own desugared
+    match interacts with a user `match` over the awaited
+    `Option<i64>` result.
+  - **Row 3, `async fn` + `requires`/`ensures`**: NOT the same bug --
+    a clean, SAFE rejection ("cannot verify 'ensures' clause: method
+    calls not supported in SMT v1"), because `_return` for an async
+    fn is the desugared `Future.Ready(expr)` constructor call, which
+    reads as a method call to the SMT encoder. This is a real
+    functional limitation (SMT contracts don't work on `async fn` at
+    all today) but not a soundness bug -- matches BUG-68's "unverifiable
+    means rejected, never silently accepted" fix.
+  - **Rows 4-5, checked clean**: `async fn` taking a plain `fn(T) ->
+    R` function-pointer parameter (called before AND after the
+    `await`) computes correctly on both backends; `async fn` that
+    internally spawns a `task`/`join`s it (a DIFFERENT concurrency
+    primitive family, both inside the single synchronous-desugar
+    function body) also computes correctly on both backends.
+  - **Why not fixed this session**: properly fixing rows 1-2 requires
+    either (a) routing `Future<T>`'s `Type::Apply` construction
+    through the same monomorphization/enum-registration pipeline
+    `Option<T>`/`Result<T,E>` already use, or (b) teaching the
+    call-site scanner and match-dispatch-kind check to specially
+    recognize `Type::Apply { name: "Future", .. }` and resolve it the
+    way `Type::Enum` already is. Either touches the async desugar
+    (`parser.rs`) and/or generic monomorphization (`checker.rs`)
+    under time pressure, in code this session's own BUG-45 entry
+    already flagged as "new, sensitive, partially-shipped machinery"
+    where "a wrong fix risks silently breaking the cases that DO work
+    today." Whoever picks this up next: start by checking whether
+    `Future<T>`'s `Type::Apply` ever gets monomorphized into a real
+    `Type::Enum(name)` ANYWHERE in the pipeline for a non-scalar `R`/
+    generic `T` (the doc's own worked examples only ever use scalar
+    `i64` returns, which may be why this was never caught before), and
+    whether the fix should generalize `resolve_bare_enum_ctors_in_stmt`
+    (BUG-46) or take a narrower, Future-specific path.
+
+  **FIXED 2026-08-04 (task #42).** Investigated per this entry's own
+  "whoever picks this up next" note. Turned out rows 1 and 2 do NOT
+  share a root cause after all -- two independent findings:
+  - **Row 1 was ALREADY FIXED**, as a side effect of an unrelated
+    2026-08-03 gap-audit fix (documented above `collect_generic_
+    calls_in_expr`'s `Match` arm in checker.rs) that added `ExprKind
+    ::Match` handling to the fn-generics call-site scanner -- for a
+    completely different bug (`try EXPR` calling a generic fn only
+    through a desugared match). `await(...)` ALSO desugars to
+    `ExprKind::Match` (`synthesize_await_desugar` in parser.rs), so
+    that fix transitively started covering `await(identity(42))`
+    too, without anyone realizing it at the time. Verified directly:
+    `await(identity(42))` now monomorphizes and runs correctly on
+    both backends with NO code changes needed for this row.
+  - **Row 2 was a real, separate bug**, unrelated to Future<T>'s
+    `Type::Apply` never being monomorphized (the original diagnosis's
+    hypothesis) -- `Future<T>`'s Apply construction was a red
+    herring. The actual cause: `synthesize_await_desugar` builds
+    `await(expr)`'s own internal match with two arms -- `Future.Ready
+    (v) then v` and `Future.Pending then 0` -- and that `0` is a
+    HARDCODED integer literal, only type-correct when T happens to be
+    i64. v1 ships purely synchronous `async fn` semantics (every
+    `Future<T>` value is constructed via `Future.Ready(v)`), so the
+    Pending arm is PROVABLY unreachable at runtime -- but the parser
+    can't know T at desugar time to build a properly-typed
+    placeholder there, and the checker's ordinary "every match arm
+    must produce the same type" rule has no way to know this specific
+    arm is dead code, so it correctly (if unhelpfully) reported a
+    type mismatch for any T != i64.
+    Fixed with a new `checked_expr_placeholder(ty, span, env)`
+    function in checker.rs that constructs a well-typed placeholder
+    value for a type: scalars/Bool directly (reusing the same shapes
+    `CheckedExpr::fallback` already used for a different error-
+    recovery purpose); Enum via its first variant (recursing into the
+    payload, if any, with this same function); Struct via all
+    fields (recursing); Tuple/fixed-length Array via all elements
+    (recursing). Returns `None` -- falling back to the ordinary
+    mismatch diagnostic -- for anything not on that list (Vec, Box,
+    OwnedStr, Ref/RefMut, Mutex, dyn Iface, etc.), matching the
+    project's "unverifiable means rejected, never silently accepted"
+    convention (BUG-68). Bounded/terminating for any well-formed
+    program: a Struct/Enum can only cycle back to itself through a
+    `Box` indirection (direct by-value recursion is already rejected
+    at struct-declaration time), and `Type::Box` is one of the
+    rejected shapes.
+    Wired in at the ONE match-arm type-mismatch site in `check_expr`'s
+    `ExprKind::Match` handling: when a mismatch is found AND the
+    mismatching arm's pattern is EXACTLY `Pattern::Variant{enum_name:
+    "Future", variant: "Pending"}` -- a shape users can never write
+    directly, since `Future<T>` is entirely parser-synthesized --
+    try the placeholder builder against the expected (Ready arm's)
+    type before falling back to the diagnostic. Every other match in
+    the whole language (the overwhelming majority) is completely
+    unaffected: the gate only fires for this one synthesized shape.
+  Verified against both original repros (prints `42` and `5`
+  respectively) plus the `Option.None` branch of row 2 (prints `-1`)
+  and a STRUCT-returning async fn (exercises the Struct-placeholder
+  recursion) on both backends; `valgrind --leak-check=full` clean (0
+  errors) on the struct case. No regression on the existing async
+  test surface (16 pre-existing async-related unit tests, including
+  every v3.1 phase test) or the wider suite -- full `cargo test
+  --release --workspace`: 0 failed.
+  New tests: 2 `src/lib.rs` + 2 `tests/run_end_to_end.rs`.
+
+---
+
+## Bug found by the local-model differential-fuzzing harness (2026-08-03)
+
+- [x] **BUG-88 (found+fixed 2026-08-03, LLVM-only, backend-divergence).
+  A non-ASCII local variable name (e.g. Devanagari `थैला`) crashed the
+  LLVM backend's `lli` JIT with a parser error; the C backend handled
+  the identical program fine.** Found by `tools/localfuzz/`'s continuous
+  differential-testing harness (mutating/generating `.vani` programs and
+  comparing both backends -- see that tool's README) on a mutated Nepali
+  tutorial example. Minimal repro: any `let <non-ascii-name>: T = ...;`
+  reached at the LLVM path.
+  ```
+  lli: candidate.ll:3371:8: error: expected '=' after instruction name
+    %t26.थैला.addr = alloca %Struct_Bag
+  ```
+  Root cause: local variable/register names (`%<name>.addr`,
+  `%arg_<name>`, the parameter list in a function's `define` line, task-
+  handle allocas, outlined-closure capture rehydration -- 12 call sites
+  total in `backend_llvm.rs`) were built directly from the raw source
+  identifier. LLVM's textual IR only allows *unquoted* local identifiers
+  matching `[a-zA-Z$._][a-zA-Z$._0-9]*`; anything else needs `%"..."`
+  quoting, which none of these sites did. Global function symbols
+  (`@fn_<name>`) already had this handled correctly via an existing
+  `llvm_mangle_ident` helper (non-ASCII byte -> `_uHHHH` hex escape,
+  producing a valid *bare* identifier rather than using LLVM's quoted-
+  string form) -- it just was never called from any of the local-variable
+  binding sites. Fixed by routing all 12 through the same helper; since
+  `ctx.locals` is keyed by the *original* source name (only the emitted
+  IR string needed mangling), no lookup-side code needed to change.
+  Confirmed the fix is general, not Nepali-specific: the checker's lexer
+  explicitly supports arbitrary Unicode identifiers (`lex_unicode_ident`
+  in `lexer.rs`), so verified against three unrelated scripts (Devanagari,
+  Hangul, Cyrillic) -- see the new
+  `non_ascii_local_variable_name_produces_correct_output_on_both_backends`
+  test in `tests/run_end_to_end.rs`.
+
+  **Sibling hardening, same session, but only partially verifiable --
+  read carefully before assuming it's "done":** struct/enum *type* names
+  (`%Struct_<Name>`, `%Enum_<Name>`) had the identical unmangled-
+  identifier gap, at 33 call sites throughout `backend_llvm.rs` (4 type-
+  definition sites plus 29 usage sites, all independently doing
+  `format!("%Struct_{}"/"%Enum_{}", <name>)` -- no shared helper, unlike
+  the 12 local-variable binding sites). All 33 now route through
+  `llvm_mangle_ident`, applied uniformly rather than auditing each site's
+  provenance individually -- safe to do that way specifically because
+  the helper is a proven no-op on all-ASCII input (`if name.bytes().all(|b|
+  b < 0x80) { return name.to_string(); }`), so this cannot change codegen
+  for any existing ASCII-named program; confirmed by the full
+  `cargo test --workspace --release` run staying at 2703/2703 lib tests
+  and 144/144 end-to-end tests, 0 failures, identical to before this change.
+
+  **However**, trying to actually exercise this end-to-end (a struct
+  declared with a non-ASCII name, then constructed/used) found the real
+  path is blocked EARLIER than the backend, by the parser: `struct
+  Кошка { age: i64 }` alone parses/checks fine (`vanic check` -> `ok`),
+  but referencing that name afterwards -- `let c: Кошка = ...` or the
+  struct-literal expression `Кошка { age: 3 }` -- fails to parse
+  (`error: expected ';'` right after the identifier), identically on
+  both backends, before codegen is ever reached. So the declaration
+  grammar accepts non-ASCII struct/enum names but the type-annotation
+  and struct-literal-constructor grammar apparently doesn't (some
+  dispatch/lookahead rule in `parser.rs` likely assumes an ASCII-only
+  shape for a "known type/constructor name" at those two call sites).
+  This is a DIFFERENT, NOT fixed bug, in the parser rather than the
+  LLVM backend -- logged here, not fixed, since it's out of the scope
+  this session actually verified (parser grammar dispatch is different,
+  higher-risk surface than the mechanical `llvm_mangle_ident` wrapping
+  done above). The `backend_llvm.rs` mangling is still worth keeping:
+  correct, safe (proven no-op on existing programs), and removes one
+  layer of work for whoever fixes the parser gap next -- they won't
+  also need to redo this. Repro files used (not committed, in `/tmp`,
+  easy to recreate): a `struct Кошка { age: i64 }` declaration, plus
+  a `let`/struct-literal reference to it, both under
+  `examples/language/{russian,any}/`-style naming if formalized.
+
+Full `cargo test --release --workspace` after BUG-88: 2703 lib tests,
+144 end-to-end tests (including the 3 new cross-script cases), 0 failed
+across all 13 binaries -- clean.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 5
+
+- [x] **BUG-89 (found+fixed 2026-08-03). Category 5, row 1:
+  `Vec<dyn Iface>` holding TWO DIFFERENT monomorphizations of the same
+  blanket-impl'd generic struct (`Wrapper<Dog>` and `Wrapper<Cat>`,
+  both implementing `Printable` via `implement<T> Printable for
+  Wrapper<T> where T is Printable`) crashed BOTH backends.** Root
+  cause: `expand_blanket_impls` (`checker.rs`) appends a concrete impl
+  per monomorphization to `program.impls` but never removes the
+  ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+  Type::Apply { name, [Type::Param(_)] }`) -- unlike the exactly
+  analogous, already-established pattern for generic functions/
+  structs/enums in the same function (`program.functions.retain(|f|
+  f.type_params.is_empty())`, `program.structs.retain(...)`,
+  `program.enums.retain(...)`, all in the same monomorphization
+  driver), which all correctly drop the generic template after
+  monomorphization -- impls were simply the one category that never
+  got this cleanup. Whatever later builds the `dyn Printable` vtable/
+  trampoline set iterates every impl of the interface in
+  `program.impls` and doesn't filter out the still-present blanket
+  template, so it generated a BOGUS THIRD trampoline for the literal
+  unresolved template `Wrapper<Param(T)>` alongside the two real
+  ones: LLVM rejected the emitted IR ("loading unsized types is not
+  allowed" on `%Struct_Wrapper__Param__T__`); C failed to compile
+  ("implicit declaration of function
+  'fn_Wrapper__Param__T___print_it'", referencing a struct type that
+  was never declared). Fixed with a single-line addition,
+  `program.impls.retain(|imp| imp.type_params.is_empty())`, placed
+  right after `expand_blanket_impls` runs -- mirroring the
+  established convention exactly. Given how broadly `program.impls`
+  is read throughout the rest of the checker (static dispatch
+  resolution, satisfiability checks, method lookup), ran the full
+  `cargo test --release --workspace` suite immediately after this
+  change (before adding new tests) to confirm nothing else depended
+  on the blanket template surviving past this point: 13/13 binaries
+  clean, 0 failed. Verified with `valgrind --leak-check=full` on a
+  native AOT LLVM build: 0 errors, all heap blocks freed.
+  Also swept the rest of category 5 (dyn dispatch x generics): a
+  generic function bounded `<T: Iface>` that ALSO takes a `dyn Iface`
+  parameter of the same interface in a different slot (mixing static
+  and dynamic dispatch for the same trait in one call), and a struct
+  implementing TWO DIFFERENT interfaces with a single instance
+  referenced through two SEPARATE `Vec<dyn IfaceA>`/`Vec<dyn IfaceB>`
+  Vecs, both checked clean on both backends -- not bugs.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real
+  stdout, both backends). Full `cargo test --release --workspace`
+  after the new tests landed: 13/13 binaries clean, 0 failed (2706
+  lib tests, up from 2705; 147 end-to-end tests, up from 146 --
+  counts relative to this session's own commit history, which may
+  differ slightly from a concurrently-updated `main` given another
+  process is independently landing fixes to this same repo in
+  parallel this session). Category 5 (all 3 rows) now fully closed
+  in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 6
+
+- [x] **BUG-90 (found+fixed 2026-08-03). Category 6, rows 2 and 3:
+  `try EXPR` calling a GENERIC function (`fn wrap<T>(x: T) ->
+  Option<T>`) failed with "generic function 'wrap' is declared but
+  never called with concrete types" even though the call is
+  genuinely there; a related shape (`try` propagating through a
+  nested `Option<Result<T,E>>`) failed with a baffling "expected
+  Result<i64, i64>, got Result__i64__i64" -- same mangled name on
+  both sides of the mismatch.** Root cause was FOUR compounding
+  gaps, all the same "sibling walker never learned about a
+  syntax-sugar shape" pattern this session kept hitting all the way
+  back to BUG-83/85/86:
+  1. `collect_generic_calls_in_expr` (`checker.rs`) had NO arm for
+     `ExprKind::Match` or `ExprKind::Block` at all. `desugar_try_let_
+     in_program` runs BEFORE fn-generics monomorphization, so by the
+     time this scanner walks the program, every `try wrap(n)` has
+     ALREADY been rewritten into `Match { scrutinee: Call(wrap, [n]),
+     arms: [Some(..) then Block{...}, None then ...] }` -- the
+     generic call sitting in a match scrutinee (or inside a
+     desugared Some-arm's Block) was structurally invisible to this
+     walker. (A narrower `ExprKind::Try` arm was added first but is
+     dead code for this exact path, since `Try` nodes don't survive
+     the desugar -- it may still matter for `try` occurrences the
+     desugar doesn't reach, so it was kept.)
+  2. `rewrite_generic_calls_in_expr`, the SIBLING pass that actually
+     renames a resolved call site (`wrap` -> `wrap__i64`), had the
+     identical missing-arm gap. Without it the call site was never
+     renamed, so once the generic template got dropped post-
+     monomorphization the bare name lingered in the AST, surfacing
+     as "unknown function 'wrap'".
+  3. `substitute_type_param`'s `Type::Apply` collapse (once a
+     generic fn's substituted args become all-concrete) always
+     produced `Type::Struct(mangled)`, never `Type::Enum(mangled)`
+     -- so a generic fn returning `Option<T>`, once specialized,
+     got a return type that Displayed as "Option__i64" but was
+     actually a `Type::Struct`, not equal to the real `Type::Enum
+     ("Option__i64")` used at the call site. Both print identically
+     (Display doesn't distinguish struct/enum), so the mismatch
+     surfaced as "expected Option__i64, got Option__i64". Fixed with
+     a new `GENERIC_ENUM_TEMPLATE_NAMES` thread-local, populated
+     once from `program.enums` at the very start of the checker
+     pipeline (before any monomorphization pass touches them,
+     alongside the pre-existing `enum_names_pre` computation), so
+     the collapse can tell "this Apply name was originally an enum
+     template" from "this was a struct template" and pick the right
+     `Type` variant.
+  4. `collect_apply_in_stmt`/`rewrite_apply_in_stmt` (used by
+     `monomorphize_type_decls_in_program` to resolve `Type::Apply`
+     annotations into concrete `Type::Enum`/`Type::Struct`) only
+     ever looked at a `Stmt::Let`'s own `annotation` field and never
+     recursed into `Return`/`Assign` exprs at all -- so a NESTED
+     `Stmt::Let` the try-desugar synthesizes inside a `Block` inside
+     a `Match` arm (e.g. `let r: Result<i64, i64> = __t;`, lifted
+     from the user's `let r: Result<i64,i64> = try lookup(x);`)
+     never had its annotation's `Type::Apply` resolved at all,
+     again surfacing as "expected Result<i64, i64>, got
+     Result__i64__i64" (the SAME name, one resolved, one not).
+     Fixed by adding a `walk_expr_for_nested_lets`/
+     `rewrite_apply_in_expr_nested_lets` helper pair that recurses
+     through `Block`/`Match`/`IfExpr`/`Try` shapes to reach nested
+     `Stmt::Let`s, called from `Stmt::Let`'s own expr, `Stmt::
+     Return`, and `Stmt::Assign`.
+  All four fixes compose and were verified together on both
+  backends for: a plain `try wrap(n)` where `wrap<T>` is generic and
+  `n` is a Var argument (not just a literal); two chained `try`s in
+  the same function, one concrete (`lookup`) and one generic
+  (`wrap`), exercising both the early-return and pass-through paths;
+  and `try` propagating through a nested `Option<Result<i64, i64>>`
+  in both the early-return (`Option.None`) and pass-through
+  (`Option.Some(Result.Ok/Err(..))`) directions.
+  Also swept category 6 row 1 (`try`/`?` inside a function holding a
+  live LOCAL `Vec<Struct>` binding, read via `clone_at` after the
+  `try`, across the early-return path): checked clean on both
+  backends, not a bug -- verified with `valgrind --leak-check=full`
+  on native AOT builds of both backends: 0 errors, all heap blocks
+  freed, "All heap blocks were freed -- no leaks are possible".
+  New tests: 4 `src/lib.rs` + 3 `tests/run_end_to_end.rs` (real
+  stdout, both backends).
+  Category 6 rows 1 and 3 fully closed. Row 2 partially closed: the
+  `try`-specific failure mode is fixed (see above), but testing it
+  surfaced a SEPARATE, deeper, pre-existing bug independent of `try`
+  entirely -- see BUG-91 below, found but deferred.
+
+- [x] **BUG-91 (found 2026-08-03, deferred, then FIXED 2026-08-04 --
+  task #40; see the fix writeup right after this entry).** A bare
+  call to a GENERIC function returning `Option<T>`/`Result<T,E>`,
+  used DIRECTLY as a `match` scrutinee with no intermediate `let`
+  binding (`match foo(7) { Option.Some(x) then x, Option.None then
+  -1 }` where `fn foo<T>(a: T) -> Option<T>`), fails with `enum
+  'Option__i64' is not declared` -- even though the exact same
+  generic fn + call, when the result is first bound via an
+  explicitly-annotated `let x: Option<i64> = foo(7);` and THEN
+  matched on `x` as a separate statement, compiles and runs
+  correctly. Reproduces with NO `try`/`?` anywhere in the program --
+  it surfaced while testing category 6 row 2 (a generic function
+  using `try` internally, whose caller in `main` naturally matches
+  the generic call's result directly), but the root cause is
+  independent of `try` and belongs to the generics/monomorphization
+  pipeline generally.
+  Root cause: `monomorphize_type_decls_in_program` (which
+  materializes a concrete `EnumDecl`/`StructDecl` -- e.g. the actual
+  `enum Option__i64 { ... }` declaration, not just the `Type::Enum`
+  reference to it -- for every `Type::Apply` it finds anywhere in
+  the program) runs BEFORE `monomorphize_generics_in_program` (the
+  fn-level pass that infers `T=i64` for `foo(7)` and creates
+  `foo__i64`). When the ONLY place a concrete `Option<i64>`
+  instantiation is discoverable is through fn-generics' own type
+  inference at a call site (no textual `Option<i64>` annotation
+  appears anywhere else in the source for the earlier decl-mono
+  pass to see), the enum-decl pass has already run and finished by
+  the time that need becomes known -- and worse, right after it
+  runs it unconditionally drops the generic template it monomorphized
+  from (`program.enums.retain(|e| e.type_params.is_empty())` at
+  checker.rs:8082, mirroring the same convention used for functions/
+  structs/impls), so there is no template left to re-specialize from
+  even if a second pass were added naively. `substitute_type_param`'s
+  collapse (see BUG-90 fix #3 above) DOES produce a correct
+  `Type::Enum("Option__i64")` reference for `foo__i64`'s return
+  type, but a bare `Type::Enum` reference isn't the same thing as
+  an actual `EnumDecl { name: "Option__i64", variants: [...] }`
+  existing in `program.enums` -- nothing materializes the latter for
+  this case, hence "enum 'Option__i64' is not declared".
+  This is why every earlier BUG-90 repro happened to work: in each
+  one, the ENCLOSING function's own return type was a concrete
+  `Option<i64>`/`Result<i64,i64>` (a literal, textual annotation
+  visible to the decl-mono pass before fn-generics ran), so the
+  needed `EnumDecl` always already existed for an unrelated reason
+  by the time the generic call's result needed it. BUG-91 is
+  specifically the case where NO such textual concrete annotation
+  exists anywhere in the source -- the concrete instantiation is
+  discoverable ONLY via inference at a generic call site, consumed
+  immediately (bare match scrutinee, no intermediate annotated
+  `let`).
+  Deferred rather than fixed in-session: a real fix needs either (a)
+  interleaving `monomorphize_type_decls_in_program` and
+  `monomorphize_generics_in_program` to a shared fixed point (each
+  pass's output can create new work for the other -- fn-mono
+  discovers new concrete Apply instantiations; decl-mono's freshly
+  materialized decls could in principle reference further generics),
+  or (b) retaining the original generic struct/enum templates (not
+  dropping them at checker.rs:8081-8082) until AFTER fn-generics
+  monomorphization has also stabilized, then running a final decl-
+  materialization pass against whatever's left in `program.structs`/
+  `program.enums`'s Type::Apply-in-signature surface at that point.
+  Both directions touch a large, heavily-load-bearing shared
+  pipeline stage with a wide blast radius (every generic struct/enum
+  instantiation in the whole language goes through this path) --
+  the same category of risk that led BUG-87 (async + generics) to
+  be deferred rather than rushed. Whoever picks this up next: start
+  by checking whether `monomorphize_generics_in_program` can, after
+  specializing a generic fn, feed any newly-concrete `Type::Apply`
+  it finds in the SPECIALIZED signature back into a queue that a
+  final call to (a re-entrant, template-preserving version of)
+  `monomorphize_type_decls_in_program` drains once fn-mono's own
+  worklist (`needed`/`generated_keys`) reaches its fixed point.
+  Repro (fails on both backends, no `try` involved):
+  ```
+  fn foo<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn main() -> i64 {
+    let r1: i64 = match foo(7) {
+      Option.Some(x) then x,
+      Option.None then -1,
+    };
+    print r1;
+    return 0;
+  }
+  ```
+  No regression test added (nothing to assert as passing); the repro
+  above is preserved here for whoever fixes it. Category 6 row 2 is
+  left checked in `docs/FEATURE_COMBINATION_GAPS_TODO.md` only for
+  its `try`-specific aspect (fixed); this deferred finding is noted
+  inline there too.
+
+  **FIXED 2026-08-04 (task #40).** Took direction (a) from this
+  entry's own "whoever picks this up next" note: fed newly-collapsed
+  `Type::Apply` instantiations back into a queue that a final
+  materialization pass drains once fn-generics' own worklist
+  stabilizes -- reusing the `NEWLY_COLLAPSED_GENERIC_APPLIES` queue
+  BUG-95 already introduced (that queue is populated by
+  `substitute_type_param`'s collapse site itself, so it fires
+  identically whether the collapse happens during
+  `monomorphize_type_decls_in_program`'s own struct/enum field
+  substitution -- BUG-95's case -- or during `monomorphize_generics_
+  in_program`'s fn-signature substitution -- this bug's case; no
+  changes needed at the collapse site at all).
+  The one genuinely new piece direction (a) required: the original
+  generic templates are gone (dropped) by the time fn-generics
+  finishes, so `check_program` now snapshots `struct_templates`/
+  `enum_templates` into local variables BEFORE calling
+  `monomorphize_type_decls_in_program` (which still drops them from
+  `program.structs`/`program.enums` exactly as before -- unchanged),
+  and a new `materialize_late_discovered_type_decls` function runs
+  right after `monomorphize_generics_in_program`: drains whatever the
+  queue collected, and -- using the snapshots -- runs one more small,
+  self-contained fixed-point round (mirroring `monomorphize_type_
+  decls_in_program`'s own worklist loop's shape, but a fresh,
+  parallel copy rather than a factored-out shared function, to avoid
+  restructuring an 800+ line, heavily load-bearing pipeline stage
+  this late -- yet another instance of the "duplicate walker" pattern
+  already common in this file, e.g. `collect_apply_in_stmt` vs.
+  `collect_apply_in_ty`) to materialize any still-missing decls. A
+  no-op in the overwhelmingly common case where nothing new was
+  discovered (checked via a cheap emptiness check on the drained
+  queue before doing any other work).
+  Verified against the exact repro above on both backends (prints
+  `7`), plus a two-generic-function variant where two DIFFERENT
+  generic fns each need a DIFFERENT concrete `Option<T>` instantiated
+  purely through this late-discovery path in the same program
+  (`Option__i64` and `Option__bool`), confirming the fixed-point loop
+  correctly materializes more than one late-discovered decl. No
+  regression on the full existing generics/monomorphization test
+  surface (BUG-90/93/95's own tests, the recursive-generic-struct
+  tests, etc.) -- full `cargo test --release --workspace`: 0 failed.
+  Deferred, out-of-scope finding surfaced while probing edge cases,
+  now tracked separately as BUG-98 below (a different bug from
+  BUG-91: that one was about the DECL not existing; BUG-98 is about
+  a working decl not being NAMEABLE from inside a still-generic
+  function body).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+- [x] **BUG-98 (found+fixed 2026-08-04 -- task #41 -- a BUG-46-class
+  ambiguity, but reaching a different site than BUG-46/95 cover). A
+  bare enum constructor INSIDE a generic function's OWN body (e.g.
+  `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+  Option.Some(a); }`) fails to resolve ("unknown variable 'Option'")
+  once 2+ DISTINCT concrete instantiations of `Option` exist
+  anywhere in the whole program** -- regardless of whether they come
+  from the SAME generic fn specialized twice (`foo(7)` and
+  `foo(true)`) or from two DIFFERENT generic fns each specialized
+  once (`foo1(7)` and `foo2(true)`, each internally constructing
+  `Option.Some(a)`). A single instantiation program-wide works fine
+  (this is exactly why BUG-91's own repro, `foo(7)` alone, never hit
+  this: only one `Option` instantiation existed in that test).
+  Root cause: `Option.Some(a)` inside a generic function's body stays
+  a bare, unqualified `Var("Option")` receiver at parse time, same as
+  everywhere else in the language. Resolving it to a concrete
+  `Option__i64`/`Option__bool` normally happens one of two ways: (1)
+  BUG-46/95's targeted, annotation-driven passes
+  (`resolve_bare_enum_ctors_in_stmt`,
+  `resolve_bare_enum_ctor_in_struct_lit`) which key off an
+  already-KNOWN concrete type at the use site (a `let`'s own
+  annotation, a function's own return type already being a concrete
+  `Type::Enum`, a struct literal field's declared type) -- none of
+  these apply to a still-generic function TEMPLATE's body, since the
+  template's return type is `Type::Apply{Option,[Param(T)]}` (or
+  similar), not yet a concrete `Type::Enum`, at the point these
+  passes run (before `monomorphize_generics_in_program` specializes
+  the body); or (2) `Env::resolve_enum_name`'s general "exactly one
+  candidate starting with `{name}__`" fallback, consulted at ordinary
+  type-check time (AFTER specialization, when the body is finally
+  checked as part of `foo__i64`/`foo__bool`) -- this is what actually
+  resolves it in the single-instantiation case, but is inherently
+  ambiguous the moment 2+ candidates exist program-wide, and fails
+  outright rather than picking one.
+  What's missing: nothing re-resolves a generic function's bare enum
+  constructors using the SPECIALIZED body's own now-concrete return
+  type, once `monomorphize_generics_in_program` has produced it. The
+  information needed (each specialized stub's own concrete return
+  type, right after substitution) is exactly what BUG-91's fix
+  (`materialize_late_discovered_type_decls`) already has on hand at
+  the point it runs -- likely the natural place to also re-run BUG-46/
+  95-style resolution against each newly-specialized function body,
+  the same way the ORIGINAL (pre-generics) pass already does for
+  ordinary concrete functions.
+  **FIXED 2026-08-04 (task #41), same session as BUG-91.** Exactly
+  the fix this entry's own "what's missing" paragraph anticipated:
+  re-run `resolve_bare_struct_lits_in_stmt`/`resolve_bare_enum_ctors_
+  in_stmt` over every function body in `check_program`, right after
+  `monomorphize_generics_in_program` AND BUG-91's own `materialize_
+  late_discovered_type_decls` have both finished -- at that point
+  each specialized stub's own return type IS concrete, so the exact
+  same BUG-46/95 resolution logic that already handles ordinary
+  functions correctly resolves the generic body's bare receiver too.
+  Uses the SAME template-name snapshots (`generic_struct_templates`/
+  `generic_enum_templates`) BUG-91's fix already introduced. A no-op
+  for already-resolved ordinary function bodies: their receivers, if
+  any were bare, were already rewritten to a concrete mangled name by
+  the FIRST (pre-fn-generics) pass, which no longer matches a generic
+  template name on this second pass, so nothing double-rewrites.
+  Verified against the repro below (prints `7` then `1`) plus the
+  same-generic-fn-specialized-twice variant (`foo(7)` and `foo(true)`
+  from the SAME `foo<T>`) on both backends, and confirmed no
+  regression on BUG-91's own repro or the wider generics/
+  monomorphization test surface. Full `cargo test --release
+  --workspace`: 0 failed.
+  Repro (previously failed on both backends, now passes):
+  ```
+  fn foo1<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn foo2<T>(a: T) -> Option<T> {
+    return Option.Some(a);
+  }
+  fn main() -> i64 {
+    let r1: i64 = match foo1(7) {
+      Option.Some(x) then x,
+      Option.None then -1,
+    };
+    let r2: i64 = match foo2(true) {
+      Option.Some(x) then 1,
+      Option.None then -1,
+    };
+    print r1;
+    print r2;
+    return 0;
+  }
+  ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 7
+
+- [x] **BUG-92 (found+fixed 2026-08-03). Category 7, row 3
+  neighborhood: `examples/language/english/bare_metal.vani` -- the
+  EXACT shipped example BUG-44 fixed -- crashes `opt`/`llc` with
+  ill-typed IR the instant it's actually built or run, on the
+  DEFAULT host target, no `--target`/`--no-std` needed at all.**
+  Found while re-auditing the BUG-44 neighborhood (cross-compile +
+  `no_std` + `#[no_mangle]` FFI export, three-way) per category 7
+  row 3 -- but the root cause turned out to be independent of the
+  three-way combination specifically: BUG-44's own fix was verified
+  by grepping EMITTED TEXT for the bare symbol name, never by
+  actually running the example through `opt`/`llc`/`lli`, so this
+  bug was sitting undiscovered in an already-shipped tutorial
+  example the whole time.
+  Two compounding bugs, both in `backend_llvm.rs`'s tree-LLVM
+  emitter (only reached when a program contains a `#[no_mangle]` fn
+  anywhere, which routes the WHOLE program to tree-LLVM per BUG-44's
+  own fix -- SSA-LLVM was never affected, and served as the
+  reference for the correct convention):
+  1. `mmio_read_u8`/`mmio_read_u16` internally did `zext i8`/`zext
+     i16 ... to i64` after their `load volatile`, unconditionally
+     widening the narrow hardware read to i64 -- contradicting the
+     "narrow types stay narrow until an explicit cast" convention
+     SSA-LLVM already follows for ordinary u8/u16 arithmetic
+     (confirmed directly: `let y: u16 = x + 5;` emits `add i16
+     %v_0, %v_1`, no widening, until a later `as i64` cast does an
+     explicit `zext`). Storing that i64-typed result into a `let sr:
+     u16 = mmio_read_u16(...);`'s `i16` alloca (the generic scalar
+     Let codegen, which assumes `emit_expr`'s result already matches
+     the destination width) produced ill-typed IR: "'%t2' defined
+     with type 'i64' but expected 'i16'". Fixed by removing the
+     internal zext entirely -- `mmio_read_u8`/`mmio_read_u16` now
+     return the raw narrow-width loaded value directly, matching
+     their own checker-declared `u8`/`u16` return type and mirroring
+     `ssa_backend_llvm.rs`'s already-correct implementation exactly
+     (confirmed by direct comparison).
+  2. Fixing (1) exposed a SECOND, previously-masked bug in the same
+     builtin family: `mmio_write_u8`/`mmio_write_u16` unconditionally
+     emitted `trunc i64 {val} to i8`/`i16` before the volatile store,
+     assuming `val` was always i64-typed. But the checker's own
+     typing of these builtins (`coerce_checked(..., &Type::U8, ...)`
+     / `&Type::U16`) means `args[1]`'s checker type is ALWAYS
+     `u8`/`u16` already -- so `val` is ALREADY narrow whenever it
+     comes from an already-narrow source (any `u8`/`u16` parameter or
+     local -- confirmed directly: a plain `byte: u8` parameter loads
+     as a native `i8`, `%t0 = load i8, i8* %byte.addr`, never i64).
+     `trunc i64 %t0 to i8` when `%t0` is ALREADY `i8`-typed is itself
+     ill-typed IR ("'%t0' defined with type 'i8' but expected
+     'i64'") -- the OPPOSITE mismatch direction from bug (1). This
+     was masked before bug (1)'s fix because nothing had exercised a
+     write fed by an already-narrow value without ALSO hitting the
+     read-side crash first. Fixed by removing the blind trunc
+     entirely and storing `val` directly -- again mirroring `ssa_
+     backend_llvm.rs`'s already-correct implementation exactly (it
+     never truncates either).
+  Verified: `examples/language/english/bare_metal.vani` now builds
+  (`vanic build ... -lm`) and runs cleanly end-to-end on the default
+  host target (previously crashed `opt`/`llc` before even reaching
+  the link step); `valgrind --leak-check=full` on the resulting
+  native binary for a minimal regression repro combining all four
+  builtins under a `#[no_mangle]` fn: 0 errors, all heap blocks
+  freed. New tests: 3 `src/lib.rs` + 1 `tests/run_end_to_end.rs`
+  (the e2e test is the REAL regression guard here -- it actually
+  builds+links+runs through `opt`/`llc`, which the `compile_to_llvm`
+  lib.rs helper does not exercise at all, since it calls
+  `LlvmBackend.emit` directly with no verifier pass).
+  Also swept the rest of category 7 (collections beyond Vec/
+  HashMap): (row 1) iterator-style Vec builtins chained directly in
+  ONE expression are correctly rejected per docs (`tutorials/src/
+  intermediate/06b_iterators_primer.md`'s own explicitly-documented
+  "chain directly" restriction -- method-call sugar only rewrites a
+  plain named-`Var` receiver); chaining via named `let`s between
+  each step (the documented v1 pattern) verified correct on both
+  backends. (row 2) `task`/`join` call-form with a genuinely multi-
+  block callee body (nested if/else inside a while loop) verified
+  correct on both backends by hand-computed expected values, not
+  just cross-backend agreement. Also confirmed the block-form `task
+  <name> { ... }`'s documented by-value/Copy capture semantics (a
+  write to a captured outer variable inside the task body does NOT
+  propagate back after `join` -- intentional, not a bug). (row 4)
+  Graph/Bst/Trie/SkipList/UnionFind/BloomFilter all actually run
+  end-to-end together (not just compile-checked), every value
+  verified against `advanced/05b_advanced_collections.md`'s own
+  documented expected output, on both backends. (row 5)
+  `vec_with_capacity` under `--backend=c` specifically: pushing past
+  the initial capacity (forcing a real realloc/growth) produces
+  correct VALUES (not just correct length), verified with `valgrind
+  --leak-check=full` on the native C-backend binary: 0 errors. (row
+  6) `Deque<Struct>`/`BinaryHeap<Struct>` are both cleanly rejected
+  as scalar-i64-only in v1, same restriction shape as HashMap's
+  documented scalar-only-V boundary -- not a bug. (row 7) `Graph`/
+  `Trie` with non-i64 payloads: more fundamental than a runtime
+  restriction -- both are non-generic (no `Type::Apply` form at
+  all), so the parser itself rejects `Graph<T>`/`Trie<T>` syntax
+  outright ("expected '='"); the boundary can't even be expressed.
+  New tests for rows 1/2/4/5/6/7: 6 `src/lib.rs` + 3 `tests/
+  run_end_to_end.rs`. Category 7 (all 7 rows) fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 8
+
+Category 8 (FFI x generics/containers/error-handling), all 3 rows
+checked clean -- no bugs found, all three combinations either work
+correctly or are cleanly rejected exactly as documented:
+
+- (row 1) `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC
+  struct by value (BUG-77 only tested a concrete, non-generic
+  struct). A small (<=16 byte, all-scalar-field) monomorphized
+  generic struct (`Wrapper<i32>`, mangled `Wrapper__i32`) passes AND
+  returns by value correctly against a real linked C shim, on both
+  backends -- confirming the mangled name and the ABI-lowering path
+  agree, exactly the concern this row was written to probe. An
+  oversized monomorphized generic struct (`Triple<i64>`, 24 bytes)
+  is cleanly rejected, with the diagnostic correctly naming the
+  MANGLED monomorphized type (`Triple__i64`, not the generic
+  template name) -- confirming FFI ABI validation runs after
+  monomorphization and sees the concrete shape.
+- (row 2) `extern "C"` fn signature using `Option<T>`/`Result<T,E>`
+  directly in a parameter or return position: cleanly rejected on
+  both backends with a specific, on-point diagnostic ("enum-by-value
+  layout is not yet wired through FFI"), in both return position
+  (`Option<i64>`) and parameter position (`Result<i64, i64>`).
+- (row 3) Calling an `extern "C"` function inside a spawned `task`
+  body: a plain (non-pure) `extern "C" fn` call hits the exact same
+  "task body cannot call non-pure function" diagnostic as any other
+  impure call -- and the diagnostic's own hint ("mark it `pure
+  extern`") points at a REAL, documented escape hatch (`pure extern
+  "C" fn`, `tutorials/src/intermediate/09_ffi.md`) that was verified
+  to genuinely work end-to-end: a `pure extern "C" fn` called inside
+  a `task` body, joined, against a real linked C shim, runs
+  correctly on both backends. `valgrind --leak-check=full` on the
+  resulting native binary: 0 errors, all heap blocks freed. Not a
+  distinct, undocumented gap.
+  New tests: 4 `src/lib.rs` + 2 `tests/run_end_to_end.rs` (the two
+  e2e tests are the real verification here, each linking and running
+  a genuine C shim). Category 8 (all 3 rows) fully closed in
+  `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 9
+
+- [x] **BUG-93 (found+fixed 2026-08-03). Category 9, row 2: a
+  recursive GENERIC struct (`struct Node<T> { value: T, next:
+  Option<Box<Node<T>>> }`, self-referential AND generic at once)
+  failed to compile at all -- even though the exact same pattern
+  with a CONCRETE (non-generic) `Node` has been a working, shipped
+  regression test since BUG-35.** Root cause was FIVE compounding
+  gaps, the SAME "sibling walker never learned about a shape"
+  pattern as BUG-90, but this time the missing shape was
+  `Type::Box` (not `Match`/`Block`):
+  1-4. `collect_apply_in_ty`, `rewrite_apply_in_ty`, the `rec`
+  closure inside `collect_apply_in_stmt`, and `normalize_one` (FOUR
+  independent copies of essentially the same "walk a Type looking
+  for/rewriting nested `Type::Apply`" logic, all in `checker.rs`)
+  each had an arm for `Vec`/`Ref`/`RefMut`/`Atomic`/`Mutex`/`Guard`
+  but none for `Type::Box` -- so a generic instantiation nested
+  inside a `Box<...>` (e.g. `Option<Box<Node<T>>>`'s inner
+  `Node<T>`) was invisible to every one of these passes, surfacing
+  as "enum payload must be assignable to Box<Node<i64>>, got
+  Box<Node__i64>" (same underlying type, one resolved, one not --
+  the exact same symptom shape BUG-90 kept producing). Fixed by
+  adding the missing arm to all four, mirroring the existing
+  sibling-type arms exactly.
+  5. Even with (1-4) fixed, `monomorphize_type_decls_in_program`
+  still only ran discovery+generation in a SINGLE pass: a freshly-
+  monomorphized generic struct's OWN fields can introduce a FURTHER
+  generic instantiation need (concretely: `Node__i64`'s own `next`
+  field needs `Option<Box<Node__i64>>` registered, but nothing else
+  in the program ever writes that type out literally for the
+  single discovery pass to find). The code already computed this
+  via `collect_apply_in_ty(&fld.ty, ..., &mut needed_structs.
+  clone(), &mut needed_enums.clone())` -- but cloning BOTH output
+  lists meant the discovery had nowhere real to go; the existing
+  comment literally said "ignored copy". Fixed by converting the
+  single-pass generation into a proper fixed-point worklist,
+  mirroring the established "XL4 multi-pass" pattern
+  `monomorphize_generics_in_program` already uses for the analogous
+  fn-generics case: each round processes only newly-pending (name,
+  args) pairs (tracked via a linear-scan `Vec` rather than a
+  `HashSet` since `Type` isn't `Hash`) and feeds any further
+  discovered needs into the next round, until a round adds nothing
+  new.
+  Verified with `valgrind --leak-check=full` on a native AOT LLVM
+  build: 0 errors, all heap blocks freed. Given the blast radius (a
+  refactor of the shared struct/enum monomorphization pipeline used
+  by every generic type in the language), ran the full `cargo test
+  --release --workspace` suite immediately after the refactor
+  compiled (before adding new tests) to confirm no regressions:
+  13/13 binaries clean, 0 failed.
+  Also swept category 9 row 1 (`clone_at` on `Vec<GenericStruct<T>>`,
+  the indexed-mutate-then-`set` idiom through a generic element
+  type): checked clean on both backends, `valgrind --leak-check=
+  full` clean -- `clone_at` correctly deep-clones the element
+  (including a non-Copy `OwnedStr` field), `set` writes the mutated
+  clone back to the right index, unrelated slots untouched.
+  THREE separate, narrower findings surfaced while investigating
+  row 2, all deferred rather than fixed in-session:
+  - (a) A bare enum constructor written DIRECTLY inside a struct-
+    literal field (`Node { value: 2, next: Option.Some(box(tail)) }`)
+    is still ambiguous once 2+ instantiations of the same generic
+    enum exist in the program -- BUG-46's existing fix
+    (`resolve_bare_enum_ctors_in_stmt`) only covers a `Let`'s own
+    top-level initializer or a `Return`, never an enum constructor
+    nested inside a `StructLit` field. HAS A WORKING WORKAROUND:
+    bind the constructor to its own `let` with an explicit enum
+    annotation first, THEN use that binding as the struct field --
+    this hits BUG-46's already-working `Let`-annotation path and
+    compiles/runs correctly (verified, both backends; this is also
+    the pattern the new regression tests use, since it's the
+    idiomatic v1 way to write this today).
+  - (b) Field access through a BARE `Box<T>` (`n1.value` where
+    `n1: Box<Node<i64>>`) is rejected outright ("field access on
+    non-struct type Box<...>") -- `Type::deref()` (`ast.rs`) only
+    peels `Ref`/`RefMut`, never `Box`. Reproduces identically with
+    a non-generic `Box<T>` too, so it's orthogonal to generics
+    specifically -- confirmed the RAII tutorial's own `Box<Node>`
+    linked-list example never actually demonstrates reading a
+    field back through a `Box`, only building the chain. `Type::
+    deref()` is used in 60+ call sites across `checker.rs`/
+    `backend_c.rs`/`backend_llvm.rs`/`ssa.rs`/`smt.rs` -- extending
+    it (or adding a parallel Box-aware variant) needs careful
+    auditing of every call site's assumptions before it's safe to
+    touch, the same category of risk as BUG-91's deferred fix.
+  - (c) While valgrind-verifying (a)'s workaround, found a THIRD,
+    genuinely separate PRE-EXISTING memory leak, independent of
+    generics entirely: `Box<StructWithHeapOwningFields>`'s scope-
+    exit Drop (`backend_c.rs`'s per-statement Drop AND its sibling
+    `emit_struct_field_drops` helper both hit the exact same gap)
+    only frees the Box's OWN heap slot -- it never recursively
+    drops the BOXED struct's own heap-owning fields first.
+    Reproduces on the ALREADY-SHIPPED, non-generic `examples/
+    language/english/option_box_recursive_struct.vani` (BUG-35's
+    own regression example): `valgrind --leak-check=full` on its
+    C-backend build shows "48 (24 direct, 24 indirect) bytes ...
+    definitely lost" (LLVM backend: 0 errors, unaffected -- LLVM's
+    Box-drop codegen apparently already chains correctly, or never
+    hit this specific gap; not investigated further given scope).
+    Deferred rather than fixed in-session: unlike every other fix
+    in this session, this ISN'T a simple missing-arm addition -- a
+    `Box<Node>` field pointing into a chain of unknown-at-compile-
+    time length needs a genuine RUNTIME recursive/iterative free
+    routine (mirroring how `Vec<T>`'s own drop is a real per-
+    element-type HELPER FUNCTION that loops at runtime, not inlined
+    code), which is a substantive design task rather than a
+    mirrored one-line arm addition. Whoever picks this up next:
+    start from `emit_struct_field_drops`'s `Type::Box(box_inner) =>
+    match &**box_inner { ... _ => free-only ... }` arm (backend_c.rs)
+    and the analogous top-level scope-exit Drop arm for
+    `Type::Box(inner)` -- both need a `Type::Struct(name)` case that
+    emits a call to a NEW dedicated recursive free helper (one per
+    boxed struct shape) rather than a bare `free()`.
+  New tests: 2 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real
+  stdout, both backends) for the fixed recursive-generic-struct
+  case, using workaround (a)'s pattern (also the idiomatic v1 way
+  to write this today). Full `cargo test --release --workspace`
+  after the new tests landed: 13/13 binaries clean, 0 failed.
+  Category 9 rows 1 and 2 closed in `docs/FEATURE_COMBINATION_GAPS_
+  TODO.md`; rows 3-4 remain for a follow-up sweep pass.
+
+Category 9 rows 3-4, swept immediately after -- both checked clean,
+no bugs found:
+
+- (row 3) `Box<T>` through a generic function boundary
+  (`fn identity<T>(b: Box<T>) -> Box<T>`) -- flagged "worth probing,
+  never observed broken" in `missing_features.md`'s own closing
+  list. Verified for both a struct T and a scalar T; `valgrind
+  --leak-check=full` clean on both backends -- ownership correctly
+  passes through the generic boundary and back with no double-free
+  or leak. (A second call site, `identity(box(42))` passing the
+  `box(...)` call expression directly rather than through a named
+  variable, hit v1's own DOCUMENTED and unrelated generic-inference
+  restriction -- "supports literal arguments... Var, or Ref/RefMut
+  (Var)... more complex argument expressions need full type-
+  checking context" -- expected, not a finding.)
+- (row 4) `parallel for` over a `Vec<Struct>` with an `OwnedStr`
+  field -- flagged "worth probing" in the same list. Each iteration
+  writes to a DISTINCT index via `clone_at` (a deep copy of a source
+  element, no shared heap state) -- the compiler correctly ALLOWS
+  this, since there is no actual race (no two iterations ever touch
+  the same memory location); confirmed genuinely safe with `valgrind
+  --leak-check=full` on the C-backend build: 0 errors, all heap
+  blocks freed (the old `OwnedStr` previously occupying each written
+  slot is correctly dropped as part of the per-iteration write). The
+  LLVM-backend build showed small "definitely lost"/"possibly lost"
+  counts under valgrind, but the backtrace traces entirely into
+  `libgomp`'s own OpenMP thread-pool machinery (`GOMP_parallel` ->
+  `pthread_create` -> `allocate_stack` -> `_dl_allocate_tls`) --
+  well-known valgrind-vs-libgomp housekeeping noise, not vani-
+  generated code; the C-backend run (identical program logic, no
+  libgomp) being fully clean confirms the LOGIC itself is correct.
+  Fresh heap allocation INSIDE the loop body (e.g. `"x" + ""`
+  string concatenation) hits a SEPARATE, already-documented purity
+  restriction ("'parallel for' body cannot use `+` on strings (heap
+  allocation is impure)") -- expected v1 behavior, not this row's
+  concern (the row asks about the ELEMENT TYPE's affine-ownership
+  interaction with `parallel for`, which `clone_at` isolates
+  cleanly from the separate "no impure heap alloc in the loop body"
+  rule).
+New tests: 2 `src/lib.rs` + 2 `tests/run_end_to_end.rs`. Full `cargo
+test --release --workspace`: 0 failed. Category 9 (all 4 rows) now
+fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 10
+
+Category 10 (pattern matching depth x generics/enums), all 3 rows
+checked clean -- no bugs found:
+
+- (row 1) `match` with bindings on a DEEPLY nested built-in enum
+  payload (`Result<Option<T>, E>`, matched in ONE `match`
+  expression): confirmed to need the same documented "two flat
+  matches" workaround user-declared nested enums already require
+  (`tutorials/src/beginner/08a_pattern_match_primer.md`) -- nesting
+  `Result.Ok(Option.Some(v))` in one pattern is a clean PARSER
+  rejection ("expected ')' (variant payload binding close)"), and
+  the two-flat-matches rewrite compiles and runs correctly on both
+  backends (verified with a 3-way branch: `Ok(Some(_))`, `Ok(None)`,
+  `Err(_)`).
+- (row 2) A guarded slice-pattern arm (`[a, b] if cond then ...`)
+  combined with a GENERIC function `fn classify<T>(xs: Vec<T>) ->
+  ...`: checked clean on both backends, for both an `i64` and an
+  `f64` instantiation of `T` -- the guard is correctly evaluated and
+  the slice-length dispatch works through the monomorphized element
+  type exactly as it does for the non-generic case.
+- (row 3) Or-pattern-shaped guard conditions (`if n == 1 || n == 2`)
+  on an enum variant match arm, combined with the variant's payload
+  BINDING used inside the guard expression itself: checked clean on
+  both backends, for two different variants (`Circle`/`Square`) each
+  with their own guarded and unguarded arm.
+New tests: 3 `src/lib.rs` + 3 `tests/run_end_to_end.rs`. Full `cargo
+test --release --workspace`: 0 failed. Category 10 (all 3 rows) now
+fully closed in `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+---
+
+## Feature-combination gap audit sweep (2026-08-03), continued -- category 11 (FINAL)
+
+- [x] **BUG-94 (found+fixed 2026-08-03). Category 11, row 1:
+  `HashMap<StructKey, V>` with `self: ref Self` in the `Hash`/`Eq`
+  impls -- EXACTLY what the checker's own diagnostic suggests --
+  crashed both backends outright.** Found while confirming this
+  boundary case is "a clean, consistent rejection" per the row's own
+  framing; instead of a rejection, the checker's own suggested fix
+  triggered a genuine crash. The by-value `self: Self` form (no
+  `ref`) already worked and still does (verified as a no-regression
+  check).
+  Two SEPARATE bugs, one per backend, same root cause: the
+  `HashMap<StructKey, V>` bundle (ARC 1.7, both
+  `emit_intent_hashmap_struct_pair_c_body` in `backend_c.rs` and
+  `emit_intent_hashmap_struct_pair_llvm` in `backend_llvm.rs`)
+  hard-coded an assumption about how the user's `Hash`/`Eq` impl
+  methods take `self`, instead of matching however the user actually
+  declared it:
+  - C backend: always forward-declared `fn_Key_hash`/`fn_Key_eq` as
+    taking the struct BY VALUE (`Struct_Key self`). When the user
+    writes `self: ref Key`, the REAL hoisted function (emitted by the
+    ordinary interface-method codegen) takes a POINTER (`const
+    Struct_Key* v_self`) -- two conflicting C declarations of the
+    same symbol: `error: conflicting types for 'fn_Key_hash'; have
+    'int64_t(const Struct_Key *)' ... previous declaration ...
+    'int64_t(Struct_Key)'`.
+  - LLVM backend: always CALLED `fn_Key_hash`/`fn_Key_eq` with a
+    bare-value argument (`{k} %k`). When the real function takes a
+    pointer, this is an ill-typed `call` -- `lli` crashed the JIT
+    outright (SIGSEGV in `llvm::orc::runAsMain`).
+  Fixed by adding a registry per backend
+  (`IMPL_METHOD_SELF_BY_REF_REGISTRY` in `backend_c.rs`,
+  `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY` in `backend_llvm.rs`),
+  populated at the start of each backend's `emit_*` from
+  `program.functions`, keyed by the hoisted method's own first-
+  parameter type (`Type::Ref`/`Type::RefMut` -> by-ref; anything else
+  -> by-value) -- mirroring the SAME "sibling walker never learned
+  about a shape" root-cause pattern this whole sweep kept finding,
+  just applied to a calling-convention mismatch instead of a missing
+  type-walk arm. A subtlety specific to LLVM: the hoisted method's
+  own name is stored WITHOUT the `fn_` emission prefix
+  (`program.functions` entries are named e.g. "Key_hash"; `fn_` is
+  added only at C/LLVM text-emission time), so the registry keys by
+  the pre-mangled `fn_`-prefixed spelling to match how the HashMap
+  bundle's own `hash_fn`/`eq_fn` strings are already constructed --
+  missing this on the first attempt at the fix left the registry
+  lookup silently falling back to "by-value" for every entry (a
+  quiet, easy-to-miss failure mode worth flagging for future
+  registry-based fixes of this shape).
+  The HashMap bundle now matches whichever convention the impl
+  actually uses: the C forward declaration picks pointer vs value
+  param types accordingly; the LLVM bundle spills `%k` (the by-value
+  HashMap-API parameter) into a fresh stack slot via `alloca`+`store`
+  to get an address when by-ref is needed (an LLVM SSA value isn't
+  otherwise addressable, unlike C locals/array elements), and reuses
+  an already-addressable `getelementptr` result (`%kcell`, the
+  table-slot side of an eq comparison) directly instead of
+  redundantly loading-then-respilling it.
+  Verified with a fuller round-trip exercising the whole API (3
+  inserts, `get`, `contains_key` hit/miss, update-returns-old-value,
+  remove-returns-old-value, `len`) on both backends; `valgrind
+  --leak-check=full` on native AOT builds of both backends: 0 errors,
+  all heap blocks freed. Given the blast radius (touches HashMap
+  <StructKey, V> codegen in both backends), ran the full `cargo test
+  --release --workspace` suite immediately after the fix compiled
+  (before adding new tests): 13/13 binaries clean, 0 failed.
+  Also swept the rest of category 11:
+  - (row 2) `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width
+    payload): checked clean -- cleanly rejected on both backends,
+    matching the documented i64-width-only restriction.
+  - (row 3) A `dyn Iface` method call held across an `.await` point:
+    checked clean, but surfaced a DOCUMENTATION-ACCURACY finding --
+    `docs/missing_features.md` documented this shape as unsupported
+    ("dyn-method receivers can't be held across suspend points"), but
+    it actually works correctly on both backends, verified with a
+    `dyn` binding held across TWO separate `await` points (method
+    called both before and after the second await) and two different
+    concrete types behind the same binding, values matching hand-
+    computation exactly (`87`, `143`). Corrected the stale entry in
+    `docs/missing_features.md`.
+  - (row 4) `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>`/
+    `RwLock<U>` (nested locks): found a real gap -- this used to
+    compile straight through the checker and crash the native
+    toolchain (undefined `intent_mutex_intent_mutex_i64` bundle
+    symbols never generated by either backend; full nested-lock
+    codegen support was never implemented, a substantially larger
+    task than a missing-arm fix). Per the row's own "either works
+    correctly or is cleanly rejected; either is fine" framing, fixed
+    with an explicit, clean rejection in `mutex_new`/`rwlock_new`'s
+    own type-checking, covering all four nesting combinations
+    (`Mutex<Mutex<T>>`, `Mutex<RwLock<T>>`, `RwLock<Mutex<T>>`,
+    `RwLock<RwLock<T>>`) with a clear diagnostic pointing at the fix
+    ("nested concurrency handles are not supported in v1 ... Use a
+    single Mutex<T>/RwLock<T> around the innermost data").
+  New tests: 4 `src/lib.rs` + 2 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace` after all category 11 changes
+  landed: 13/13 binaries clean, 0 failed. Category 11 (all 4 rows,
+  the FINAL category of the 11-category feature-combination gap
+  audit sweep) now fully closed in `docs/FEATURE_COMBINATION_GAPS_
+  TODO.md`.
+
+---
+
+## Deferred-finding fixups (2026-08-03), post-sweep
+
+- [x] **BUG-95 (found+fixed 2026-08-03). Deferred finding from BUG-93:
+  a bare enum constructor written directly inside a struct-literal
+  field (`Node { value: 2, next: Option.Some(box(tail)) }`, with no
+  intermediate `let` to hold the value first) failed on both
+  backends.** The BUG-93 writeup had diagnosed this as a "BUG-46-
+  class ambiguity" (multiple generic-enum instantiations in scope,
+  receiver resolution can't tell which one a bare constructor means)
+  and shipped a workaround-pattern test instead of a fix. The real
+  shape turned out to be THREE compounding bugs, only the first of
+  which resembled the original diagnosis:
+  1. BUG-46's existing fix (`resolve_bare_enum_ctors_in_stmt`) only
+     ever looked at a `let`'s top-level initializer or a `return`
+     value -- never inside a struct-literal's OWN fields. Fixed by
+     adding `resolve_bare_enum_ctor_in_struct_lit`, which looks up
+     the struct literal's (already-monomorphized) field types and
+     resolves any enum-typed field's bare constructor the same way,
+     recursing into nested struct literals.
+  2. With (1) alone, the rewrite still silently failed: the pass that
+     resolves a `StructLit`'s own `type_name` from the bare generic-
+     template name ("Node") to the mangled monomorphized name
+     ("Node__i64") (`resolve_bare_struct_lits_in_stmt`) ran AFTER the
+     enum-ctor pass at all 3 call sites in
+     `monomorphize_type_decls_in_program`, so (1)'s field-type lookup
+     (keyed by the mangled name) always missed on a still-bare
+     `type_name`. Fixed by reordering the two passes at all 3 sites,
+     with a comment explaining why the order matters.
+  3. Even with (1) and (2) fixed, the target enum this now correctly
+     resolved TO didn't actually exist: `substitute_type_param`'s
+     `Type::Apply` -> `Type::Enum`/`Type::Struct` collapse (BUG-90's
+     fix) rewrites a struct field's type IN PLACE, eagerly, the
+     moment its args become concrete -- discarding the `(name, args)`
+     pair that produced it before `collect_apply_in_ty` (BUG-93's
+     worklist-feeding fix, which walks a freshly-monomorphized
+     struct's fields looking for `Type::Apply` nodes still needing
+     generation) ever gets a chance to see it. Concretely:
+     `Node__i64`'s `next` field correctly ends up typed
+     `Type::Enum("Option__Box_Struct__Node__i64___")`, but
+     `program.enums` never actually contained an `EnumDecl` by that
+     name -- "enum '...' is not declared" the instant anything
+     referenced it, including a completely unrelated-looking
+     `Option.None` reference in a sibling `let` that had never
+     touched the new code paths at all (traced via temporary debug
+     `eprintln!`s dumping `program.enums`'s actual contents, since
+     the failure mode gave no indication the missing piece was
+     enum-generation rather than receiver-resolution). This exactly
+     explains why the BUG-93 workaround (an explicit
+     `let: Option<Box<Node<i64>>>` elsewhere in the same function)
+     worked: that path keeps a genuine, literal `Type::Apply` node in
+     the AST long enough for the normal discovery walk to find it,
+     independent of the struct-field collapse. Fixed with a new
+     thread-local queue (`NEWLY_COLLAPSED_GENERIC_APPLIES` in
+     `checker.rs`) that the collapse site in `substitute_type_param`
+     records `(name, args, is_enum)` into on its way to erasing the
+     `Apply` shape; the same worklist round in
+     `monomorphize_type_decls_in_program` that already drains
+     `collect_apply_in_ty`'s discoveries into `discovered_structs`/
+     `discovered_enums` now also drains this queue, right after both
+     the struct-field and enum-variant-payload substitution passes.
+     Same "sibling/parallel code path silently missing a case" root-
+     cause family this whole sweep kept surfacing, just one level
+     deeper than the original diagnosis reached.
+  Verified with `valgrind --leak-check=full` on native AOT builds of
+  both backends: LLVM 0 errors; the C backend reproduces the SAME
+  pre-existing, already-separately-tracked leak in
+  `Box<StructWithHeapOwningFields>` Drop (not a new regression --
+  see the deferred finding in BUG-93's own writeup). No regression on
+  the BUG-93 workaround-pattern test, which continues to pass
+  unchanged.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+- [x] **BUG-96 (found+fixed 2026-08-03). Deferred finding from
+  BUG-93: field access through a bare `Box<T>` (`n.value` where
+  `n: Box<Node>`) was rejected outright ("field access on non-struct
+  type Box<...>").** `Box<T>` (T != `dyn Iface`) lowers to a bare
+  `T*` in both backends (confirmed in `c_type_name`/`llvm_byte_size`)
+  -- bit-identical to Ref/RefMut's own runtime representation -- but
+  the checker's FieldAccess resolution only ever unwrapped
+  `Ref`/`RefMut` via `Type::deref()`, never `Box`, and both backends'
+  FieldAccess codegen gated the pointer-load path on `is_any_ref()`,
+  which is likewise Ref/RefMut-only.
+  Fixed with two new, narrowly-scoped `Type` helpers in `ast.rs`:
+  `is_field_access_indirect()` (true for Ref/RefMut and non-dyn Box)
+  and `deref_through_box()` (like `deref()`, but also peels one
+  non-dyn Box layer) -- used ONLY at the three FieldAccess
+  resolution/codegen sites (`checker.rs`'s `ExprKind::FieldAccess`
+  arm, `backend_c.rs`'s `TypedExprKind::FieldAccess` arm,
+  `backend_llvm.rs`'s `TypedExprKind::FieldAccess` arm in
+  `emit_expr`). Deliberately NOT folded into the general-purpose
+  `is_any_ref()`/`deref()`: those are consulted by 60+ call sites
+  across checker.rs/backend_c.rs/backend_llvm.rs/ssa.rs/smt.rs,
+  many of which assume Ref/RefMut's specific *borrowed* semantics
+  (borrow-checking, move analysis, drop) -- conflating an owned
+  `Box` with a borrow there would be a much larger, riskier change
+  than this fix warrants. `Box<dyn Iface>` is deliberately excluded
+  and remains cleanly rejected: it lowers to the 16-byte fat-pointer
+  struct itself (with an owning `.data` pointer), not a pointer to a
+  field-bearing aggregate, so it genuinely has no fields to read;
+  verified this exclusion holds (no regression) with a dedicated
+  spot-check. The SSA fast-path emitters (`ssa_backend_c.rs`,
+  `ssa_backend_llvm.rs`) don't implement `FieldAccess` at all (their
+  instruction set doesn't cover struct field access), so no change
+  was needed there.
+  Also updated `tutorials/src/intermediate/03a_box_raii_primer.md`,
+  which had documented this exact gap as "a real v1 boundary" after
+  the BUG-93 investigation surfaced it -- replaced the caution note
+  with a short confirmation that field access now works through
+  `Box<T>` the same way it works through a ref.
+  Verified on both backends with a struct having a direct `Box<T>`
+  binding AND a `Box<T>`-typed struct field (covering the
+  lvalue-chaining path, e.g. `n.next.x`).
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+- [x] **BUG-97 (found+fixed 2026-08-03). Deferred finding from
+  BUG-93/task #39: the canonical `Node { next: Option<Box<Node>> }`
+  recursive-struct shape (the one the Box<T>/RAII tutorial itself
+  demonstrates, `examples/language/english/
+  option_box_recursive_struct.vani`) leaked on the C backend --
+  root cause was much deeper than "Drop doesn't recurse into the
+  Box".** `valgrind` on the shipped example showed 2 of 3 mallocs
+  (48 of 72 bytes) never freed even at the OUTERMOST Box; the
+  generated C for `fn_main` contained ZERO `free()` calls at all for
+  any of the three `Node` locals.
+  Root cause, found by dumping generated C and checking `is_copy()`
+  by hand: `Type::Enum`'s non-Copy-payload registration (checker.rs)
+  only ever checked a hardcoded `matches!(t, Type::OwnedStr |
+  Type::Vec(_))` -- predating `Box<T>` and every other affine type
+  added since -- so `Option<Box<Node>>` was silently treated as
+  Copy. That made `Node`'s own field check (`!f.ty.is_copy()`) pass
+  too, so `Node` itself registered as Copy, so the checker never
+  emitted a scope-exit `TypedStmt::Drop` for a `Node` local AT ALL --
+  not a "doesn't recurse" bug, a "never even starts" bug. Compounded
+  by a second, independent gap: the struct-non-Copy pass and the
+  enum-non-Copy pass ran as two separate ONE-SHOT passes (structs
+  first, enums second), so even a corrected enum check would have
+  been invisible to the struct pass on the same run -- a struct
+  whose Copy-ness depends on an enum field, and an enum whose Copy-
+  ness depends on a struct payload, are mutually dependent and need
+  a SHARED fixed point, same "sibling/parallel walk needs a shared
+  fixed point" root-cause family as the generics-monomorphization
+  worklist bugs (BUG-90/93/95).
+  Fixed in three layers:
+  1. checker.rs: merged the struct and enum non-Copy registration
+     into one fixed-point loop (was two separate one-shot passes),
+     and switched the enum-payload check from the hardcoded
+     `OwnedStr | Vec` match to `!payload.is_copy()` (self-updating
+     as new affine types are added, matching how the struct-field
+     check already worked).
+  2. checker.rs: correctly-classified `Node` then hit TWO more
+     gaps this had been masking: the struct-field-type allowlist had
+     no `Type::Enum` arm (rejecting the field outright), and `box()`
+     rejected any non-Copy struct argument outright (rejecting
+     `box(tail)`). Both relaxed: `Type::Enum(_)` added to the field
+     allowlist (Drop chains through it the same way a nested struct
+     field already does); `box()`'s struct gate changed from
+     requiring `is_copy()` to unconditional `true` (any struct
+     reaching this point already passed the field-type allowlist, so
+     its Drop is guaranteed to be a shape both backends know how to
+     walk).
+  3. backend_c.rs codegen, once the checker correctly asked for a
+     `Node` Drop: `emit_struct_field_drops` had NO `Type::Enum` arm
+     (silent no-op) and its `Type::Box` arm's fallback case for
+     `Type::Struct` inner types just did `free(box)` -- the box's OWN
+     slot, never the boxed struct's OWN owning fields. Same gap
+     independently existed in the bare-local `TypedStmt::Drop`'s
+     `Type::Box` arm AND in its `Type::Enum` arm's Box-payload case
+     (three separate copies of "Box<T> Drop chaining," all missing
+     the same `Type::Struct` case). Fixed by adding the `Type::Enum`
+     arm (factored `emit_enum_value_drop` out of the bare-local
+     handler so the tag-switch + per-variant-payload-free logic
+     isn't tripled), and adding a `Type::Struct` case to all three
+     `Type::Box` sites. For a NON-recursive `Box<Struct>` (no cycle
+     back to itself), this inline-recurses via
+     `emit_struct_field_drops`, same as an ordinary nested struct
+     field -- safe, since a DAG always bottoms out. For a
+     box-RECURSIVE struct (owns a `Box<Self>`, directly or through
+     one layer of enum wrapping -- detected into a new
+     `BOX_RECURSIVE_STRUCTS_REGISTRY` in ast.rs, populated by the
+     checker), inline recursion would need infinitely much generated
+     C text to unroll a cycle, so all three sites instead call one
+     generated, ITERATIVE (heap-worklist-based, not native-call-
+     recursive -- won't blow the C stack on a long chain) "deep drop"
+     helper function per box-recursive struct type
+     (`emit_box_recursive_deep_drop_helpers`), emitted once every
+     struct/enum body is defined and before any function body that
+     might drop one.
+  The LLVM backend needed NO changes -- confirmed via `valgrind
+  --leak-check=full` on native AOT builds that it already correctly
+  drops every case this fix covers, both before and after (0 errors
+  throughout), matching this bug's own original "LLVM backend is
+  unaffected -- worth checking as a reference implementation" framing.
+  Verified with `valgrind --leak-check=full --show-leak-kinds=all` on
+  native AOT C builds of: the shipped 3-node example (0 errors, all
+  heap blocks freed -- vs. "24 direct + 24 indirect bytes
+  definitely/indirectly lost" before this fix); a 10-node chain where
+  each node ALSO owns a plain `OwnedStr` field alongside the
+  recursive `Box<Self>` edge (0 errors, 21/21 allocs freed --
+  confirms the generated helper's non-recursive-field-drop pass and
+  its worklist-push pass compose correctly); and the BUG-93/95
+  generic `Node<T>` instantiation (0 errors -- this fix incidentally
+  also closes THAT bug's own deferred C-backend leak finding, a nice
+  two-for-one). No regression on any existing Box<T>/struct-field/
+  enum-payload Drop test (166+31+... across the full suite, 0
+  failed).
+  Deferred, smaller finding along the way: a MIXED-payload enum
+  (2+ variants with owning-but-different payload types) with a
+  Box<Struct>-shaped variant payload still isn't handled in
+  `emit_enum_value_drop`'s mixed-payload branch (only OwnedStr/Vec
+  there) -- not needed by this bug's actual repro (`Option` is
+  single-payload: only `Some` carries one), left as a documented gap
+  rather than scope-creeping further.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.

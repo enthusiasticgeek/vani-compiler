@@ -30,6 +30,44 @@ pub fn struct_has_non_copy_field(name: &str) -> bool {
 }
 
 thread_local! {
+    /// Names of structs that directly own a `Box<Self>` (optionally
+    /// through one layer of single-payload-per-variant enum
+    /// wrapping, e.g. `Option<Box<Self>>`) — the "linked list / tree
+    /// node" shape. BUG-97 (task #39, 2026-08-03).
+    ///
+    /// Populated by the checker once struct/enum decls are known.
+    /// Consulted by both backends' scope-exit Drop emission: for a
+    /// struct in this set, dropping a `Box<Struct>` (whether a bare
+    /// local, a struct field, or an enum payload) must NOT inline-
+    /// recurse into the struct's own fields the way a plain nested
+    /// `Type::Struct` field does — that recursion is only safe for
+    /// non-self-referential (DAG-shaped) structs, since the
+    /// generator would need to emit infinitely much C/LLVM text to
+    /// inline-unroll a cycle. Instead, both backends emit ONE
+    /// generated, iterative (heap-worklist-based, not native-call-
+    /// recursive) "deep drop" function per box-recursive struct type
+    /// and call that function at all three drop sites.
+    pub(crate) static BOX_RECURSIVE_STRUCTS_REGISTRY: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// Reset and repopulate the box-recursive-struct registry. Called
+/// once per `check_program` after struct/enum decls are validated.
+pub fn set_box_recursive_structs<I: IntoIterator<Item = String>>(names: I) {
+    BOX_RECURSIVE_STRUCTS_REGISTRY.with(|cell| {
+        let mut set = cell.borrow_mut();
+        set.clear();
+        set.extend(names);
+    });
+}
+
+/// True when `name` was registered as directly owning a `Box<Self>`
+/// (see `BOX_RECURSIVE_STRUCTS_REGISTRY`'s doc comment).
+pub fn struct_is_box_recursive(name: &str) -> bool {
+    BOX_RECURSIVE_STRUCTS_REGISTRY.with(|cell| cell.borrow().contains(name))
+}
+
+thread_local! {
     /// Names of enums declared with at least one non-Copy
     /// payload type (in v1, that means an `OwnedStr` payload).
     /// Populated by the checker so `Type::Enum(name)` reports
@@ -1036,14 +1074,16 @@ pub enum Type {
     /// `expr` into the new slot; read via `*b` unary deref;
     /// dropped via `free(b)` at scope exit.
     ///
-    /// v1 restrictions (L2 Phase 1, 2026-06-07):
-    /// - T must be Copy + sized (primitives + Copy structs). Box
-    ///   of an already-affine type would need recursive drop and
-    ///   is queued.
-    /// - C backend only — LLVM backend gates with a clear error
-    ///   directing users to `--backend=c`. Queued for L2 Phase 2.
-    /// - `Box<dyn Iface>` queued for L2 Phase 3 (the documented
-    ///   `struct Drawer { r: Box<dyn Renderer> }` blocker).
+    /// Supported inner types (both backends): primitives, `dyn
+    /// Iface` (a 16-byte fat pointer instead of a plain pointer —
+    /// see `Type::is_field_access_indirect`'s doc comment), `Vec
+    /// <T>`, `OwnedStr`, and any struct type — including non-Copy
+    /// and self-referential ("recursive") ones, e.g. `struct Node
+    /// { next: Option<Box<Node>> } ` (BUG-97, 2026-08-04; the
+    /// self-referential case's Drop is an iterative, not native-
+    /// call-recursive, generated helper — see
+    /// `emit_box_recursive_deep_drop_helpers` in backend_c.rs).
+    /// Not yet supported: `Box<Box<T>>` and `Box` of a tuple.
     Box(Box<Type>),
     /// `Condvar` — affine handle to a kernel waiter (futex on
     /// Linux, WaitOnAddress on Windows, pthread_cond_t
@@ -1306,6 +1346,38 @@ impl Type {
     pub fn deref(&self) -> &Type {
         match self {
             Type::Ref(inner) | Type::RefMut(inner) => inner.deref(),
+            other => other,
+        }
+    }
+
+    /// True for Ref/RefMut, and for `Box<T>` where `T` is not
+    /// `dyn Iface`. Both backends lower `Box<T>` (T != dyn Iface) to
+    /// a bare `T*` — bit-identical to Ref/RefMut's own runtime
+    /// representation — so field access can treat them the same way
+    /// ("one level of indirection to peel"). `Box<dyn Iface>` is
+    /// excluded: it lowers to the 16-byte fat-pointer struct itself,
+    /// not a pointer to a field-bearing aggregate.
+    /// Deliberately a NEW, narrowly-scoped query rather than folded
+    /// into `is_any_ref()`/`deref()` above: those are consulted by
+    /// 60+ call sites (borrow-checking, moves, drop) that assume
+    /// Ref/RefMut's specific *borrowed* semantics, which an owned
+    /// Box must not be conflated with.
+    pub fn is_field_access_indirect(&self) -> bool {
+        match self {
+            Type::Ref(_) | Type::RefMut(_) => true,
+            Type::Box(inner) => !matches!(**inner, Type::Object(_)),
+            _ => false,
+        }
+    }
+
+    /// Like `deref()`, but also peels a `Box<T>` layer (except
+    /// `Box<dyn Iface>` — see `is_field_access_indirect`). Used
+    /// exclusively for field-access resolution; see that method's
+    /// doc comment for why this is kept separate from `deref()`.
+    pub fn deref_through_box(&self) -> &Type {
+        match self {
+            Type::Ref(inner) | Type::RefMut(inner) => inner.deref_through_box(),
+            Type::Box(inner) if !matches!(**inner, Type::Object(_)) => inner.deref_through_box(),
             other => other,
         }
     }

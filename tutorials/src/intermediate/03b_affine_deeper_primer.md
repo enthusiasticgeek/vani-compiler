@@ -160,42 +160,45 @@ print xs[0];          // <- can we still read xs while r is alive?
 Answer: yes for **shared (read-only) borrows** like `ref`. You
 can have many of them at once. They're all read-only.
 
-The design intent -- and the rule Rust enforces, which this
-section used to claim vāṇी enforces too -- is that a **mutable**
-borrow should be exclusive: no reading the original while a
-`mut ref` alias to it is outstanding.
+The rule -- the same one Rust enforces -- is that a **mutable**
+borrow must be exclusive: no reading (or writing) the original
+while a `mut ref` alias to it is outstanding, and no taking a
+second `ref`/`mut ref` of the same binding either.
 
-<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
-**As of this writing, the checker does not actually enforce
-this.** The following compiles and runs cleanly, on both
-backends, with no diagnostic at all:
+The checker enforces this for **named `mut ref` bindings** --
+a `let`-bound alias whose lifetime is its own enclosing scope,
+not a one-off `foo(mut ref xs)` call argument (see below for that
+distinction):
 
 ```vani
 let xs: Vec<i64> = vec(1, 2, 3);
 let r: mut ref Vec<i64> = mut ref xs;
 push(r, 4);
-print xs[0];           // NOT rejected -- compiles and runs fine
+print xs[0];
 ```
 
-Confirmed not narrow to this one shape either -- the identical
-gap shows up whether the `mut ref` is stored in a `let` or passed
-inline (`push(mut ref xs, 4); print xs[0];`), and whether the
-conflicting access is a read or a write through the other alias
-(`set(r, 0, 99); print xs[0];` also compiles). Only vāṇी's
-**affine move rule** is enforced here (you can't read a value
-after it's been *moved*) -- there is currently no checker pass
-that tracks "an outstanding `mut ref` alias makes the original
-binding temporarily unreadable," the "single mutable borrow"
-exclusivity Rust is known for. In the example above nothing
-actually goes wrong at runtime (`push` only appends, so `xs[0]`
-is unaffected regardless), but the *rule* that would catch a
-genuinely dangerous version of this pattern isn't there to catch
-it if the aliasing ever did matter.
+```
+error: cannot use 'xs' while it is mutably borrowed by 'r'
+```
 
-Rust enforces this at compile time; as covered just above, vāṇी
-does not yet -- affine *moves* are checked, exclusive *borrowing*
-is not.
+The same rejection fires for a write through the other alias
+(`set(mut ref xs, 0, 99);` while `r` is still live), and for
+taking a second borrow -- shared or mutable -- of `xs` while `r`
+holds it. The check is scoped to `r`'s own enclosing block: once
+`r`'s block exits, `xs` is freely accessible again.
+
+**What this check does NOT (yet) track**: it's a lexical
+approximation, not full non-lexical-lifetime analysis --
+`r`'s borrow is considered live for the rest of its *declaring
+scope*, whether or not `r` is actually used again after some
+earlier point. It also only sees NAMED `mut ref`/`ref` bindings;
+an inline borrow passed directly as a call argument
+(`push(mut ref xs, 4); print xs[0];`) is never stored anywhere,
+so per the borrow-scopes rule from the top of this section its
+lifetime ends the moment the call returns -- that shape compiles
+cleanly, correctly, both before and after this fix.
 
 ## What "ends" a borrow?
 
@@ -223,10 +226,17 @@ outlives the holder.
 Affine ownership (the move rule) eliminates a class of bugs
 (use-after-free, double-free, dangling pointer) at compile time.
 Data races specifically depend on the mutable-borrow-exclusivity
-rule from the section above, which -- as covered there -- isn't
-enforced yet; see [Advanced 2a](../advanced/02a_parallelism_primer.md)
-for how vāṇी's concurrency primitives handle shared mutable state
-in practice today.
+rule from the section above, which -- as covered there -- is
+enforced for the common named-`mut ref`-binding shape, but is a
+lexical approximation rather than full non-lexical-lifetime
+analysis (see the section above for exactly what it does and
+doesn't catch). Cross-THREAD data races are a separate, already-
+independently-enforced mechanism (Copy-only task captures, no
+implicit sharing across `task`/`parallel-for` boundaries without
+an explicit `Mutex`/`Channel`/`Atomic`) -- see
+[Advanced 2a](../advanced/02a_parallelism_primer.md) for how
+vāṇी's concurrency primitives handle shared mutable state in
+practice.
 
 The cost: you have to think about WHO OWNS WHAT and pass
 values around explicitly. Code that "looks fine" in
@@ -254,9 +264,12 @@ ownership errors.
   consistent.
 - **Borrow scopes**: shared borrows (`ref`) can multiply freely --
   confirmed enforced. The "many shared XOR one mutable"
-  exclusivity rule for `mut ref` is the *design intent* but is
-  **not currently enforced by the checker** (see the section
-  above) -- only the affine move rule is checked today.
+  exclusivity rule for `mut ref` **is enforced for named
+  `let`-bound borrows** (see the section above for the exact
+  shape and its lexical-scope, not full-NLL, precision) -- an
+  inline `foo(mut ref xs)` call argument's borrow still ends,
+  untracked, the moment the call returns, matching "Borrow ends"
+  below.
 - **Borrow ends** when the borrow's binding goes out of
   scope (or earlier via NLL).
 

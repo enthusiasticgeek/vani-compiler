@@ -1,0 +1,37 @@
+// build & run:
+//   vanic run examples/language/english/async_fn_generics.vani                # LLVM
+//   vanic run examples/language/english/async_fn_generics.vani --backend=c    # C
+
+intent "Regression for BUG-87 (found 2026-08-03, fixed 2026-08-04): `async fn` combined with generics or a built-in generic enum return type was broken. Row 1: a generic `async fn` called directly inside `await(...)` (no intermediate `let`) failed monomorphization outright -- fixed as a side effect of an earlier, unrelated fix that taught the fn-generics call-site scanner to look inside desugared match expressions (`await(...)` desugars to a match). Row 2: an `async fn` returning a generic enum (`Option<i64>`), awaited then matched, failed with a type mismatch inside `await`'s OWN desugared match -- its synthesized `Future.Pending` arm hardcodes a bare `Int(0)` placeholder, which only type-checks when the awaited value happens to be i64. Fixed with a `checked_expr_placeholder` helper that builds a well-typed placeholder value for the actual awaited type (the Pending arm is provably unreachable in v1's synchronous semantics, so its exact value never matters).";
+
+async fn identity<T>(x: T) -> T {
+  return x;
+}
+
+async fn maybe_get(n: i64) -> Option<i64> {
+  if n > 0 {
+    return Option.Some(n);
+  }
+  return Option.None;
+}
+
+fn main() -> i64 {
+  // Row 1: generic async fn called directly inside await(...).
+  let r1: i64 = await(identity(42));
+  print "await(identity(42)) (42):", r1;
+
+  // Row 2: async fn returning Option<i64>, awaited then matched.
+  let r2: i64 = match await(maybe_get(5)) {
+    Option.Some(x) then x,
+    Option.None then 0 - 1,
+  };
+  print "await(maybe_get(5)) matched (5):", r2;
+
+  let r3: i64 = match await(maybe_get(0 - 3)) {
+    Option.Some(x) then x,
+    Option.None then 0 - 1,
+  };
+  print "await(maybe_get(-3)) matched (-1):", r3;
+
+  return 0;
+}

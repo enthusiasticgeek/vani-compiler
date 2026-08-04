@@ -4,7 +4,60 @@ use crate::ir::{
     TypedConst, TypedExpr, TypedExprKind, TypedFunction, TypedParam, TypedProgram, TypedStmt,
 };
 use crate::span::Span;
-use std::collections::{BTreeMap, HashMap};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+thread_local! {
+    // Gap-audit fix (2026-08-03): names of every generic enum
+    // TEMPLATE (e.g. "Option", "Result", or a user-declared generic
+    // enum) as they exist at the very start of the checker pipeline,
+    // before any monomorphization pass has touched them. Populated
+    // once from `program.enums` alongside `enum_names_pre` (used for
+    // `resolve_enum_types_in_program`) so it reflects the pristine
+    // set. `substitute_type_param`'s `Type::Apply` collapse needs
+    // this to decide whether a newly-all-concrete `Apply{name, args}`
+    // should collapse to `Type::Enum(mangled)` or `Type::Struct
+    // (mangled)` -- without it, every collapse defaulted to Struct,
+    // so a generic fn returning `Option<T>`/`Result<T,E>` produced a
+    // `Type::Struct("Option__i64")` for its specialized return type
+    // instead of `Type::Enum("Option__i64")`. Both Display the same
+    // (mangled name string), so the mismatch only surfaced as a
+    // baffling "expected Option__i64, got Option__i64" diagnostic.
+    static GENERIC_ENUM_TEMPLATE_NAMES: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
+    // Gap-audit follow-up fix (2026-08-03, category 9 finding (a)
+    // root cause -- deeper than initially diagnosed): when a
+    // generic struct/enum's OWN field/payload type collapses a
+    // nested `Type::Apply` straight to `Type::Enum`/`Type::Struct`
+    // (the arm just below this thread_local), that collapse
+    // happens EAGERLY, in place, discarding the `(name, args)` pair
+    // that produced it. The struct/enum-decl worklist in
+    // `monomorphize_type_decls_in_program` tries to re-discover
+    // further-needed instantiations from a freshly-generated
+    // struct/enum's OWN fields via `collect_apply_in_ty` (the BUG-93
+    // fix) -- but `collect_apply_in_ty` only recognizes a literal
+    // `Type::Apply` NODE; once `substitute_type_param` has ALREADY
+    // collapsed it to `Type::Enum(mangled)`, there is nothing left
+    // for `collect_apply_in_ty` to find, so the corresponding
+    // `EnumDecl`/`StructDecl` never actually gets generated even
+    // though the FIELD correctly references its (never-materialized)
+    // mangled name. Concretely: `Node<T> { next: Option<Box<Node<T>>>
+    // }` monomorphized to `Node__i64` gets a `next` field correctly
+    // typed `Type::Enum("Option__Box_Struct__Node__i64___")`, but
+    // `program.enums` never actually contains an `EnumDecl` by that
+    // name -- "enum 'Option__Box_Struct__Node__i64___' is not
+    // declared" the instant anything tries to construct or match it
+    // directly (as opposed to the workaround of writing the
+    // instantiation out literally via an explicit `let` annotation
+    // elsewhere, which DOES reach `collect_apply_in_ty` while the
+    // `Type::Apply` node is still intact). This queue lets the
+    // collapse site record what it collapsed FROM, so the worklist
+    // can drain it and feed the underlying (name, args) pair back
+    // into `discovered_structs`/`discovered_enums` same as any other
+    // freshly-discovered need.
+    static NEWLY_COLLAPSED_GENERIC_APPLIES:
+        RefCell<Vec<(String, Vec<Type>, bool)>> = RefCell::new(Vec::new());
+}
 
 const BUILTIN_FUNCTION_NAMES: &[&str] =
     &["vec", "push", "pop", "set", "sort", "sort_by", "sort_desc", "vec_swap", "vec_remove_at", "vec_replace_all", "reverse", "dedup", "find", "contains", "binary_search", "swap_remove", "insert", "clear", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_split", "parse_int", "parse_float", "i64_to_str", "f64_to_str", "bool_to_str", "str_index_of", "substring", "str_repeat", "str_to_upper", "str_to_lower", "parse_bool", "str_join", "str_pad_left", "str_pad_right", "str_lines", "str_chars", "str_reverse", "str_strip_prefix", "str_strip_suffix", "str_count_char", "pow", "sqrt", "sin", "cos", "tan", "floor", "ceil", "abs", "log", "log2", "log10", "exp", "atan2", "f64_is_nan", "f64_is_inf", "f64_is_finite", "f64_pi", "f64_e", "f64_inf", "f64_nan", "f64_round", "f64_trunc_to_i64", "i64_gcd", "i64_lcm", "i64_pow", "i64_abs_diff", "i64_signum", "f64_signum", "is_ascii_digit", "is_ascii_alpha", "is_ascii_alphanumeric", "is_ascii_whitespace", "i64_count_set_bits", "i64_leading_zeros", "i64_trailing_zeros", "i64_bswap", "i64_rotate_left", "i64_rotate_right", "f64_to_bits", "f64_from_bits", "i64_min_value", "i64_max_value", "f64_max_finite", "i64_div_floor", "i64_mod_floor", "f64_lerp", "f64_clamp01", "i64_log2_floor", "i64_log2_ceil", "i64_is_power_of_2", "i64_next_power_of_2", "i64_saturating_add", "i64_saturating_sub", "i64_saturating_mul", "i64_min", "i64_max", "i64_clamp", "f64_min", "f64_max", "f64_clamp", "i64_isqrt", "f64_hypot", "f64_to_radians", "f64_to_degrees", "asin", "acos", "atan", "sinh", "cosh", "tanh", "f64_epsilon", "f64_min_positive", "f64_min_subnormal", "f64_copysign", "f64_fma", "f64_remainder", "f64_is_normal", "f64_is_subnormal", "f64_sign_bit", "f64_next_up", "f64_next_down", "i64_div_ceil", "i64_div_round", "f64_trunc", "f64_frac", "i64_count_digits", "i64_log10_floor", "i64_log10_ceil", "i64_pow_mod", "i64_is_prime", "i64_factorial", "i64_fibonacci", "i64_binomial", "i64_perm", "i64_avg", "i64_wrap", "f64_wrap", "f64_mod_floor", "i64_min_3", "i64_max_3", "f64_min_3", "f64_max_3", "f64_sigmoid", "f64_softsign", "f64_step", "f64_smoothstep", "f64_smoothstep5", "f64_inv_lerp", "f64_chebyshev", "f64_l1_norm", "i64_isqrt_ceil", "i64_is_perfect_square", "i64_divisor_count", "i64_divisor_sum", "i64_totient", "i64_radical", "i64_next_prime", "i64_prev_prime", "i64_mod_inverse", "i64_set_bit", "i64_clear_bit", "i64_toggle_bit", "i64_test_bit", "i64_reverse_bits", "f64_relu", "f64_leaky_relu", "f64_softplus", "f64_swish", "f64_logit", "f64_sinc", "f64_safe_div", "f64_safe_sqrt", "i64_safe_div", "f64_safe_log", "f64_geometric_mean", "f64_harmonic_mean", "f64_quadratic_mean", "f64_log_b", "f64_erf", "f64_erfc", "f64_tgamma", "f64_lgamma", "f64_cbrt", "f64_expm1", "f64_log1p", "f64_exp2", "f64_exp10", "f64_inv_sqrt", "f64_round_to", "f64_sec", "f64_csc", "f64_cot", "f64_normal_pdf", "f64_normal_cdf", "f64_lerp_clamp", "f64_atan2_deg", "f64_uniform_random", "f64_inv_smoothstep", "f64_atan_deg", "f64_rgb_to_grayscale", "i64_pack_rgb", "i64_unpack_rgb_r", "i64_unpack_rgb_g", "i64_unpack_rgb_b", "f64_remap", "str_byte_at", "str_len_bytes", "str_starts_with_byte", "str_ends_with_byte", "str_byte_count", "str_index_of_byte", "str_last_index_of_byte", "str_count_ascii_digits", "str_count_ascii_alpha", "str_count_ascii_alphanumeric", "str_count_ascii_whitespace", "str_count_ascii_upper", "str_count_ascii_lower", "str_count_ascii_punct", "str_count_ascii_control", "str_first_byte", "str_last_byte", "seed_rng", "rand_i64", "rand_in_range", "hash_i64", "hash_f64", "hash_str", "hash_combine", "siphash_i64", "siphash_str", "heap_push", "heap_pop", "heap_peek", "heapify", "deque_new", "deque_push_back", "deque_push_front", "deque_pop_back", "deque_pop_front", "deque_peek_back", "deque_peek_front", "deque_len", "deque_clear", "hashset_new", "hashset_insert", "hashset_contains", "hashset_remove", "hashset_len", "hashset_clear", "hashmap_new", "hashmap_insert", "hashmap_get", "hashmap_contains_key", "hashmap_remove", "hashmap_len", "hashmap_clear", "btreeset_new", "btreeset_insert", "btreeset_contains", "btreeset_remove", "btreeset_len", "btreeset_range", "btreeset_min", "btreeset_max", "btreeset_clear", "btreemap_new", "btreemap_insert", "btreemap_get", "btreemap_contains_key", "btreemap_remove", "btreemap_len", "btreemap_range_keys", "btreemap_range_values", "btreemap_min_key", "btreemap_max_key", "btreemap_clear", "vec_map", "vec_fold", "vec_filter", "vec_position", "vec_count_if", "vec_max_by", "vec_min_by", "vec_zip_with", "vec_take", "vec_drop", "vec_take_while", "vec_drop_while", "vec_map_fold", "vec_filter_fold", "vec_map_filter", "vec_map_filter_fold", "vec_sum", "vec_product", "vec_min", "vec_max", "vec_count", "vec_any", "vec_all", "vec_chain", "vec_range", "vec_repeat", "vec_extend", "vec_concat", "vec_reverse_copy", "vec_unique", "vec_iota", "vec_first", "vec_last", "vec_running_sum", "vec_dot", "vec_intersect", "vec_difference", "vec_union", "option_unwrap_or", "option_is_some", "option_is_none", "option_map", "option_filter", "option_or", "option_and_then", "option_unwrap_or_f64", "option_is_some_f64", "option_is_none_f64", "union_find_new", "union_find_union", "union_find_find", "union_find_connected", "union_find_count", "union_find_clear", "binary_heap_new", "binary_heap_push", "binary_heap_pop", "binary_heap_peek", "binary_heap_len", "binary_heap_clear", "bloom_filter_new", "bloom_filter_insert", "bloom_filter_contains", "bloom_filter_len", "bloom_filter_count", "bloom_filter_clear", "bst_new", "bst_insert", "bst_contains", "bst_remove", "bst_len", "bst_min", "bst_max", "bst_clear", "graph_new", "graph_add_edge", "graph_num_nodes", "graph_num_edges", "graph_bfs_reach", "graph_dfs_reach", "graph_dijkstra", "graph_has_cycle", "graph_mst_kruskal", "graph_mst_prim", "graph_astar", "graph_topo_sort", "graph_clear", "trie_new", "trie_insert", "trie_contains", "trie_starts_with", "trie_delete", "trie_len", "trie_node_count", "trie_clear", "skiplist_new", "skiplist_insert", "skiplist_contains", "skiplist_remove", "skiplist_len", "skiplist_min", "skiplist_max", "skiplist_clear", "clone", "clone_at", "hash_combine_3", "hash_combine_4", "hash_pair", "hash_triple", "f64_hash_pair", "f64_hash_triple", "str_hash_pair", "str_hash_triple", "vec_argmin", "vec_argmax", "vec_count_value", "vec_index_of_value", "vec_last_index_of_value", "vec_cumulative_max", "vec_cumulative_min", "vec_running_product", "vec_running_xor", "vec_running_and", "vec_running_or", "vec_all_equal", "vec_is_sorted_asc", "vec_is_sorted_desc", "vec_is_palindrome", "vec_sliding_max", "vec_sliding_min", "vec_sliding_sum", "vec_sliding_product", "vec_abs", "vec_negate", "vec_signum", "vec_square", "vec_add_scalar", "vec_sub_scalar", "vec_mul_scalar", "vec_div_scalar", "vec_eq_mask", "vec_ne_mask", "vec_lt_mask", "vec_le_mask", "vec_gt_mask", "vec_ge_mask", "vec_min_with_scalar", "vec_max_with_scalar", "vec_clamp_scalar", "vec_add_pairwise", "vec_sub_pairwise", "vec_mul_pairwise", "vec_min_pairwise", "vec_max_pairwise", "vec_mod_scalar", "vec_pow_scalar", "vec_shl_scalar", "vec_shr_scalar", "vec_rotate_left", "vec_rotate_right", "vec_shift_left", "vec_shift_right", "vec_subset_of", "vec_disjoint", "vec_equal_set", "vec_equal_seq", "vec_diff", "vec_pad_left", "vec_pad_right", "vec_replace_value", "vec_count_distinct", "vec_indices_of_value", "vec_dedup_consecutive", "vec_mean", "vec_merge_sorted", "vec_insert_sorted", "vec_is_sorted_unique", "vec_range_span", "vec_mode", "vec_kth_smallest", "vec_median", "i64_byte_at", "i64_set_byte", "i64_count_leading_ones", "i64_count_trailing_ones", "f64_asin_deg", "f64_acos_deg", "f64_sec_deg", "f64_csc_deg", "f64_cot_deg", "str_is_ascii", "str_is_digit_only", "str_is_alpha_only", "str_is_alphanumeric_only", "str_is_whitespace_only", "str_is_empty", "rand_f64", "rand_in_range_f64", "rand_bool", "rand_choice", "rand_normal", "vec_chunks", "vec_windows", "vec_flatten", "vec_group_by_value", "i64_parity", "i64_mod_pos", "i64_cube_root", "f64_pow_int", "f64_round_to_multiple", "f64_quadratic_root", "vec_running_mean", "vec_intersperse", "pool_new", "pool_alloc", "pool_get", "pool_free", "taint", "assert_safe", "raw_load", "raw_store", "unsafe_alloc", "unsafe_free", "bptr_new", "bptr_get", "bptr_set", "bptr_len", "region_new", "region_alloc_i64", "region_len", "region_borrow_i64", "aref_load", "aref_store", "mmio_read_u32", "mmio_write_u32", "mmio_read_u8", "mmio_read_u16", "mmio_write_u8", "mmio_write_u16", "sleep_ms",
@@ -442,6 +495,95 @@ impl CheckedExpr {
     }
 }
 
+/// BUG-87 row 2 fix (task #42, 2026-08-04). Constructs a well-typed
+/// placeholder value of type `ty`, used ONLY for the synthesized
+/// `Future.Pending` arm of an `await(...)` desugar (see
+/// `synthesize_await_desugar` in parser.rs). v1 ships purely
+/// synchronous `async fn` semantics -- every `Future<T>` value is
+/// constructed via `Future.Ready(v)`; `Future.Pending` is provably
+/// unreachable at runtime, so the exact value this arm produces is
+/// never actually observed. The parser can't build a type-correct
+/// placeholder at desugar time (no type information available yet);
+/// `synthesize_await_desugar` hardcodes a bare `Int(0)` literal,
+/// which only happens to type-check when T is i64 -- any other
+/// return type ("match arm body has type i64 but earlier arm
+/// produced Option__i64") is BUG-87 row 2. This builds a real value
+/// of type `ty` instead, so the match's "every arm produces the
+/// same type" check succeeds for any T.
+/// Handles the shapes expected to plausibly appear as an `async fn`
+/// return type: scalars, Bool, Enum (recurses into the FIRST
+/// variant's payload, if any), Struct (recurses into every field),
+/// Tuple, and fixed-length Array. Returns `None` for anything else
+/// (Vec, Box, OwnedStr, Ref/RefMut, Mutex, dyn Iface, etc.) -- the
+/// caller falls back to the ordinary type-mismatch diagnostic,
+/// matching the project's "unverifiable means rejected, never
+/// silently accepted" convention (BUG-68). Bounded/terminating for
+/// any well-formed program: a Struct/Enum can only cycle back to
+/// itself through a `Box` indirection (direct by-value recursion is
+/// already rejected at struct-declaration time), and `Type::Box` is
+/// one of the rejected shapes here.
+fn checked_expr_placeholder(ty: &Type, span: Span, env: &Env) -> Option<CheckedExpr> {
+    match ty {
+        Type::I8 | Type::I16 | Type::I32 | Type::I64
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+            Some(CheckedExpr::new(TypedExprKind::Int(0), ty.clone(), None, span))
+        }
+        Type::F32 | Type::F64 => {
+            Some(CheckedExpr::new(TypedExprKind::Float(0.0), ty.clone(), None, span))
+        }
+        Type::Bool => Some(CheckedExpr::new(TypedExprKind::Bool(false), ty.clone(), None, span)),
+        Type::Enum(name) => {
+            let info = env.lookup_enum(name)?;
+            let variant_name = info.variants.first()?.clone();
+            let payload_ty = info.payload_types.first().cloned().flatten();
+            match payload_ty {
+                None => Some(CheckedExpr::new(
+                    TypedExprKind::EnumVariant { enum_name: name.clone(), variant: variant_name, tag: 0 },
+                    ty.clone(), None, span,
+                )),
+                Some(pty) => {
+                    let payload = checked_expr_placeholder(&pty, span, env)?;
+                    Some(CheckedExpr::new(
+                        TypedExprKind::EnumVariantWithPayload {
+                            enum_name: name.clone(), variant: variant_name, tag: 0,
+                            payload: Box::new(payload.expr),
+                            payload_ty: pty,
+                        },
+                        ty.clone(), None, span,
+                    ))
+                }
+            }
+        }
+        Type::Struct(name) => {
+            let field_tys: Vec<(String, Type)> = env.lookup_struct(name)?.fields.clone();
+            let mut fields: Vec<(String, TypedExpr)> = Vec::new();
+            for (fname, fty) in &field_tys {
+                let f = checked_expr_placeholder(fty, span, env)?;
+                fields.push((fname.clone(), f.expr));
+            }
+            Some(CheckedExpr::new(
+                TypedExprKind::StructLit { type_name: name.clone(), fields },
+                ty.clone(), None, span,
+            ))
+        }
+        Type::Tuple(elements) => {
+            let mut typed_elements = Vec::new();
+            for e in elements {
+                typed_elements.push(checked_expr_placeholder(e, span, env)?.expr);
+            }
+            Some(CheckedExpr::new(TypedExprKind::Tuple { elements: typed_elements }, ty.clone(), None, span))
+        }
+        Type::Array { element, length } => {
+            let mut elements = Vec::new();
+            for _ in 0..*length {
+                elements.push(checked_expr_placeholder(element, span, env)?.expr);
+            }
+            Some(CheckedExpr::new(TypedExprKind::ArrayLit { elements }, ty.clone(), None, span))
+        }
+        _ => None,
+    }
+}
+
 pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
     check_impl(program, true, &std::collections::HashSet::new())
 }
@@ -523,6 +665,7 @@ fn check_impl(
     // analysis sees the right Type variant. T1.3.
     let enum_names_pre: std::collections::HashSet<String> =
         program.enums.iter().map(|e| e.name.clone()).collect();
+    GENERIC_ENUM_TEMPLATE_NAMES.with(|c| *c.borrow_mut() = enum_names_pre.clone());
     resolve_enum_types_in_program(&mut program, &enum_names_pre);
 
     // T4.15 alias half: build the alias registry, detect
@@ -568,6 +711,35 @@ fn check_impl(
         validate_no_nested_ref_in_return_type(function, &mut diagnostics);
     }
 
+    // BUG-91 fix (task #40, 2026-08-04): snapshot the generic
+    // struct/enum templates BEFORE `monomorphize_type_decls_in_
+    // program` drops them from `program.structs`/`program.enums`
+    // (its own last step). `monomorphize_generics_in_program`, which
+    // runs next, can discover a further concrete instantiation need
+    // (via `substitute_type_param`'s eager collapse -- see
+    // `NEWLY_COLLAPSED_GENERIC_APPLIES`) that's invisible to the
+    // decl-mono pass above because it's ONLY discoverable through
+    // fn-generics' own type inference at a call site (no textual
+    // concrete annotation anywhere else in the source). Without a
+    // surviving template to re-specialize from, that need could
+    // never be materialized into an actual decl -- see
+    // `materialize_late_discovered_type_decls`'s doc comment for the
+    // full repro/writeup.
+    let generic_struct_templates: HashMap<String, StructDecl> = program
+        .structs
+        .iter()
+        .filter(|s| !s.type_params.is_empty())
+        .cloned()
+        .map(|s| (s.name.clone(), s))
+        .collect();
+    let generic_enum_templates: HashMap<String, EnumDecl> = program
+        .enums
+        .iter()
+        .filter(|e| !e.type_params.is_empty())
+        .cloned()
+        .map(|e| (e.name.clone(), e))
+        .collect();
+
     // Closure #281: monomorphize generic struct/enum decls.
     // Must run BEFORE the fn-generic monomorphizer because
     // fn signatures can reference `Option<T>` / `Result<T,E>`
@@ -587,6 +759,75 @@ fn check_impl(
     // the original generic functions so downstream type-check
     // sees a fully-concrete program.
     monomorphize_generics_in_program(&mut program, &mut diagnostics);
+
+    // BUG-91 fix (task #40, 2026-08-04): materialize any concrete
+    // struct/enum decl that ONLY became discoverable through the
+    // fn-generics pass just above (see the doc comment on
+    // `materialize_late_discovered_type_decls`). A no-op in the
+    // overwhelmingly common case where nothing new was discovered.
+    materialize_late_discovered_type_decls(
+        &mut program,
+        &generic_struct_templates,
+        &generic_enum_templates,
+    );
+
+    // BUG-98 fix (task #41, 2026-08-04): a bare enum/struct
+    // constructor INSIDE a generic function's OWN body (e.g.
+    // `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+    // Option.Some(a); }`) is a bare, unqualified `Var("Option")`
+    // receiver, same as everywhere else -- resolving it normally
+    // happens via `monomorphize_type_decls_in_program`'s own
+    // `resolve_bare_enum_ctors_in_stmt`/`resolve_bare_struct_lits_
+    // in_stmt` pass (BUG-46/95), keyed off the function's OWN return
+    // type. But that pass runs BEFORE fn-generics specializes the
+    // body, so for a still-generic template the return type is
+    // `Type::Apply{Option,[Param(T)]}`, not yet a concrete
+    // `Type::Enum` -- the pass silently does nothing for it. The
+    // ONLY thing left to resolve it is `Env::resolve_enum_name`'s
+    // general "exactly one candidate" fallback at ordinary check
+    // time, which fails the moment 2+ instantiations of the same
+    // enum exist anywhere in the program (each specialized copy of
+    // `foo`'s body still carries the SAME bare "Option" name).
+    // Fixed by re-running that exact same BUG-46/95 resolution pass
+    // over every function body again, now that fn-generics has
+    // finished and each specialized stub's OWN return type is
+    // concrete -- mirroring the identical pass inside
+    // `monomorphize_type_decls_in_program`, just re-run against the
+    // POST-fn-generics program instead of the pre-fn-generics one.
+    // Idempotent/harmless for already-resolved (ordinary, non-
+    // generic) function bodies: their bare receivers, if any, were
+    // already rewritten to a concrete mangled name by the earlier
+    // pass, which no longer matches a generic template name, so the
+    // template-name gate below silently skips them on this second
+    // pass.
+    {
+        let struct_field_types: std::collections::HashMap<String, Vec<crate::ast::StructField>> =
+            program
+                .structs
+                .iter()
+                .map(|s| (s.name.clone(), s.fields.clone()))
+                .collect();
+        let struct_template_names: std::collections::HashSet<String> =
+            generic_struct_templates.keys().cloned().collect();
+        let enum_template_names: std::collections::HashSet<String> =
+            generic_enum_templates.keys().cloned().collect();
+        for f in program.functions.iter_mut() {
+            let fn_return_struct = match &f.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in f.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, fn_return_struct.as_deref(), &struct_template_names);
+            }
+            let fn_return_enum = match &f.return_type {
+                Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in f.body.iter_mut() {
+                resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_template_names, &struct_field_types);
+            }
+        }
+    }
 
     // T1.5 phase 2: hoist `implement Iface for Type { fn m â€¦ }`
     // method bodies into regular functions named
@@ -688,16 +929,29 @@ fn check_impl(
     // Must run before the validation loop below, because that
     // loop calls `field.ty.is_copy()` to decide whether the
     // field type is acceptable. T1.2 phase 2b + T2.7 phase 2.
+    //
+    // BUG-96 follow-up (task #39, 2026-08-03): structs and enums
+    // are registered together in ONE fixed-point loop, not two
+    // separate passes. A struct's Copy-ness can depend on an
+    // enum-typed field's payload (`Option<Box<Node>>`), and an
+    // enum's Copy-ness can equally depend on a struct-typed
+    // payload — running "all structs" then "all enums" as two
+    // one-shot passes meant an enum whose payload is a Box (or a
+    // struct containing one) was never seen by the struct pass in
+    // time: `enum_has_non_copy_payload` was still empty when
+    // structs were checked, so a struct like `Node { next:
+    // Option<Box<Node>> }` was silently treated as Copy — no
+    // scope-exit Drop was EVER emitted for it (not even for the
+    // Box's own malloc'd slot), a straightforward heap leak on
+    // every recursively-boxed struct. Same "sibling/parallel walk
+    // needs a shared fixed point" root-cause family as the
+    // generics-monomorphization worklist bugs (BUG-90/93/95).
     {
         let mut non_copy: Vec<String> = Vec::new();
-        // Fixed-point iteration so nested-struct fields
-        // propagate the non-Copy flag: a struct that
-        // contains an already-marked struct field becomes
-        // non-Copy itself. Without this, source order
-        // would determine whether `Outer { inner: Inner }`
-        // (with Inner non-Copy) is marked.
+        let mut non_copy_enums: Vec<String> = Vec::new();
         loop {
             crate::ast::set_non_copy_structs(non_copy.clone());
+            crate::ast::set_non_copy_enums(non_copy_enums.clone());
             let mut changed = false;
             for decl in &program.structs {
                 if non_copy.iter().any(|n| n == &decl.name) {
@@ -705,6 +959,26 @@ fn check_impl(
                 }
                 if decl.fields.iter().any(|f| !f.ty.is_copy()) {
                     non_copy.push(decl.name.clone());
+                    changed = true;
+                }
+            }
+            // A payload is non-Copy exactly when `Type::is_copy()`
+            // says so — NOT a hardcoded `OwnedStr | Vec` match.
+            // That hardcoded list (T1.3 vintage) predates `Box<T>`
+            // and every other affine type added since; using
+            // `is_copy()` directly keeps this in sync automatically
+            // as new affine types are added, the same way the
+            // struct-field check above already does.
+            for decl in &program.enums {
+                if non_copy_enums.iter().any(|n| n == &decl.name) {
+                    continue;
+                }
+                let has_non_copy_payload = decl
+                    .variants
+                    .iter()
+                    .any(|v| v.payload.first().map_or(false, |t| !t.is_copy()));
+                if has_non_copy_payload {
+                    non_copy_enums.push(decl.name.clone());
                     changed = true;
                 }
             }
@@ -731,26 +1005,47 @@ fn check_impl(
             }
         }
         crate::ast::set_non_copy_structs(non_copy);
+        crate::ast::set_non_copy_enums(non_copy_enums);
     }
-    // Parallel pass: register enums whose payload includes a
-    // heap-shaped type (OwnedStr in v1) so the scope-exit Drop
-    // pass treats them as affine. T1.3 + T1.2 phase 2b.
+    // BUG-97 (task #39, 2026-08-03): detect structs that directly
+    // own a `Box<Self>`, optionally through one layer of single-
+    // payload-per-variant enum wrapping (`Option<Box<Self>>`) — see
+    // `BOX_RECURSIVE_STRUCTS_REGISTRY`'s doc comment in ast.rs for
+    // why these need dedicated iterative-drop codegen instead of
+    // the ordinary inline field-walk.
     {
-        let mut non_copy_enums: Vec<String> = Vec::new();
-        for decl in &program.enums {
-            let has_heap = decl
-                .variants
-                .iter()
-                .any(|v| {
-                    v.payload
-                        .first()
-                        .map_or(false, |t| matches!(t, Type::OwnedStr | Type::Vec(_)))
-                });
-            if has_heap {
-                non_copy_enums.push(decl.name.clone());
+        fn field_is_direct_box_of(
+            field_ty: &Type,
+            target: &str,
+            enums: &[crate::ast::EnumDecl],
+        ) -> bool {
+            match field_ty {
+                Type::Box(inner) => matches!(&**inner, Type::Struct(n) if n == target),
+                Type::Enum(enum_name) => enums
+                    .iter()
+                    .find(|e| &e.name == enum_name)
+                    .map(|decl| {
+                        decl.variants.iter().any(|v| {
+                            v.payload.first().map_or(false, |p| {
+                                matches!(p, Type::Box(inner) if matches!(&**inner, Type::Struct(n) if n == target))
+                            })
+                        })
+                    })
+                    .unwrap_or(false),
+                _ => false,
             }
         }
-        crate::ast::set_non_copy_enums(non_copy_enums);
+        let box_recursive: Vec<String> = program
+            .structs
+            .iter()
+            .filter(|decl| {
+                decl.fields
+                    .iter()
+                    .any(|f| field_is_direct_box_of(&f.ty, &decl.name, &program.enums))
+            })
+            .map(|decl| decl.name.clone())
+            .collect();
+        crate::ast::set_box_recursive_structs(box_recursive);
     }
 
     let mut struct_registry: BTreeMap<String, StructInfo> = BTreeMap::new();
@@ -815,7 +1110,14 @@ fn check_impl(
                 // `struct Drawer { r: Box<dyn Renderer> }`. Box
                 // is a single pointer at the machine level; the
                 // outer struct's drop chains into the Box's free.
-                || matches!(&field.ty, Type::Box(_));
+                || matches!(&field.ty, Type::Box(_))
+                // BUG-97 (task #39, 2026-08-03): Enum-typed field
+                // storage — the canonical `next: Option<Box<Node>>`
+                // recursive-struct shape. The enum's own Drop
+                // (tag-switch + per-variant payload free) chains
+                // the same way the nested-struct case above does;
+                // see `emit_enum_value_drop` in each backend.
+                || matches!(&field.ty, Type::Enum(_));
             if !field_allowed {
                 diagnostics.push(Diagnostic::new(
                     field.span,
@@ -823,8 +1125,9 @@ fn check_impl(
                         "struct field '{}::{}' has non-Copy type {} â€” \
                          v1 supports Copy types, OwnedStr, Vec<T>, \
                          [T; N] of Copy elements, Task, Atomic<T>, \
-                         Mutex<T>, Channel<T, N>, and Box<T> as struct \
-                         fields; Guard<T> still needs explicit wiring",
+                         Mutex<T>, Channel<T, N>, Box<T>, and enum \
+                         types as struct fields; Guard<T> still needs \
+                         explicit wiring",
                         decl.name, field.name, field.ty
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &field.name)));
@@ -999,6 +1302,28 @@ fn check_impl(
                     payload_ty,
                     Type::Array { element, .. } if element.is_copy()
                 );
+                // BUG-74: a Tuple payload whose elements are each
+                // either genuinely Copy OR themselves an array-of-
+                // Copy-elements (e.g. `(i64, [i64; 3])`) is exactly
+                // as safe to store/bitwise-copy inline in the tagged
+                // union as any other Copy payload -- `Type::Array`'s
+                // `is_copy()` is unconditionally `false` (by design,
+                // for reasons unrelated to payload safety), so
+                // `Type::Tuple::is_copy()`'s element-wise recursion
+                // rejects any tuple containing an array even when
+                // every element is stack/inline data with no heap
+                // pointers. Mirrors the `array_of_copy` special case
+                // one level deeper, the same way the struct-field
+                // admission check's own `[T;N] of Copy` arm already
+                // does for a bare array field.
+                fn tuple_elem_admitted(ty: &Type) -> bool {
+                    ty.is_copy()
+                        || matches!(ty, Type::Array { element, .. } if element.is_copy())
+                }
+                let tuple_of_admitted = matches!(
+                    payload_ty,
+                    Type::Tuple(elements) if elements.iter().all(tuple_elem_admitted)
+                );
                 let allowed = payload_ty.is_copy()
                     || matches!(
                         payload_ty,
@@ -1010,7 +1335,8 @@ fn check_impl(
                             | Type::Mutex(_)
                             | Type::Channel(_, _)
                     )
-                    || array_of_copy;
+                    || array_of_copy
+                    || tuple_of_admitted;
                 if !allowed {
                     diagnostics.push(Diagnostic::new(
                         decl.variants[i].name_span,
@@ -7033,6 +7359,57 @@ fn collect_generic_calls_in_expr(
         ExprKind::Unary { expr: inner, .. } => {
             collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
         }
+        // Gap-audit fix (2026-08-03): `try EXPR`/`EXPR?` wraps its
+        // inner call in `ExprKind::Try { inner }` -- this scanner had
+        // no arm for it, so a generic function called ONLY through
+        // `try`/`?` (e.g. `let v: i64 = try wrap(n);` where `wrap<T>`
+        // is generic) was never discovered as a real call site,
+        // failing monomorphization outright ("generic function 'wrap'
+        // is declared but never called with concrete types") even
+        // though the call is genuinely there. Same root-cause SHAPE
+        // as the (deferred) BUG-87 async finding -- a special syntax
+        // wrapper node this walker doesn't know about -- but a much
+        // narrower, lower-risk fix here: `Try` is a simple pass-
+        // through wrapper (unlike `await`'s Future<T> desugar), so
+        // recursing into `inner` the same way `Unary` does is
+        // sufficient and carries none of async's architectural risk.
+        ExprKind::Try { inner } => {
+            collect_generic_calls_in_expr(inner, generics, needed, scope, diagnostics);
+        }
+        // Gap-audit fix (2026-08-03), part 2: `desugar_try_let_in_program`
+        // runs BEFORE this monomorphization pass, so by the time this
+        // scanner walks the program every `try EXPR` has ALREADY been
+        // rewritten into `Match { scrutinee: EXPR, arms: [Some(..)
+        // then Block{...}, None then ...] }` -- the `ExprKind::Try` arm
+        // above is dead code for that path (it only matters for `try`
+        // occurrences the desugar doesn't reach). This scanner had NO
+        // arm at all for `Match` or `Block`, so a generic call sitting
+        // in a match scrutinee or inside a desugared Some-arm's Block
+        // was invisible to monomorphization -- the real cause of
+        // `wrap(n)` never getting specialized, surfacing downstream as
+        // nonsensical "scrutinee is of integer type" diagnostics once
+        // the template was silently dropped for having no call sites.
+        ExprKind::Match { scrutinee, arms } => {
+            collect_generic_calls_in_expr(scrutinee, generics, needed, scope, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_generic_calls_in_expr(guard, generics, needed, scope, diagnostics);
+                }
+                collect_generic_calls_in_expr(&arm.body, generics, needed, scope, diagnostics);
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            let mut inner_scope = scope.clone();
+            for s in stmts {
+                collect_generic_calls_in_stmt(s, generics, needed, &mut inner_scope, diagnostics);
+            }
+            collect_generic_calls_in_expr(tail, generics, needed, &inner_scope, diagnostics);
+        }
+        ExprKind::IfExpr { cond, then_value, else_value } => {
+            collect_generic_calls_in_expr(cond, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(then_value, generics, needed, scope, diagnostics);
+            collect_generic_calls_in_expr(else_value, generics, needed, scope, diagnostics);
+        }
         _ => {}
     }
 }
@@ -7205,14 +7582,37 @@ fn infer_concrete_type_for_call(
                 ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                 None
             }),
-            // Peel expr-level Ref/RefMut so `show(ref d)` where d: Dog
-            // resolves the T-bearing slot to Dog, then structural
-            // unification of `ref T` vs Dog gives T = Dog.
-            // Previously gated to is_v31_poll only; now enabled for all
-            // generic calls so `<T: Iface>` bounds work with ref params.
+            // Re-wrap the referent's scope type in Ref/RefMut so it
+            // accurately reflects the argument's real type (a
+            // reference), then let `unify_param_to_arg`'s own
+            // `(Ref(p), Ref(a))`/`(RefMut(p), RefMut(a))` arm peel it
+            // in lockstep with the param's declared shape. BUG-71
+            // fix: this used to return the referent's BARE type
+            // (`Dog`, not `ref Dog`) — which happened to produce the
+            // right answer by accident for a param shaped bare `ref
+            // T` (unify fails to match Ref-vs-non-Ref, falls back to
+            // "T = whole arg type" which is coincidentally already
+            // correct when there's nothing between Ref and Param),
+            // but silently inferred the WRONG type — the whole
+            // referent type instead of its element type — for any
+            // param shaped `ref Vec<T>` / `ref Box<T>` / etc., since
+            // unify_param_to_arg never got a chance to peel the inner
+            // wrapper: `show(ref d)` where d: Dog resolves the
+            // T-bearing slot to Dog, then structural unification of
+            // `ref T` vs `ref Dog` gives T = Dog; `first(ref xs)`
+            // where `xs: Vec<Pt>` and the param is `ref Vec<T>` now
+            // resolves to `ref Vec<Pt>` and correctly unifies down to
+            // T = Pt instead of T = Vec<Pt>.
             ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+                let is_mut = matches!(&arg.kind, ExprKind::RefMut { .. });
                 if let ExprKind::Var(name) = &inner.kind {
-                    scope.get(name).cloned().or_else(|| {
+                    scope.get(name).cloned().map(|ty| {
+                        if is_mut {
+                            Type::RefMut(Box::new(ty))
+                        } else {
+                            Type::Ref(Box::new(ty))
+                        }
+                    }).or_else(|| {
                         diagnostics.push(Diagnostic::new(
                             span,
                             format!(
@@ -7352,6 +7752,43 @@ fn rewrite_generic_calls_in_expr(
             ExprKind::Unary { expr: inner, .. } => {
                 rewrite_generic_calls_in_expr(inner, generics, scope);
             }
+            ExprKind::Try { inner } => {
+                rewrite_generic_calls_in_expr(inner, generics, scope);
+            }
+            // Gap-audit fix (2026-08-03), part 3: same missing-arm
+            // shape as `collect_generic_calls_in_expr` above -- this
+            // is the SIBLING pass that actually mangles a generic
+            // call site's name (`wrap` -> `wrap__i64`) once
+            // monomorphization knows the concrete type. Since
+            // `desugar_try_let_in_program` runs before either pass,
+            // a `try wrap(n)` call always sits inside a `Match`
+            // scrutinee (or a desugared Some-arm's `Block`) by the
+            // time this rewriter walks the tree. Without these arms
+            // the call site was never renamed, so the (now-removed)
+            // generic template's bare name lingered in the AST --
+            // "unknown function 'wrap'" once monomorphization
+            // dropped the template.
+            ExprKind::Match { scrutinee, arms } => {
+                rewrite_generic_calls_in_expr(scrutinee, generics, scope);
+                for arm in arms.iter_mut() {
+                    if let Some(guard) = &mut arm.guard {
+                        rewrite_generic_calls_in_expr(guard, generics, scope);
+                    }
+                    rewrite_generic_calls_in_expr(&mut arm.body, generics, scope);
+                }
+            }
+            ExprKind::Block { stmts, tail } => {
+                let mut inner_scope = scope.clone();
+                for s in stmts.iter_mut() {
+                    rewrite_generic_calls_in_stmt(s, generics, &mut inner_scope);
+                }
+                rewrite_generic_calls_in_expr(tail, generics, &inner_scope);
+            }
+            ExprKind::IfExpr { cond, then_value, else_value } => {
+                rewrite_generic_calls_in_expr(cond, generics, scope);
+                rewrite_generic_calls_in_expr(then_value, generics, scope);
+                rewrite_generic_calls_in_expr(else_value, generics, scope);
+            }
             _ => {}
         }
     }
@@ -7370,6 +7807,10 @@ fn monomorphize_type_decls_in_program(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Defensive: this queue should always be empty on entry (nothing
+    // upstream of this pass calls substitute_type_param yet), but
+    // clear it explicitly rather than assume.
+    NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| q.borrow_mut().clear());
     // Collect generic struct/enum templates and drop them
     // from the program (specializations replace them).
     let struct_templates: HashMap<String, StructDecl> = program
@@ -7416,7 +7857,7 @@ fn monomorphize_type_decls_in_program(
                 Type::Param(_) => true,
                 Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
                 | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
-                | Type::Channel(t, _) => has_param(t),
+                | Type::Box(t) | Type::Channel(t, _) => has_param(t),
                 Type::Array { element, .. } => has_param(element),
                 Type::Tuple(elements) => elements.iter().any(has_param),
                 Type::FnPtr(params, ret) => params.iter().any(has_param) || has_param(ret),
@@ -7457,8 +7898,24 @@ fn monomorphize_type_decls_in_program(
                     needed_structs, needed_enums,
                 );
             }
+            // Gap-audit fix (2026-08-03): `Type::Box` was missing
+            // from this arm (and its two sibling copies of this same
+            // walker, at `rewrite_apply_in_ty` and the local `rec`
+            // inside `collect_apply_in_stmt`) -- a `Type::Apply`
+            // nested inside a `Box<...>` (e.g. `Option<Box<Node<T>>
+            // >`'s inner `Node<T>`, the canonical recursive-generic-
+            // struct shape) was never discovered as needing
+            // monomorphization, so it never got rewritten from the
+            // unresolved `Type::Apply{Node,[i64]}` into the concrete
+            // `Type::Struct("Node__i64")`. The VALUE side (`box(x)`'s
+            // own type-checking) already produced the correctly
+            // mangled type independently, so the two sides disagreed
+            // -- surfacing as "enum payload must be assignable to
+            // Box<Node<i64>>, got Box<Node__i64>" (same underlying
+            // type, one resolved, one not).
             Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner)
-            | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
+            | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::Box(inner) => {
                 collect_apply_in_ty(
                     inner, struct_templates, enum_templates,
                     needed_structs, needed_enums,
@@ -7816,7 +8273,8 @@ fn monomorphize_type_decls_in_program(
                 }
             }
             Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
-            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i) => {
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => {
                 normalize_one(i, st, en, all_enum_names);
             }
             Type::Array { element, .. } => normalize_one(element, st, en, all_enum_names),
@@ -7850,75 +8308,175 @@ fn monomorphize_type_decls_in_program(
     // Templates' variant payloads / field types reference
     // Type::Param(name); substitute each occurrence with
     // the matching concrete arg.
+    //
+    // Gap-audit fix (2026-08-03): a freshly-monomorphized struct's
+    // OWN fields can reference a FURTHER generic instantiation that
+    // wasn't otherwise discoverable from any call site (e.g. a
+    // self-referential generic `struct Node<T> { value: T, next:
+    // Option<Box<Node<T>>> }` monomorphized to `Node__i64` needs
+    // `Option<Box<Node__i64>>` registered too, but nothing else in
+    // the program ever writes that type out literally). This used to
+    // be discovered via `collect_apply_in_ty(..., &mut needed_structs
+    // .clone(), &mut needed_enums.clone())` -- cloning BOTH output
+    // lists so the discovery had nowhere to go, silently discarded
+    // ("ignored copy", per the old comment). Fixed by turning this
+    // into a proper fixed-point worklist, mirroring the established
+    // "XL4 multi-pass" pattern `monomorphize_generics_in_program`
+    // already uses for the analogous fn-generics case: each round
+    // processes only the NEWLY-pending (name, args) pairs, collects
+    // any further needs a freshly-generated decl's own fields/
+    // payloads introduce, and loops until a round adds nothing new.
+    // `processed_*` guards against reprocessing (and against a
+    // pathological infinite loop, though ordinary monomorphization
+    // can't actually cycle -- each round's new needs are always
+    // MORE concrete than the last).
     let mut new_structs: Vec<StructDecl> = Vec::new();
-    for (name, args) in &needed_structs {
-        let template = &struct_templates[name];
-        if template.type_params.len() != args.len() {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic struct '{}' expects {} type arguments, got {}",
-                    name, template.type_params.len(), args.len()
-                ),
-            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
-            continue;
-        }
-        let mangled = mangle_generic_decl(name, args);
-        let mut mono = template.clone();
-        mono.name = mangled;
-        mono.type_params = Vec::new();
-        for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
-            for fld in mono.fields.iter_mut() {
-                substitute_type_param(&mut fld.ty, tp, concrete);
-            }
-        }
-        // Replace any Type::Apply we just substituted into
-        // the fields (e.g. `Pair<i64, T>` inside a generic
-        // struct's field becomes `Pair<i64, concrete>`
-        // after substitution â€” collect it for the worklist).
-        for fld in &mono.fields {
-            collect_apply_in_ty(
-                &fld.ty, &struct_templates, &enum_templates,
-                &mut needed_structs.clone(), // ignored copy
-                &mut needed_enums.clone(),   // ignored copy
-            );
-        }
-        new_structs.push(mono);
-    }
     let mut new_enums: Vec<EnumDecl> = Vec::new();
-    for (name, args) in &needed_enums {
-        let template = &enum_templates[name];
-        if template.type_params.len() != args.len() {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic enum '{}' expects {} type arguments, got {}",
-                    name, template.type_params.len(), args.len()
-                ),
-            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
-            continue;
-        }
-        let mangled = mangle_generic_decl(name, args);
-        let mut mono = template.clone();
-        mono.name = mangled;
-        mono.type_params = Vec::new();
-        for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
-            for variant in mono.variants.iter_mut() {
-                for p_ty in variant.payload.iter_mut() {
-                    substitute_type_param(p_ty, tp, concrete);
+    // `Type` isn't `Hash`, so track "already processed" with a plain
+    // Vec + linear scan (these lists stay small in practice -- the
+    // number of distinct generic instantiations in a program).
+    let mut processed_structs: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut processed_enums: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut pending_structs = needed_structs.clone();
+    let mut pending_enums = needed_enums.clone();
+    while !pending_structs.is_empty() || !pending_enums.is_empty() {
+        let mut discovered_structs: Vec<(String, Vec<Type>)> = Vec::new();
+        let mut discovered_enums: Vec<(String, Vec<Type>)> = Vec::new();
+        for (name, mut args) in pending_structs.drain(..) {
+            normalize_apply_args(&mut args, &struct_templates, &enum_templates, &all_enum_names);
+            let key = (name.clone(), args.clone());
+            if processed_structs.contains(&key) {
+                continue;
+            }
+            processed_structs.push(key);
+            let Some(template) = struct_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                diagnostics.push(Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic struct '{}' expects {} type arguments, got {}",
+                        name, template.type_params.len(), args.len()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
+                continue;
+            }
+            let mangled = mangle_generic_decl(&name, &args);
+            let mut mono = template.clone();
+            mono.name = mangled;
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for fld in mono.fields.iter_mut() {
+                    substitute_type_param(&mut fld.ty, tp, concrete);
                 }
             }
-        }
-        // Closure #284: after substitution, any Type::Struct
-        // names that are actually declared enums need to be
-        // rewritten to Type::Enum so the payload type-equality
-        // check at variant constructors lines up.
-        for variant in mono.variants.iter_mut() {
-            for p_ty in variant.payload.iter_mut() {
-                normalize_one(p_ty, &struct_templates, &enum_templates, &all_enum_names);
+            // Replace any Type::Apply we just substituted into
+            // the fields (e.g. `Pair<i64, T>` inside a generic
+            // struct's field becomes `Pair<i64, concrete>`
+            // after substitution) -- feed genuinely new needs
+            // into the NEXT round instead of discarding them.
+            for fld in &mono.fields {
+                collect_apply_in_ty(
+                    &fld.ty, &struct_templates, &enum_templates,
+                    &mut discovered_structs, &mut discovered_enums,
+                );
             }
+            // Gap-audit follow-up fix (2026-08-03): the substitution
+            // above may have ALREADY collapsed a field's `Type::Apply`
+            // straight to `Type::Enum`/`Type::Struct` in place (e.g.
+            // a self-referential `next: Option<Box<Node<T>>>` field
+            // once T is concrete) -- `collect_apply_in_ty` just above
+            // can't see those anymore since there's no `Apply` node
+            // left. Drain whatever `substitute_type_param` recorded
+            // on its way to collapsing and feed it into this round's
+            // discovery too, so the corresponding decl actually gets
+            // generated instead of only ever being referenced.
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            new_structs.push(mono);
         }
-        new_enums.push(mono);
+        for (name, mut args) in pending_enums.drain(..) {
+            normalize_apply_args(&mut args, &struct_templates, &enum_templates, &all_enum_names);
+            let key = (name.clone(), args.clone());
+            if processed_enums.contains(&key) {
+                continue;
+            }
+            processed_enums.push(key);
+            let Some(template) = enum_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                diagnostics.push(Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic enum '{}' expects {} type arguments, got {}",
+                        name, template.type_params.len(), args.len()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
+                continue;
+            }
+            let mangled = mangle_generic_decl(&name, &args);
+            let mut mono = template.clone();
+            mono.name = mangled;
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for variant in mono.variants.iter_mut() {
+                    for p_ty in variant.payload.iter_mut() {
+                        substitute_type_param(p_ty, tp, concrete);
+                    }
+                }
+            }
+            // Closure #284: after substitution, any Type::Struct
+            // names that are actually declared enums need to be
+            // rewritten to Type::Enum so the payload type-equality
+            // check at variant constructors lines up.
+            for variant in mono.variants.iter_mut() {
+                for p_ty in variant.payload.iter_mut() {
+                    normalize_one(p_ty, &struct_templates, &enum_templates, &all_enum_names);
+                }
+            }
+            // Same worklist-feeding as the struct arm above -- an
+            // enum variant payload can equally introduce a further
+            // generic instantiation need.
+            for variant in &mono.variants {
+                for p_ty in &variant.payload {
+                    collect_apply_in_ty(
+                        p_ty, &struct_templates, &enum_templates,
+                        &mut discovered_structs, &mut discovered_enums,
+                    );
+                }
+            }
+            // Gap-audit follow-up fix (2026-08-03): same as the
+            // struct arm above -- drain anything the substitution
+            // collapsed away in place before `collect_apply_in_ty`
+            // ever got a chance to see it.
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            new_enums.push(mono);
+        }
+        pending_structs = discovered_structs
+            .into_iter()
+            .filter(|k| !processed_structs.contains(k))
+            .collect();
+        pending_enums = discovered_enums
+            .into_iter()
+            .filter(|k| !processed_enums.contains(k))
+            .collect();
     }
     // Drop the generic templates from the program; append
     // the new monomorphic copies.
@@ -7930,6 +8488,20 @@ fn monomorphize_type_decls_in_program(
     // the matching mangled Struct/Enum name.
     let struct_names: std::collections::HashSet<String> = struct_templates.keys().cloned().collect();
     let enum_names: std::collections::HashSet<String> = enum_templates.keys().cloned().collect();
+    // Gap-audit follow-up fix (2026-08-03, category 9 finding (a)):
+    // per-struct field-type lookup, built from the now-fully-
+    // monomorphized `program.structs` (the `.extend(new_structs)`
+    // above already ran). Feeds `resolve_bare_enum_ctor_in_struct_lit`
+    // below, which extends BUG-46's fix to a bare enum constructor
+    // nested INSIDE a struct-literal field (`Node { value: 2, next:
+    // Option.Some(box(tail)) }`) -- the original BUG-46 fix only
+    // covered a `Let`'s own top-level initializer or a `Return`.
+    let struct_field_types: std::collections::HashMap<String, Vec<crate::ast::StructField>> =
+        program
+            .structs
+            .iter()
+            .map(|s| (s.name.clone(), s.fields.clone()))
+            .collect();
     for f in program.functions.iter_mut() {
         for p in f.params.iter_mut() {
             rewrite_apply_in_ty(&mut p.ty, &struct_names, &enum_names);
@@ -7955,12 +8527,36 @@ fn monomorphize_type_decls_in_program(
         // its initializer. Resolve the ambiguity right here, while
         // we still have that context, by rewriting the bare
         // template name straight to the mangled one.
+        // BUG-46-class fix for generic STRUCTS (found later, same
+        // root cause): same rewrite, keyed off Type::Struct instead
+        // of Type::Enum.
+        //
+        // Gap-audit follow-up fix (2026-08-03): this MUST run before
+        // the enum-ctor resolution below, not after. A `StructLit`'s
+        // own `type_name` is still the bare generic template name
+        // ("Node") until this pass rewrites it to the monomorphized
+        // one ("Node__i64") -- `resolve_bare_enum_ctor_in_struct_lit`
+        // looks up `struct_field_types` BY the (already-mangled) type
+        // name, so running it first against an unresolved "Node"
+        // silently finds nothing and resolves nothing. Originally
+        // this ran in the opposite order (enum-ctors first, struct-
+        // lits second), which happened to be fine for the two
+        // existing BUG-46 cases (neither depends on StructLit's
+        // type_name) but broke the new struct-literal-field case
+        // outright.
+        let fn_return_struct = match &f.return_type {
+            Type::Struct(n) => Some(n.clone()),
+            _ => None,
+        };
+        for stmt in f.body.iter_mut() {
+            resolve_bare_struct_lits_in_stmt(stmt, fn_return_struct.as_deref(), &struct_names);
+        }
         let fn_return_enum = match &f.return_type {
             Type::Enum(n) => Some(n.clone()),
             _ => None,
         };
         for stmt in f.body.iter_mut() {
-            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names);
+            resolve_bare_enum_ctors_in_stmt(stmt, fn_return_enum.as_deref(), &enum_names, &struct_field_types);
         }
     }
     for s in program.structs.iter_mut() {
@@ -7987,12 +8583,23 @@ fn monomorphize_type_decls_in_program(
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
             // BUG-46 fix -- same as the plain-function loop above.
+            // Gap-audit follow-up fix (2026-08-03): struct-lit
+            // resolution must run BEFORE enum-ctor resolution here
+            // too -- see the matching comment on the plain-function
+            // loop above for why.
+            let method_return_struct = match &method.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
+            }
             let method_return_enum = match &method.return_type {
                 Type::Enum(n) => Some(n.clone()),
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
             }
         }
     }
@@ -8008,6 +8615,30 @@ fn monomorphize_type_decls_in_program(
     let mono_enum_names: std::collections::HashSet<String> =
         program.enums.iter().map(|e| e.name.clone()).collect();
     expand_blanket_impls(program, &mono_struct_names, &mono_enum_names, &struct_names, &enum_names);
+    // Gap-audit fix (2026-08-03): `expand_blanket_impls` APPENDS a
+    // concrete impl per monomorphization but never removes the
+    // ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+    // Type::Apply { name, [Type::Param(_)] }`) from `program.impls` --
+    // unlike the exactly analogous, already-established pattern for
+    // generic functions/structs/enums just above/below in this same
+    // function (`program.functions.retain(|f| f.type_params.
+    // is_empty())`, `program.structs.retain(...)`, `program.enums.
+    // retain(...)`), which all correctly drop the generic template
+    // after monomorphization. Whatever later builds a `dyn Iface`
+    // vtable/trampoline set iterates every impl of that interface in
+    // `program.impls` and doesn't filter out the still-present
+    // blanket template -- so `Vec<dyn Printable>` holding TWO
+    // monomorphizations of a blanket-impl'd generic struct
+    // (`Wrapper<Dog>`, `Wrapper<Cat>`) generated a BOGUS THIRD
+    // trampoline for the literal unresolved template
+    // `Wrapper<Param(T)>`, which then crashed both backends at
+    // codegen ("loading unsized types is not allowed" on LLVM;
+    // "implicit declaration of function
+    // 'fn_Wrapper__Param__T___print_it'" on C, referencing a struct
+    // type that was never declared, `Struct_Wrapper__Param__T__`).
+    // Fixed by retaining the same way, mirroring the established
+    // convention exactly.
+    program.impls.retain(|imp| imp.type_params.is_empty());
     // Rewrite Type::Apply in `methods on T` blocks.
     for mb in program.methods_blocks.iter_mut() {
         rewrite_apply_in_ty(&mut mb.for_type, &struct_names, &enum_names);
@@ -8020,15 +8651,302 @@ fn monomorphize_type_decls_in_program(
                 rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
             // BUG-46 fix -- same as the plain-function loop above.
+            // Gap-audit follow-up fix (2026-08-03): struct-lit
+            // resolution must run BEFORE enum-ctor resolution here
+            // too -- see the matching comment on the plain-function
+            // loop above for why.
+            let method_return_struct = match &method.return_type {
+                Type::Struct(n) => Some(n.clone()),
+                _ => None,
+            };
+            for stmt in method.body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(stmt, method_return_struct.as_deref(), &struct_names);
+            }
             let method_return_enum = match &method.return_type {
                 Type::Enum(n) => Some(n.clone()),
                 _ => None,
             };
             for stmt in method.body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names);
+                resolve_bare_enum_ctors_in_stmt(stmt, method_return_enum.as_deref(), &enum_names, &struct_field_types);
             }
         }
     }
+}
+
+/// BUG-91 fix (task #40, 2026-08-04). `monomorphize_generics_in_
+/// program` runs AFTER `monomorphize_type_decls_in_program` has
+/// already finished and dropped the original generic struct/enum
+/// templates from `program.structs`/`program.enums`. It substitutes
+/// each specialized fn's own params/return type via `substitute_
+/// type_param` -- and THAT function's eager `Type::Apply` ->
+/// `Type::Enum`/`Type::Struct` collapse (see `NEWLY_COLLAPSED_
+/// GENERIC_APPLIES`'s doc comment) can be the ONLY place a concrete
+/// instantiation is discoverable in the whole program: `match
+/// foo(7) { Option.Some(x) then x, ... }` with no intermediate
+/// annotated `let` never writes `Option<i64>` out literally anywhere
+/// else for the earlier decl-mono pass to see. Without this, the
+/// specialized `foo__i64`'s return type correctly reads
+/// `Type::Enum("Option__i64")`, but no matching `EnumDecl` was ever
+/// materialized -- "enum 'Option__i64' is not declared" the instant
+/// the match tries to resolve it.
+///
+/// Drains whatever `NEWLY_COLLAPSED_GENERIC_APPLIES` collected
+/// during fn-mono and, using template snapshots the caller took
+/// BEFORE `monomorphize_type_decls_in_program` dropped them, runs
+/// one more small fixed-point round (mirroring that same function's
+/// own worklist loop, but self-contained here rather than factored
+/// out of it -- lower risk than restructuring an 800+ line, heavily
+/// load-bearing function this late in a long session) to materialize
+/// any still-missing decls. No-ops cleanly when nothing new was
+/// discovered -- the overwhelmingly common case, since most generic-
+/// enum instantiations ARE discoverable by the earlier pass (a
+/// concrete return-type/let annotation, a struct field, etc.).
+fn materialize_late_discovered_type_decls(
+    program: &mut Program,
+    struct_templates: &HashMap<String, StructDecl>,
+    enum_templates: &HashMap<String, EnumDecl>,
+) {
+    let (mut pending_structs, mut pending_enums): (
+        Vec<(String, Vec<Type>)>,
+        Vec<(String, Vec<Type>)>,
+    ) = (Vec::new(), Vec::new());
+    NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+        for (n, a, is_enum) in q.borrow_mut().drain(..) {
+            if is_enum {
+                pending_enums.push((n, a));
+            } else {
+                pending_structs.push((n, a));
+            }
+        }
+    });
+    if pending_structs.is_empty() && pending_enums.is_empty() {
+        return;
+    }
+    let mut existing_structs: std::collections::HashSet<String> =
+        program.structs.iter().map(|s| s.name.clone()).collect();
+    let mut existing_enums: std::collections::HashSet<String> =
+        program.enums.iter().map(|e| e.name.clone()).collect();
+    let all_enum_names: std::collections::HashSet<String> = existing_enums
+        .iter()
+        .cloned()
+        .chain(enum_templates.keys().cloned())
+        .collect();
+
+    fn normalize_one_late(
+        ty: &mut Type,
+        st: &HashMap<String, StructDecl>,
+        en: &HashMap<String, EnumDecl>,
+        all_enum_names: &std::collections::HashSet<String>,
+    ) {
+        match ty {
+            Type::Apply { name, args } => {
+                for a in args.iter_mut() {
+                    normalize_one_late(a, st, en, all_enum_names);
+                }
+                let mangled = mangle_generic_decl(name, args);
+                *ty = if st.contains_key(name) {
+                    Type::Struct(mangled)
+                } else if en.contains_key(name) {
+                    Type::Enum(mangled)
+                } else {
+                    return;
+                };
+            }
+            Type::Struct(name) => {
+                if all_enum_names.contains(name) {
+                    let n = name.clone();
+                    *ty = Type::Enum(n);
+                }
+            }
+            Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => normalize_one_late(i, st, en, all_enum_names),
+            Type::Array { element, .. } => normalize_one_late(element, st, en, all_enum_names),
+            Type::Channel(element, _) => normalize_one_late(element, st, en, all_enum_names),
+            Type::Tuple(elements) => {
+                for e in elements.iter_mut() {
+                    normalize_one_late(e, st, en, all_enum_names);
+                }
+            }
+            Type::FnPtr(params, ret) => {
+                for p in params.iter_mut() {
+                    normalize_one_late(p, st, en, all_enum_names);
+                }
+                normalize_one_late(ret, st, en, all_enum_names);
+            }
+            _ => {}
+        }
+    }
+    fn collect_apply_late(
+        ty: &Type,
+        struct_templates: &HashMap<String, StructDecl>,
+        enum_templates: &HashMap<String, EnumDecl>,
+        needed_structs: &mut Vec<(String, Vec<Type>)>,
+        needed_enums: &mut Vec<(String, Vec<Type>)>,
+    ) {
+        match ty {
+            Type::Apply { name, args } => {
+                for a in args {
+                    collect_apply_late(a, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+                if struct_templates.contains_key(name) {
+                    if !needed_structs.iter().any(|(n, a)| n == name && a == args) {
+                        needed_structs.push((name.clone(), args.clone()));
+                    }
+                } else if enum_templates.contains_key(name) {
+                    if !needed_enums.iter().any(|(n, a)| n == name && a == args) {
+                        needed_enums.push((name.clone(), args.clone()));
+                    }
+                }
+            }
+            Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
+            | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+            | Type::Box(i) => collect_apply_late(
+                i, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Array { element, .. } => collect_apply_late(
+                element, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Channel(element, _) => collect_apply_late(
+                element, struct_templates, enum_templates, needed_structs, needed_enums,
+            ),
+            Type::Tuple(elements) => {
+                for e in elements {
+                    collect_apply_late(e, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+            }
+            Type::FnPtr(params, ret) => {
+                for p in params {
+                    collect_apply_late(p, struct_templates, enum_templates, needed_structs, needed_enums);
+                }
+                collect_apply_late(ret, struct_templates, enum_templates, needed_structs, needed_enums);
+            }
+            _ => {}
+        }
+    }
+
+    for (_n, args) in pending_structs.iter_mut() {
+        for a in args.iter_mut() {
+            normalize_one_late(a, struct_templates, enum_templates, &all_enum_names);
+        }
+    }
+    for (_n, args) in pending_enums.iter_mut() {
+        for a in args.iter_mut() {
+            normalize_one_late(a, struct_templates, enum_templates, &all_enum_names);
+        }
+    }
+
+    let mut new_structs: Vec<StructDecl> = Vec::new();
+    let mut new_enums: Vec<EnumDecl> = Vec::new();
+    let mut processed_structs: Vec<(String, Vec<Type>)> = Vec::new();
+    let mut processed_enums: Vec<(String, Vec<Type>)> = Vec::new();
+    while !pending_structs.is_empty() || !pending_enums.is_empty() {
+        let mut discovered_structs: Vec<(String, Vec<Type>)> = Vec::new();
+        let mut discovered_enums: Vec<(String, Vec<Type>)> = Vec::new();
+        for (name, args) in pending_structs.drain(..) {
+            let key = (name.clone(), args.clone());
+            if processed_structs.contains(&key) {
+                continue;
+            }
+            processed_structs.push(key);
+            let mangled = mangle_generic_decl(&name, &args);
+            if existing_structs.contains(&mangled) {
+                continue;
+            }
+            let Some(template) = struct_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                continue;
+            }
+            let mut mono = template.clone();
+            mono.name = mangled.clone();
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for fld in mono.fields.iter_mut() {
+                    substitute_type_param(&mut fld.ty, tp, concrete);
+                }
+            }
+            for fld in &mono.fields {
+                collect_apply_late(
+                    &fld.ty, struct_templates, enum_templates,
+                    &mut discovered_structs, &mut discovered_enums,
+                );
+            }
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            existing_structs.insert(mangled);
+            new_structs.push(mono);
+        }
+        for (name, args) in pending_enums.drain(..) {
+            let key = (name.clone(), args.clone());
+            if processed_enums.contains(&key) {
+                continue;
+            }
+            processed_enums.push(key);
+            let mangled = mangle_generic_decl(&name, &args);
+            if existing_enums.contains(&mangled) {
+                continue;
+            }
+            let Some(template) = enum_templates.get(&name) else { continue };
+            if template.type_params.len() != args.len() {
+                continue;
+            }
+            let mut mono = template.clone();
+            mono.name = mangled.clone();
+            mono.type_params = Vec::new();
+            for (tp, concrete) in template.type_params.iter().zip(args.iter()) {
+                for variant in mono.variants.iter_mut() {
+                    for p_ty in variant.payload.iter_mut() {
+                        substitute_type_param(p_ty, tp, concrete);
+                    }
+                }
+            }
+            for variant in mono.variants.iter_mut() {
+                for p_ty in variant.payload.iter_mut() {
+                    normalize_one_late(p_ty, struct_templates, enum_templates, &all_enum_names);
+                }
+            }
+            for variant in &mono.variants {
+                for p_ty in &variant.payload {
+                    collect_apply_late(
+                        p_ty, struct_templates, enum_templates,
+                        &mut discovered_structs, &mut discovered_enums,
+                    );
+                }
+            }
+            NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                for (n, a, is_enum) in q.borrow_mut().drain(..) {
+                    if is_enum {
+                        if !discovered_enums.iter().any(|(dn, da)| dn == &n && da == &a) {
+                            discovered_enums.push((n, a));
+                        }
+                    } else if !discovered_structs.iter().any(|(dn, da)| dn == &n && da == &a) {
+                        discovered_structs.push((n, a));
+                    }
+                }
+            });
+            existing_enums.insert(mangled);
+            new_enums.push(mono);
+        }
+        pending_structs = discovered_structs
+            .into_iter()
+            .filter(|k| !processed_structs.contains(k))
+            .collect();
+        pending_enums = discovered_enums
+            .into_iter()
+            .filter(|k| !processed_enums.contains(k))
+            .collect();
+    }
+    program.structs.extend(new_structs);
+    program.enums.extend(new_enums);
 }
 
 /// BUG-46 fix. Rewrites a bare `EnumName.Variant(payload)`
@@ -8068,12 +8986,56 @@ fn resolve_bare_enum_ctor_receiver(
     }
 }
 
+/// Gap-audit follow-up (2026-08-03, category 9 finding (a)): BUG-46's
+/// fix (`resolve_bare_enum_ctor_receiver`/
+/// `resolve_bare_enum_ctors_in_stmt`) only rewrote a bare enum-
+/// constructor receiver when the constructor call was the DIRECT
+/// initializer of a `let`/`return` -- it never looked inside a
+/// struct-literal's OWN fields. Once 2+ instantiations of the same
+/// generic enum exist in the program, a bare `Option.Some(x)`
+/// written directly as a struct-literal field value (`Node { value:
+/// 2, next: Option.Some(box(tail)) }`) stayed ambiguous and
+/// unresolved -- "unknown variable 'Option'" -- even though the
+/// struct's own (already-monomorphized) field type tells us exactly
+/// which concrete enum instantiation is needed. Looks up the
+/// enclosing struct literal's declared field types (built from the
+/// now-fully-monomorphized `program.structs`) and resolves any
+/// enum-typed field's bare constructor value the same way BUG-46
+/// already does for `let`/`return`. Recurses into each field's own
+/// value too, in case it's itself a nested struct literal.
+fn resolve_bare_enum_ctor_in_struct_lit(
+    expr: &mut Expr,
+    struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
+    enum_template_names: &std::collections::HashSet<String>,
+) {
+    if let ExprKind::StructLit { type_name, fields, .. } = &mut expr.kind {
+        if let Some(field_types) = struct_field_types.get(type_name.as_str()) {
+            for (field_name, field_expr) in fields.iter_mut() {
+                if let Some(sf) = field_types.iter().find(|f| &f.name == field_name) {
+                    if let Type::Enum(target) = &sf.ty {
+                        let target = target.clone();
+                        resolve_bare_enum_ctor_receiver(field_expr, &target, enum_template_names);
+                    }
+                }
+            }
+        }
+        for (_field_name, field_expr) in fields.iter_mut() {
+            resolve_bare_enum_ctor_in_struct_lit(field_expr, struct_field_types, enum_template_names);
+        }
+    }
+}
+
 /// Walks a statement (recursing into `if`/`if let`/`while`/
 /// `while let`/`for` bodies) applying `resolve_bare_enum_ctor_receiver`
 /// to `return` expressions (against `fn_return_enum`, the enclosing
 /// function's already-monomorphized return type) and `let`
 /// expressions (against that same `let`'s own already-monomorphized
-/// annotation, if any).
+/// annotation, if any). Also applies
+/// `resolve_bare_enum_ctor_in_struct_lit` to every `let`/`return`
+/// expression unconditionally (not gated on the annotation's own
+/// kind), since a struct-literal's ENUM-TYPED FIELD can need
+/// resolving regardless of whether the enclosing `let`/`return`
+/// itself is enum- or struct-typed.
 ///
 /// `IfLet`/`WhileLet` recursion was missing from the initial fix --
 /// found by testing a `return EnumName.Variant(...);` inside an
@@ -8085,46 +9047,155 @@ fn resolve_bare_enum_ctors_in_stmt(
     stmt: &mut Stmt,
     fn_return_enum: Option<&str>,
     enum_template_names: &std::collections::HashSet<String>,
+    struct_field_types: &std::collections::HashMap<String, Vec<crate::ast::StructField>>,
 ) {
     match stmt {
-        Stmt::Let { annotation: Some(Type::Enum(target)), expr, .. } => {
-            let target = target.clone();
-            resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+        Stmt::Let { annotation, expr, .. } => {
+            if let Some(Type::Enum(target)) = annotation {
+                let target = target.clone();
+                resolve_bare_enum_ctor_receiver(expr, &target, enum_template_names);
+            }
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
         }
         Stmt::Return { expr, .. } => {
             if let Some(target) = fn_return_enum {
                 resolve_bare_enum_ctor_receiver(expr, target, enum_template_names);
             }
+            resolve_bare_enum_ctor_in_struct_lit(expr, struct_field_types, enum_template_names);
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::IfLet { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
             for s in else_body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::While { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::WhileLet { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
             }
         }
         Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
             for s in body.iter_mut() {
-                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names);
+                resolve_bare_enum_ctors_in_stmt(s, fn_return_enum, enum_template_names, struct_field_types);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Struct analog of `resolve_bare_enum_ctor_receiver`/
+/// `resolve_bare_enum_ctors_in_stmt` (BUG-46's fix) — same bug
+/// class, same fix shape, found sweeping the testing matrix's
+/// "generic struct instantiated at 2+ different T" row: once a
+/// SECOND monomorphic instantiation of the same generic struct
+/// exists anywhere in the program, `Env::resolve_struct_name`'s
+/// "exactly one candidate" fallback can no longer disambiguate a
+/// bare `Box2 { items: ... }` literal, and EVERY construction site
+/// for that struct breaks with "unknown struct type", even ones
+/// whose concrete instantiation is perfectly clear from a `let`
+/// annotation or the enclosing function's return type. `StructLit`
+/// carries its `type_name` directly (no receiver-expression
+/// indirection like an enum constructor call), so the rewrite is
+/// simpler: just overwrite `type_name` in place when it names a
+/// generic template and the enclosing `let`/`return` already tells
+/// us the concrete instantiation.
+fn resolve_bare_struct_lit_receiver(
+    expr: &mut Expr,
+    target_struct_name: &str,
+    struct_template_names: &std::collections::HashSet<String>,
+) {
+    if let ExprKind::StructLit { type_name, .. } = &mut expr.kind {
+        if struct_template_names.contains(type_name.as_str()) {
+            *type_name = target_struct_name.to_string();
+        }
+        return;
+    }
+    // `let vi: Vec<Box2<i64>> = vec(Box2 { .. }, Box2 { .. });` --
+    // the single most natural way to write "a Vec of a generic
+    // struct" (matches every other `vec(literal, literal, ...)`
+    // pattern used throughout the codebase/tutorials). The `vec(...)`
+    // builtin's every argument shares the Vec's element type, so
+    // once the LET's annotation identifies the target element as a
+    // generic-struct instantiation, recurse into each arg with the
+    // same target. Deliberately narrow to the `vec` builtin itself
+    // (not arbitrary function calls) -- same "add resolving power,
+    // never remove it" philosophy as the enum fix this mirrors.
+    if let ExprKind::Call { name, args, .. } = &mut expr.kind {
+        if name == "vec" {
+            for a in args.iter_mut() {
+                resolve_bare_struct_lit_receiver(a, target_struct_name, struct_template_names);
+            }
+        }
+    }
+}
+
+/// Struct analog of `resolve_bare_enum_ctors_in_stmt`.
+fn resolve_bare_struct_lits_in_stmt(
+    stmt: &mut Stmt,
+    fn_return_struct: Option<&str>,
+    struct_template_names: &std::collections::HashSet<String>,
+) {
+    match stmt {
+        Stmt::Let { annotation: Some(Type::Struct(target)), expr, .. } => {
+            let target = target.clone();
+            resolve_bare_struct_lit_receiver(expr, &target, struct_template_names);
+        }
+        Stmt::Let { annotation: Some(Type::Vec(elem)), expr, .. }
+            if matches!(&**elem, Type::Struct(_)) =>
+        {
+            let Type::Struct(target) = &**elem else { unreachable!() };
+            let target = target.clone();
+            resolve_bare_struct_lit_receiver(expr, &target, struct_template_names);
+        }
+        Stmt::Return { expr, .. } => {
+            if let Some(target) = fn_return_struct {
+                resolve_bare_struct_lit_receiver(expr, target, struct_template_names);
+            }
+        }
+        Stmt::If { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::IfLet { then_body, else_body, .. } => {
+            for s in then_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+            for s in else_body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::While { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::WhileLet { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
+            }
+        }
+        Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
+            for s in body.iter_mut() {
+                resolve_bare_struct_lits_in_stmt(s, fn_return_struct, struct_template_names);
             }
         }
         _ => {}
@@ -8391,7 +9462,7 @@ fn rewrite_apply_in_ty(
                     Type::Param(_) => true,
                     Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
                     | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
-                    | Type::Channel(t, _) => has_param_local(t),
+                    | Type::Box(t) | Type::Channel(t, _) => has_param_local(t),
                     Type::Array { element, .. } => has_param_local(element),
                     Type::Tuple(elements) => elements.iter().any(has_param_local),
                     Type::FnPtr(params, ret) => params.iter().any(has_param_local) || has_param_local(ret),
@@ -8415,7 +9486,8 @@ fn rewrite_apply_in_ty(
             };
         }
         Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner)
-        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
+        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+        | Type::Box(inner) => {
             rewrite_apply_in_ty(inner, struct_names, enum_names);
         }
         Type::Array { element, .. } => rewrite_apply_in_ty(element, struct_names, enum_names),
@@ -8469,7 +9541,8 @@ fn collect_apply_in_stmt(
                     }
                 }
                 Type::Vec(i) | Type::Ref(i) | Type::RefMut(i)
-                | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i) => {
+                | Type::Atomic(i) | Type::Mutex(i) | Type::Guard(i)
+                | Type::Box(i) => {
                     rec(i, st, en, ns, ne)
                 }
                 Type::Array { element, .. } => rec(element, st, en, ns, ne),
@@ -8513,16 +9586,102 @@ fn collect_apply_in_stmt(
         }
         rec(ty, struct_templates, enum_templates, ns, ne);
     };
+    // Gap-audit fix (2026-08-03), part 4: `desugar_try_let_in_program`
+    // runs before this pass and synthesizes `Stmt::Let` nodes (with
+    // the user's ORIGINAL type annotation cloned onto them, e.g.
+    // `let r: Result<i64, i64> = __t;`) buried inside a `Block`
+    // expr nested inside a `Match` arm, itself the tail of a
+    // `Stmt::Return`. This walker only ever looked at the
+    // TOP-LEVEL stmt list's own annotations -- `expr: _` above
+    // discarded exactly the sub-tree where a try-desugar's nested
+    // annotation lives, and `Stmt::Return`/`Stmt::Assign` fell
+    // through the `_ => {}` catch-all entirely. Net effect: a
+    // nested generic-enum annotation produced by the try desugar
+    // never got its `Type::Apply` resolved into the monomorphized
+    // `Type::Enum`, surfacing as a baffling "expected Result<i64,
+    // i64>, got Result__i64__i64" (same annotation, one resolved
+    // one not).
+    fn walk_expr_for_nested_lets(
+        expr: &Expr,
+        struct_templates: &HashMap<String, StructDecl>,
+        enum_templates: &HashMap<String, EnumDecl>,
+        needed_structs: &mut Vec<(String, Vec<Type>)>,
+        needed_enums: &mut Vec<(String, Vec<Type>)>,
+    ) {
+        match &expr.kind {
+            ExprKind::Block { stmts, tail } => {
+                for s in stmts {
+                    collect_apply_in_stmt(
+                        s, struct_templates, enum_templates,
+                        needed_structs, needed_enums,
+                    );
+                }
+                walk_expr_for_nested_lets(
+                    tail, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                walk_expr_for_nested_lets(
+                    scrutinee, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        walk_expr_for_nested_lets(
+                            g, struct_templates, enum_templates,
+                            needed_structs, needed_enums,
+                        );
+                    }
+                    walk_expr_for_nested_lets(
+                        &arm.body, struct_templates, enum_templates,
+                        needed_structs, needed_enums,
+                    );
+                }
+            }
+            ExprKind::IfExpr { cond, then_value, else_value } => {
+                walk_expr_for_nested_lets(
+                    cond, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                walk_expr_for_nested_lets(
+                    then_value, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                walk_expr_for_nested_lets(
+                    else_value, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            ExprKind::Try { inner } => {
+                walk_expr_for_nested_lets(
+                    inner, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+            _ => {}
+        }
+    }
     match stmt {
-        Stmt::Let { annotation, expr: _, .. } => {
+        Stmt::Let { annotation, expr, .. } => {
             if let Some(ty) = annotation {
                 walk_ty(ty, needed_structs, needed_enums);
             }
+            walk_expr_for_nested_lets(
+                expr, struct_templates, enum_templates,
+                needed_structs, needed_enums,
+            );
         }
         Stmt::LetTuple { annotation, .. } => {
             if let Some(ty) = annotation {
                 walk_ty(ty, needed_structs, needed_enums);
             }
+        }
+        Stmt::Return { expr, .. } | Stmt::Assign { expr, .. } => {
+            walk_expr_for_nested_lets(
+                expr, struct_templates, enum_templates,
+                needed_structs, needed_enums,
+            );
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body {
@@ -8558,16 +9717,64 @@ fn collect_apply_in_stmt(
     }
 }
 
+// Gap-audit fix (2026-08-03), part 4 (mutable sibling of the
+// collect-side fix above): mirrors `walk_expr_for_nested_lets`,
+// recursing through the `Block`/`Match`/`IfExpr`/`Try` shapes the
+// try-desugar produces to reach nested `Stmt::Let` annotations so
+// they actually get rewritten `Type::Apply` -> `Type::Enum`/
+// `Type::Struct`, not just discovered.
+fn rewrite_apply_in_expr_nested_lets(
+    expr: &mut Expr,
+    struct_names: &std::collections::HashSet<String>,
+    enum_names: &std::collections::HashSet<String>,
+) {
+    match &mut expr.kind {
+        ExprKind::Block { stmts, tail } => {
+            for s in stmts.iter_mut() {
+                rewrite_apply_in_stmt(s, struct_names, enum_names);
+            }
+            rewrite_apply_in_expr_nested_lets(tail, struct_names, enum_names);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            rewrite_apply_in_expr_nested_lets(scrutinee, struct_names, enum_names);
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard {
+                    rewrite_apply_in_expr_nested_lets(g, struct_names, enum_names);
+                }
+                rewrite_apply_in_expr_nested_lets(&mut arm.body, struct_names, enum_names);
+            }
+        }
+        ExprKind::IfExpr { cond, then_value, else_value } => {
+            rewrite_apply_in_expr_nested_lets(cond, struct_names, enum_names);
+            rewrite_apply_in_expr_nested_lets(then_value, struct_names, enum_names);
+            rewrite_apply_in_expr_nested_lets(else_value, struct_names, enum_names);
+        }
+        ExprKind::Try { inner } => {
+            rewrite_apply_in_expr_nested_lets(inner, struct_names, enum_names);
+        }
+        _ => {}
+    }
+}
+
 fn rewrite_apply_in_stmt(
     stmt: &mut Stmt,
     struct_names: &std::collections::HashSet<String>,
     enum_names: &std::collections::HashSet<String>,
 ) {
     match stmt {
-        Stmt::Let { annotation, .. } | Stmt::LetTuple { annotation, .. } => {
+        Stmt::Let { annotation, expr, .. } => {
             if let Some(ty) = annotation {
                 rewrite_apply_in_ty(ty, struct_names, enum_names);
             }
+            rewrite_apply_in_expr_nested_lets(expr, struct_names, enum_names);
+        }
+        Stmt::LetTuple { annotation, .. } => {
+            if let Some(ty) = annotation {
+                rewrite_apply_in_ty(ty, struct_names, enum_names);
+            }
+        }
+        Stmt::Return { expr, .. } | Stmt::Assign { expr, .. } => {
+            rewrite_apply_in_expr_nested_lets(expr, struct_names, enum_names);
         }
         Stmt::If { then_body, else_body, .. } => {
             for s in then_body.iter_mut() {
@@ -8610,8 +9817,19 @@ fn type_mangle(ty: &Type) -> String {
         Type::OwnedStr => "OwnedStr".to_string(),
         Type::Struct(name) => format!("Struct_{}", name),
         Type::Enum(name) => format!("Enum_{}", name),
+        // BUG-72: `{:?}` on a Type wrapping a `Vec<Type>` (Tuple's
+        // element list, FnPtr's param list, ...) renders with `[`/`]`
+        // (Rust's derived Debug for Vec) -- these weren't in the
+        // replacement set below, so a mangled name like a generic
+        // function specialized over a Tuple T could come out
+        // containing literal `[`/`]` (e.g. `Tuple_[I64__I64]_`),
+        // which isn't a valid bare identifier in emitted LLVM IR
+        // (`@fn_first__Tuple_[I64__I64]_` -- "expected '(' in call").
+        // The C backend happened not to hit this exact path for the
+        // repro that found it, but an unescaped `[`/`]` isn't a valid
+        // bare C identifier either, so this fix applies to both.
         other => format!("{:?}", other)
-            .replace([' ', '<', '>', ',', '(', ')', '"', '{', '}', ':'], "_"),
+            .replace([' ', '<', '>', ',', '(', ')', '"', '{', '}', ':', '[', ']'], "_"),
     }
 }
 
@@ -8676,7 +9894,21 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
                 if let Type::Apply { name, args } = ty.clone() {
                     if args.len() == 1 {
                         let mangled = format!("{}__{}", name, type_mangle(&args[0]));
-                        *ty = Type::Struct(mangled);
+                        let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
+                            .with(|c| c.borrow().contains(&name));
+                        // Gap-audit follow-up fix (2026-08-03): record
+                        // what this collapsed FROM so the struct/enum-
+                        // decl worklist can still discover it needs
+                        // generating -- see NEWLY_COLLAPSED_GENERIC_
+                        // APPLIES's doc comment for the full writeup.
+                        NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                            q.borrow_mut().push((name.clone(), args.clone(), is_enum));
+                        });
+                        *ty = if is_enum {
+                            Type::Enum(mangled)
+                        } else {
+                            Type::Struct(mangled)
+                        };
                     }
                 }
             }
@@ -11162,6 +12394,42 @@ fn check_one_stmt(
             };
             diagnose_partial_then_whole_move(expr, &coerced, env, diagnostics);
             consume_if_moved_var(expr, &coerced, env);
+            // BUG-36 fix (2026-08-02): `x = ...;` writes directly to
+            // `x`'s own storage -- if `x` is NOT itself a ref binding
+            // (i.e. this is a write to the true owner, not a write
+            // routed through a `mut ref` place, which uses a
+            // different statement shape), it must be rejected while
+            // some other binding holds a live `mut ref x`. Mirrors
+            // the read-side check in `check_expr`'s `ExprKind::Var`
+            // arm; see `find_live_mut_borrow_of`'s doc comment.
+            if !existing.ty.is_any_ref() {
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "cannot assign to '{}' while it is mutably borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
+                }
+            }
+            // BUG-36 fix: `r = mut ref ys;` reassigns a ref-typed
+            // LOCAL to a new source -- recompute `ref_aliases` from
+            // the new RHS (mirroring the `Let` binding path) so the
+            // exclusivity checks above track the new target, not a
+            // stale one. Without this, `xs` would stay incorrectly
+            // "locked" after `r` moves on to borrow `ys` instead
+            // (over-conservative but sound), AND -- the real
+            // soundness gap -- `ys` would never be recognized as
+            // borrowed at all.
+            let new_ref_aliases = if existing.ty.is_any_ref() {
+                Some(compute_ref_aliases_from_let_rhs(expr, env, signatures))
+            } else {
+                None
+            };
             let drop_old = !existing.ty.is_copy() && existing.moved.is_none();
             let mut rhs = coerced.expr;
             inject_branch_drops(&mut rhs);  // closure #179
@@ -11176,6 +12444,9 @@ fn check_one_stmt(
             if let Some(info) = env.lookup_mut(name) {
                 info.constant = None;
                 info.moved = None;
+                if let Some(aliases) = new_ref_aliases {
+                    info.ref_aliases = aliases;
+                }
             }
             // Reassignment invalidates any prior facts about `name`.
             // OUTSIDE of a loop body this is straightforward: the old
@@ -11931,6 +13202,28 @@ fn check_one_stmt(
                 }
             };
 
+            // BUG-36 fix (2026-08-02): `xs[i] = v;` writes directly to
+            // `xs`'s own storage when `through_ref` is false (the
+            // `mut ref xs[i]`-through-a-borrow shape sets
+            // `through_ref = true` and is exempt -- that IS the
+            // legitimate way to mutate through an outstanding mut
+            // ref). See `find_live_mut_borrow_of`'s doc comment.
+            if !through_ref {
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "cannot index-assign to '{}' while it is mutably \
+                                 borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
+                }
+            }
+
             verify_call_args_in_expr(index, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(value, smt_facts, env, signatures, diagnostics);
             let index_checked = check_expr(index, env, signatures, diagnostics);
@@ -12318,6 +13611,7 @@ fn check_one_stmt(
             // this, the source binding would scope-exit-drop
             // and double-free the heap now owned by the
             // struct's field. Closure #166.
+            reject_affine_closure_into_struct_field(value, field_ty, field, diagnostics);
             consume_if_moved_var(value, &value_coerced, env);
             // L4 (B) Phase 2 (2026-06-08) â€” scope-escape check
             // for FieldAssign. When the RHS contains a `ref X`
@@ -14171,6 +15465,100 @@ fn collect_ref_sources_in_expr(
 
 /// L4 (C) Phase 4 (2026-06-09): at a ref-escape site, walk
 /// the expression looking for `Var` nodes whose env entry
+/// BUG-36 fix (2026-08-02): v1's affine checker only ever tracked
+/// MOVES (a value can't be read after being moved) -- there was no
+/// pass at all enforcing that an outstanding `mut ref` alias makes
+/// its source binding temporarily unreadable, contrary to what the
+/// tutorials claimed ("`ref` can multiply, `mut ref` must be
+/// exclusive"). `docs/TODO_CURRENT.md`'s BUG-36 entry confirmed this
+/// with a direct repro: `let r: mut ref Vec<i64> = mut ref xs; push(r,
+/// 4); print xs[0];` compiled and ran cleanly with no diagnostic at
+/// all, on both backends.
+///
+/// This is a deliberately NAMED-BINDING-SCOPED, lexical (not real
+/// non-lexical-lifetime) approximation of exclusivity, chosen to keep
+/// the blast radius small and avoid the false-rejection risk a full
+/// liveness analysis would carry under time pressure:
+///
+///   * Only `let`-bound `ref`/`mut ref` bindings are tracked -- an
+///     inline `foo(mut ref xs)` call argument is never stored in
+///     `env` at all (see `check_ref_mut`: `TypedExprKind::RefMut`
+///     values passed directly as call arguments don't go through
+///     `Stmt::Let`), so it naturally never appears in this scan.
+///     This matches the tutorials' own documented model ("the
+///     compiler doesn't track them across the call -- once the call
+///     returns, the borrow ends") -- that shape is intentionally left
+///     alone, not a gap in this fix.
+///   * A tracked borrow's "lifetime" is exactly its owning binding's
+///     lexical scope: `env.scopes` only contains bindings whose
+///     enclosing block hasn't exited yet, so once the borrowing
+///     binding's own scope pops, this scan naturally stops seeing it
+///     -- no separate "borrow end" bookkeeping needed.
+///   * Reuses the pre-existing `ref_aliases` field (populated by
+///     `compute_ref_aliases_from_let_rhs`) rather than adding new
+///     state -- a live `Ref`/`RefMut`-typed binding whose
+///     `ref_aliases` contains `target` IS the borrow.
+///
+/// Known, deliberately-accepted gap: reassigning a ref-typed binding
+/// to a NEW source (`r = mut ref ys;`) is handled by `Stmt::Assign`
+/// recomputing `ref_aliases` (mirroring the `Let` path) so this stays
+/// sound for the common case; anything this lexical/named-binding
+/// model can't see (real interprocedural or non-lexical patterns)
+/// remains unchecked, exactly as before this fix -- a false negative,
+/// never a false positive, which is the required direction for a
+/// checker that must never reject sound code.
+///
+/// Returns the name of a live `mut ref` binding that aliases
+/// `target`, if one exists (scans every open scope). `exclude` lets a
+/// ref-creation site avoid flagging the binding currently being
+/// created (which isn't inserted into `env` yet at that point, but is
+/// here for future-proofing / defensive symmetry with
+/// `find_live_borrow_of`).
+fn find_live_mut_borrow_of<'a>(
+    env: &'a Env,
+    target: &str,
+    exclude: Option<&str>,
+) -> Option<&'a str> {
+    for scope in &env.scopes {
+        for (name, info) in scope {
+            if Some(name.as_str()) == exclude || name == target {
+                continue;
+            }
+            if matches!(info.ty, Type::RefMut(_)) && info.ref_aliases.iter().any(|a| a == target) {
+                return Some(name.as_str());
+            }
+        }
+    }
+    None
+}
+
+/// Sibling of `find_live_mut_borrow_of` for the ref/mut-ref CREATION
+/// site: taking a new `mut ref x` must be rejected if ANY live
+/// borrow (shared `ref` or `mut ref`) of `x` already exists (mutable
+/// access must be exclusive against everything); taking a new plain
+/// `ref x` only conflicts with an existing live `mut ref x` (shared
+/// refs may multiply freely against each other, per the documented
+/// rule). Returns `(borrower_name, existing_is_mut)`.
+fn find_live_borrow_of<'a>(
+    env: &'a Env,
+    target: &str,
+    exclude: Option<&str>,
+) -> Option<(&'a str, bool)> {
+    for scope in &env.scopes {
+        for (name, info) in scope {
+            if Some(name.as_str()) == exclude || name == target {
+                continue;
+            }
+            let is_mut = matches!(info.ty, Type::RefMut(_));
+            let is_shared = matches!(info.ty, Type::Ref(_));
+            if (is_mut || is_shared) && info.ref_aliases.iter().any(|a| a == target) {
+                return Some((name.as_str(), is_mut));
+            }
+        }
+    }
+    None
+}
+
 /// has recorded `ref_aliases` (populated by
 /// `compute_ref_aliases_from_let_rhs` at the binding site).
 /// Each alias becomes a `(source_name, span)` entry â€” the
@@ -14745,6 +16133,72 @@ fn validate_no_raw_ptr_on_hosted(
     }
 }
 
+/// BUG-66 residual fix (2026-08-02): a closure whose captured
+/// environment owns heap memory (a `Vec`/`OwnedStr`/other non-Copy
+/// capture, moved in rather than `ref`-captured) crashes both
+/// backends when moved into a struct field -- LLVM: the env struct
+/// is referenced as an unsized type at the point it's read back out
+/// of the field ("base element of getelementptr must be sized"); C:
+/// a double-free at runtime. There is no move-into-struct-field
+/// support for an affine closure env today (would need lifetime
+/// tracking for the heap-owning env across the struct-field
+/// boundary -- a real feature, not a quick fix). Until that lands,
+/// reject the pattern with a clean diagnostic instead of letting it
+/// reach codegen and crash.
+///
+/// Narrow, name-based check: `CLOSURE_AFF_REGISTRY` is keyed by the
+/// closure literal's own bind name, populated when the closure
+/// literal itself is checked (see the `L5` registration in the
+/// `Stmt::Let` closure-literal desugar). This catches the direct
+/// `Struct { field: closure_var }` / `obj.field = closure_var;`
+/// shape -- the one in the original bug report and the tutorial's
+/// own worked example -- without attempting full alias tracking
+/// through intermediate renames (`let cb2 = cb;`), which would need
+/// a broader mechanism than this targeted fix.
+fn reject_affine_closure_into_struct_field(
+    value_expr: &Expr,
+    field_ty: &Type,
+    field_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !matches!(field_ty, Type::Closure(_, _)) {
+        return;
+    }
+    if let ExprKind::Var(name) = &value_expr.kind {
+        let is_affine = crate::ast::CLOSURE_AFF_REGISTRY
+            .with(|r| r.borrow().contains_key(name));
+        if is_affine {
+            diagnostics.push(
+                Diagnostic::new(
+                    value_expr.span,
+                    format!(
+                        "closure '{}' captures a heap-owning value by move -- \
+                         storing it in struct field '{}' is not yet supported \
+                         in v1",
+                        name, field_name
+                    ),
+                )
+                .with_elaboration(vec![
+                    format!(
+                        "'{}' captures at least one non-Copy value (a `Vec`, \
+                         `OwnedStr`, or similar) by move, not by `ref`.",
+                        name
+                    ),
+                    "vāṇी doesn't yet track a heap-owning closure environment's \
+                     lifetime once it crosses a struct-field boundary -- storing \
+                     it and reading it back later is not a sound operation in v1."
+                        .to_string(),
+                    "Workarounds: capture by `ref` instead of by move if the \
+                     captured value outlives the struct, or restructure so the \
+                     closure only captures Copy values (pass the heap-owning \
+                     value as a call argument instead of capturing it)."
+                        .to_string(),
+                ]),
+            );
+        }
+    }
+}
+
 /// Emit a "cannot move whole struct after partial move"
 /// diagnostic when `source` is a Var consume of a binding
 /// that already has at least one moved-out field. Call BEFORE
@@ -15120,7 +16574,7 @@ fn check_match_str(
     let mut seen_strs: Vec<String> = Vec::new();
     let mut wildcard_body: Option<TypedExpr> = None;
     let mut wildcard_seen_at: Option<usize> = None;
-    let mut typed_arms: Vec<(String, TypedExpr)> = Vec::new();
+    let mut typed_arms: Vec<(String, Option<TypedExpr>, TypedExpr)> = Vec::new();
     let mut result_ty: Option<Type> = None;
     for (i, arm) in arms.iter().enumerate() {
         if wildcard_seen_at.is_some() {
@@ -15145,6 +16599,25 @@ fn check_match_str(
                     continue;
                 }
                 seen_strs.push(s.clone());
+                // BUG-20 residual fix (2026-08-02): guards on string
+                // match arms were parsed and type-checked nowhere --
+                // silently accepted then ignored, so a guarded arm
+                // always behaved as if its guard were `true`. String
+                // patterns bind no names, so evaluating the guard has
+                // no dependency on the pattern having matched (unlike
+                // the slice-pattern fix, which must gate guard
+                // evaluation behind the length check to avoid an
+                // out-of-bounds read) -- safe to fold eagerly below.
+                let guard_typed: Option<TypedExpr> = arm.guard.as_ref().map(|g| {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    gc.expr
+                });
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
@@ -15166,7 +16639,7 @@ fn check_match_str(
                 } else {
                     result_ty = Some(body_checked.ty().clone());
                 }
-                typed_arms.push((s.clone(), body_checked.expr));
+                typed_arms.push((s.clone(), guard_typed, body_checked.expr));
             }
             crate::ast::Pattern::Wildcard => {
                 wildcard_seen_at = Some(i);
@@ -15233,7 +16706,7 @@ fn check_match_str(
     // Fold the string arms right-to-left into a nested
     // IfExpr chain whose final else is the wildcard body.
     let mut chain = default_body;
-    for (text, body) in typed_arms.into_iter().rev() {
+    for (text, guard_opt, body) in typed_arms.into_iter().rev() {
         let scr_var = TypedExpr {
             kind: TypedExprKind::Var(tmp_name.clone()),
             ty: scrut_ty.clone(),
@@ -15248,7 +16721,7 @@ fn check_match_str(
             span,
             binding_decl_span: None,
         };
-        let cond = TypedExpr {
+        let eq_cond = TypedExpr {
             kind: TypedExprKind::Binary {
                 op: BinaryOp::Eq,
                 left: Box::new(scr_var),
@@ -15259,6 +16732,26 @@ fn check_match_str(
             constant: None,
             span,
             binding_decl_span: None,
+        };
+        // BUG-20 residual fix: fold the guard in with an eager `&&` --
+        // safe here since the guard never reads a pattern binding, so
+        // there's no need to gate its evaluation behind `eq_cond`
+        // first the way the slice-pattern fix must.
+        let cond = if let Some(guard_expr) = guard_opt {
+            TypedExpr {
+                kind: TypedExprKind::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(eq_cond),
+                    right: Box::new(guard_expr),
+                    checked: false,
+                },
+                ty: Type::Bool,
+                constant: None,
+                span,
+                binding_decl_span: None,
+            }
+        } else {
+            eq_cond
         };
         chain = TypedExpr {
             kind: TypedExprKind::IfExpr {
@@ -15426,7 +16919,7 @@ fn check_match_float(
     let mut seen_bits: Vec<u64> = Vec::new();
     let mut wildcard_body: Option<TypedExpr> = None;
     let mut wildcard_seen_at: Option<usize> = None;
-    let mut typed_arms: Vec<(f64, TypedExpr)> = Vec::new();
+    let mut typed_arms: Vec<(f64, Option<TypedExpr>, TypedExpr)> = Vec::new();
     let mut result_ty: Option<Type> = None;
     for (i, arm) in arms.iter().enumerate() {
         if wildcard_seen_at.is_some() {
@@ -15462,6 +16955,19 @@ fn check_match_float(
                     continue;
                 }
                 seen_bits.push(bits);
+                // BUG-20 residual fix (2026-08-02): see the matching
+                // comment in check_match_str -- float patterns bind no
+                // names either, so the guard can fold in eagerly.
+                let guard_typed: Option<TypedExpr> = arm.guard.as_ref().map(|g| {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    gc.expr
+                });
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
@@ -15483,7 +16989,7 @@ fn check_match_float(
                 } else {
                     result_ty = Some(body_checked.ty().clone());
                 }
-                typed_arms.push((*f, body_checked.expr));
+                typed_arms.push((*f, guard_typed, body_checked.expr));
             }
             crate::ast::Pattern::Wildcard => {
                 wildcard_seen_at = Some(i);
@@ -15549,7 +17055,7 @@ fn check_match_float(
         binding_decl_span: None,
     });
     let mut chain = default_body;
-    for (lit, body) in typed_arms.into_iter().rev() {
+    for (lit, guard_opt, body) in typed_arms.into_iter().rev() {
         let scr_var = TypedExpr {
             kind: TypedExprKind::Var(tmp_name.clone()),
             ty: scrut_ty.clone(),
@@ -15564,7 +17070,7 @@ fn check_match_float(
             span,
             binding_decl_span: None,
         };
-        let cond = TypedExpr {
+        let eq_cond = TypedExpr {
             kind: TypedExprKind::Binary {
                 op: BinaryOp::Eq,
                 left: Box::new(scr_var),
@@ -15575,6 +17081,22 @@ fn check_match_float(
             constant: None,
             span,
             binding_decl_span: None,
+        };
+        let cond = if let Some(guard_expr) = guard_opt {
+            TypedExpr {
+                kind: TypedExprKind::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(eq_cond),
+                    right: Box::new(guard_expr),
+                    checked: false,
+                },
+                ty: Type::Bool,
+                constant: None,
+                span,
+                binding_decl_span: None,
+            }
+        } else {
+            eq_cond
         };
         chain = TypedExpr {
             kind: TypedExprKind::IfExpr {
@@ -15679,10 +17201,34 @@ fn check_match_slice(
         }
         match &arm.pattern {
             crate::ast::Pattern::Wildcard => {
-                wildcard_seen = true;
+                // BUG-20 residual fix (2026-08-02): a guarded wildcard
+                // arm's `arm.guard` was never even read here (unlike
+                // the `Slice` arm below, which BUG-20's original fix
+                // already wired up) -- the guard was silently dropped
+                // and the wildcard always behaved as an unconditional
+                // catch-all. Mirrors the M3 int/bool/enum dispatch
+                // precedent: a guarded wildcard does NOT close off
+                // later arms (`wildcard_seen` stays false), and its
+                // guard is folded into the dispatch chain as an
+                // ordinary conditional entry (cond = guard, no length
+                // check needed since Wildcard structurally matches any
+                // length) rather than becoming the unconditional
+                // `wildcard_body` fallback.
                 let body = check_expr(&arm.body, env, signatures, diagnostics);
                 unify_arm_type(&body, &mut result_ty, diagnostics, arm.body.span);
-                wildcard_body = Some(body.expr);
+                if let Some(g) = &arm.guard {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    typed_arms.push((gc.expr, body.expr));
+                } else {
+                    wildcard_seen = true;
+                    wildcard_body = Some(body.expr);
+                }
             }
             crate::ast::Pattern::Slice { heads, tail, has_rest } => {
                 let needed = (heads.len() + tail.len()) as u64;
@@ -16141,6 +17687,29 @@ fn check_expr(
                         diag = diag.with_related(expr.span, h);
                     }
                     diagnostics.push(diag);
+                }
+                // BUG-36 fix (2026-08-02): reading a binding directly
+                // while a `mut ref` of it is live in another binding
+                // is an aliasing violation -- the mut-ref holder is
+                // supposed to have exclusive access. See
+                // `find_live_mut_borrow_of`'s doc comment for the
+                // exact (lexical, named-binding-scoped) model this
+                // enforces. This is the read-side half of the check;
+                // `Stmt::Assign`/`Stmt::IndexAssign` cover direct
+                // writes, and `check_ref`/`check_ref_mut` cover
+                // rejecting a second overlapping borrow at creation
+                // time.
+                if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "cannot use '{}' while it is mutably borrowed by '{}'",
+                                name, borrower
+                            ),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+                    );
                 }
                 let decl_span = info.decl_span;
                 // T4.15: when the resolved binding came from a
@@ -17484,6 +19053,7 @@ fn check_expr(
                 // backend would emit two `free` calls for it.
                 // T1.2 phase 2b.
                 diagnose_partial_then_whole_move(&found.1, &coerced, env, diagnostics);
+                reject_affine_closure_into_struct_field(&found.1, fty, fname, diagnostics);
                 consume_if_moved_var(&found.1, &coerced, env);
                 let mut field_expr = coerced.expr;
                 inject_branch_drops(&mut field_expr);
@@ -17571,8 +19141,12 @@ fn check_expr(
             }
             let inner = check_expr(object, env, signatures, diagnostics);
             // Field access works through one level of borrow
-            // (so `ref_to_point.x` reads `(*ref_to_point).x`).
-            let underlying = inner.ty().deref().clone();
+            // (so `ref_to_point.x` reads `(*ref_to_point).x`),
+            // and likewise through one level of `Box<T>` (BUG-95
+            // follow-up, task #38): `Box<T>` lowers to a bare `T*`
+            // in both backends, identical to Ref/RefMut, so
+            // `boxed_point.x` reads `(*boxed_point).x` the same way.
+            let underlying = inner.ty().deref_through_box().clone();
             let (struct_name, field_ty, field_index) = match &underlying {
                 Type::Struct(name) => {
                     let Some(decl) = env.lookup_struct(name) else {
@@ -18102,7 +19676,7 @@ fn check_expr(
                 };
                 // final_arm_binding may be upgraded to OwnedStr below.
                 let mut final_arm_binding = arm_binding.clone();
-                let body_checked = if let Some((bname, bty)) = &arm_binding {
+                let mut body_checked = if let Some((bname, bty)) = &arm_binding {
                     env.push_scope();
                     // M5: if the arm body is EXACTLY Var(bname) and
                     // the original payload was OwnedStr, the payload
@@ -18212,14 +19786,37 @@ fn check_expr(
                 };
                 if let Some(expected) = &result_ty {
                     if body_checked.ty() != expected {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body has type {} but earlier arm produced {}",
-                                body_checked.ty(),
-                                expected
-                            ),
-                        ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &body_checked.ty().to_string())));
+                        // BUG-87 row 2 fix (task #42, 2026-08-04): the
+                        // `Future.Pending` arm of an `await(...)` desugar
+                        // (see `synthesize_await_desugar` in parser.rs)
+                        // hardcodes a bare `Int(0)` body -- only type-
+                        // correct when T happens to be i64. Since v1 is
+                        // purely synchronous, this arm is provably
+                        // unreachable at runtime; substitute a real
+                        // placeholder value of the EXPECTED (Ready arm's)
+                        // type instead of erroring, when one can be built.
+                        let is_future_pending_arm = matches!(
+                            &arm.pattern,
+                            crate::ast::Pattern::Variant { enum_name, variant }
+                                if enum_name == "Future" && variant == "Pending"
+                        );
+                        let placeholder = if is_future_pending_arm {
+                            checked_expr_placeholder(expected, arm.body.span, env)
+                        } else {
+                            None
+                        };
+                        if let Some(replacement) = placeholder {
+                            body_checked = replacement;
+                        } else {
+                            diagnostics.push(Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body has type {} but earlier arm produced {}",
+                                    body_checked.ty(),
+                                    expected
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &body_checked.ty().to_string())));
+                        }
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
@@ -19119,6 +20716,21 @@ fn check_ref_mut(
             ),
         );
     }
+    // BUG-36 fix: a new `mut ref` must be exclusive against ANY
+    // already-live borrow of the same binding, shared or mut.
+    if let Some((borrower, existing_is_mut)) = find_live_borrow_of(env, name, None) {
+        let kind = if existing_is_mut { "mutably" } else { "as shared" };
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!(
+                    "cannot mutably borrow '{}' -- it is already borrowed {} by '{}'",
+                    name, kind, borrower
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
+        );
+    }
     let ref_ty = Type::RefMut(Box::new(info.ty.clone()));
     let decl_span = info.decl_span;
     CheckedExpr::new(
@@ -19274,6 +20886,22 @@ fn check_ref(
             .with_elaboration(
                 crate::diagnostic_elaborations::raw_ptr_escape(),
             ),
+        );
+    }
+    // BUG-36 fix: a new shared `ref` only conflicts with an already-
+    // live `mut ref` of the same binding (shared refs may multiply
+    // freely against each other).
+    if let Some(borrower) = find_live_mut_borrow_of(env, name, None) {
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!(
+                    "cannot borrow '{}' as shared -- it is already mutably \
+                     borrowed by '{}'",
+                    name, borrower
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::alias_mut_with_shared(name)),
         );
     }
     let ref_ty = Type::Ref(Box::new(info.ty.clone()));
@@ -20756,10 +22384,9 @@ fn check_call(
     // checker, which is a follow-up.
     match name {
         // L2 Phase 1 (2026-06-07): Box<T> heap-allocating
-        // constructor. `box(expr)` â†’ `Box<typeof expr>`. v1
-        // requires expr's type to be Copy + sized â€” primitives
-        // and Copy structs. Box of an already-affine type would
-        // need recursive drop and is queued.
+        // constructor. `box(expr)` â†’ `Box<typeof expr>`. See
+        // `check_box_builtin`'s own doc comment for the current
+        // (as of BUG-97, 2026-08-04) supported-type surface.
         "box" => return check_box_builtin(args, env, signatures, name_span, span, diagnostics),
         // L2 Phase 1: read the inner value of a Box<T> by
         // copying. Takes `ref Box<T>` so the box stays valid
@@ -22611,6 +24238,31 @@ fn check_mutex_builtin(
             // Phase 2: infer T from the initial value's type.
             let initial = check_expr(&args[0], env, signatures, diagnostics);
             let inferred_element = initial.ty().clone();
+            // Gap-audit fix (2026-08-03): nested concurrency handles
+            // (`Mutex<Mutex<T>>`, `Mutex<RwLock<T>>`) were never
+            // actually implemented -- neither backend generates the
+            // "Mutex-of-Mutex" bundle infrastructure, so this used to
+            // compile straight through the checker and crash `opt`/
+            // `llc`/`cc` with undefined bundle types/symbols
+            // (`intent_mutex_intent_mutex_i64`, never emitted). Reject
+            // cleanly instead, matching the boundary-confirmation
+            // row's "either works correctly or is cleanly rejected;
+            // either is fine" framing -- full nested-lock codegen
+            // support is a substantive follow-up, not a missing-arm
+            // fix.
+            if matches!(inferred_element, Type::Mutex(_) | Type::RwLock(_)) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "nested concurrency handles are not supported in v1: \
+                         'mutex_new' was given a value of type {}, which is itself \
+                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
+                         data instead of wrapping one lock in another.",
+                        inferred_element
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &inferred_element.to_string())));
+                return CheckedExpr::fallback(Type::Mutex(Box::new(Type::I64)), span);
+            }
             let inferred_mutex_ty = Type::Mutex(Box::new(inferred_element.clone()));
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -23442,6 +25094,24 @@ fn check_rwlock_builtin(
             }
             let v = check_expr(&args[0], env, signatures, diagnostics);
             let element = v.ty().clone();
+            // Gap-audit fix (2026-08-03): see the matching check in
+            // `mutex_new` above for the full root-cause writeup --
+            // nested concurrency handles were never actually
+            // implemented in either backend and used to crash the
+            // native toolchain instead of failing cleanly.
+            if matches!(element, Type::Mutex(_) | Type::RwLock(_)) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "nested concurrency handles are not supported in v1: \
+                         'rwlock_new' was given a value of type {}, which is itself \
+                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
+                         data instead of wrapping one lock in another.",
+                        element
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &element.to_string())));
+                return CheckedExpr::fallback(Type::RwLock(Box::new(Type::I64)), span);
+            }
             let ret_ty = Type::RwLock(Box::new(element));
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -23947,11 +25617,15 @@ fn check_try_vec_builtin(
 }
 
 /// L2 Phase 1 (2026-06-07): `box(expr)` heap-allocating
-/// constructor. Returns `Box<typeof expr>`. v1 restricts the
-/// inner type to Copy + sized â€” primitives (`i64`, `bool`, â€¦)
-/// and Copy structs. The rationale: Box of an already-affine
-/// type (`Box<Vec<i64>>`, `Box<OwnedStr>`) would need recursive
-/// drop walks and is queued for v2.
+/// constructor. Returns `Box<typeof expr>`. v1 accepts
+/// primitives (`i64`, `bool`, â€¦), `dyn Iface`, `Vec<T>`,
+/// `OwnedStr`, and (as of BUG-97, 2026-08-04) any struct type --
+/// including non-Copy and self-referential ("recursive") ones,
+/// whose Drop is walked recursively by the backends (see
+/// `emit_box_recursive_deep_drop_helpers` in backend_c.rs for the
+/// self-referential case). Not yet supported: `Box<Box<T>>`,
+/// tuples, and a handful of other owning inner types -- queued
+/// for a follow-up.
 fn check_box_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -23989,7 +25663,20 @@ fn check_box_builtin(
         | Type::U8 | Type::U16 | Type::U32 | Type::U64
         | Type::F32 | Type::F64
         | Type::Bool => true,
-        Type::Struct(_) => inner_ty.is_copy(),
+        // BUG-97 (task #39, 2026-08-03): previously gated on
+        // `inner_ty.is_copy()`, rejecting any struct with an
+        // owning field (OwnedStr, Vec, Box, non-Copy enum, or a
+        // nested non-Copy struct) — including the canonical
+        // recursive `Node { next: Option<Box<Node>> }` shape the
+        // Box<T>/RAII tutorial itself demonstrates. A struct
+        // reaching this point already passed the struct-decl
+        // field-type allowlist (field_allowed, above), so its own
+        // fields are guaranteed to be one of the shapes both
+        // backends' Drop emission already knows how to walk (see
+        // `emit_struct_field_drops` / its LLVM analog, plus the new
+        // box-recursive-struct iterative-drop helper for the
+        // `Box<Self>` case) — Copy-ness is no longer the right gate.
+        Type::Struct(_) => true,
         // L2 Phase 3 (2026-06-08): Box<dyn Iface>. The inner
         // expression is expected to be a DynCoerce node (the
         // result of `value as dyn Iface`). The C backend
@@ -24013,9 +25700,10 @@ fn check_box_builtin(
             Diagnostic::new(
                 args[0].span,
                 format!(
-                    "box() v1 supports Copy + sized element types (primitives, Copy structs), \
-                     `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. Other owning inner \
-                     types (Box<Box<T>>, Box<HashMap<â€¦>>, etc.) remain a follow-up.",
+                    "box() v1 supports Copy + sized scalar types (primitives), any \
+                     struct type, `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. \
+                     Other owning inner types (Box<Box<T>>, Box<HashMap<â€¦>>, tuples, \
+                     etc.) remain a follow-up.",
                     inner_ty
                 ),
             )

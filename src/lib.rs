@@ -1274,6 +1274,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clone_at_chained_three_levels_deep_on_vec_of_vec_of_struct() {
+        // Testing-matrix sweep: "clone_at chained three levels deep"
+        // -- clone_at(ref outer, i) where outer: Vec<Vec<Struct>>,
+        // then clone_at again on the result. Checked 2026-08-02, not
+        // a bug: both clone_at calls compute correctly and outer/
+        // middle stay independent (outer's own length is unaffected
+        // by cloning out of it) on both backends -- see the paired
+        // e2e test for hand-computed runtime values.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let outer: Vec<Vec<Pt>> = vec(
+                vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }),
+                vec(Pt { x: 5, y: 6 }, Pt { x: 7, y: 8 }, Pt { x: 9, y: 10 }),
+              );
+              let middle: Vec<Pt> = clone_at(ref outer, 1);
+              let inner: Pt = clone_at(ref middle, 2);
+              print inner.x;
+              print inner.y;
+              print len(middle) as i64;
+              print len(outer) as i64;
+              return 0;
+            }
+        "#;
+        compile(source).expect("three-level-deep chained clone_at must compile");
+    }
+
     // Closure #291: arrays now accept `clone_at(ref xs, i)`
     // alongside Vec. The C backend lowers it to `xs[i]`
     // (with a deep-clone for Vec elements). LLVM lowers via
@@ -9161,6 +9189,80 @@ mod tests {
     }
 
     #[test]
+    fn partial_move_of_vec_field_then_clone_at_on_different_field_compiles() {
+        // Testing-matrix sweep: "partial move out of a Vec<T> struct
+        // field, followed by clone_at on a DIFFERENT field of the
+        // same struct instance" -- interaction between partial-move
+        // tracking and clone_at's own non-Copy-element restrictions.
+        // Checked 2026-08-02, not a bug: moving `h.xs` out (a
+        // Vec<i64> field) leaves `h.ys` (a Vec<OwnedStr> field)
+        // fully usable, and clone_at on it works correctly. Using
+        // `h.xs` again after the move is still correctly rejected
+        // (confirms tracking is real, not just permissive).
+        let source = r#"
+            struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+            fn main() -> i64 {
+              let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "", "b" + "") };
+              let moved_xs: Vec<i64> = h.xs;
+              let sum: i64 = moved_xs[0] + moved_xs[1] + moved_xs[2];
+              let s0: OwnedStr = clone_at(ref h.ys, 0);
+              print sum;
+              print s0;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "clone_at on an unmoved struct field must compile after a sibling field was partial-moved",
+        );
+
+        let bad_source = r#"
+            struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+            fn main() -> i64 {
+              let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "") };
+              let moved_xs: Vec<i64> = h.xs;
+              print len(h.xs) as i64;
+              return 0;
+            }
+        "#;
+        let errs = compile(bad_source).expect_err("reading a moved field again must be rejected");
+        assert!(
+            errs.iter().any(|e| e.message.contains("was moved")),
+            "expected a use-after-move diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn struct_with_vec_and_owned_str_fields_partial_move_and_read_compiles() {
+        // Testing-matrix sweep: "struct with BOTH a Vec<T> field and
+        // an OwnedStr field, partially moved (one field taken, the
+        // other read), then dropped -- confirm no leak/double-free
+        // on the un-moved field." Checked 2026-08-02, not a bug --
+        // this compiles cleanly, and (checked manually outside this
+        // test suite, since it needs a real process, not just a
+        // compile-time check) `valgrind --leak-check=full` against
+        // native binaries built from this exact program reports 0
+        // leaks and a balanced alloc/free count on BOTH backends
+        // (LLVM: 2 allocs/2 frees; C: 3 allocs/3 frees -- different
+        // internal representation, same "everything freed exactly
+        // once" outcome). See docs/TESTING_MATRIX_TODO.md for the
+        // full writeup.
+        let source = r#"
+            struct Rec { xs: Vec<i64>, name: OwnedStr }
+            fn main() -> i64 {
+              let r: Rec = Rec { xs: vec(1, 2, 3), name: "widget" + "" };
+              let taken: Vec<i64> = r.xs;
+              print r.name;
+              print taken[0] + taken[1] + taken[2];
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "partial move of a Vec field + read of a sibling OwnedStr field, then drop, must compile",
+        );
+    }
+
+    #[test]
     fn partial_move_double_extract_rejected() {
         // Reading a moved field again is a use-after-move.
         let source = r#"
@@ -9971,6 +10073,230 @@ mod tests {
         compile(source).expect("let-binding a ref should now compile");
         compile_to_c(source).expect("C backend accepts ref let-binding");
         compile_to_llvm(source).expect("LLVM backend accepts ref let-binding");
+    }
+
+    // BUG-36 (2026-08-02): the "single mutable borrow" exclusivity
+    // rule ("`ref` can multiply, `mut ref` must be exclusive") was
+    // documented but never enforced by the checker at all -- only the
+    // affine MOVE rule was checked. `let r: mut ref Vec<i64> = mut ref
+    // xs; push(r, 4); print xs[0];` compiled and ran cleanly on both
+    // backends with no diagnostic. Fixed with a deliberately narrow,
+    // lexical (not full non-lexical-lifetime), NAMED-`let`-binding-
+    // scoped check: `find_live_mut_borrow_of`/`find_live_borrow_of`
+    // scan all open scopes for a live `Ref`/`RefMut`-typed binding
+    // whose `ref_aliases` (pre-existing L4 machinery) names the
+    // binding being accessed/re-borrowed. See the doc comment on
+    // `find_live_mut_borrow_of` in checker.rs for the full design
+    // rationale and the deliberately-accepted gaps.
+
+    #[test]
+    fn bug36_mut_ref_read_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              print xs[0];
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("reading xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_mut_ref_write_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              set(mut ref xs, 0, 99);
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("writing to xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already borrowed mutably by 'r'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_scalar_mut_ref_read_while_borrowed_rejected() {
+        // The exclusivity check isn't Vec-specific -- a mutably
+        // borrowed scalar local must be rejected the same way.
+        let source = r#"
+            fn main() -> i64 {
+              let ys: i64 = 6;
+              let r: mut ref i64 = mut ref ys;
+              return ys;
+            }
+        "#;
+        let err = compile(source).expect_err("reading ys while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic for a scalar target, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_index_assign_while_borrowed_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              xs[0] = 99;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("direct index-assign to xs while r holds a live mut ref must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot index-assign to 'xs'") && combined.contains("mutably"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_second_mut_ref_while_shared_ref_live_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: ref Vec<i64> = ref xs;
+              let r2: mut ref Vec<i64> = mut ref xs;
+              push(r2, 4);
+              return r1[0];
+            }
+        "#;
+        let err = compile(source).expect_err("taking mut ref while a shared ref is live must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already borrowed as shared by 'r1'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_shared_ref_while_mut_ref_live_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: mut ref Vec<i64> = mut ref xs;
+              push(r1, 4);
+              let r2: ref Vec<i64> = ref xs;
+              return r2[0];
+            }
+        "#;
+        let err = compile(source).expect_err("taking a shared ref while a mut ref is live must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("already mutably borrowed by 'r1'"),
+            "expected the exclusivity diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug36_inline_mut_ref_call_arg_not_tracked_still_accepted() {
+        // The documented, deliberately-unenforced shape: an inline
+        // `foo(mut ref xs)` call argument is never stored in a named
+        // binding, so per the tutorials' own "borrow ends when the
+        // call returns" model it must NOT be flagged -- this is not a
+        // gap in the fix, it's the intended scope boundary.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              push(mut ref xs, 4);
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("inline mut-ref call argument must not be tracked as a named borrow");
+    }
+
+    #[test]
+    fn bug36_multiple_named_shared_refs_coexist_accepted() {
+        // "ref can multiply": two named shared-ref bindings of the
+        // same source must NOT conflict with each other. (Uses
+        // `print` + intermediate `let`s rather than `return
+        // r1[0] + r2[0]` -- the latter trips a separate, pre-existing
+        // and unrelated L4 escape-check quirk that conservatively
+        // walks `Index`/`Binary` return expressions for ref aliases
+        // regardless of the computed result's own type; not a BUG-36
+        // regression, just a test-shape pitfall to avoid here.)
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r1: ref Vec<i64> = ref xs;
+              let r2: ref Vec<i64> = ref xs;
+              print r1[0];
+              print r2[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("two coexisting named shared refs of the same source must be accepted");
+    }
+
+    #[test]
+    fn bug36_mut_ref_scope_ended_before_later_access_accepted() {
+        // The borrow is scoped to `r`'s own enclosing block -- once
+        // that block exits, `xs` must be freely accessible again.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              if true {
+                let r: mut ref Vec<i64> = mut ref xs;
+                push(r, 4);
+              }
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("access to xs after r's block has exited must be accepted");
+    }
+
+    #[test]
+    fn bug36_reassigning_ref_binding_tracks_new_target() {
+        // `r = mut ref ys;` must recompute `r`'s tracked alias --
+        // otherwise `ys` (the new, real target) would never be
+        // recognized as borrowed at all (a soundness gap), while `xs`
+        // (the old target) would stay incorrectly locked forever (a
+        // usability bug). Both directions are exercised here: `xs` is
+        // used successfully BEFORE the reassignment (while `r` still
+        // aliases it -- this must be rejected, confirming the OLD
+        // alias is still tracked right up to the reassignment), and
+        // `ys` is used AFTER (confirming the NEW alias is tracked).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = vec(4, 5, 6);
+              let r: mut ref Vec<i64> = mut ref xs;
+              push(r, 4);
+              r = mut ref ys;
+              push(r, 7);
+              return ys[0];
+            }
+        "#;
+        let err = compile(source).expect_err("reading ys while r (now retargeted) still borrows it must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("mutably borrowed by 'r'"),
+            "expected the exclusivity diagnostic against the NEW target 'ys', got: {}",
+            combined
+        );
     }
 
     #[test]
@@ -13159,6 +13485,32 @@ fn main() -> i64 {
             }
         "#;
         compile_to_c(source).expect("reduce with max on integer should type-check");
+    }
+
+    #[test]
+    fn parallel_for_reduce_over_vec_of_struct_field_compiles() {
+        // Testing-matrix sweep: "parallel for iterating a Vec<Struct>
+        // with a reduce accumulating a struct field". Checked
+        // 2026-08-02, not a bug: indexing a Vec<Pt> (Pt is Copy --
+        // scalar fields only) inside a parallel for body and
+        // reducing one of its fields with `+` compiles and computes
+        // correctly on both backends -- see the paired e2e test for
+        // the hand-computed sum.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let pts: Vec<Pt> = vec(Pt { x: 1, y: 10 }, Pt { x: 2, y: 20 }, Pt { x: 3, y: 30 }, Pt { x: 4, y: 40 });
+              let n: i64 = len(pts) as i64;
+              let sum: i64 = 0;
+              parallel for i from 0 to n
+              reduce sum with +;
+              {
+                sum = sum + pts[i].x;
+              }
+              return sum;
+            }
+        "#;
+        compile(source).expect("parallel for + reduce over a Vec<Struct> field must compile");
     }
 
     #[test]
@@ -25215,6 +25567,94 @@ fn main() -> i64 {
         assert!(
             c.contains("__result"),
             "expected __result field in specialized Task struct"
+        );
+    }
+
+    #[test]
+    fn generic_fn_with_ref_vec_t_param_infers_element_type_not_whole_vec() {
+        // BUG-71: found sweeping the testing matrix's "generic fn
+        // first<T>(xs: ref Vec<T>) -> T monomorphized over Struct and
+        // Tuple T" row. `infer_concrete_type_for_call`'s handling of
+        // a `Ref{inner}`/`RefMut{inner}` call argument resolved the
+        // referent's BARE scope type (e.g. `Vec<i64>` for `ref
+        // nums` where `nums: Vec<i64>`) instead of re-wrapping it as
+        // `Ref(Vec<i64>)` -- so `unify_param_to_arg`, given
+        // `param_ty = Ref(Vec(Param(T)))` vs `arg_ty = Vec(I64)`
+        // (top-level shapes don't match: Ref vs Vec), always fell
+        // through to `None`, and the fallback "T = whole arg type"
+        // path bound T to `Vec<i64>` instead of `i64` -- for ANY T,
+        // not just Struct/Tuple (confirmed with a scalar-only repro
+        // first). Every call site then failed with `argument 1 to
+        // 'first__Vec_I64_' must be assignable to ref Vec<Vec<i64>>,
+        // got ref Vec<i64>`. Fixed by re-wrapping the resolved
+        // referent type in `Type::Ref`/`Type::RefMut` before
+        // unification, letting `unify_param_to_arg`'s existing
+        // `(Ref(p), Ref(a))` arm peel both the Ref AND the Vec layer
+        // in lockstep, for any T (scalar, Struct, or Tuple).
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn first<T>(xs: ref Vec<T>) -> T {
+              return xs[0];
+            }
+            fn main() -> i64 {
+              let nums: Vec<i64> = vec(10, 20, 30);
+              let n: i64 = first(ref nums);
+
+              let pts: Vec<Pt> = vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 });
+              let p: Pt = first(ref pts);
+
+              let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+              let t: (i64, i64) = first(ref tups);
+
+              print n;
+              print p.x;
+              print p.y;
+              print t.0;
+              print t.1;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "generic fn(ref Vec<T>) -> T must infer T as the element type for scalar, Struct, and Tuple T",
+        );
+    }
+
+    #[test]
+    fn type_mangle_escapes_square_brackets_from_tuple_debug_repr() {
+        // BUG-72, found in the same sweep pass as BUG-71 (fixing
+        // BUG-71 was necessary to even reach this one): `type_mangle`'s
+        // fallback arm renders `format!("{:?}", ty)` and replaces a
+        // fixed set of punctuation with `_` -- but `Type::Tuple(Vec<Type>)`'s
+        // derived Debug output uses `[`/`]` for the inner Vec (e.g.
+        // `Tuple([I64, I64])`), and `[`/`]` weren't in the replacement
+        // set. A generic fn specialized over a Tuple T (e.g.
+        // `first<T>` called with `T = (i64, i64)`) mangled to a name
+        // containing literal brackets (`first__Tuple_[I64__I64]_`),
+        // which crashed the LLVM backend at `lli` with "expected '('
+        // in call" (not a valid bare LLVM identifier). The C backend
+        // happened not to hit this in the exact repro that found it,
+        // but `[`/`]` aren't valid in a bare C identifier either.
+        let source = r#"
+            fn first<T>(xs: ref Vec<T>) -> T {
+              return xs[0];
+            }
+            fn main() -> i64 {
+              let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+              let t: (i64, i64) = first(ref tups);
+              print t.0 + t.1;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("generic fn over Tuple T must compile to C");
+        assert!(
+            c.contains("first__Tuple_"),
+            "expected the generic-over-Tuple specialization in C output:\n{c}"
+        );
+        assert!(
+            !c.contains("Tuple_["),
+            "mangled generic-over-Tuple name must not contain a literal '[' from \
+             Type::Tuple's derived Debug repr (ordinary C array-declaration syntax \
+             elsewhere in the file is fine; only the identifier itself must be clean):\n{c}"
         );
     }
 
@@ -41519,6 +41959,53 @@ função main() -> i64 {
     }
 
     #[test]
+    fn extern_c_fn_returning_small_struct_unlowers_at_call_site_in_llvm() {
+        // BUG-77, found sweeping the testing matrix's "extern C fn
+        // taking/returning a Struct BY VALUE" row. The System V
+        // x86-64 ABI-lowering param-passing side (Closure #288,
+        // tested just above by
+        // `extern_small_struct_lowers_to_packed_integer_in_llvm`)
+        // correctly bitcasts a struct-by-value ARGUMENT to its
+        // packed-register lowered form (`i64`) before the call. The
+        // RETURN side never got the mirror-image fix: the `call`
+        // instruction correctly used the lowered return type, but
+        // the SSA value it produced was then handed straight to
+        // every downstream consumer (a `let` binding's `store`, a
+        // struct-field read, ...) as if it were already the real
+        // `%Struct_X` type -- an LLVM type mismatch the instant a
+        // struct-RETURNING extern fn was actually called (not just
+        // declared): `'%tN' defined with type 'i64' but expected
+        // '%Struct_Point'`. Fixed by mirroring the param-passing
+        // lowering in reverse right after the call: spill the
+        // lowered SSA value to an alloca, bitcast to the real struct
+        // pointer type, and load.
+        let source = r#"
+            struct Point { x: i32, y: i32 }
+            extern "C" fn make_point(x: i32, y: i32) -> Point;
+            fn main() -> i64 {
+              let p: Point = make_point(3 as i32, 4 as i32);
+              return (p.x + p.y) as i64;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("extern fn returning a small struct by value must compile to valid LLVM IR");
+        // The call itself uses the lowered i64 return type...
+        assert!(
+            ll.contains("call i64 @make_point("),
+            "expected the call site to use the lowered i64 return type, got:\n{}",
+            ll
+        );
+        // ...and the result gets un-lowered back to %Struct_Point
+        // via a bitcast before any consumer touches it as a struct.
+        assert!(
+            ll.contains("bitcast i64*") && ll.contains("to %Struct_Point*"),
+            "expected a bitcast from the lowered i64 form back to \
+             %Struct_Point* after the call, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn extern_vec_param_rejected() {
         let source = r#"
             extern "C" fn takes_vec(xs: Vec<i32>) -> i32;
@@ -41851,6 +42338,71 @@ função main() -> i64 {
             ll.contains("call void @free(i8*"),
             "expected LLVM OwnedStr-free in mixed-payload enum drop",
         );
+    }
+
+    #[test]
+    fn clone_at_mixed_payload_enum_preserves_scalar_and_string_payloads() {
+        // BUG-75, found sweeping the testing matrix's "match over
+        // Vec<Enum> with 3+ variants, mixed Copy/non-Copy payloads"
+        // row -- a real LLVM/C backend DIVERGENCE, not just an
+        // LLVM-only crash: `clone_at` on a `Vec<Enum>` element, where
+        // the enum has 3+ variants with genuinely different payload
+        // TYPES (i64, OwnedStr, bool), silently corrupted every
+        // scalar payload on the LLVM backend -- `Num(7)` cloned as
+        // `Num(0)`, `Flag(true)` cloned as `Flag(false)`. The C
+        // backend was unaffected.
+        //
+        // Root cause #1: `LLVM_ENUM_PAYLOAD_REGISTRY` stored a
+        // single `payload_ty` per enum -- the FIRST payload type
+        // found across variants -- so when a non-OwnedStr variant
+        // happened to be declared before the OwnedStr one,
+        // `clone_at`'s `heap_kind` detection missed the OwnedStr
+        // payload entirely and took a "tag-only" fallback that
+        // discarded the WHOLE payload for every variant (not just
+        // the missed OwnedStr one), round-tripping through
+        // `insertvalue undef, tag, 0` and leaving the payload byte-
+        // buffer field `undef`.
+        //
+        // Root cause #2 (found immediately after fixing #1 -- fixing
+        // the detection newly reached a second, previously-dormant
+        // bug): for a genuinely mixed-payload-type enum, field 1's
+        // real LLVM type is a byte buffer `[N x i8]`, not `i8*` --
+        // the pre-existing deep-clone-as-string code
+        // (`extractvalue`/`insertvalue` at the SSA-value level)
+        // assumed field 1 was always `i8*`, an LLVM type mismatch
+        // ("defined with type '[8 x i8]' but expected 'ptr'") the
+        // instant that branch was actually reached. Fixed by
+        // rewriting the deep-clone path to operate through pointers
+        // (GEP + bitcast to `i8**`) instead of SSA-value
+        // extract/insert, which works correctly for both the
+        // uniform-`i8*` and mixed-`[N x i8]` field-1 representations
+        // and naturally preserves every OTHER tag's raw payload
+        // bytes (no separate "tag-only" reconstruction needed --
+        // `dest_slot` starts as a full store of the loaded source
+        // value).
+        let source = r#"
+            enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+            fn describe(it: Item) -> i64 {
+              return match it {
+                Item.Num(n) then n,
+                Item.Text then 1000,
+                Item.Flag(b) then if b { 2000 } else { 3000 },
+                Item.Nothing then 0,
+              };
+            }
+            fn main() -> i64 {
+              let items: Vec<Item> = vec(Item.Num(7), Item.Text("hello" + ""), Item.Flag(true), Item.Flag(false), Item.Nothing);
+              let it0: Item = clone_at(ref items, 0);
+              let it1: Item = clone_at(ref items, 1);
+              let it2: Item = clone_at(ref items, 2);
+              let it3: Item = clone_at(ref items, 3);
+              let it4: Item = clone_at(ref items, 4);
+              let total: i64 = describe(it0) + describe(it1) + describe(it2) + describe(it3) + describe(it4);
+              print total;
+              return 0;
+            }
+        "#;
+        compile(source).expect("clone_at over a mixed-payload-type enum Vec element must compile");
     }
 
     #[test]
@@ -42333,6 +42885,161 @@ função main() -> i64 {
         "#;
         compile(source).expect(
             "payload-less Option.None must resolve alongside a second Option<T> instantiation",
+        );
+    }
+
+    #[test]
+    fn option_none_zero_placeholder_supports_enum_payload_type() {
+        // BUG-76, found sweeping the testing matrix's "nested if let
+        // 2 levels deep on a Vec element" row -- minimal repro turned
+        // out to have nothing to do with Vec/clone_at/nested if-let
+        // at all: `let z: Option<MyResult> = Option.None;` alone
+        // (MyResult a user-defined payloaded enum) crashed the LLVM
+        // backend. Same bug class as BUG-29 (Str) / BUG-35
+        // (Box<T>/raw pointers): building the payload-less `None`
+        // variant's zero-value placeholder for the OTHER variant's
+        // payload type (`Some(T)`'s `T`) has a per-type match that
+        // was simply missing an arm for `Type::Enum(_)`, falling
+        // through to the `_ => "0"` default -- invalid LLVM IR
+        // (`insertvalue %Enum_Option__MyResult %t, %Enum_MyResult 0,
+        // 1`, "integer constant must have integer type") since an
+        // enum-typed placeholder needs `zeroinitializer`, not a bare
+        // `0`. Fixed by adding `Type::Enum(_)` to the
+        // `zeroinitializer` arm alongside Vec/Tuple/Struct/Array/
+        // Task/Mutex/Channel.
+        let source = r#"
+            enum MyResult { Ok(i64), Err(i64) }
+            fn main() -> i64 {
+              let z: Option<MyResult> = Option.None;
+              print "built";
+              return 0;
+            }
+        "#;
+        compile(source).expect("Option<Enum>.None must compile (enum zero-placeholder)");
+    }
+
+    #[test]
+    fn option_array_and_result_tuple_payloads_compile_and_match_correctly() {
+        // BUG-80, found sweeping the testing matrix's "Option<Array<T,N>>
+        // / Result<Tuple,E>" row. LLVM was correct throughout; the C
+        // backend crashed on `Option<[i64; 3]>` specifically (Result
+        // over a Tuple payload already worked -- Tuple's own match-arm
+        // binding path was already correct). Two layered bugs:
+        //
+        // 1. The match-arm payload-binding codegen declared the local
+        //    via `c_type_name(bty)`, and `c_type_name`'s `Type::Array`
+        //    arm deliberately spells an array as the RETURN-POSITION
+        //    wrapper struct (`intent_arr_ret_<N>_<T>`, Closure #239) --
+        //    its own doc comment already warned "the Let path passes
+        //    through format_declarator instead", but this match-arm
+        //    binding (a Let-like position) was still calling
+        //    `c_type_name` directly. That wrapper typedef was never
+        //    even emitted for this position ("unknown type name"), and
+        //    even if it had been, it's a struct (`{ T data[N]; }`), so
+        //    `v_arr[0]` wouldn't subscript correctly either way.
+        // 2. Switching to `c_element_storage` (the correct per-shape
+        //    helper, already used for every other payload shape here)
+        //    fixed the type NAME but exposed a second issue: C arrays
+        //    (even through a raw-array typedef) can't be copy-assigned
+        //    via `=` at all ("invalid initializer"). Fixed by declaring
+        //    the binding as a POINTER to the element type instead
+        //    (`int64_t* v_arr = __scr.payload;`) -- the raw array
+        //    member naturally decays to a pointer to its first element
+        //    in this expression context (valid C), and `v_arr[0]`/etc.
+        //    in the arm body keeps working unchanged (pointer
+        //    subscripting uses the same syntax as array subscripting).
+        //
+        // Also needed emitting the `intent_arrN_T` typedef for an enum
+        // payload that's DIRECTLY `Array<T,N>` (not nested inside a
+        // Tuple, which BUG-74's fix already covered) -- walked
+        // `program.enums`' payload types directly through the existing
+        // `emit_array_typedefs_for` pass.
+        let source = r#"
+            fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+              if has { return Option.Some([1, 2, 3]); }
+              return Option.None;
+            }
+            fn safe_div_pair(a: i64, b: i64) -> Result<(i64, i64), i64> {
+              if b == 0 { return Result.Err(0 - 1); }
+              return Result.Ok((a / b, a % b));
+            }
+            fn main() -> i64 {
+              let oa: Option<[i64; 3]> = maybe_arr(true);
+              let total: i64 = match oa {
+                Option.Some(arr) then arr[0] + arr[1] + arr[2],
+                Option.None then 0 - 999,
+              };
+              let on: Option<[i64; 3]> = maybe_arr(false);
+              let total2: i64 = match on {
+                Option.Some(arr) then arr[0] + arr[1] + arr[2],
+                Option.None then 0 - 999,
+              };
+              let r1: Result<(i64, i64), i64> = safe_div_pair(17, 5);
+              let s1: i64 = match r1 {
+                Result.Ok(pair) then pair.0 * 100 + pair.1,
+                Result.Err(_) then 0 - 1,
+              };
+              print total;
+              print total2;
+              print s1;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Option<Array<T,N>> and Result<Tuple,E> must compile and match correctly");
+    }
+
+    #[test]
+    fn vec_of_option_of_copy_struct_compiles_and_matches_correctly() {
+        // Testing-matrix sweep (final row): "Vec<Option<Struct>> --
+        // Option of a non-Copy struct, stored in a Vec (three-level:
+        // Vec -> Option -> Struct)". The "non-Copy struct" half of
+        // this row is not actually reachable in v1 at all: enum
+        // payload admission (checked 2026-08-02) cleanly and
+        // consistently rejects ANY non-Copy struct payload for ANY
+        // enum -- not just Option<T> -- with "payload type ... is not
+        // admitted in v1" (confirmed identically for a plain
+        // user-declared `enum Wrapper { Has(Item), Empty }` wrapping
+        // the same non-Copy `Item { name: OwnedStr, val: i64 }`, so
+        // this isn't an Option-specific gap). Real, documented v1
+        // restriction, not a bug -- the admitted payload set is Copy
+        // types, OwnedStr, Vec<T>, Box<T>, [T;N] of Copy, Task,
+        // Atomic<T>, Mutex<T>, Channel<T,N>. The three-level
+        // Vec<Option<Struct>> nesting itself, with a Copy struct
+        // (all-scalar fields), compiles and computes correctly on
+        // both backends -- see the paired e2e test.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            fn main() -> i64 {
+              let items: Vec<Option<Pt>> = vec(Option.Some(Pt { x: 1, y: 2 }), Option.None, Option.Some(Pt { x: 3, y: 4 }));
+              let n: i64 = len(items) as i64;
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < n {
+                let it: Option<Pt> = items[i];
+                let v: i64 = match it {
+                  Option.Some(p) then p.x + p.y,
+                  Option.None then 0,
+                };
+                total = total + v;
+                i = i + 1;
+              }
+              print total;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Vec<Option<Struct>> (Copy struct) must compile and match correctly");
+
+        let noncopy_source = r#"
+            struct Item { name: OwnedStr, val: i64 }
+            enum Wrapper { Has(Item), Empty }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(noncopy_source)
+            .expect_err("a non-Copy struct payload must be rejected for ANY enum, not just Option");
+        assert!(
+            errs.iter().any(|e| e.message.contains("is not admitted in v1")),
+            "expected the enum-payload admission diagnostic, got: {:?}",
+            errs
         );
     }
 
@@ -49737,6 +50444,1694 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-89 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 5: dyn dispatch x generics). `Vec<dyn Iface>` holding
+    // TWO DIFFERENT monomorphizations of the same blanket-impl'd
+    // generic struct (`Wrapper<Dog>` and `Wrapper<Cat>`, both
+    // implementing `Printable` via `implement<T> Printable for
+    // Wrapper<T> where T is Printable`) crashed BOTH backends. Root
+    // cause: `expand_blanket_impls` (checker.rs) appends a concrete
+    // impl per monomorphization to `program.impls` but never removes
+    // the ORIGINAL blanket impl (`type_params` non-empty, `for_type:
+    // Type::Apply { name, [Type::Param(_)] }`) -- unlike the exactly
+    // analogous, already-established pattern for generic functions/
+    // structs/enums in the same function (`program.functions.
+    // retain(|f| f.type_params.is_empty())` etc., which all correctly
+    // drop the generic template after monomorphization). Whatever
+    // later builds the `dyn Printable` vtable/trampoline set iterates
+    // every impl of the interface in `program.impls` and didn't
+    // filter out the still-present blanket template, so it generated
+    // a BOGUS THIRD trampoline for the literal unresolved template
+    // `Wrapper<Param(T)>` alongside the two real ones -- LLVM:
+    // "loading unsized types is not allowed"; C: "implicit
+    // declaration of function 'fn_Wrapper__Param__T___print_it'"
+    // (referencing a struct type that was never declared). Fixed by
+    // adding `program.impls.retain(|imp| imp.type_params.is_empty())`
+    // right after `expand_blanket_impls` runs, mirroring the
+    // established convention exactly. Verified with `valgrind
+    // --leak-check=full` on a native AOT LLVM build: 0 errors.
+    #[test]
+    fn vec_of_dyn_iface_with_two_blanket_impl_monomorphizations_compiles_and_runs_correctly() {
+        let source = r#"
+            interface Printable {
+              fn print_it(self: Self) -> i64;
+            }
+            struct Wrapper<T> { inner: T }
+            implement<T> Printable for Wrapper<T> where T is Printable {
+              fn print_it(self: Wrapper<T>) -> i64 {
+                return self.inner.print_it();
+              }
+            }
+            struct Dog { name: i64 }
+            implement Printable for Dog {
+              fn print_it(self: Dog) -> i64 { return 111; }
+            }
+            struct Cat { name: i64 }
+            implement Printable for Cat {
+              fn print_it(self: Cat) -> i64 { return 222; }
+            }
+            fn main() -> i64 {
+              let wd: Wrapper<Dog> = Wrapper { inner: Dog { name: 1 } };
+              let wc: Wrapper<Cat> = Wrapper { inner: Cat { name: 2 } };
+              let items: Vec<dyn Printable> = vec(wd as dyn Printable, wc as dyn Printable);
+              let i: u64 = 0;
+              while i < len(items) {
+                print items[i].print_it();
+                i = i + 1;
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<dyn Printable> of two blanket-impl monomorphizations must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<dyn Printable> of two blanket-impl monomorphizations must compile to LLVM");
+    }
+
+    // BUG-90 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 6: try/? x containers/generics, row 2). `try EXPR`
+    // calling a GENERIC function (`fn wrap<T>(x: T) -> Option<T>`)
+    // failed with "generic function 'wrap' is declared but never
+    // called with concrete types" even though the call is genuinely
+    // there. Root cause was FOUR compounding gaps, all the same
+    // "sibling walker never learned about a syntax-sugar shape"
+    // pattern seen repeatedly this session:
+    //   1. `collect_generic_calls_in_expr` (checker.rs) had no arm
+    //      for `ExprKind::Match`/`ExprKind::Block` at all. Since
+    //      `desugar_try_let_in_program` runs BEFORE fn-generics
+    //      monomorphization, every `try wrap(n)` has ALREADY been
+    //      rewritten into `Match { scrutinee: Call(wrap, [n]), ... }`
+    //      by the time this scanner runs -- so the generic call was
+    //      structurally invisible to it, regardless of an earlier,
+    //      narrower `ExprKind::Try` arm fix (dead code for this
+    //      exact path, since `Try` nodes don't survive the desugar).
+    //   2. `rewrite_generic_calls_in_expr`, the SIBLING pass that
+    //      actually renames a resolved call site (`wrap` ->
+    //      `wrap__i64`), had the identical missing-arm gap --
+    //      without it the call site was never renamed, surfacing as
+    //      "unknown function 'wrap'" once the generic template was
+    //      dropped post-monomorphization.
+    //   3. `substitute_type_param`'s `Type::Apply` collapse (once
+    //      args are all-concrete) ALWAYS produced `Type::Struct
+    //      (mangled)`, never `Type::Enum(mangled)` -- so a generic
+    //      fn returning `Option<T>` specialized to a return type
+    //      that Displayed as "Option__i64" but was actually a
+    //      `Type::Struct`, not equal to the real `Type::Enum
+    //      ("Option__i64")` used elsewhere. Both print identically,
+    //      so the mismatch surfaced as a baffling "expected
+    //      Option__i64, got Option__i64" diagnostic. Fixed via a new
+    //      `GENERIC_ENUM_TEMPLATE_NAMES` thread-local (populated
+    //      once from `program.enums` before any monomorphization
+    //      touches them) so the collapse can tell enum templates
+    //      from struct templates by name.
+    //   4. `collect_apply_in_stmt`/`rewrite_apply_in_stmt` (used by
+    //      `monomorphize_type_decls_in_program` to resolve
+    //      `Type::Apply` annotations into concrete `Type::Enum`/
+    //      `Type::Struct`) only ever looked at a `Stmt::Let`'s own
+    //      `annotation` field, never recursed into `Return`/`Assign`
+    //      exprs to find NESTED `Stmt::Let`s the try-desugar
+    //      synthesizes inside `Block`/`Match` shapes -- so a nested
+    //      annotation like `let r: Result<i64, i64> = __t;` (from
+    //      `let r: Result<i64,i64> = try lookup(x);`) never got its
+    //      `Type::Apply` resolved, again surfacing as "expected
+    //      Result<i64, i64>, got Result__i64__i64" (same name, two
+    //      different unresolved/resolved representations).
+    // All four fixes compose; verified on both backends.
+    #[test]
+    fn try_inside_generic_function_call_produces_correct_output_on_both_backends_lib() {
+        let source = r#"
+            fn wrap<T>(x: T) -> Option<T> {
+              return Option.Some(x);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let w: i64 = try wrap(n);
+              return Option.Some(w + 1);
+            }
+            fn main() -> i64 {
+              let r: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("try wrapping a generic call must compile to C");
+        compile_to_llvm(source).expect("try wrapping a generic call must compile to LLVM");
+    }
+
+    #[test]
+    fn try_generic_call_after_try_concrete_call_produces_correct_output_lib() {
+        // Nested trys: a concrete call's `try` followed by a
+        // generic call's `try` in the same function, one taking the
+        // early-return path and one not.
+        let source = r#"
+            fn lookup(x: i64) -> Option<i64> {
+              if x < 0 { return Option.None; }
+              return Option.Some(x * 2);
+            }
+            fn wrap<T>(x: T) -> Option<T> {
+              return Option.Some(x);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let v: i64 = try lookup(n);
+              let w: i64 = try wrap(v);
+              return Option.Some(w + 1);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match compute(0 - 1) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("nested try(concrete)+try(generic) must compile to C");
+        compile_to_llvm(source).expect("nested try(concrete)+try(generic) must compile to LLVM");
+    }
+
+    // BUG-90 continued: category 6 row 3. Nested `Option<Result<T,
+    // E>>` -- the built-in generic enums nested in EACH OTHER --
+    // exercised via `try` propagation through both layers. This
+    // specifically needed fix #4 above (the nested-Let-annotation
+    // walk gap), since `let r: Result<i64, i64> = try lookup(x);`
+    // synthesizes a nested annotation that must resolve correctly.
+    #[test]
+    fn try_propagates_through_nested_option_result_enum_lib() {
+        let source = r#"
+            fn safe_div(a: i64, b: i64) -> Result<i64, i64> {
+              if b == 0 { return Result.Err(-1); }
+              return Result.Ok(a / b);
+            }
+            fn lookup(x: i64) -> Option<Result<i64, i64>> {
+              if x < 0 { return Option.None; }
+              return Option.Some(safe_div(100, x));
+            }
+            fn compute(x: i64) -> Option<Result<i64, i64>> {
+              let r: Result<i64, i64> = try lookup(x);
+              return Option.Some(r);
+            }
+            fn main() -> i64 {
+              let r1: Result<i64, i64> = match compute(4) {
+                Option.Some(v) then v,
+                Option.None then Result.Err(-99),
+              };
+              let out1: i64 = match r1 {
+                Result.Ok(v) then v,
+                Result.Err(e) then e,
+              };
+              let r2: Result<i64, i64> = match compute(0 - 1) {
+                Option.Some(v) then v,
+                Option.None then Result.Err(-99),
+              };
+              let out2: i64 = match r2 {
+                Result.Ok(v) then v,
+                Result.Err(e) then e,
+              };
+              print out1;
+              print out2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("try propagating through nested Option<Result<T,E>> must compile to C");
+        compile_to_llvm(source)
+            .expect("try propagating through nested Option<Result<T,E>> must compile to LLVM");
+    }
+
+    // Category 6 row 1: `try`/`?` inside a function that also
+    // holds a live LOCAL `Vec<Struct>` binding across the early
+    // return path. Checked clean (not a bug) -- the drop-sequence
+    // correctly accounts for the Vec<Struct> regardless of which
+    // branch of the try's implicit match fires. Verified with
+    // `valgrind --leak-check=full` on native AOT builds of both
+    // backends: 0 errors, all heap blocks freed.
+    #[test]
+    fn try_with_live_local_vec_struct_across_early_return_lib() {
+        let source = r#"
+            struct Item { id: i64, tag: OwnedStr }
+            fn find_positive(x: i64) -> Option<i64> {
+              if x < 0 { return Option.None; }
+              return Option.Some(x * 2);
+            }
+            fn compute(n: i64) -> Option<i64> {
+              let items: Vec<Item> = vec(
+                Item { id: 1, tag: "a" + "" },
+                Item { id: 2, tag: "b" + "" },
+              );
+              let doubled: i64 = try find_positive(n);
+              let first: Item = clone_at(ref items, 0);
+              let second: Item = clone_at(ref items, 1);
+              let total: i64 = doubled + first.id + second.id;
+              return Option.Some(total);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match compute(5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match compute(0 - 5) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("try with a live local Vec<Struct> across early-return must compile to C");
+        compile_to_llvm(source)
+            .expect("try with a live local Vec<Struct> across early-return must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 1:
+    // iterator-style Vec builtins CHAINED together in one expression
+    // (`xs.filter(...).map(...).fold(...)`, all one expression, no
+    // intermediate `let`). Checked clean -- NOT a bug. This is an
+    // explicitly documented v1 restriction (tutorials/src/
+    // intermediate/06b_iterators_primer.md, "A style note, not just
+    // a preference"): method-call sugar only rewrites a receiver
+    // that's a plain, named `Var` (checker.rs's `if let
+    // ExprKind::Var(recv_name) = &receiver.kind` guard, right before
+    // the Vec-builtin-sugar table) -- chaining directly onto the
+    // result of another call is rejected with EXACTLY the message
+    // this test asserts, which matches the tutorial's own quoted
+    // wording verbatim. The nested free-function form (`vec_fold(ref
+    // vec_map(ref vec_filter(ref xs, ...), ...), ...)`) hits the
+    // same underlying rule from the other direction: `ref` only
+    // borrows a named place, never an arbitrary expression, so
+    // `ref vec_filter(...)` is rejected too. Each combinator step
+    // needs its own named `let` in v1 either way.
+    #[test]
+    fn iterator_combinator_chained_directly_in_one_expression_is_rejected_per_docs() {
+        let source = r#"
+            fn is_even(x: i64) -> bool { return x % 2 == 0; }
+            fn double_it(x: i64) -> i64 { return x * 2; }
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let chained: i64 = xs.filter(is_even).map(double_it).fold(0, add);
+              print chained;
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("chaining combinators directly in one expression must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("cannot call method 'map' on")
+                && format!("{:?}", c_err).contains("methods are attached to struct/enum types only in v1"),
+            "unexpected C rejection message: {:?}",
+            c_err
+        );
+        let llvm_err = compile_to_llvm(source)
+            .err()
+            .expect("chaining combinators directly in one expression must be rejected (LLVM)");
+        assert!(
+            format!("{:?}", llvm_err).contains("cannot call method 'map' on")
+                && format!("{:?}", llvm_err).contains("methods are attached to struct/enum types only in v1"),
+            "unexpected LLVM rejection message: {:?}",
+            llvm_err
+        );
+    }
+
+    #[test]
+    fn iterator_combinators_chained_via_named_lets_compile_on_both_backends() {
+        let source = r#"
+            fn is_even(x: i64) -> bool { return x % 2 == 0; }
+            fn double_it(x: i64) -> i64 { return x * 2; }
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn mul(a: i64, b: i64) -> i64 { return a * b; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+              let ys: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+              let evens: Vec<i64> = xs.filter(is_even);
+              let doubled: Vec<i64> = evens.map(double_it);
+              let total: i64 = doubled.fold(0, add);
+              print total;
+              let zipped: Vec<i64> = vec_zip_with(ref xs, ref ys, mul);
+              let zipped_evens: Vec<i64> = zipped.filter(is_even);
+              let zipped_sum: i64 = zipped_evens.fold(0, add);
+              print zipped_sum;
+              let taken: Vec<i64> = doubled.take(2);
+              print taken[0];
+              print taken[1];
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("chained combinators via named lets must compile to C");
+        compile_to_llvm(source)
+            .expect("chained combinators via named lets must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 2:
+    // `task`/`join` (the call-form, `task fn(args) -> Task<R>`) with
+    // a genuinely MULTI-BLOCK callee body (nested if/else inside a
+    // while loop) -- main.rs's own comment flags multi-block task
+    // bodies as an SSA-LLVM-reject/tree-LLVM-fallback edge case
+    // (`ssa_llvm_extra_reject`). Checked clean on both backends;
+    // verified the output by hand (not just cross-backend
+    // agreement, in case both backends shared a bug): worker(10) =
+    // 37, worker(20) = 107.
+    // Also tried the block-form `task <name> { <body> }` with a
+    // captured outer variable assignment (`result = acc;` inside the
+    // task, read after `join`) -- NOT a bug: docs (tutorials/src/
+    // advanced/03_concurrency.md, "There's also a block form...")
+    // explicitly state the block form "has no return-value payload
+    // ... since it implicitly captures the enclosing function's
+    // bindings" BY VALUE/Copy -- the assignment legitimately only
+    // mutates the task's own private copy, so the outer binding is
+    // untouched after `join`. This is intentional, not silently
+    // wrong; getting a value out of a task requires either the
+    // call-form's `Task<R>` + `join`, or an explicit `Atomic`/
+    // `Mutex`/`Channel`.
+    #[test]
+    fn task_join_callform_multiblock_body_produces_correct_output_on_both_backends() {
+        let source = r#"
+            fn worker(n: i64) -> i64 {
+              let acc: i64 = 0;
+              let i: i64 = 0;
+              while i < n {
+                if i % 3 == 0 {
+                  acc = acc + i * 2;
+                } else {
+                  if i % 2 == 0 {
+                    acc = acc + i;
+                  } else {
+                    acc = acc - i;
+                  }
+                }
+                i = i + 1;
+              }
+              return acc;
+            }
+            fn main() -> i64 {
+              let t1: Task<i64> = task worker(10);
+              let t2: Task<i64> = task worker(20);
+              let r1: i64 = join t1;
+              let r2: i64 = join t2;
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("multi-block task/join body must compile to C");
+        compile_to_llvm(source).expect("multi-block task/join body must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 4:
+    // Graph/Bst/Trie/SkipList/UnionFind/BloomFilter actually RUN
+    // end-to-end together (not just compile-checked individually --
+    // per docs/TESTING_MATRIX_TODO.md, these had 401 lib.rs
+    // compile-only hits but only 8 real e2e hits despite
+    // advanced/05b_advanced_collections.md leaning heavily on all
+    // six). Checked clean on both backends -- every value verified
+    // against the tutorial's own documented expected output.
+    #[test]
+    fn advanced_collections_graph_bst_trie_skiplist_unionfind_bloomfilter_run_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let g: Graph = graph_new(5);
+              let _ = g.add_edge(0, 1, 4);
+              let _ = g.add_edge(0, 2, 1);
+              let _ = g.add_edge(2, 1, 2);
+              let _ = g.add_edge(1, 3, 1);
+              let _ = g.add_edge(3, 4, 3);
+              print g.num_nodes();
+              print g.num_edges();
+              print g.bfs_reach(0);
+              print g.dfs_reach(0);
+              let dist: Option<i64> = g.dijkstra(0, 4);
+              print option_unwrap_or(dist, -1);
+
+              let b: Bst<i64> = bst_new();
+              let _ = b.insert(5);
+              let _ = b.insert(3);
+              let _ = b.insert(7);
+              let _ = b.insert(1);
+              print b.contains(3);
+              print b.contains(6);
+              print b.len();
+              print option_unwrap_or(b.min(), -1);
+              print option_unwrap_or(b.max(), -1);
+              let _ = b.remove(3);
+              print b.len();
+
+              let t: Trie = trie_new();
+              let _ = t.insert("hello");
+              let _ = t.insert("help");
+              let _ = t.insert("world");
+              print t.contains("hello");
+              print t.contains("hell");
+              print t.starts_with("hel");
+              print t.starts_with("wor");
+              print t.len();
+
+              let sl: SkipList = skiplist_new();
+              let _ = sl.insert(10);
+              let _ = sl.insert(5);
+              let _ = sl.insert(20);
+              let _ = sl.insert(5);
+              print sl.len();
+              print sl.contains(5);
+              print sl.contains(7);
+              print option_unwrap_or(sl.min(), -1);
+              print option_unwrap_or(sl.max(), -1);
+
+              let uf: UnionFind = union_find_new(6);
+              let _ = union_find_union(mut ref uf, 0, 1);
+              let _ = union_find_union(mut ref uf, 1, 2);
+              let _ = union_find_union(mut ref uf, 3, 4);
+              print union_find_count(ref uf);
+              print union_find_connected(mut ref uf, 0, 2);
+              print union_find_connected(mut ref uf, 0, 3);
+
+              let bf: BloomFilter = bloom_filter_new(1024, 4);
+              let _ = bf.insert(42);
+              let _ = bf.insert(100);
+              let _ = bf.insert(7);
+              print bf.contains(42);
+              print bf.contains(99);
+              print bf.len();
+              print bf.count();
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("advanced collections program must compile to C");
+        compile_to_llvm(source).expect("advanced collections program must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7 row 3
+    // neighborhood: `mmio_read_u8`/`mmio_read_u16`/`mmio_write_u8`/
+    // `mmio_write_u16` in tree-LLVM (forced by a `#[no_mangle]` fn
+    // anywhere in the program) must emit type-consistent IR --
+    // narrow load/store, no spurious i64 widen/narrow mismatch. This
+    // is a fast unit-level check (text inspection); the real e2e
+    // regression guard is `tests/run_end_to_end.rs`'s
+    // `mmio_narrow_read_write_builtins_build_and_run_correctly_under_no_mangle`,
+    // which actually runs the value through `opt`/`llc` (the only
+    // thing that catches an ill-typed-IR regression -- this
+    // `compile_to_llvm` helper just calls `LlvmBackend.emit` directly
+    // with no verifier pass). See that test's doc comment for the
+    // full root-cause writeup.
+    #[test]
+    fn mmio_narrow_read_write_builtins_emit_type_consistent_ir() {
+        let source = r#"
+            #[no_mangle]
+            fn dummy_export() -> i64 {
+              return 0;
+            }
+            fn uart_tx_ready() -> bool {
+              let sr: u16 = mmio_read_u16(0x40011000);
+              return (sr as i64) & 0x80 != 0;
+            }
+            fn uart_send(byte: u8) -> i64 {
+              let _ = mmio_write_u8(0x40011004, byte);
+              return 0;
+            }
+            fn set_ctrl_reg(v: u16) -> i64 {
+              let _ = mmio_write_u16(0x40011008, v);
+              return 0;
+            }
+            fn main() -> i64 {
+              print "ok";
+              return 0;
+            }
+        "#;
+        let ir = compile_to_llvm(source)
+            .expect("mmio narrow read/write under #[no_mangle] must compile to LLVM");
+        assert!(ir.contains("fn_uart_tx_ready"), "expected uart_tx_ready in emitted IR");
+        assert!(ir.contains("fn_uart_send"), "expected uart_send in emitted IR");
+        assert!(ir.contains("fn_set_ctrl_reg"), "expected set_ctrl_reg in emitted IR");
+        // This text-emission check can't catch the actual ill-typed-IR
+        // bug (LlvmBackend.emit never runs opt/llc's verifier) -- the
+        // real regression guard is the e2e test in
+        // tests/run_end_to_end.rs, which builds+links+runs this exact
+        // program through the full pipeline.
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 6:
+    // `Deque<Struct>` / `BinaryHeap<Struct>` -- do these collections
+    // support non-scalar (struct) elements? Checked clean on both
+    // backends -- NOT a bug. Both are scalar-i64-only in v1, cleanly
+    // rejected with a clear diagnostic identical in shape to
+    // HashMap's documented scalar-only-V restriction: "deque_push_
+    // back() only supports Deque<i64> in v1, got Deque<Item>" /
+    // "binary_heap_len() only supports BinaryHeap<i64> in v1, got
+    // BinaryHeap<Item>". Deque and BinaryHeap share the SAME
+    // restriction as each other (neither is more permissive).
+    #[test]
+    fn deque_and_binary_heap_reject_non_scalar_struct_elements() {
+        let deque_source = r#"
+            struct Item { id: i64 }
+            fn main() -> i64 {
+              let d: Deque<Item> = deque_new();
+              let _ = deque_push_back(mut ref d, Item { id: 1 });
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(deque_source)
+            .err()
+            .expect("Deque<Struct> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("only supports `Deque<i64>` in v1"),
+            "unexpected Deque rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(deque_source)
+            .err()
+            .expect("Deque<Struct> must be rejected (LLVM)");
+
+        let heap_source = r#"
+            struct Item { id: i64 }
+            fn main() -> i64 {
+              let h: BinaryHeap<Item> = binary_heap_new();
+              let _ = binary_heap_push(mut ref h, Item { id: 1 });
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(heap_source)
+            .err()
+            .expect("BinaryHeap<Struct> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("only supports `BinaryHeap<i64>` in v1")
+                || format!("{:?}", c_err).contains("binary_heap value must be assignable to i64"),
+            "unexpected BinaryHeap rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(heap_source)
+            .err()
+            .expect("BinaryHeap<Struct> must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 7, row 7:
+    // `Graph`/`Trie` with non-i64 node/edge payloads. Checked clean
+    // -- NOT a bug, and more fundamental than a runtime restriction:
+    // `Graph`/`Trie` are non-generic types in v1 (no `Type::Apply`
+    // form at all -- `Graph`/`Trie` are bare, monomorphic types
+    // whose nodes are always i64 indices / Str keys respectively).
+    // The parser itself rejects `Graph<T>`/`Trie<T>` syntax outright
+    // ("expected '='"), so the boundary can't even be expressed,
+    // let alone silently misbehave.
+    #[test]
+    fn graph_and_trie_reject_generic_type_parameter_syntax() {
+        let graph_source = r#"
+            fn main() -> i64 {
+              let g: Graph<i64> = graph_new(3);
+              return 0;
+            }
+        "#;
+        compile_to_c(graph_source)
+            .err()
+            .expect("Graph<T> generic syntax must be rejected (C)");
+        compile_to_llvm(graph_source)
+            .err()
+            .expect("Graph<T> generic syntax must be rejected (LLVM)");
+
+        let trie_source = r#"
+            fn main() -> i64 {
+              let t: Trie<i64> = trie_new();
+              return 0;
+            }
+        "#;
+        compile_to_c(trie_source)
+            .err()
+            .expect("Trie<T> generic syntax must be rejected (C)");
+        compile_to_llvm(trie_source)
+            .err()
+            .expect("Trie<T> generic syntax must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 8, row 1:
+    // `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC struct
+    // by value (BUG-77 tested a concrete, non-generic struct only).
+    // Checked clean on both backends -- a small (<=16 byte,
+    // all-scalar-field) monomorphized generic struct passes/returns
+    // by value correctly (verified with a real linked C shim, see
+    // the matching e2e test); an oversized one is cleanly rejected
+    // with the mangled monomorphized name in the diagnostic,
+    // confirming FFI ABI validation runs AFTER monomorphization and
+    // correctly sees the concrete `Triple__i64` shape.
+    #[test]
+    fn extern_c_fn_with_oversized_monomorphized_generic_struct_is_rejected() {
+        let source = r#"
+            struct Triple<T> { a: T, b: T, c: T }
+            extern "C" fn make_triple(a: i64, b: i64, c: i64) -> Triple<i64>;
+            extern "C" fn triple_sum(t: Triple<i64>) -> i64;
+            fn main() -> i64 {
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("oversized monomorphized generic struct by value must be rejected (C)");
+        let msg = format!("{:?}", c_err);
+        assert!(
+            msg.contains("Triple__i64") && msg.contains("unsupported"),
+            "expected diagnostic to name the mangled monomorphized struct: {:?}",
+            c_err
+        );
+        compile_to_llvm(source)
+            .err()
+            .expect("oversized monomorphized generic struct by value must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 8, row 2:
+    // `extern "C"` fn signature using `Option<T>`/`Result<T,E>`
+    // directly in a parameter or return position. Checked clean on
+    // both backends -- cleanly rejected ("enum-by-value layout is
+    // not yet wired through FFI"), both in return position
+    // (`Option<i64>`) and parameter position (`Result<i64, i64>`).
+    #[test]
+    fn extern_c_fn_with_option_or_result_in_signature_is_rejected() {
+        let option_source = r#"
+            extern "C" fn maybe_get(x: i64) -> Option<i64>;
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(option_source)
+            .err()
+            .expect("Option<T> in extern fn return position must be rejected (C)");
+        compile_to_llvm(option_source)
+            .err()
+            .expect("Option<T> in extern fn return position must be rejected (LLVM)");
+
+        let result_source = r#"
+            extern "C" fn handle_result(r: Result<i64, i64>) -> i64;
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(result_source)
+            .err()
+            .expect("Result<T,E> in extern fn parameter position must be rejected (C)");
+        compile_to_llvm(result_source)
+            .err()
+            .expect("Result<T,E> in extern fn parameter position must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 8, row 3:
+    // calling an `extern "C"` function inside a spawned `task` body.
+    // Checked clean on both backends -- a plain (non-pure) `extern
+    // "C" fn` call is rejected with the SAME "task body cannot call
+    // non-pure function" diagnostic as any other impure call, with a
+    // helpful hint pointing at the documented escape hatch (`pure
+    // extern "C" fn`, `tutorials/src/intermediate/09_ffi.md`); using
+    // that escape hatch genuinely works end-to-end (see the matching
+    // e2e test) -- not a distinct, undocumented gap.
+    #[test]
+    fn extern_c_call_inside_task_body_requires_pure_extern() {
+        let source = r#"
+            extern "C" fn c_add(a: i64, b: i64) -> i64;
+            fn main() -> i64 {
+              task worker {
+                let x: i64 = c_add(3, 4);
+              }
+              join worker;
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(source)
+            .err()
+            .expect("plain extern fn call inside task body must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("task body cannot call non-pure function"),
+            "unexpected rejection message: {:?}",
+            c_err
+        );
+        compile_to_llvm(source)
+            .err()
+            .expect("plain extern fn call inside task body must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 9, row 1:
+    // `clone_at` on `Vec<GenericStruct<T>>` -- the indexed-mutate-
+    // then-`set` idiom through a generic element type. Checked clean
+    // on both backends -- `clone_at` correctly deep-clones the
+    // element (including a non-Copy `OwnedStr` field), `set` writes
+    // the mutated clone back to the right index, and unrelated
+    // slots are untouched. Verified with `valgrind --leak-check=full`
+    // on native AOT builds of both backends: 0 errors, all heap
+    // blocks freed.
+    #[test]
+    fn clone_at_indexed_mutate_then_set_on_generic_struct_vec_lib() {
+        let source = r#"
+            struct Holder<T> { value: T, label: OwnedStr }
+            fn main() -> i64 {
+              let items: Vec<Holder<i64>> = vec(
+                Holder { value: 1, label: "a" + "" },
+                Holder { value: 2, label: "b" + "" },
+              );
+              let mut_item: Holder<i64> = clone_at(ref items, 1);
+              let updated: Holder<i64> = Holder { value: mut_item.value + 100, label: mut_item.label };
+              let _ = set(mut ref items, 1, updated);
+              let a: Holder<i64> = clone_at(ref items, 0);
+              let b: Holder<i64> = clone_at(ref items, 1);
+              print a.value;
+              print b.value;
+              print b.label;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("clone_at indexed-mutate-then-set on generic struct Vec must compile to C");
+        compile_to_llvm(source)
+            .expect("clone_at indexed-mutate-then-set on generic struct Vec must compile to LLVM");
+    }
+
+    // BUG-93 (found+fixed 2026-08-03). Category 9, row 2: a recursive
+    // GENERIC struct (`struct Node<T> { value: T, next: Option<Box
+    // <Node<T>>> }`, self-referential AND generic at once) failed to
+    // compile at all -- "unknown variable 'Option'" / "struct field
+    // 'next' must be assignable to Option__Box_Struct__Node__i64___,
+    // got i64" -- even though the exact same pattern with a
+    // CONCRETE (non-generic) `Node` has been a working, shipped
+    // regression test since BUG-35.
+    // Root cause was FIVE compounding gaps, the SAME "sibling walker
+    // never learned about a shape" pattern from BUG-90, but this
+    // time the missing shape was `Type::Box` (not Match/Block):
+    //   1-4. `collect_apply_in_ty`, `rewrite_apply_in_ty`, the `rec`
+    //      closure inside `collect_apply_in_stmt`, and `normalize_one`
+    //      (FOUR independent copies of essentially the same "walk a
+    //      Type looking for/rewriting nested Type::Apply" logic, all
+    //      in checker.rs) each had an arm for Vec/Ref/RefMut/Atomic/
+    //      Mutex/Guard but none for `Type::Box` -- so a generic
+    //      instantiation nested inside a `Box<...>` (e.g. `Option<Box
+    //      <Node<T>>>`'s inner `Node<T>`) was invisible to every one
+    //      of these passes. Fixed by adding the missing arm to all
+    //      four, mirroring the existing sibling-type arms exactly.
+    //   5. Even with (1-4) fixed, `monomorphize_type_decls_in_program`
+    //      still only ran discovery+generation in a SINGLE pass: a
+    //      freshly-monomorphized generic struct's OWN fields can
+    //      introduce a FURTHER generic instantiation need (concretely:
+    //      `Node__i64`'s own `next` field needs `Option<Box<Node__
+    //      i64>>` registered, but nothing else in the program ever
+    //      writes that type out literally for the single discovery
+    //      pass to find). The code already collected this via
+    //      `collect_apply_in_ty(&fld.ty, ..., &mut needed_structs.
+    //      clone(), &mut needed_enums.clone())` -- but cloning BOTH
+    //      output lists meant the discovery had nowhere real to go;
+    //      the surrounding comment literally said "ignored copy".
+    //      Fixed by converting the single-pass generation into a
+    //      proper fixed-point worklist (mirroring the established
+    //      "XL4 multi-pass" pattern `monomorphize_generics_in_program`
+    //      already uses for the analogous fn-generics case): each
+    //      round processes only newly-pending (name, args) pairs and
+    //      feeds any further discovered needs into the next round,
+    //      until a round adds nothing new.
+    // Verified with `valgrind --leak-check=full` on a native AOT
+    // LLVM build: 0 errors.
+    // Two SEPARATE, narrower findings surfaced during this
+    // investigation, both deferred (not fixed) rather than rushed:
+    //   (a) A bare enum constructor written DIRECTLY inside a struct-
+    //       literal field (`Node { value: 2, next: Option.Some(box(
+    //       tail)) }`) is still ambiguous once 2+ instantiations of
+    //       the same generic enum exist in the program -- BUG-46's
+    //       existing fix (`resolve_bare_enum_ctors_in_stmt`) only
+    //       covers a `Let`'s own top-level initializer or a `Return`,
+    //       not an enum constructor nested inside a StructLit field.
+    //       HAS A WORKING WORKAROUND: bind the constructor to its own
+    //       `let` with an explicit enum annotation first (`let
+    //       tail_next: Option<Box<Node<i64>>> = Option.Some(box(
+    //       tail));`), THEN use that binding as the struct field --
+    //       this hits BUG-46's already-working `Let`-annotation path
+    //       and compiles/runs correctly (verified, both backends).
+    //   (b) Field access through a BARE `Box<T>` (`n1.value` where
+    //       `n1: Box<Node<i64>>`) is rejected outright ("field access
+    //       on non-struct type Box<...>") -- `Type::deref()` (ast.rs)
+    //       only peels `Ref`/`RefMut`, never `Box`. Reproduces
+    //       identically with a non-generic Box<T> too, so it's
+    //       orthogonal to generics specifically. `Type::deref()` is
+    //       used in 60+ call sites across checker.rs/backend_c.rs/
+    //       backend_llvm.rs/ssa.rs/smt.rs -- extending it (or adding a
+    //       parallel Box-aware variant) needs careful auditing of
+    //       every call site's assumptions before it's safe to touch,
+    //       the same category of risk as BUG-91's deferred fix.
+    //   (c) While valgrind-verifying (a)'s workaround, found a THIRD,
+    //       genuinely separate pre-existing memory leak, independent
+    //       of generics entirely: `Box<StructWithHeapOwningFields>`'s
+    //       scope-exit Drop (`backend_c.rs`'s per-statement Drop
+    //       AND its sibling `emit_struct_field_drops` helper, both
+    //       hit the exact same gap) only frees the Box's OWN heap
+    //       slot -- it never recursively drops the BOXED struct's
+    //       OWN heap-owning fields first. Reproduces on the ALREADY-
+    //       SHIPPED, non-generic `examples/language/english/
+    //       option_box_recursive_struct.vani` (BUG-35's own
+    //       regression example): `valgrind --leak-check=full` on its
+    //       C-backend build shows "48 (24 direct, 24 indirect) bytes
+    //       ... definitely lost" (LLVM backend: 0 errors, unaffected).
+    //       Deferred rather than fixed in-session: unlike the other
+    //       fixes in this session, this ISN'T a simple missing-arm
+    //       fix -- a `Box<Node>` field pointing into a chain of
+    //       unknown-at-compile-time length needs a genuine runtime
+    //       recursive/iterative free routine (mirroring how `Vec<T>`'s
+    //       own drop is a real per-element-type HELPER FUNCTION that
+    //       loops at runtime, not inlined code), which is a
+    //       substantive design task rather than a mirrored one-line
+    //       arm addition. Whoever picks this up next: start from
+    //       `emit_struct_field_drops`'s `Type::Box(box_inner) => match
+    //       &**box_inner { ... _ => free-only ... }` arm (backend_c.rs)
+    //       and the analogous top-level scope-exit Drop arm for
+    //       `Type::Box(inner)` -- both need a `Type::Struct(name)` case
+    //       that emits a call to a NEW dedicated recursive free helper
+    //       (one per boxed struct shape) rather than a bare `free()`.
+    // New tests: 2 `src/lib.rs` + 1 `tests/run_end_to_end.rs` (real
+    // stdout, both backends) for the fixed recursive-generic-struct
+    // case (using workaround (a)'s pattern, which is also the
+    // idiomatic v1 way to write this).
+    #[test]
+    fn recursive_generic_struct_node_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+            fn main() -> i64 {
+              let tail: Node<i64> = Node { value: 3, next: Option.None };
+              let tail_next: Option<Box<Node<i64>>> = Option.Some(box(tail));
+              let mid: Node<i64> = Node { value: 2, next: tail_next };
+              let mid_next: Option<Box<Node<i64>>> = Option.Some(box(mid));
+              let head: Node<i64> = Node { value: 1, next: mid_next };
+              print head.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("recursive generic struct Node<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("recursive generic struct Node<T> must compile to LLVM");
+    }
+
+    // BUG-95 (found+fixed 2026-08-03). Follow-up to BUG-93/BUG-46:
+    // a bare enum constructor written DIRECTLY inside a struct-
+    // literal field (`Node { value: 2, next: Option.Some(box(tail))
+    // }`, with NO intermediate `let` -- the pattern the BUG-93 test
+    // above needed as a workaround) now compiles and runs correctly.
+    // Root cause was TWO compounding bugs, deeper than the original
+    // "BUG-46-class ambiguity" diagnosis:
+    //   1. BUG-46's fix (`resolve_bare_enum_ctors_in_stmt`) never
+    //      looked inside a struct-literal's OWN fields, only a
+    //      `let`'s top-level initializer or a `return`. Fixed by
+    //      adding `resolve_bare_enum_ctor_in_struct_lit`, which
+    //      looks up the struct literal's (already-monomorphized)
+    //      field types and resolves any enum-typed field's bare
+    //      constructor value the same way.
+    //   2. That alone still failed: the pass that resolves a
+    //      `StructLit`'s own `type_name` from the bare template name
+    //      ("Node") to the mangled one ("Node__i64")
+    //      (`resolve_bare_struct_lits_in_stmt`) ran AFTER the enum-
+    //      ctor pass instead of before, so `resolve_bare_enum_ctor_
+    //      in_struct_lit`'s field-type lookup (keyed by the mangled
+    //      name) always missed. Fixed by reordering the two passes.
+    //   3. Even with (1) and (2) fixed, the target enum this now
+    //      correctly resolved TO didn't actually exist yet:
+    //      `substitute_type_param`'s `Type::Apply` collapse (BUG-90's
+    //      fix) collapses a struct field's type straight to
+    //      `Type::Enum(mangled)` IN PLACE the moment its args become
+    //      concrete -- discarding the `(name, args)` pair that
+    //      produced it before `collect_apply_in_ty` (BUG-93's
+    //      worklist-feeding fix) ever gets a chance to see the
+    //      now-gone `Type::Apply` node and register it as needed.
+    //      Concretely: `Node__i64`'s `next` field correctly ends up
+    //      typed `Type::Enum("Option__Box_Struct__Node__i64___")`,
+    //      but `program.enums` never actually contained an `EnumDecl`
+    //      by that name -- "enum '...' is not declared" the instant
+    //      anything referenced it directly, which is exactly why the
+    //      BUG-93 workaround (writing the instantiation out literally
+    //      via an explicit `let: Option<Box<Node<i64>>>` annotation
+    //      elsewhere) worked: that path keeps the `Type::Apply` node
+    //      intact long enough for the normal discovery walk to find
+    //      it. Fixed with a new thread-local queue
+    //      (`NEWLY_COLLAPSED_GENERIC_APPLIES`) that the collapse site
+    //      records into on its way to erasing the `Apply` shape,
+    //      drained by the same worklist round that already feeds
+    //      `collect_apply_in_ty`'s discoveries back in.
+    // Verified with `valgrind --leak-check=full` on a native AOT
+    // LLVM build: 0 errors (the C-backend build reproduces a
+    // SEPARATE, already-tracked, unrelated pre-existing leak in
+    // `Box<StructWithHeapOwningFields>` Drop -- see the deferred
+    // finding in BUG-93's own writeup in docs/TODO_CURRENT.md).
+    // No regression on the BUG-93 workaround-pattern test above,
+    // which continues to pass unchanged.
+    #[test]
+    fn recursive_generic_struct_node_direct_struct_literal_form_lib() {
+        let source = r#"
+            struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+            fn main() -> i64 {
+              let tail: Node<i64> = Node { value: 3, next: Option.None };
+              let mid: Node<i64> = Node { value: 2, next: Option.Some(box(tail)) };
+              let head: Node<i64> = Node { value: 1, next: Option.Some(box(mid)) };
+              print head.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("direct struct-literal form of recursive generic struct must compile to C");
+        compile_to_llvm(source)
+            .expect("direct struct-literal form of recursive generic struct must compile to LLVM");
+    }
+
+    // BUG-96 (found+fixed 2026-08-03). Deferred finding from BUG-93:
+    // field access through a bare `Box<T>` (`n.value` where `n:
+    // Box<Node>`) was rejected outright ("field access on non-
+    // struct type Box<...>"). `Box<T>` (T != dyn Iface) lowers to a
+    // bare `T*` in both backends -- bit-identical to Ref/RefMut's
+    // own runtime representation -- so field access can peel it the
+    // same way `ref_to_point.x` peels a `Ref`. Fixed with two new,
+    // narrowly-scoped `Type` helpers in ast.rs
+    // (`is_field_access_indirect` / `deref_through_box`) used only
+    // at FieldAccess resolution/codegen sites, deliberately NOT
+    // folded into the general-purpose `is_any_ref()`/`deref()` (60+
+    // call sites there assume Ref/RefMut's specific *borrowed*
+    // semantics -- e.g. borrow-checking and move analysis -- which
+    // must not conflate an owned `Box` with a borrow). `Box<dyn
+    // Iface>` is deliberately excluded (still cleanly rejected): it
+    // lowers to the 16-byte fat-pointer struct itself, not a
+    // pointer to a field-bearing aggregate, so it genuinely has no
+    // fields to read. Verified `Box<dyn Iface>` field access is
+    // still correctly rejected (no regression) as part of this fix.
+    #[test]
+    fn field_access_through_bare_box_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            struct Node { value: Point, next: Box<Point> }
+            fn main() -> i64 {
+              let p: Point = Point { x: 3, y: 4 };
+              let boxed: Box<Point> = box(p);
+              print boxed.x;
+              print boxed.y;
+              let n: Node = Node { value: Point { x: 1, y: 2 }, next: box(Point { x: 9, y: 8 }) };
+              print n.next.x;
+              print n.next.y;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("field access through a bare Box<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("field access through a bare Box<T> must compile to LLVM");
+    }
+
+    // BUG-97 (found+fixed 2026-08-03). Deferred finding from
+    // BUG-93/task #39: `Box<StructWithHeapOwningFields>`'s scope-
+    // exit Drop on the C backend leaked -- the canonical `Node {
+    // next: Option<Box<Node>> }` recursive-struct shape (the one
+    // the Box<T>/RAII tutorial itself demonstrates,
+    // examples/language/english/option_box_recursive_struct.vani)
+    // never freed anything at all, not even the outermost Box's own
+    // malloc'd slot. Root cause was deeper than "Drop doesn't
+    // recurse": `Type::Enum`'s non-Copy-payload registration only
+    // ever checked a hardcoded `OwnedStr | Vec` match, never `Box`,
+    // so `Option<Box<Node>>` was silently treated as Copy -- which
+    // made `Node` itself register as Copy too, so the checker never
+    // emitted a scope-exit `TypedStmt::Drop` for a `Node` local AT
+    // ALL. Fixing that (checker.rs: merge the struct/enum non-Copy
+    // registration into one fixed-point loop, and check
+    // `!payload.is_copy()` generically instead of the stale
+    // hardcoded match) correctly unmasked the struct as non-Copy,
+    // but then surfaced that struct-field-type validation had no
+    // `Type::Enum` field arm, and `box()`'s own gate rejected any
+    // non-Copy struct outright -- both needed relaxing (any struct
+    // that already passed field-type validation is safe to box; its
+    // own Drop emission -- extended below -- knows how to walk it).
+    // Backend codegen (backend_c.rs) needed three things: (1)
+    // `emit_struct_field_drops` gained a `Type::Enum` arm (was a
+    // silent no-op before) and a `Type::Struct` case in its
+    // `Type::Box` arm (was a bare `free()` of the box's own slot,
+    // never recursing into the boxed struct's fields); (2) the
+    // bare-local `TypedStmt::Drop`'s `Type::Box` arm gained the
+    // same `Type::Struct` case; (3) the enum-payload `Type::Box`
+    // case (inside the newly-factored-out `emit_enum_value_drop`,
+    // shared with (1) to avoid a third copy of the tag-switch logic)
+    // gained a `Type::Struct` case too. For a NON-recursive `Box
+    // <Struct>` (no cycle), all three inline-recurse via
+    // `emit_struct_field_drops`, same as an ordinary nested struct
+    // field. For a box-RECURSIVE struct (one that owns a `Box<Self>`,
+    // directly or through one layer of enum wrapping -- detected by
+    // the checker into a new `BOX_RECURSIVE_STRUCTS_REGISTRY`),
+    // inline recursion would need to unroll a cycle into infinitely
+    // much C text, so all three instead call one generated,
+    // iterative (heap-worklist-based, NOT native-call-recursive --
+    // safe for an arbitrarily long chain) "deep drop" helper function
+    // per box-recursive struct type
+    // (`emit_box_recursive_deep_drop_helpers`).
+    // The LLVM backend needed NO changes -- confirmed via `valgrind
+    // --leak-check=full` on native AOT builds that it already
+    // correctly drops every case this fix covers (0 errors before
+    // and after), matching the "worth checking as a reference
+    // implementation" note this bug's own C-backend-only framing
+    // carried from the start.
+    // Verified with `valgrind --leak-check=full --show-leak-kinds=
+    // all` on native AOT C builds of: the shipped 3-node example
+    // (0 errors, all heap blocks freed, vs. "24 direct + 24
+    // indirect bytes definitely/indirectly lost" before this fix);
+    // a 10-node chain where each node ALSO owns a plain `OwnedStr`
+    // field alongside the recursive `Box<Self>` edge (0 errors,
+    // confirming the iterative helper's non-recursive-field drop
+    // pass and its worklist-push pass compose correctly); and the
+    // BUG-93/95 generic `Node<T>` instantiation (0 errors -- this
+    // fix incidentally also closes that bug's own deferred C-backend
+    // leak finding). Full `cargo test --release --workspace`: 0
+    // failed, no regressions on any existing Box<T>/struct-field/
+    // enum-payload Drop test.
+    #[test]
+    fn recursive_struct_box_deep_drop_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            struct Node { value: i64, name: OwnedStr, next: Option<Box<Node>> }
+            fn main() -> i64 {
+              let n0: Node = Node { value: 0, name: "n0" + "", next: Option.None };
+              let n1: Node = Node { value: 1, name: "n1" + "", next: Option.Some(box(n0)) };
+              let n2: Node = Node { value: 2, name: "n2" + "", next: Option.Some(box(n1)) };
+              print n2.value;
+              print n2.name;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("box-recursive struct Node with an extra owning field must compile to C");
+        compile_to_llvm(source)
+            .expect("box-recursive struct Node with an extra owning field must compile to LLVM");
+    }
+
+    // BUG-91 (found 2026-08-03, fixed 2026-08-04, task #40). A bare
+    // call to a GENERIC function returning `Option<T>`, used
+    // DIRECTLY as a `match` scrutinee with no intermediate `let`
+    // binding, failed with "enum 'Option__i64' is not declared" --
+    // even though the exact same generic fn + call, first bound via
+    // an explicitly-annotated `let`, compiled fine. Root cause:
+    // `monomorphize_type_decls_in_program` (materializes concrete
+    // `EnumDecl`s for every `Type::Apply` it finds) runs BEFORE
+    // `monomorphize_generics_in_program` (the fn-level pass that
+    // infers `T=i64` for `foo(7)`), and unconditionally drops the
+    // generic templates it monomorphized from right after running.
+    // When the ONLY place a concrete `Option<i64>` instantiation is
+    // discoverable is through fn-generics' own type inference at a
+    // call site -- no textual `Option<i64>` annotation anywhere
+    // else in the source -- the decl-mono pass has already finished
+    // AND thrown away the template needed to re-specialize from.
+    // `substitute_type_param`'s eager collapse (BUG-90/95) DOES
+    // still produce a correct `Type::Enum("Option__i64")` reference
+    // for the specialized fn's return type, but nothing materialized
+    // an actual `EnumDecl` for it.
+    // Fixed by snapshotting the generic struct/enum templates in
+    // `check_program` BEFORE `monomorphize_type_decls_in_program`
+    // drops them, and adding a new `materialize_late_discovered_
+    // type_decls` pass that runs right after `monomorphize_generics_
+    // in_program`: it drains whatever `NEWLY_COLLAPSED_GENERIC_
+    // APPLIES` collected during fn-mono's own substitution calls
+    // and, using the template snapshots, runs one more small fixed-
+    // point round (mirroring `monomorphize_type_decls_in_program`'s
+    // own worklist loop, self-contained rather than factored out of
+    // it, to keep the change small and low-risk against an 800+
+    // line, heavily load-bearing shared pipeline stage) to
+    // materialize any still-missing decls. A no-op in the
+    // overwhelmingly common case (nothing new discovered).
+    #[test]
+    fn bare_generic_call_as_match_scrutinee_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn foo<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match foo(7) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("bare generic call as match scrutinee must compile to C");
+        compile_to_llvm(source)
+            .expect("bare generic call as match scrutinee must compile to LLVM");
+    }
+
+    // BUG-98 (found 2026-08-04, fixed 2026-08-04, task #41). A bare
+    // enum constructor INSIDE a generic function's OWN body (e.g.
+    // `Option.Some(a)` in `fn foo<T>(a: T) -> Option<T> { return
+    // Option.Some(a); }`) failed to resolve ("unknown variable
+    // 'Option'") once 2+ distinct concrete instantiations of
+    // `Option` existed anywhere in the program -- whether from the
+    // SAME generic fn specialized twice or two DIFFERENT generic
+    // fns each specialized once. A single instantiation program-wide
+    // (BUG-91's own repro) worked fine, which is why this stayed
+    // hidden until BUG-91's fix started probing multi-instantiation
+    // shapes. Root cause: BUG-46/95's targeted, annotation-driven
+    // resolution pass (`resolve_bare_enum_ctors_in_stmt`, run inside
+    // `monomorphize_type_decls_in_program`) only ever sees a still-
+    // generic function TEMPLATE's return type as `Type::Apply{
+    // Option,[Param(T)]}`, not yet a concrete `Type::Enum` -- so it
+    // silently does nothing for a generic body. The only thing left
+    // to resolve the bare receiver was `Env::resolve_enum_name`'s
+    // general "exactly one candidate" fallback at ordinary check
+    // time, inherently ambiguous once 2+ candidates exist.
+    // Fixed by re-running that exact same BUG-46/95 resolution pass
+    // over every function body again in `check_program`, right after
+    // `monomorphize_generics_in_program` (and BUG-91's own late-decl-
+    // materialization pass) have both finished -- at that point each
+    // specialized function's own return type IS concrete, so the
+    // pass can finally resolve it. A no-op for already-resolved
+    // ordinary function bodies (their receivers no longer match a
+    // generic template name on the second pass).
+    #[test]
+    fn bare_enum_ctor_inside_generic_fn_body_with_two_instantiations_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            fn foo1<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn foo2<T>(a: T) -> Option<T> {
+              return Option.Some(a);
+            }
+            fn main() -> i64 {
+              let r1: i64 = match foo1(7) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              let r2: i64 = match foo2(true) {
+                Option.Some(x) then 1,
+                Option.None then -1,
+              };
+              print r1;
+              print r2;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("bare enum ctor inside generic fn body (2 instantiations) must compile to C");
+        compile_to_llvm(source)
+            .expect("bare enum ctor inside generic fn body (2 instantiations) must compile to LLVM");
+    }
+
+    // BUG-87 rows 1-2 (found 2026-08-03, fixed 2026-08-04, task
+    // #42). `async fn` combined with generics or a built-in generic
+    // enum return type was broken -- two related symptoms, one root
+    // cause each, both fixed:
+    // - Row 1 (`async fn identity<T>(x: T) -> T` called directly
+    //   inside `await(identity(42))`) turned out to ALREADY be fixed
+    //   as a side effect of an earlier, unrelated gap-audit fix
+    //   (2026-08-03) that added a `Match` arm to `collect_generic_
+    //   calls_in_expr` (the fn-generics call-site scanner) for the
+    //   `try`-desugar case -- `await(...)` ALSO desugars to a
+    //   `Match` (`synthesize_await_desugar` in parser.rs), so that
+    //   fix transitively covered this row too. No new checker/
+    //   parser change was needed for row 1; verified it still works.
+    // - Row 2 (`async fn maybe_get(n: i64) -> Option<i64>`, awaited
+    //   then matched) was a genuinely separate bug: "match arm body
+    //   has type i64 but earlier arm produced Option__i64". Root
+    //   cause: `synthesize_await_desugar`'s own internal match (the
+    //   one `await(...)` desugars TO) has two arms -- `Future.Ready
+    //   (v) then v` and `Future.Pending then 0` -- and that `0`
+    //   literal is HARDCODED, only type-correct when T happens to be
+    //   i64. v1 ships purely synchronous `async fn` semantics (every
+    //   `Future<T>` is constructed via `Future.Ready(v)`), so the
+    //   Pending arm is provably unreachable at runtime -- but the
+    //   parser can't know T at desugar time to build a properly-
+    //   typed placeholder, and the checker's ordinary "every match
+    //   arm must produce the same type" rule doesn't know this
+    //   specific arm is dead code.
+    //   Fixed with a new `checked_expr_placeholder(ty, span, env)`
+    //   helper that constructs a well-typed placeholder value for a
+    //   type (scalars/Bool directly; Enum via its first variant,
+    //   recursing into the payload if any; Struct via all fields;
+    //   Tuple/Array via all elements -- returns `None`, i.e. falls
+    //   back to the ordinary mismatch diagnostic, for anything else:
+    //   Vec/Box/OwnedStr/Ref/Mutex/dyn Iface/etc., matching the
+    //   project's "unverifiable means rejected, never silently
+    //   accepted" convention). Consulted ONLY when the mismatching
+    //   arm's pattern is EXACTLY `Future.Pending` (a shape users can
+    //   never construct directly -- `Future<T>` is entirely parser-
+    //   synthesized) -- every other match in the whole language is
+    //   completely unaffected by this change.
+    // Verified `valgrind --leak-check=full` clean (0 errors) on a
+    // struct-returning async fn (exercises the Struct-placeholder
+    // branch). Full `cargo test --release --workspace`: 0 failed --
+    // no regression on the existing async test surface (rows 4-5,
+    // both already-passing shapes from this same bug's own audit).
+    #[test]
+    fn async_fn_generic_call_inside_await_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            async fn identity<T>(x: T) -> T {
+              return x;
+            }
+            fn main() -> i64 {
+              let r: i64 = await(identity(42));
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("async fn generic call inside await must compile to C");
+        compile_to_llvm(source)
+            .expect("async fn generic call inside await must compile to LLVM");
+    }
+
+    #[test]
+    fn async_fn_returning_generic_enum_awaited_and_matched_compiles_and_runs_correctly_lib() {
+        let source = r#"
+            async fn maybe_get(n: i64) -> Option<i64> {
+              if n > 0 {
+                return Option.Some(n);
+              }
+              return Option.None;
+            }
+            fn main() -> i64 {
+              let r: i64 = match await(maybe_get(5)) {
+                Option.Some(x) then x,
+                Option.None then -1,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("async fn returning Option<i64>, awaited and matched, must compile to C");
+        compile_to_llvm(source)
+            .expect("async fn returning Option<i64>, awaited and matched, must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 9, row 3:
+    // `Box<T>` through a generic function boundary (`fn identity<T>
+    // (b: Box<T>) -> Box<T>`) -- flagged "worth probing, never
+    // observed broken" in missing_features.md's own closing list.
+    // Checked clean on both backends for a struct T and a scalar T,
+    // `valgrind --leak-check=full` clean (0 errors, all heap blocks
+    // freed) -- ownership correctly passes through the generic
+    // boundary and back without a double-free or leak.
+    #[test]
+    fn box_through_generic_function_boundary_lib() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn identity<T>(b: Box<T>) -> Box<T> {
+              return b;
+            }
+            fn main() -> i64 {
+              let p: Point = Point { x: 3, y: 4 };
+              let boxed: Box<Point> = box(p);
+              let round_tripped: Box<Point> = identity(boxed);
+              let n: i64 = 42;
+              let boxed_n: Box<i64> = box(n);
+              let round_tripped_n: Box<i64> = identity(boxed_n);
+              print "ok";
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Box<T> through generic fn boundary must compile to C");
+        compile_to_llvm(source).expect("Box<T> through generic fn boundary must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 9, row 4:
+    // `parallel for` over a `Vec<Struct>` where the struct has an
+    // `OwnedStr` field -- flagged "worth probing" in the same list.
+    // Checked clean: each iteration writes to a DISTINCT index (no
+    // cross-iteration aliasing), reading a source element via
+    // `clone_at` (a deep copy, no shared heap state) and writing the
+    // clone into its own slot -- the compiler correctly allows this
+    // (there is no actual race: no two iterations ever touch the
+    // same memory), and `valgrind --leak-check=full` on the
+    // C-backend build confirms it's genuinely safe: 0 errors, all
+    // heap blocks freed (the old OwnedStr previously at each slot is
+    // correctly dropped as part of the per-iteration write). Fresh
+    // heap allocation INSIDE the loop body (e.g. `"x" + ""`) hits a
+    // SEPARATE, already-documented purity restriction ("'parallel
+    // for' body cannot use `+` on strings (heap allocation is
+    // impure)") -- expected, not this row's concern.
+    #[test]
+    fn parallel_for_over_vec_struct_with_ownedstr_field_lib() {
+        let source = r#"
+            struct Item { id: i64, label: OwnedStr }
+            fn main() -> i64 {
+              let source: Vec<Item> = vec(
+                Item { id: 10, label: "a" + "" },
+                Item { id: 20, label: "b" + "" },
+                Item { id: 30, label: "c" + "" },
+              );
+              let items: Vec<Item> = vec(
+                Item { id: 0, label: "x" + "" },
+                Item { id: 0, label: "y" + "" },
+                Item { id: 0, label: "z" + "" },
+              );
+              parallel for i from 0 to 3 {
+                items[i] = clone_at(ref source, i);
+              }
+              let a: Item = clone_at(ref items, 0);
+              print a.id;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("parallel for over Vec<Struct-with-OwnedStr> must compile to C");
+        compile_to_llvm(source)
+            .expect("parallel for over Vec<Struct-with-OwnedStr> must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 10, row 1:
+    // `match` with bindings on a DEEPLY nested built-in enum payload
+    // (`Result<Option<T>, E>`, matched in ONE `match` expression).
+    // Checked clean -- NOT a bug, confirmed to need the same
+    // documented "two flat matches" workaround user-declared nested
+    // enums already require (`tutorials/src/beginner/
+    // 08a_pattern_match_primer.md`): nesting `Result.Ok(Option.Some
+    // (v))` in one pattern is a clean PARSER rejection ("expected ')'
+    // (variant payload binding close)"); the two-flat-matches
+    // rewrite compiles and runs correctly on both backends.
+    #[test]
+    fn nested_result_option_match_requires_two_flat_matches_per_docs() {
+        let nested_source = r#"
+            fn lookup(x: i64) -> Result<Option<i64>, i64> {
+              if x < 0 { return Result.Err(-1); }
+              return Result.Ok(Option.Some(x * 2));
+            }
+            fn main() -> i64 {
+              let r: i64 = match lookup(5) {
+                Result.Ok(Option.Some(v)) then v,
+                Result.Ok(Option.None) then 0,
+                Result.Err(e) then e,
+              };
+              print r;
+              return 0;
+            }
+        "#;
+        compile_to_c(nested_source)
+            .err()
+            .expect("one-expression nested Result<Option<T>,E> match must be rejected (C)");
+        compile_to_llvm(nested_source)
+            .err()
+            .expect("one-expression nested Result<Option<T>,E> match must be rejected (LLVM)");
+
+        let two_flat_source = r#"
+            fn lookup(x: i64) -> Result<Option<i64>, i64> {
+              if x < 0 { return Result.Err(-1); }
+              if x == 0 { return Result.Ok(Option.None); }
+              return Result.Ok(Option.Some(x * 2));
+            }
+            fn classify(x: i64) -> i64 {
+              let r: Result<Option<i64>, i64> = lookup(x);
+              let inner: Option<i64> = match r {
+                Result.Ok(opt) then opt,
+                Result.Err(e) then Option.None,
+              };
+              let is_err: bool = match r {
+                Result.Ok(_) then false,
+                Result.Err(_) then true,
+              };
+              if is_err {
+                return match r {
+                  Result.Ok(_) then 0,
+                  Result.Err(e) then e,
+                };
+              }
+              return match inner {
+                Option.Some(v) then v,
+                Option.None then 0,
+              };
+            }
+            fn main() -> i64 {
+              print classify(5);
+              print classify(0);
+              print classify(0 - 1);
+              return 0;
+            }
+        "#;
+        compile_to_c(two_flat_source)
+            .expect("two-flat-matches rewrite of nested Result<Option<T>,E> must compile to C");
+        compile_to_llvm(two_flat_source)
+            .expect("two-flat-matches rewrite of nested Result<Option<T>,E> must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 10, row 2:
+    // a guarded slice-pattern arm (`[a, b] if cond then ...`)
+    // combined with a GENERIC function `fn classify<T>(xs: Vec<T>)`
+    // where T is a Copy scalar type parameter. Checked clean on both
+    // backends, for both an i64 and an f64 instantiation of T.
+    #[test]
+    fn guarded_slice_pattern_through_generic_vec_element_type() {
+        let source = r#"
+            fn classify<T>(xs: Vec<T>, n: i64) -> i64 {
+              return match xs {
+                [a, b] if n > 10 then n,
+                _ if n > 5 then 100,
+                _ then -1,
+              };
+            }
+            fn main() -> i64 {
+              let ints: Vec<i64> = vec(1, 2);
+              print classify(ints, 20);
+              let ints2: Vec<i64> = vec(1, 2);
+              print classify(ints2, 6);
+              let ints3: Vec<i64> = vec(1, 2);
+              print classify(ints3, 1);
+              let floats: Vec<f64> = vec(1.0, 2.0);
+              print classify(floats, 20);
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("guarded slice pattern through generic Vec<T> must compile to C");
+        compile_to_llvm(source)
+            .expect("guarded slice pattern through generic Vec<T> must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 10, row 3:
+    // an or-pattern-shaped guard condition (`if n == 1 || n == 2`) on
+    // an enum variant match arm, combined with the variant's payload
+    // BINDING used inside the guard expression itself. Checked clean
+    // on both backends.
+    #[test]
+    fn or_pattern_guard_referencing_variant_binding() {
+        let source = r#"
+            enum Shape {
+              Circle(i64),
+              Square(i64),
+            }
+            fn classify(s: Shape) -> i64 {
+              return match s {
+                Shape.Circle(n) if n == 1 || n == 2 then 100,
+                Shape.Circle(n) then n,
+                Shape.Square(n) if n == 1 || n == 2 then 200,
+                Shape.Square(n) then n * 10,
+              };
+            }
+            fn main() -> i64 {
+              print classify(Shape.Circle(1));
+              print classify(Shape.Circle(5));
+              print classify(Shape.Square(2));
+              print classify(Shape.Square(5));
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("or-pattern guard referencing variant binding must compile to C");
+        compile_to_llvm(source)
+            .expect("or-pattern guard referencing variant binding must compile to LLVM");
+    }
+
+    // BUG-94 (found+fixed 2026-08-03). Category 11, row 1:
+    // `HashMap<StructKey, V>` (non-scalar key) -- the checker's OWN
+    // diagnostic for "HashMap key must implement Hash" suggests
+    // `implement Hash for K { fn hash(self: ref Self) -> i64 {...} }`
+    // -- writing EXACTLY that crashed both backends outright (LLVM:
+    // `lli` JIT SIGSEGV; C: `cc` "conflicting types for
+    // 'fn_Key_hash'"). The by-VALUE form (`self: Self`, no `ref`)
+    // already worked correctly and still does (verified below as a
+    // no-regression check).
+    // Two SEPARATE bugs, one per backend, same root cause: the
+    // `HashMap<StructKey, V>` bundle (ARC 1.7) hard-coded an
+    // assumption about how the user's `Hash`/`Eq` impl methods take
+    // `self`, instead of matching however the user actually declared
+    // it.
+    // - C backend (`emit_intent_hashmap_struct_pair_c_body`): always
+    //   forward-declared `fn_Key_hash`/`fn_Key_eq` as taking the
+    //   struct BY VALUE (`Struct_Key self`). When the user writes
+    //   `self: ref Key`, the REAL hoisted function (emitted by the
+    //   ordinary interface-method codegen) takes a POINTER
+    //   (`const Struct_Key* v_self`) -- two conflicting C
+    //   declarations of the same symbol, a hard compile error.
+    // - LLVM backend (`emit_intent_hashmap_struct_pair_llvm`): always
+    //   CALLED `fn_Key_hash`/`fn_Key_eq` with a bare-value argument
+    //   (`{k} %k`). When the real function takes a pointer, this is
+    //   an ill-typed `call` -- `lli` (and would-be `llc`) reject it,
+    //   crashing the JIT.
+    // Fixed by adding a registry (`IMPL_METHOD_SELF_BY_REF_REGISTRY`
+    // in backend_c.rs, `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY` in
+    // backend_llvm.rs) populated at the start of each backend's
+    // `emit_*` from `program.functions`, keyed by the hoisted
+    // method's own first-parameter type (`Type::Ref`/`Type::RefMut`
+    // -> by-ref; anything else -> by-value). The HashMap bundle now
+    // matches whichever convention the impl actually uses: the C
+    // forward declaration picks pointer vs value param types
+    // accordingly; the LLVM bundle spills `%k` into a fresh stack
+    // slot (via `alloca`+`store`) to get an address when by-ref is
+    // needed (an SSA value isn't otherwise addressable), and reuses
+    // an already-addressable `getelementptr` result (`%kcell`)
+    // directly instead of redundantly loading-then-respilling it.
+    // Verified with a fuller round-trip (3 inserts, get, contains_key
+    // hit/miss, update-returns-old-value, remove-returns-old-value,
+    // len) on both backends; `valgrind --leak-check=full` on native
+    // AOT builds of both backends: 0 errors, all heap blocks freed.
+    #[test]
+    fn hashmap_struct_key_hash_eq_self_by_ref_lib() {
+        let source = r#"
+            struct Key { a: i64, b: i64 }
+            interface Hash { fn hash(self: ref Self) -> i64; }
+            interface Eq { fn eq(self: ref Self, other: ref Self) -> bool; }
+            implement Hash for Key {
+              fn hash(self: ref Key) -> i64 {
+                return self.a * 1000003 + self.b;
+              }
+            }
+            implement Eq for Key {
+              fn eq(self: ref Key, other: ref Key) -> bool {
+                return self.a == other.a && self.b == other.b;
+              }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Key, i64> = hashmap_new();
+              let k1: Key = Key { a: 1, b: 2 };
+              let k2: Key = Key { a: 3, b: 4 };
+              let k3: Key = Key { a: 5, b: 6 };
+              let _ = hashmap_insert(mut ref m, k1, 100);
+              let _ = hashmap_insert(mut ref m, k2, 200);
+              let _ = hashmap_insert(mut ref m, k3, 300);
+              print hashmap_len(ref m);
+              let lookup1: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, lookup1), -1);
+              let lookup2: Key = Key { a: 3, b: 4 };
+              print hashmap_contains_key(ref m, lookup2);
+              let lookup_missing: Key = Key { a: 9, b: 9 };
+              print hashmap_contains_key(ref m, lookup_missing);
+              let update_k: Key = Key { a: 1, b: 2 };
+              let old: i64 = option_unwrap_or(hashmap_insert(mut ref m, update_k, 999), -1);
+              print old;
+              let updated_lookup: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, updated_lookup), -1);
+              let remove_k: Key = Key { a: 5, b: 6 };
+              let removed: i64 = option_unwrap_or(hashmap_remove(mut ref m, remove_k), -1);
+              print removed;
+              print hashmap_len(ref m);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("HashMap<StructKey,V> with self:ref Self must compile to C");
+        compile_to_llvm(source).expect("HashMap<StructKey,V> with self:ref Self must compile to LLVM");
+    }
+
+    // No-regression check: the by-value `self: Self` form (never
+    // broken) still works exactly as before.
+    #[test]
+    fn hashmap_struct_key_hash_eq_self_by_value_lib() {
+        let source = r#"
+            struct Key { a: i64, b: i64 }
+            interface Hash { fn hash(self: Self) -> i64; }
+            interface Eq { fn eq(self: Self, other: Self) -> bool; }
+            implement Hash for Key {
+              fn hash(self: Key) -> i64 {
+                return self.a * 1000003 + self.b;
+              }
+            }
+            implement Eq for Key {
+              fn eq(self: Key, other: Key) -> bool {
+                return self.a == other.a && self.b == other.b;
+              }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Key, i64> = hashmap_new();
+              let k1: Key = Key { a: 1, b: 2 };
+              let _ = hashmap_insert(mut ref m, k1, 100);
+              let lookup_k: Key = Key { a: 1, b: 2 };
+              print option_unwrap_or(hashmap_get(ref m, lookup_k), -1);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("HashMap<StructKey,V> with self:Self must compile to C");
+        compile_to_llvm(source).expect("HashMap<StructKey,V> with self:Self must compile to LLVM");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 11, row
+    // 2: `Atomic<Vec<T>>` / `Atomic<Struct>` (non-i64-width payload).
+    // Checked clean: cleanly rejected on both backends, matching the
+    // documented i64-width-only restriction.
+    #[test]
+    fn atomic_non_i64_width_payload_is_rejected() {
+        let vec_source = r#"
+            fn main() -> i64 {
+              let a: Atomic<Vec<i64>> = atomic_new(vec(1, 2, 3));
+              return 0;
+            }
+        "#;
+        compile_to_c(vec_source).err().expect("Atomic<Vec<T>> must be rejected (C)");
+        compile_to_llvm(vec_source).err().expect("Atomic<Vec<T>> must be rejected (LLVM)");
+
+        let struct_source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let a: Atomic<Point> = atomic_new(Point { x: 1, y: 2 });
+              return 0;
+            }
+        "#;
+        compile_to_c(struct_source).err().expect("Atomic<Struct> must be rejected (C)");
+        compile_to_llvm(struct_source).err().expect("Atomic<Struct> must be rejected (LLVM)");
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 11, row
+    // 4: `Mutex<T>`/`RwLock<T>` where `T` is itself a `Mutex<U>`/
+    // `RwLock<U>` (nested locks). Found a real gap: this used to
+    // compile straight through the checker and crash the native
+    // toolchain (undefined `intent_mutex_intent_mutex_i64` bundle
+    // symbols never generated by either backend -- full nested-lock
+    // codegen support was never implemented). Fixed with a clean,
+    // explicit rejection in `mutex_new`/`rwlock_new`'s own type-
+    // checking, covering all four nesting combinations
+    // (Mutex<Mutex>, Mutex<RwLock>, RwLock<Mutex>, RwLock<RwLock>).
+    #[test]
+    fn nested_concurrency_handles_are_cleanly_rejected() {
+        let mutex_in_mutex = r#"
+            fn main() -> i64 {
+              let inner: Mutex<i64> = mutex_new(5);
+              let outer: Mutex<Mutex<i64>> = mutex_new(inner);
+              return 0;
+            }
+        "#;
+        let c_err = compile_to_c(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (C)");
+        assert!(
+            format!("{:?}", c_err).contains("nested concurrency handles are not supported"),
+            "unexpected rejection message: {:?}", c_err
+        );
+        compile_to_llvm(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (LLVM)");
+
+        let rwlock_in_mutex = r#"
+            fn main() -> i64 {
+              let inner_rw: RwLock<i64> = rwlock_new(5);
+              let outer_m: Mutex<RwLock<i64>> = mutex_new(inner_rw);
+              return 0;
+            }
+        "#;
+        compile_to_c(rwlock_in_mutex).err().expect("Mutex<RwLock<T>> must be rejected (C)");
+        compile_to_llvm(rwlock_in_mutex).err().expect("Mutex<RwLock<T>> must be rejected (LLVM)");
+
+        let mutex_in_rwlock = r#"
+            fn main() -> i64 {
+              let inner_m: Mutex<i64> = mutex_new(5);
+              let outer_rw: RwLock<Mutex<i64>> = rwlock_new(inner_m);
+              return 0;
+            }
+        "#;
+        compile_to_c(mutex_in_rwlock).err().expect("RwLock<Mutex<T>> must be rejected (C)");
+        compile_to_llvm(mutex_in_rwlock).err().expect("RwLock<Mutex<T>> must be rejected (LLVM)");
+
+        let rwlock_in_rwlock = r#"
+            fn main() -> i64 {
+              let inner: RwLock<i64> = rwlock_new(5);
+              let outer: RwLock<RwLock<i64>> = rwlock_new(inner);
+              return 0;
+            }
+        "#;
+        compile_to_c(rwlock_in_rwlock).err().expect("RwLock<RwLock<T>> must be rejected (C)");
+        compile_to_llvm(rwlock_in_rwlock).err().expect("RwLock<RwLock<T>> must be rejected (LLVM)");
+    }
+
     // Parametric Channel<T> — struct element type
     #[test]
     fn channel_struct_element_emits_parametric_bundle() {
@@ -50079,6 +52474,114 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-85 (found+fixed 2026-08-03, feature-combination gap audit
+    // category 3, SSA-C only). A BARE (SSA-eligible -- no structs,
+    // no block expressions forcing tree) `Mutex<i64>`/`Guard<i64>`
+    // program failed to compile on the C backend at all: `cc`
+    // rejected it with "implicit declaration of function
+    // 'intent_mutex_i64_new'". Root cause: `ssa_backend_c.rs` has
+    // its OWN, entirely separate `mutex_new`/`mutex_lock`/
+    // `guard_get`/`guard_set` implementation (and its own
+    // `c_declarator` type-spelling function) from the TREE emitter
+    // in `backend_c.rs` -- and this SSA-specific copy was hardcoded
+    // to the literal name `intent_mutex_i64`/`intent_guard_i64`,
+    // stale since BUG-19 (2026-07-27) made the preamble bundle
+    // ALWAYS use the parametric name (`intent_mutex_int64_t`) even
+    // for the plain i64 case. The tree emitter was updated at the
+    // time; this sibling SSA implementation never was. Found because
+    // the specific program shape needed to trigger this (a Mutex used
+    // with NO structs/block-expressions anywhere, so the SSA fast
+    // path is actually taken instead of falling back to tree) had
+    // never been end-to-end tested before -- every prior Mutex test
+    // this session used either a struct payload or a block-
+    // expression, both of which force tree. Fixed by routing all
+    // four builtins plus the six `c_declarator` arms (bare/`&`/`&mut`
+    // x Mutex/Guard) through `c_mutex_storage`/`c_guard_storage`
+    // (extracting the real element type from `instr.ty` or the
+    // argument's type via `value_types`), mirroring the pattern
+    // `channel_new`/`channel_send`/`channel_recv` already used in the
+    // same file.
+    #[test]
+    fn bare_scalar_mutex_ssa_path_compiles_with_parametric_naming() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<i64> = mutex_new(0);
+              let g: Guard<i64> = mutex_lock(ref m);
+              print guard_get(ref g);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("bare scalar Mutex<i64> (SSA-eligible) must compile to C");
+        assert!(
+            c.contains("intent_mutex_int64_t_new") && c.contains("intent_mutex_int64_t_lock")
+                && c.contains("intent_guard_int64_t_get"),
+            "SSA-C path must use the parametric bundle name, not the stale \
+             hardcoded 'intent_mutex_i64_*'/'intent_guard_i64_*' forms; got:\n{}",
+            c
+        );
+        assert!(
+            !c.contains("v_0 = intent_mutex_i64_new") && !c.contains("intent_guard_i64_get("),
+            "SSA-C path must not reference the stale, never-declared \
+             'intent_mutex_i64'/'intent_guard_i64' names at any call site; got:\n{}",
+            c
+        );
+    }
+
+    // BUG-86 (found+fixed 2026-08-03, same gap-audit pass, tree-C
+    // only -- a REAL SILENT DEADLOCK, not a compile failure). Once
+    // BUG-85's naming fix made a bare Mutex<i64> compile on the C
+    // backend, testing TWO SEQUENTIAL (non-overlapping) lock/unlock
+    // cycles on the SAME mutex through a block-expression
+    // (`let v: i64 = { let g = mutex_lock(ref m); guard_get(ref g)
+    // };`, the tutorial's own idiom) revealed the program HANGS
+    // FOREVER on the second `mutex_lock` call. Root cause: the
+    // block-expression-specific `TypedStmt::Drop` emitter in
+    // `backend_c.rs` (a completely separate, incomplete
+    // reimplementation of the correct top-level statement Drop
+    // emitter a few thousand lines earlier in the same file) has
+    // explicit arms for OwnedStr/Vec/Struct/Enum but NONE for
+    // Guard/ReadGuard/WriteGuard -- it silently fell through to a
+    // `_ => {}` no-op, so the guard's RAII unlock never fired. The
+    // first lock was never released, so the second `mutex_lock`
+    // spun forever waiting for a lock that (from the runtime's
+    // point of view) was still legitimately held. No diagnostic, no
+    // crash -- the worst possible failure mode for a concurrency
+    // primitive. Fixed by adding the three missing arms, mirroring
+    // the already-correct top-level statement Drop handler exactly.
+    #[test]
+    fn block_expr_guard_drop_unlocks_the_mutex_for_sequential_reuse() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<i64> = mutex_new(0);
+              let v1: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              let v2: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v1;
+              print v2;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("two sequential block-expr-scoped lock/unlock cycles must compile to C");
+        let unlock_count = c.matches("_unlock(&v_g)").count();
+        assert!(
+            unlock_count >= 2,
+            "expected the guard's unlock call to be emitted for EACH block-\
+             expression-scoped `let g = mutex_lock(...);` (found {} unlock \
+             call(s) referencing v_g) -- a missing unlock here is a silent \
+             deadlock at runtime (the second mutex_lock spins forever), not \
+             just a leaked resource; got:\n{}",
+            unlock_count,
+            c
+        );
+    }
+
     // BUG-22 (2026-07-27): found while verifying BUG-19 against the C
     // backend. `c_type_name` (called by the Let-statement / fn-param /
     // fn-return type-spelling path) was missing Mutex/Guard/RwLock/
@@ -50377,6 +52880,49 @@ fn main() -> i64 { return Reset_Handler(); }
         assert!(
             c.contains("Reset_Handler("),
             "expected bare symbol name in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn no_mangle_fn_with_tuple_and_array_params_emits_bare_names_both_backends() {
+        // Testing-matrix sweep: "#[no_mangle] fn with a Tuple/Array
+        // parameter" -- BUG-44's fix (forcing the tree backend for
+        // any #[no_mangle] function, since the SSA fast path never
+        // implemented bare-symbol emission at all) was only verified
+        // with scalar params. Checked 2026-08-02, not a bug: a
+        // no_mangle fn taking a `(i64, i64)` tuple and one taking a
+        // `[i64; 4]` array both keep their bare symbol name (not
+        // `fn_sum_pair`/`fn_sum_arr`) and compute correctly on both
+        // backends -- see the paired e2e test for runtime values.
+        let src = r#"
+intent "no_mangle tuple/array params";
+#[no_mangle]
+fn sum_pair(p: (i64, i64)) -> i64 { return p.0 + p.1; }
+#[no_mangle]
+fn sum_arr(a: [i64; 4]) -> i64 { return a[0] + a[1] + a[2] + a[3]; }
+fn main() -> i64 {
+  print sum_pair((10, 20));
+  print sum_arr([1, 2, 3, 4]);
+  return 0;
+}
+"#;
+        let c = compile_to_c(src).expect("no_mangle with Tuple/Array params must compile to C");
+        assert!(
+            c.contains("sum_pair(") && !c.contains("fn_sum_pair"),
+            "expected bare symbol 'sum_pair' (not 'fn_sum_pair') in C output:\n{c}"
+        );
+        assert!(
+            c.contains("sum_arr(") && !c.contains("fn_sum_arr"),
+            "expected bare symbol 'sum_arr' (not 'fn_sum_arr') in C output:\n{c}"
+        );
+        let ll = compile_to_llvm(src).expect("no_mangle with Tuple/Array params must compile to LLVM");
+        assert!(
+            ll.contains("@sum_pair(") && !ll.contains("@fn_sum_pair"),
+            "expected bare symbol '@sum_pair' (not '@fn_sum_pair') in LLVM output"
+        );
+        assert!(
+            ll.contains("@sum_arr(") && !ll.contains("@fn_sum_arr"),
+            "expected bare symbol '@sum_arr' (not '@fn_sum_arr') in LLVM output"
         );
     }
 
@@ -51096,6 +53642,190 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn generic_struct_two_instantiations_both_construct_correctly() {
+        // BUG-46-class bug for user-defined generic STRUCTS (found
+        // sweeping the testing matrix's "generic struct instantiated
+        // at 2+ different T" row). `Env::resolve_struct_name`'s
+        // "exactly one candidate in the whole program" fallback (the
+        // struct analog of the enum heuristic BUG-46 already fixed)
+        // means once a SECOND instantiation of the same generic
+        // struct exists, a bare `Box2 { items: ... }` literal can't
+        // be disambiguated and EVERY construction site for that
+        // struct broke with "unknown struct type 'Box2'" -- even
+        // though the enclosing `let`'s own annotation already names
+        // the exact concrete instantiation. Fixed the same way
+        // BUG-46 was: rewrite the bare template name to the mangled
+        // one at `let`/`return` sites where the concrete
+        // instantiation is already known from context.
+        let source = r#"
+            struct Box2<T> { items: Vec<T> }
+            fn main() -> i64 {
+              let bi: Box2<i64> = Box2 { items: vec(1, 2, 3) };
+              let bs: Box2<OwnedStr> = Box2 { items: vec("a" + "", "b" + "") };
+              let total: i64 = bi.items[0] + bi.items[1] + bi.items[2];
+              let s0: OwnedStr = clone_at(ref bs.items, 0);
+              print total;
+              print s0;
+              print len(bs.items) as i64;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "two instantiations of the same generic struct must both construct correctly",
+        );
+    }
+
+    #[test]
+    fn vec_of_generic_struct_two_monomorphizations_compiles() {
+        // Testing-matrix sweep: "Vec<GenericStruct<i64>> alongside
+        // Vec<GenericStruct<f64>>" -- compounds BUG-70's exact bug
+        // class (a second instantiation of the same generic struct)
+        // with BUG-61's territory (a container whose element is a
+        // handle/aggregate type with its own per-shape codegen).
+        // Checked 2026-08-02, not a bug: with the BUG-70 fix already
+        // in place, `Vec<Box2<i64>>` and `Vec<Box2<OwnedStr>>`
+        // (Copy and non-Copy instantiations of the same generic
+        // struct, each wrapped in its own Vec) both compile and run
+        // correctly on both backends -- see the paired e2e test.
+        let source = r#"
+            struct Box2<T> { val: T }
+            fn main() -> i64 {
+              let vi: Vec<Box2<i64>> = vec(Box2 { val: 100 }, Box2 { val: 200 });
+              let vs: Vec<Box2<OwnedStr>> = vec(Box2 { val: "hello" + "" }, Box2 { val: "world" + "" });
+              let sum_i: i64 = vi[0].val + vi[1].val;
+              let cs0: Box2<OwnedStr> = clone_at(ref vs, 0);
+              print sum_i;
+              print cs0.val;
+              print len(vi) as i64;
+              print len(vs) as i64;
+              return 0;
+            }
+        "#;
+        compile(source)
+            .expect("Vec<GenericStruct<T>> for two different T instantiations must compile");
+    }
+
+    #[test]
+    fn enum_variant_payload_vec_of_struct_compiles_and_dispatches() {
+        // Testing-matrix sweep: "enum variant payload is Vec<Struct>"
+        // -- multi-level payload nesting. Checked 2026-08-02, not a
+        // bug: `Vec<Pt>` as an enum payload compiles, constructs, and
+        // dispatches (tag-match without destructure-binding, same v1
+        // restriction as `Vec<i64>` payloads already document) on
+        // both backends.
+        let source = r#"
+            struct Pt { x: i64, y: i64 }
+            enum Bag { Items(Vec<Pt>), Empty }
+            fn build(use_items: bool) -> Bag {
+              if use_items {
+                return Bag.Items(vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }));
+              }
+              return Bag.Empty;
+            }
+            fn classify(b: Bag) -> i64 {
+              return match b {
+                Bag.Items then 1,
+                Bag.Empty then 0,
+              };
+            }
+            fn main() -> i64 {
+              let a: Bag = build(true);
+              let z: Bag = build(false);
+              print classify(a);
+              print classify(z);
+              return 0;
+            }
+        "#;
+        compile(source).expect("enum variant payload Vec<Struct> must compile and dispatch");
+    }
+
+    #[test]
+    fn enum_variant_payload_tuple_containing_array_now_admitted_and_correct() {
+        // BUG-74, found sweeping the testing matrix's "enum variant
+        // payload is ... a Tuple containing an Array" row. THREE
+        // layered bugs, found in sequence:
+        //
+        // 1. Checker: the enum-payload admission check computed
+        //    `payload_ty.is_copy()` for the whole Tuple, and
+        //    `Type::Array::is_copy()` is unconditionally `false` (by
+        //    design, unrelated to payload safety) -- so a Tuple
+        //    containing an Array (e.g. `(i64, [i64; 3])`) was
+        //    rejected as "not admitted in v1" even though every
+        //    element is stack/inline data with no heap pointers,
+        //    exactly as safe as any other Copy payload. Fixed by
+        //    adding a `tuple_of_admitted` check mirroring the
+        //    existing `array_of_copy` special case one level deeper.
+        // 2. C backend (BUG-74a): `emit_array_typedefs_for` never
+        //    recursed into `Type::Tuple` elements, and the one call
+        //    site that fed it only walked the Vec-element axis
+        //    (never enum payloads) -- so `intent_arr3_int64_t` was
+        //    referenced by the tuple bundle before ever being
+        //    declared: "unknown type name". Fixed by recursing into
+        //    Tuple elements and moving the array-typedef pass earlier
+        //    (before the early-tuple-bundle emission it now needs to
+        //    precede), sharing one `seen` set with the original
+        //    Vec-element pass.
+        // 3. C backend (BUG-74b): even with the typedef declared,
+        //    `TypedExprKind::Tuple`'s C emission didn't special-case
+        //    an Array-typed element with an inline ArrayLit
+        //    initializer the way `StructLit` already did -- gcc
+        //    rejects assigning a cast compound-literal array
+        //    (`((int64_t[3]){1,2,3})`) to a struct member of array
+        //    type. Fixed by mirroring StructLit's existing bare-brace
+        //    `{1,2,3}` special case for Tuple too. Confirmed this
+        //    last bug is general, not enum-specific: a bare local
+        //    `let x: (i64, [i64;3]) = (42, [1,2,3]);` (no enum
+        //    involved at all) hit the exact same C-backend crash.
+        let source = r#"
+            enum Rec { Full((i64, [i64; 3])), Nothing }
+            fn build(has: bool) -> Rec {
+              if has {
+                return Rec.Full((42, [1, 2, 3]));
+              }
+              return Rec.Nothing;
+            }
+            fn classify(r: Rec) -> i64 {
+              return match r {
+                Rec.Full then 1,
+                Rec.Nothing then 0,
+              };
+            }
+            fn main() -> i64 {
+              let a: Rec = build(true);
+              let z: Rec = build(false);
+              print classify(a);
+              print classify(z);
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "enum variant payload Tuple<Array> must now be admitted and compile correctly",
+        );
+    }
+
+    #[test]
+    fn tuple_containing_array_local_compiles_to_valid_c() {
+        // BUG-74b in isolation (no enum involved): a plain local
+        // binding whose type is a Tuple containing an Array element
+        // must produce valid C -- confirms the fix is general, not
+        // an enum-payload-specific patch.
+        let source = r#"
+            fn main() -> i64 {
+              let x: (i64, [i64; 3]) = (42, [1, 2, 3]);
+              print x.0;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Tuple<Array> local must compile to C");
+        assert!(
+            !c.contains("((int64_t[3]){"),
+            "array-typed tuple element must use bare-brace init, not a cast \
+             compound literal (gcc rejects that inside a struct-member \
+             initializer):\n{c}"
+        );
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";
@@ -51397,6 +54127,159 @@ fn main() -> i64 {
 "#;
         let result = compile_to_c(src);
         assert!(result.is_err(), "slice pattern on Vec<OwnedStr> (non-Copy elem) must be rejected");
+    }
+
+    // BUG-20 residual fix (2026-08-02): a guarded `_` wildcard arm in a
+    // slice/array match never even read `arm.guard` (unlike the `Slice`
+    // arm, which BUG-20's original fix already wired up) -- the guard
+    // was silently dropped and the wildcard always behaved as an
+    // unconditional catch-all. Fixed by folding a guarded wildcard into
+    // the dispatch chain as an ordinary conditional entry instead of
+    // treating it as the unconditional fallback. Runtime behavior
+    // (guard is actually evaluated, not ignored) is verified end-to-end
+    // on both backends in tests/run_end_to_end.rs -- this test only
+    // covers compile-time acceptance and guard type-checking.
+    #[test]
+    fn slice_pattern_guarded_wildcard_compiles_on_both_backends() {
+        let src = r#"
+intent "slice_guarded_wildcard";
+fn classify(xs: Vec<i64>, n: i64) -> i64 {
+    return match xs {
+        [a, b] if n > 10 then a + b,
+        _ if n > 5 then 100,
+        _ then -1,
+    };
+}
+fn main() -> i64 {
+    print classify(vec(1, 2), 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded wildcard slice match should compile on C backend");
+        compile_to_llvm(src).expect("guarded wildcard slice match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn slice_pattern_guarded_wildcard_guard_must_be_bool() {
+        let src = r#"
+intent "slice_guarded_wildcard_bad_guard";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let n: i64 = 5;
+    let r: i64 = match xs {
+        _ if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a slice wildcard arm must be rejected");
+    }
+
+    #[test]
+    fn slice_pattern_guarded_wildcard_does_not_close_off_later_arms() {
+        // A guarded wildcard must NOT set the "wildcard seen" flag --
+        // an arm after it (even another wildcard) must still be reachable.
+        let src = r#"
+intent "slice_guarded_wildcard_not_terminal";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let n: i64 = 1;
+    let r: i64 = match xs {
+        _ if n > 10 then 1,
+        _ then 2,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src)
+            .expect("an arm after a guarded wildcard must not be rejected as unreachable");
+        assert!(c.contains("int64_t") || c.contains("main"), "sanity: C emitted");
+    }
+
+    // BUG-20 residual fix (2026-08-02): `check_match_str` never
+    // type-checked or wired `arm.guard` into the generated dispatch at
+    // all -- a guarded string-match arm always behaved as if its guard
+    // were `true`. Runtime behavior verified end-to-end on both
+    // backends in tests/run_end_to_end.rs.
+    #[test]
+    fn string_match_guard_compiles_and_type_checks() {
+        let src = r#"
+intent "string_match_guard";
+fn classify(s: OwnedStr, n: i64) -> i64 {
+    return match s {
+        "x" if n > 10 then 1,
+        "y" then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify("x" + "", 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded string match should compile on C backend");
+        compile_to_llvm(src).expect("guarded string match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn string_match_guard_must_be_bool() {
+        let src = r#"
+intent "string_match_guard_bad";
+fn main() -> i64 {
+    let s: OwnedStr = "x" + "";
+    let n: i64 = 5;
+    let r: i64 = match s {
+        "x" if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a string match arm must be rejected");
+    }
+
+    // BUG-20 residual fix (2026-08-02): `check_match_float` never
+    // type-checked or wired `arm.guard` into the generated dispatch at
+    // all -- same gap as the string-match case above.
+    #[test]
+    fn float_match_guard_compiles_and_type_checks() {
+        let src = r#"
+intent "float_match_guard";
+fn classify(x: f64, n: i64) -> i64 {
+    return match x {
+        1.5 if n > 10 then 1,
+        2.5 then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify(1.5, 20);
+    return 0;
+}
+"#;
+        compile_to_c(src).expect("guarded float match should compile on C backend");
+        compile_to_llvm(src).expect("guarded float match should compile on LLVM backend");
+    }
+
+    #[test]
+    fn float_match_guard_must_be_bool() {
+        let src = r#"
+intent "float_match_guard_bad";
+fn main() -> i64 {
+    let x: f64 = 1.5;
+    let n: i64 = 5;
+    let r: i64 = match x {
+        1.5 if n then 1,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "a non-Bool guard on a float match arm must be rejected");
     }
 
     // ── L4 Runtime integer overflow guards ────────────────────────────────────
@@ -52123,6 +55006,304 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    #[test]
+    fn struct_with_vec128_and_vec256_fields_alongside_plain_vec_field_compiles_to_c() {
+        // Testing-matrix sweep: "struct with both a SIMD Vec128/
+        // Vec256 field AND a plain Vec field". Found BUG-79 --
+        // unrelated to any naming collision between the two Vec
+        // families (the row's own hypothesis); `c_element_storage`
+        // (the function specifically responsible for giving structs/
+        // Vec elements/etc. their REAL per-shape C type, as opposed
+        // to `c_leaf_type`'s deliberate placeholder-comment fallback
+        // for "caller forgot to route through the real spelling")
+        // simply never had arms for `Type::Vec128`/`Vec256`/`Vec512`
+        // at all, unlike Tuple/Struct/Closure/Channel/Mutex which
+        // all already had the analogous fix applied in earlier
+        // sweeps. A struct field of `vec128<f64>` type declared
+        // itself as `/* vec128<T> */ lane;` -- not valid C. Fixed by
+        // adding the three missing arms, delegating to the
+        // already-correct `c_vec128_type`/`c_vec256_type`/
+        // `c_vec512_type` helpers (same helpers the LOCAL-variable
+        // case, tested just above, already used correctly).
+        let source = r#"
+            struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+            struct Combo2 { lane: vec256<f64>, xs: Vec<f64> }
+            fn main() -> i64 {
+              let l: vec128<f64> = simd_splat(3.0 as f64);
+              let c: Combo = Combo { lane: l, xs: vec(1.0 as f64, 2.0 as f64, 3.0 as f64) };
+              let s: f64 = simd_reduce_add(c.lane);
+              let l2: vec256<f64> = simd256_splat(5.0 as f64);
+              let c2: Combo2 = Combo2 { lane: l2, xs: vec(10.0 as f64, 20.0 as f64) };
+              let s2: f64 = simd256_reduce_add(c2.lane);
+              print s;
+              print c.xs[0];
+              print s2;
+              print c2.xs[1];
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("struct with both a SIMD field and a plain Vec field must compile to C");
+        assert!(
+            !c.contains("/* vec128<T> */") && !c.contains("/* vec256<T> */"),
+            "must not leak a c_leaf_type placeholder comment into a struct field \
+             declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("double __attribute__((vector_size(16))) lane;"),
+            "expected the real vec128 GNU vector-extension type on the struct field; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("double __attribute__((vector_size(32))) lane;"),
+            "expected the real vec256 GNU vector-extension type on the struct field; got:\n{}",
+            c
+        );
+    }
+
+    // Feature-combination gap audit (2026-08-03), category 1: SIMD as
+    // a CONTAINER ELEMENT (not a struct field, which BUG-79 above
+    // already covers). `Vec<vec128<f64>>` found TWO real bugs, one
+    // per backend, both the same "per-shape codegen helper forgot
+    // this element type" class as BUG-61/79:
+    //
+    // (1) C backend: `element_tag` (backend_c.rs) -- the function
+    //     that names Vec BUNDLE typedefs/helpers, a separate function
+    //     from `c_element_storage` that BUG-79 fixed -- had no arm
+    //     for Vec128/256/512, so its `_ => c_leaf_type(...)` fallback
+    //     returned the placeholder comment "/* vec128<T> */", and
+    //     `.replace(' ', "_")` turned it into `/*_vec128<T>_*/` --
+    //     embedded into every generated `intent_vec_<tag>__*`
+    //     identifier, corrupting the whole bundle (`cc` rejected with
+    //     a cascade of "expected '=', ',', ';'..." errors).
+    // (2) LLVM backend: TWO layered issues. First, `vec_struct_tag`
+    //     (backend_llvm.rs, the LLVM analog of `element_tag`) had the
+    //     same missing-arm gap, causing a Rust panic
+    //     ("llvm_type: use llvm_type_string for aggregate / ref
+    //     type"). Fixing that alone revealed a SECOND, more severe
+    //     bug: `vec_element_byte_size` (drives the Vec's malloc/
+    //     realloc sizing for push/growth) has a final fallback
+    //     `element.bits().unwrap_or(64) / 8` -- `Type::bits()`
+    //     returns `None` for SIMD lane types, so this silently
+    //     computed 8 bytes for a REAL 16-byte `vec128` (32 for
+    //     vec256, 64 for vec512) -- under-allocating the buffer by
+    //     half to 1/8th, corrupting the heap on the second element's
+    //     store (`realloc(): invalid next size` at runtime). Fixed
+    //     both: added the missing arms to `vec_struct_tag`
+    //     (identifier-safe recursive tag, mirroring `element_tag`)
+    //     and to `vec_element_byte_size` (16/32/64-byte constants,
+    //     matching the already-correct `llvm_byte_size`). Verified
+    //     with `valgrind --leak-check=full` on a native AOT LLVM
+    //     build in addition to both backends' stdout: 0 errors, all
+    //     heap blocks freed.
+    #[test]
+    fn vec_of_vec128_pushes_and_indexes_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let b: vec128<f64> = simd_splat(2.0 as f64);
+              let mut_v: Vec<vec128<f64>> = vec(a, b);
+              let s: f64 = simd_reduce_add(mut_v[0]);
+              print s;
+              push(mut ref mut_v, simd_splat(3.0 as f64));
+              print len(mut_v) as i64;
+              let s2: f64 = simd_reduce_add(mut_v[2]);
+              print s2;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<vec128<f64>> must compile to C");
+        assert!(
+            !c.contains("/*_vec128<T>_*/") && !c.contains("/* vec128<T> */"),
+            "must not leak the vec128<T> placeholder into a Vec bundle identifier; got:\n{}",
+            c
+        );
+        compile_to_llvm(source).expect("Vec<vec128<f64>> must compile to LLVM without panicking");
+    }
+
+    #[test]
+    fn array_of_vec128_indexes_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let b: vec128<f64> = simd_splat(2.0 as f64);
+              let arr: [vec128<f64>; 2] = [a, b];
+              let s0: f64 = simd_reduce_add(arr[0]);
+              let s1: f64 = simd_reduce_add(arr[1]);
+              print s0;
+              print s1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("[vec128<f64>; 2] must compile to C");
+        compile_to_llvm(source).expect("[vec128<f64>; 2] must compile to LLVM");
+    }
+
+    #[test]
+    fn struct_field_vec_of_vec256_compiles() {
+        // Two levels of nesting: struct -> Vec -> SIMD (as opposed
+        // to BUG-79's one-level struct -> SIMD).
+        let source = r#"
+            struct Lanes { data: Vec<vec256<f64>> }
+            fn main() -> i64 {
+              let a: vec256<f64> = simd256_splat(1.5 as f64);
+              let l: Lanes = Lanes { data: vec(a) };
+              let s: f64 = simd256_reduce_add(l.data[0]);
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("struct { Vec<vec256<f64>> } must compile to C");
+        compile_to_llvm(source).expect("struct { Vec<vec256<f64>> } must compile to LLVM");
+    }
+
+    #[test]
+    fn tuple_containing_vec128_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(2.0 as f64);
+              let pair: (vec128<f64>, i64) = (a, 42);
+              let s: f64 = simd_reduce_add(pair.0);
+              print s;
+              print pair.1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("(vec128<f64>, i64) tuple must compile to C");
+        compile_to_llvm(source).expect("(vec128<f64>, i64) tuple must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_struct_instantiated_at_vec128_compiles() {
+        let source = r#"
+            struct Wrapper<T> { v: T }
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(3.0 as f64);
+              let w: Wrapper<vec128<f64>> = Wrapper { v: a };
+              let s: f64 = simd_reduce_add(w.v);
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Wrapper<vec128<f64>> must compile to C");
+        compile_to_llvm(source).expect("Wrapper<vec128<f64>> must compile to LLVM");
+    }
+
+    #[test]
+    fn option_of_vec128_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(4.0 as f64);
+              let o: Option<vec128<f64>> = Option.Some(a);
+              let s: f64 = match o {
+                Option.Some(v) then simd_reduce_add(v),
+                Option.None then 0.0 as f64,
+              };
+              print s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Option<vec128<f64>> must compile to C");
+        compile_to_llvm(source).expect("Option<vec128<f64>> must compile to LLVM");
+    }
+
+    // BUG-82 (found+fixed 2026-08-03, same gap-audit pass as BUG-81
+    // above, LLVM-only). `Result<vec128<f64>, i64>` -- a MIXED-
+    // payload-type enum (unlike `Option<vec128<f64>>` just above,
+    // which has only ONE payloaded variant and so never touches the
+    // mixed-payload path at all) -- crashed `lli` with a bare
+    // segfault, no diagnostic, on both construction (`Result.Ok(v)`)
+    // and match-arm extraction. Root cause: mixed-payload enums store
+    // their payload in an `{i32, [N x i8]}` byte buffer (see the
+    // `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY` doc comment); reading or
+    // writing the ACTUAL payload type through that buffer requires a
+    // `bitcast i8* ... to <payload_llvm_type>*` followed by a
+    // load/store. Neither the construction site
+    // (`TypedExprKind::EnumVariantWithPayload`) nor the match-arm
+    // extraction site had an explicit `align` on that load/store --
+    // LLVM defaults to the pointee type's ABI alignment, which for
+    // `<2 x double>` (vec128) is 16 bytes, `<4 x double>` (vec256) is
+    // 32, etc. The buffer itself only guarantees 4-byte alignment
+    // (from the struct's leading `i32` tag field), so LLVM emitted an
+    // ALIGNED SSE/AVX move instruction against actually-unaligned
+    // memory -- a hard segfault at runtime, not a compile-time error,
+    // and not caught by `Option<T>` (single-payload-type enums use
+    // `insertvalue`/`extractvalue` directly on the SSA struct value,
+    // never touching the byte buffer at all). Fixed by adding an
+    // explicit `align 1` to both the construction-site store and the
+    // match-arm-extraction load -- tells LLVM to use unaligned move
+    // instructions, which is always correct regardless of the
+    // buffer's real alignment, for every payload type this code path
+    // handles (not just SIMD ones). Verified with `valgrind
+    // --leak-check=full` on a native AOT LLVM build covering BOTH
+    // variants (`Result.Ok` and `Result.Err`): 0 errors.
+    #[test]
+    fn result_of_vec128_and_i64_mixed_payload_enum_compiles() {
+        let source = r#"
+            fn make(flag: bool) -> Result<vec128<f64>, i64> {
+              if flag {
+                return Result.Ok(simd_splat(4.0 as f64));
+              }
+              return Result.Err(99);
+            }
+            fn main() -> i64 {
+              let r1: Result<vec128<f64>, i64> = make(true);
+              let r2: Result<vec128<f64>, i64> = make(false);
+              let s: f64 = match r1 {
+                Result.Ok(v) then simd_reduce_add(v),
+                Result.Err(_) then 0.0 as f64,
+              };
+              let e: i64 = match r2 {
+                Result.Ok(_) then -1,
+                Result.Err(code) then code,
+              };
+              print s;
+              print e;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Result<vec128<f64>, i64> must compile to C");
+        compile_to_llvm(source).expect("Result<vec128<f64>, i64> must compile to LLVM without panicking");
+    }
+
+    #[test]
+    fn hashmap_value_vec128_is_cleanly_rejected() {
+        // Matches the documented "hashmap_insert() supports scalar V
+        // in v1" restriction (same boundary as Vec<T> values) --
+        // confirming it's real and consistent for SIMD too, not
+        // silently accepted or a panic.
+        let source = r#"
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(5.0 as f64);
+              let m: HashMap<i64, vec128<f64>> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, a);
+              return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(result.is_err(), "HashMap<i64, vec128<f64>> value must be rejected in v1");
+    }
+
+    #[test]
+    fn clone_at_on_struct_with_simd_field_in_vec_compiles_and_runs_correctly() {
+        let source = r#"
+            struct Combo { lane: vec128<f64>, tag: i64 }
+            fn main() -> i64 {
+              let a: vec128<f64> = simd_splat(1.0 as f64);
+              let items: Vec<Combo> = vec(Combo { lane: a, tag: 1 }, Combo { lane: a, tag: 2 });
+              let c: Combo = clone_at(items, 0);
+              let s: f64 = simd_reduce_add(c.lane);
+              print s;
+              print c.tag;
+              print len(items) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("clone_at on Vec<Combo> (SIMD field) must compile to C");
+        compile_to_llvm(source).expect("clone_at on Vec<Combo> (SIMD field) must compile to LLVM");
+    }
+
     /// BUG-58 (found in the same audit): `simd_store`/`simd256_store`/
     /// `simd512_store` mutate the target `Vec<T>` THROUGH its ref/
     /// pointer and return a byval COPY of the struct header (the SAME
@@ -52384,6 +55565,218 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    // Feature-combination gap audit (2026-08-03), category 2:
+    // generics x concurrency handles. `struct Cache<T> { lock:
+    // Mutex<T> }` found BUG-83: `collect_mutex_specs`/
+    // `collect_rwlock_specs`/`collect_channel_specs` (the passes that
+    // discover which concrete T's need a bundle emitted) only ever
+    // recursed into Vec/Atomic/Array/Ref/RefMut -- never a nominal
+    // struct's OWN field types. Crucially, `struct_field_mutex_
+    // alongside_vec_field_compiles_to_c` just above did NOT catch
+    // this: it ALSO declares a bare `let m: Mutex<i64> = ...;`
+    // elsewhere in the same function, which the pre-existing
+    // `TypedStmt::Let` arm already discovers directly -- masking the
+    // gap entirely. The bug only manifests when the concrete T is
+    // used EXCLUSIVELY through the struct field, never as a bare
+    // local/param anywhere else in the program -- exactly the natural
+    // "a Cache/SharedState struct wraps a lock" pattern. Confirmed via
+    // `cc`: "implicit declaration of function
+    // 'intent_mutex_int64_t_new'" -- the bundle was never emitted at
+    // all. Fixed by adding a `Type::Struct(name)` arm to all three
+    // collector functions, looking up the struct's field types via a
+    // new shared `lookup_struct_fields_any_backend` helper.
+    //
+    // That helper's OWN existence is because of a second, LLVM-only
+    // layer to the same bug: these three collector functions live in
+    // `backend_c.rs` and are REUSED directly by `backend_llvm.rs` (no
+    // duplicate LLVM-side versions), but each backend populates its
+    // own independent struct-fields registry
+    // (`backend_c::STRUCT_FIELDS_REGISTRY` vs.
+    // `backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY`) -- only one is
+    // ever populated per compile run. A naive fix reading only the
+    // C-side registry made the C backend correct while LLVM kept
+    // failing with "Cannot allocate unsized type" (the mutex struct
+    // type was silently never emitted). `lookup_struct_fields_any_
+    // backend` checks both, in order.
+    #[test]
+    fn generic_struct_with_mutex_field_never_used_as_bare_local_compiles() {
+        let source = r#"
+            struct Cache<T> { lock: Mutex<T> }
+            fn main() -> i64 {
+              let ci: Cache<i64> = Cache { lock: mutex_new(42) };
+              let vi: i64 = {
+                let gi = mutex_lock(ref ci.lock);
+                guard_get(ref gi)
+              };
+              print vi;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Cache<i64> { lock: Mutex<i64> } must compile to C");
+        compile_to_llvm(source).expect("Cache<i64> { lock: Mutex<i64> } must compile to LLVM");
+    }
+
+    // Regression found verifying the BUG-83 fix above, fixed in the
+    // same pass (2026-08-03): the initial `Type::Struct` recursion
+    // arm added to `collect_mutex_specs`/`collect_rwlock_specs`/
+    // `collect_channel_specs` assumed a struct's field graph is
+    // always a DAG (true for by-VALUE nesting, which can't be
+    // infinite-sized) -- wrong for `Vec<Self>`, which IS legal and
+    // common (`struct Node { children: Vec<Node> }`, the shape every
+    // tree/recursive-walk example needs, since `Vec` is always
+    // pointer-indirected). Without a cycle guard, recursing into
+    // `Node`'s `Vec<Node>` field walked straight back into `Node`
+    // itself, forever -- confirmed as a REAL stack overflow at
+    // runtime (`examples/language/english/self_referential_struct_
+    // vec.vani`, an existing pinned regression test for a DIFFERENT,
+    // already-fixed bug (BUG-31), started crashing with "thread
+    // 'main' has overflowed its stack" the moment this fix landed).
+    // Fixed with a `STRUCT_RECURSION_GUARD` thread-local tracking
+    // which struct names are currently being expanded on the current
+    // walk -- a struct already in progress is skipped rather than
+    // re-entered, correctly breaking the cycle while still fully
+    // exploring every distinct struct once per top-level call.
+    #[test]
+    fn self_referential_struct_with_mutex_field_does_not_infinite_recurse() {
+        let source = r#"
+            struct Node { value: i64, children: Vec<Node>, lock: Mutex<i64> }
+            fn main() -> i64 {
+              let empty: Vec<Node> = vec();
+              let n: Node = Node { value: 1, children: empty, lock: mutex_new(0) };
+              print n.value;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("self-referential struct with an unrelated Mutex field must compile, not hang/stack-overflow");
+        compile_to_llvm(source).expect("self-referential struct with an unrelated Mutex field must compile to LLVM too");
+    }
+
+    // BUG-84 (found+fixed 2026-08-03, same gap-audit pass, LLVM-only).
+    // Testing `Cache<bool>` (a second instantiation of the same
+    // generic struct, T=bool) alongside the i64 one above surfaced a
+    // completely separate, general bug: `Mutex<bool>` (ANY `Mutex
+    // <bool>`, not just as a struct field or generic instantiation --
+    // confirmed with a bare top-level `Mutex<bool>` too) crashed `lli`
+    // with a type-mismatch verifier error ("defined with type 'i8'
+    // but expected 'i1'"). Root cause: `Mutex<bool>`'s payload is
+    // stored as `i8` (the same Atomic<bool> shadow-storage trick --
+    // `i1` isn't byte-addressable), but `guard_get`'s codegen returned
+    // the raw loaded `i8` value directly instead of converting it
+    // back to `i1`, and `guard_set` had the mirror gap on the write
+    // side. Fixed by mirroring `atomic_load`/`atomic_store`'s
+    // existing Bool handling (`icmp ne i8 X, 0` / `zext i1 to i8`).
+    #[test]
+    fn generic_struct_with_mutex_bool_field_compiles_and_runs_correctly() {
+        let source = r#"
+            struct Cache<T> { lock: Mutex<T> }
+            fn main() -> i64 {
+              let cb: Cache<bool> = Cache { lock: mutex_new(true) };
+              let vb: bool = {
+                let gb = mutex_lock(ref cb.lock);
+                guard_get(ref gb)
+              };
+              print vb;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Cache<bool> must compile to C");
+        compile_to_llvm(source).expect("Cache<bool> must compile to LLVM without a type-mismatch verifier error");
+    }
+
+    #[test]
+    fn bare_mutex_bool_guard_get_and_set_round_trip_correctly() {
+        // General confirmation beyond the struct-field case above:
+        // Mutex<bool> was broken for ANY usage shape, not just
+        // structs/generics.
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<bool> = mutex_new(true);
+              let v: bool = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("bare Mutex<bool> must compile to C");
+        compile_to_llvm(source).expect("bare Mutex<bool> must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_function_constructing_mutex_from_its_own_type_param_compiles() {
+        // Category 2, row 2: a generic function that itself
+        // constructs a Mutex<T>/RwLock<T>/Channel<T,N> from its own
+        // generic parameter (as opposed to a struct declaring the
+        // field). Checked clean -- no bug found.
+        let source = r#"
+            fn make_locked<T>(initial: T) -> Mutex<T> {
+              return mutex_new(initial);
+            }
+            fn main() -> i64 {
+              let m: Mutex<i64> = make_locked(7);
+              let v: i64 = {
+                let g = mutex_lock(ref m);
+                guard_get(ref g)
+              };
+              print v;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("generic fn constructing Mutex<T> must compile to C");
+        compile_to_llvm(source).expect("generic fn constructing Mutex<T> must compile to LLVM");
+    }
+
+    #[test]
+    fn generic_task_capture_copy_check_applies_per_monomorphization() {
+        // Category 2, row 4: a generic, bounded task-capture Copy
+        // check must be evaluated PER MONOMORPHIZATION -- the exact
+        // same generic function body should accept a Copy
+        // instantiation (T=i64) and reject a non-Copy one (T=
+        // OwnedStr) within the SAME program. Checked clean -- no bug
+        // found; both directions behave correctly.
+        let accepted = r#"
+            fn use_val<T>(x: T) -> i64 {
+              task worker {
+                let _ = x;
+              }
+              join worker;
+              return 0;
+            }
+            fn main() -> i64 {
+              let n: i64 = use_val(5);
+              print n;
+              return 0;
+            }
+        "#;
+        compile_to_c(accepted).expect("task capture of Copy T=i64 must be accepted");
+        compile_to_llvm(accepted).expect("task capture of Copy T=i64 must be accepted (LLVM)");
+
+        let rejected = r#"
+            fn use_val<T>(x: T) -> i64 {
+              task worker {
+                let _ = x;
+              }
+              join worker;
+              return 0;
+            }
+            fn main() -> i64 {
+              let n: i64 = use_val(5);
+              let s: OwnedStr = "hi" + "";
+              let m: i64 = use_val(s);
+              print n;
+              print m;
+              return 0;
+            }
+        "#;
+        let result = compile(rejected);
+        assert!(
+            result.is_err(),
+            "task capture of non-Copy T=OwnedStr must be rejected even though \
+             the i64 instantiation of the same generic function is accepted"
+        );
+    }
+
     /// BUG-62 (tree-C, part 1): `array_c_typedef`'s helper for the
     /// INNER element spelling of a `Vec<[T;N]>` typedef fell
     /// through to `c_leaf_type` for Struct elements, which returns
@@ -52411,6 +55804,62 @@ fn main() -> i64 { return leak_check(); }
         assert!(
             c.contains("typedef Struct_Point intent_arr2_Struct_Point[2];"),
             "expected a real typedef aliasing Struct_Point; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn array_of_tuple_or_struct_fn_param_emits_real_type_not_placeholder() {
+        // BUG-78, found sweeping the testing matrix's Big-O row
+        // (`Array<Tuple,N>` as a function parameter) -- unrelated to
+        // Big-O itself, a general C-backend declarator bug: ANY
+        // function taking `[Tuple; N]` or `[Struct; N]` BY VALUE (a
+        // param or plain local, not just inside a Vec) hit it.
+        // `format_declarator`'s `Type::Array` arm called
+        // `c_leaf_type(element)` directly -- `c_leaf_type` is
+        // documented as a LEAF-only spelling table that deliberately
+        // returns a placeholder comment ("/* tuple */", "/* struct
+        // */") for aggregate types, expecting callers to route
+        // through `c_element_storage` instead (which already has the
+        // correct per-shape arms, used elsewhere for exactly this).
+        // `fn sum_array_tuple(arr: [(i64, i64); 5])` declared itself
+        // as `/* tuple */ v_arr[5]` -- not valid C, "unknown type
+        // name 'v_arr'". Fixed in three places: the bare `Type::Array`
+        // arm, and the `ref`/`mut ref` Array arms (same bug, same
+        // fix) in `format_declarator`.
+        let source = r#"
+            fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+              return arr[0].0;
+            }
+            struct Pt { x: i64, y: i64 }
+            fn sum_array_struct(arr: [Pt; 3]) -> i64 {
+              return arr[0].x;
+            }
+            fn main() -> i64 {
+              let a: [(i64, i64); 5] = [(1,1),(2,2),(3,3),(4,4),(5,5)];
+              let b: [Pt; 3] = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }];
+              print sum_array_tuple(a);
+              print sum_array_struct(b);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Array<Tuple,N>/Array<Struct,N> fn params must compile to C");
+        assert!(
+            !c.contains("/* tuple */") && !c.contains("/* struct */"),
+            "must not leak a c_leaf_type placeholder comment into a function \
+             parameter declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("sum_array_tuple(intent_tuple_int64_t_int64_t v_arr[5])") || c.contains("sum_array_tuple(intent_tuple_int64_t_int64_t v_arr[5]"),
+            "expected the real tuple bundle struct name in the array parameter \
+             declarator; got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("sum_array_struct(Struct_Pt v_arr[3])") || c.contains("sum_array_struct(Struct_Pt v_arr[3]"),
+            "expected the real Struct_Pt name in the array parameter \
+             declarator; got:\n{}",
             c
         );
     }
@@ -52602,6 +56051,68 @@ fn main() -> i64 { return leak_check(); }
                 < c.find("struct Struct_Handler {").unwrap(),
             "closure typedef must precede Struct_Handler's body:\n{}",
             c
+        );
+    }
+
+    /// BUG-66 residual fix (2026-08-02): the deferred gap logged
+    /// alongside the fix above. A closure with a HEAP-OWNING capture
+    /// (moved in, not `ref`-captured) stored into a struct field
+    /// crashed on both backends -- LLVM: `lli` rejected the emitted
+    /// IR ("base element of getelementptr must be sized" -- the
+    /// synthesized env struct is referenced as an opaque/unsized type
+    /// at the point the closure is stored into and read back from the
+    /// struct field); C: `free(): double free detected in tcache 2`
+    /// at runtime. This is an affine-ownership/lifetime gap (the
+    /// closure's heap-owning env crossing a struct-field boundary),
+    /// not a missing typedef -- deliberately not attempted as a "make
+    /// it work" fix; instead the checker now rejects the pattern with
+    /// a clean diagnostic via `reject_affine_closure_into_struct_field`,
+    /// using the pre-existing `CLOSURE_AFF_REGISTRY` (populated when
+    /// the closure literal itself is checked) to detect a heap-owning
+    /// capture at the struct-literal-field / field-assignment site.
+    #[test]
+    fn struct_field_closure_with_heap_owning_capture_is_rejected_not_crashed() {
+        let source = r#"
+            struct Handler { cb: Closure(i64) -> i64 }
+            fn main() -> i64 {
+              let data: Vec<i64> = vec(1, 2, 3, 4);
+              let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+              let h: Handler = Handler { cb: cb };
+              let f: Closure(i64) -> i64 = h.cb;
+              print f(5);
+              return 0;
+            }
+        "#;
+        let result = compile_to_c(source);
+        assert!(
+            result.is_err(),
+            "a closure with a heap-owning (moved) capture stored into a \
+             struct field must be a clean compile-time rejection, not \
+             reach codegen and crash"
+        );
+    }
+
+    #[test]
+    fn struct_field_assign_closure_with_heap_owning_capture_is_rejected() {
+        let source = r#"
+            struct Handler { cb: Closure(i64) -> i64 }
+            fn main() -> i64 {
+              let data: Vec<i64> = vec(1, 2, 3, 4);
+              let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+              let zero: i64 = 0;
+              let noop = fn(x: i64) -> i64 { return x + zero; };
+              let h: Handler = Handler { cb: noop };
+              let hh: mut ref Handler = mut ref h;
+              hh.cb = cb;
+              return 0;
+            }
+        "#;
+        let result = compile_to_c(source);
+        assert!(
+            result.is_err(),
+            "assigning a heap-owning-capture closure into a struct field via \
+             `obj.field = ...;` must also be rejected, not just the struct-\
+             literal shape"
         );
     }
 

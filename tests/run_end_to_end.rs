@@ -6906,3 +6906,3527 @@ fn main() -> i64 {
         assert_eq!(stdout, "3\n-1\n7\n-999\n", "for {:?}; got: {}", backend_args, stdout);
     }
 }
+
+// Testing-matrix sweep, "container x generics / monomorphization": a
+// user-defined generic struct `Box2<T> { items: Vec<T> }` instantiated at
+// TWO different T (i64 and OwnedStr) in the same program. Same bug class
+// as BUG-46 (built-in generic enums) but for struct construction --
+// Env::resolve_struct_name's "exactly one candidate" fallback broke every
+// Box2 { .. } construction site once a second instantiation existed
+// anywhere in the program. Fixed via resolve_bare_struct_lits_in_stmt.
+#[test]
+fn generic_struct_two_instantiations_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic_struct_two_instantiations",
+        r#"
+struct Box2<T> { items: Vec<T> }
+fn main() -> i64 {
+  let bi: Box2<i64> = Box2 { items: vec(1, 2, 3) };
+  let bs: Box2<OwnedStr> = Box2 { items: vec("a" + "", "b" + "") };
+  let total: i64 = bi.items[0] + bi.items[1] + bi.items[2];
+  let s0: OwnedStr = clone_at(ref bs.items, 0);
+  let s1: OwnedStr = clone_at(ref bs.items, 1);
+  print total;
+  print s0;
+  print s1;
+  print len(bs.items) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "6\na\nb\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "generic fn first<T>(xs: ref Vec<T>) -> T
+// monomorphized over Struct and Tuple T": found BUG-71 (generic inference
+// through `ref Vec<T>` bound T to the whole Vec instead of its element,
+// for ANY T -- not container/generics-specific in a narrow sense, but a
+// general generic-call inference bug) and BUG-72 (a generic fn specialized
+// over a Tuple T mangled its name with literal `[`/`]` from Tuple's
+// derived-Debug fallback, crashing the LLVM backend's "expected '(' in
+// call" -- C backend was unaffected by this specific repro). Both fixed;
+// this test exercises the full row end-to-end: scalar, Struct, and Tuple T
+// through the same generic fn, correct values on both backends.
+#[test]
+fn generic_fn_ref_vec_t_over_scalar_struct_tuple_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "generic_fn_ref_vec_t_struct_tuple",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn first<T>(xs: ref Vec<T>) -> T {
+  return xs[0];
+}
+fn main() -> i64 {
+  let nums: Vec<i64> = vec(10, 20, 30);
+  let n: i64 = first(ref nums);
+  let pts: Vec<Pt> = vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 });
+  let p: Pt = first(ref pts);
+  let tups: Vec<(i64, i64)> = vec((5, 6), (7, 8));
+  let t: (i64, i64) = first(ref tups);
+  print n;
+  print p.x;
+  print p.y;
+  print t.0;
+  print t.1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "10\n1\n2\n5\n6\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "container x generics": Vec<GenericStruct<i64>>
+// alongside Vec<GenericStruct<f64>> (here OwnedStr instead of f64, to also
+// cover a non-Copy instantiation) -- two different monomorphizations of
+// the same generic struct, each wrapped in its own Vec. Compounds BUG-70's
+// bug class (2+ instantiations of the same generic struct) with BUG-61's
+// territory (container-element codegen that's written per-shape). Checked
+// 2026-08-02, not a bug -- both compile and run correctly on both
+// backends.
+#[test]
+fn vec_of_generic_struct_two_monomorphizations_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_of_generic_struct_two_mono",
+        r#"
+struct Box2<T> { val: T }
+fn main() -> i64 {
+  let vi: Vec<Box2<i64>> = vec(Box2 { val: 100 }, Box2 { val: 200 });
+  let vs: Vec<Box2<OwnedStr>> = vec(Box2 { val: "hello" + "" }, Box2 { val: "world" + "" });
+  let sum_i: i64 = vi[0].val + vi[1].val;
+  let cs0: Box2<OwnedStr> = clone_at(ref vs, 0);
+  let cs1: Box2<OwnedStr> = clone_at(ref vs, 1);
+  print sum_i;
+  print cs0.val;
+  print cs1.val;
+  print len(vi) as i64;
+  print len(vs) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "300\nhello\nworld\n2\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "enum variant payload is Vec<Struct>". Checked
+// 2026-08-02, not a bug -- construction, tag-match dispatch, and drop all
+// work correctly on both backends.
+#[test]
+fn enum_variant_payload_vec_of_struct_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "enum_payload_vec_of_struct",
+        r#"
+struct Pt { x: i64, y: i64 }
+enum Bag { Items(Vec<Pt>), Empty }
+fn build(use_items: bool) -> Bag {
+  if use_items {
+    return Bag.Items(vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }));
+  }
+  return Bag.Empty;
+}
+fn classify(b: Bag) -> i64 {
+  return match b {
+    Bag.Items then 1,
+    Bag.Empty then 0,
+  };
+}
+fn main() -> i64 {
+  let a: Bag = build(true);
+  let z: Bag = build(false);
+  print classify(a);
+  print classify(z);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "1\n0\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-74: enum variant payload is a Tuple containing an Array
+// (`(i64, [i64; 3])`). Three layered bugs found+fixed (checker admission
+// gate + two C-backend codegen gaps -- typedef ordering and array-element
+// initializer syntax); see docs/TODO_CURRENT.md for the full writeup.
+// This test also covers the payload's construction actually carrying the
+// right values by unpacking through a helper (destructure-binding a
+// non-Copy... actually Copy here, but still routed through match).
+#[test]
+fn enum_variant_payload_tuple_containing_array_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "enum_payload_tuple_array",
+        r#"
+enum Rec { Full((i64, [i64; 3])), Nothing }
+fn build(has: bool) -> Rec {
+  if has {
+    return Rec.Full((42, [1, 2, 3]));
+  }
+  return Rec.Nothing;
+}
+fn classify(r: Rec) -> i64 {
+  return match r {
+    Rec.Full then 1,
+    Rec.Nothing then 0,
+  };
+}
+fn main() -> i64 {
+  let a: Rec = build(true);
+  let z: Rec = build(false);
+  print classify(a);
+  print classify(z);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "1\n0\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-74b in isolation: a plain local Tuple<Array> binding, no enum
+// involved, confirming the C-backend initializer-syntax fix is general.
+#[test]
+fn tuple_containing_array_local_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "tuple_containing_array_local",
+        r#"
+fn main() -> i64 {
+  let x: (i64, [i64; 3]) = (42, [1, 2, 3]);
+  print x.0;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "42\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-75, found sweeping "match over Vec<Enum> with 3+ variants, mixed
+// Copy/non-Copy payloads": clone_at on a mixed-payload-type enum element
+// silently corrupted every scalar payload on LLVM (two layered bugs --
+// wrong OwnedStr-tag detection, then an LLVM type mismatch once that
+// detection was fixed; see docs/TODO_CURRENT.md). This test iterates a
+// Vec<Item> with 5 elements across 4 variant shapes (i64, OwnedStr, bool,
+// no-payload), clone_at-ing each and matching, hand-computed expected sum.
+#[test]
+fn match_over_vec_enum_mixed_payloads_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "match_vec_enum_mixed_payloads",
+        r#"
+enum Item { Num(i64), Text(OwnedStr), Flag(bool), Nothing }
+fn describe(it: Item) -> i64 {
+  return match it {
+    Item.Num(n) then n,
+    Item.Text then 1000,
+    Item.Flag(b) then if b { 2000 } else { 3000 },
+    Item.Nothing then 0,
+  };
+}
+fn main() -> i64 {
+  let items: Vec<Item> = vec(
+    Item.Num(7),
+    Item.Text("hello" + ""),
+    Item.Flag(true),
+    Item.Flag(false),
+    Item.Nothing,
+  );
+  let total: i64 = 0;
+  let i: i64 = 0;
+  let n: i64 = len(items) as i64;
+  while i < n {
+    let it: Item = clone_at(ref items, i);
+    total = total + describe(it);
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // 7 (Num) + 1000 (Text) + 2000 (Flag true) + 3000 (Flag false) + 0 (Nothing) = 6007
+        assert_eq!(stdout, "6007\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "nested if let 2 levels deep on a Vec element":
+// a genuinely nested pattern (`if let Option.Some(Result.Ok(v)) = ...`) is
+// cleanly rejected at parse time on both backends -- a real, documented
+// v1 limitation ("no nested patterns", intermediate/02_enums_payloads.md),
+// not a divergence bug. The flattened two-level form (two separate if-let
+// statements, per that doc's own "flatten with two match levels"
+// guidance) combined with an outer binding sourced from a Vec element via
+// clone_at found BUG-76: `Option<UserEnum>.None`'s zero-value placeholder
+// crashed the LLVM backend (see docs/TODO_CURRENT.md) -- nothing to do
+// with Vec/clone_at/if-let nesting specifically, just the first repro in
+// this sweep that happened to construct an Option<T> where T is a
+// user-defined enum. Fixed; this test covers the full flattened-nesting
+// scenario end-to-end.
+#[test]
+fn flattened_nested_if_let_on_vec_element_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "flattened_nested_iflet_vec_element",
+        r#"
+enum MyResult { Ok(i64), Err(i64) }
+fn main() -> i64 {
+  let xs: Vec<Option<MyResult>> = vec(
+    Option.Some(MyResult.Ok(7)),
+    Option.Some(MyResult.Err(0 - 1)),
+    Option.None,
+  );
+  let i: i64 = 0;
+  let n: i64 = len(xs) as i64;
+  let total: i64 = 0;
+  while i < n {
+    let outer: Option<MyResult> = clone_at(ref xs, i);
+    if let Option.Some(inner) = outer {
+      if let MyResult.Ok(v) = inner {
+        total = total + v;
+      }
+      if let MyResult.Err(e) = inner {
+        total = total + (0 - e) * 100;
+      }
+    }
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // 7 (Ok(7)) + 1*100 (Err(-1)) = 107
+        assert_eq!(stdout, "107\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-77, testing-matrix sweep "extern C fn taking/returning a Struct BY
+// VALUE": a real, linked C function that TAKES a small struct by value
+// already worked on both backends (Closure #288's ABI lowering), but one
+// that RETURNS a small struct by value crashed the LLVM backend the
+// instant it was actually called (not just declared) -- the ABI-lowered
+// call result (`i64`) was handed to callers as if it were already the
+// real `%Struct_X` type, an LLVM type mismatch. C backend was unaffected.
+// Exercises both directions (param AND return) against a real linked C
+// shim on both backends.
+#[test]
+fn extern_c_struct_by_value_param_and_return_runs_correctly_on_both_backends() {
+    use std::fs;
+    let src = write_tmp_vani(
+        "extern_struct_by_value",
+        r#"
+struct Point { x: i32, y: i32 }
+extern "C" fn make_point(x: i32, y: i32) -> Point;
+extern "C" fn point_sum(p: Point) -> i32;
+fn main() -> i64 {
+  let p: Point = make_point(3 as i32, 4 as i32);
+  let s: i32 = point_sum(p);
+  print s as i64;
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\n\
+         typedef struct { int32_t x; int32_t y; } Point;\n\
+         Point make_point(int32_t x, int32_t y) { Point p; p.x = x; p.y = y; return p; }\n\
+         int32_t point_sum(Point p) { return p.x + p.y; }\n",
+    )
+    .expect("write shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    // LLVM backend: `vanic build` (AOT, always LLVM) + `--link-with` + `-lm`
+    // (the generated runtime helpers pull in libm symbols that `cc` only
+    // resolves when linked explicitly here, per the FFI tutorial's own
+    // `--link-with=m` guidance).
+    let llvm_bin = dir.join("prog_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "LLVM backend output mismatch"
+    );
+
+    // C backend: `vanic run --backend=c --link-with` (JIT-equivalent via
+    // gcc, no separate build step needed for the C path).
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Testing-matrix sweep, "#[no_mangle] fn with a Tuple/Array parameter".
+// BUG-44's fix was only verified with scalar params. Checked 2026-08-02,
+// not a bug: both a Tuple-typed and an Array-typed parameter on a
+// no_mangle fn compute correctly on both backends.
+#[test]
+fn no_mangle_fn_with_tuple_and_array_params_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "no_mangle_tuple_array_params",
+        r#"
+#[no_mangle]
+fn sum_pair(p: (i64, i64)) -> i64 { return p.0 + p.1; }
+#[no_mangle]
+fn sum_arr(a: [i64; 4]) -> i64 { return a[0] + a[1] + a[2] + a[3]; }
+fn main() -> i64 {
+  print sum_pair((10, 20));
+  print sum_arr([1, 2, 3, 4]);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "30\n10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "partial move out of a Vec<T> struct field,
+// followed by clone_at on a DIFFERENT field of the same struct instance".
+// Checked 2026-08-02, not a bug -- both operations compute correctly and
+// no double-free/corruption on scope exit (the moved-out field isn't
+// freed twice) on either backend.
+#[test]
+fn partial_move_then_clone_at_different_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "partial_move_then_clone_at",
+        r#"
+struct Holder { xs: Vec<i64>, ys: Vec<OwnedStr> }
+fn main() -> i64 {
+  let h: Holder = Holder { xs: vec(1, 2, 3), ys: vec("a" + "", "b" + "", "c" + "") };
+  let moved_xs: Vec<i64> = h.xs;
+  let sum: i64 = moved_xs[0] + moved_xs[1] + moved_xs[2];
+  let s0: OwnedStr = clone_at(ref h.ys, 0);
+  let s1: OwnedStr = clone_at(ref h.ys, 1);
+  print sum;
+  print s0;
+  print s1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "6\na\nb\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "clone_at chained three levels deep": clone_at
+// on a Vec<Vec<Struct>>, then clone_at again on the result. Checked
+// 2026-08-02, not a bug -- both levels compute correctly and outer stays
+// untouched (independent of the clone) on both backends.
+#[test]
+fn clone_at_chained_three_levels_deep_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "clone_at_chained_three_levels",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let outer: Vec<Vec<Pt>> = vec(
+    vec(Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }),
+    vec(Pt { x: 5, y: 6 }, Pt { x: 7, y: 8 }, Pt { x: 9, y: 10 }),
+  );
+  let middle: Vec<Pt> = clone_at(ref outer, 1);
+  let inner: Pt = clone_at(ref middle, 2);
+  print inner.x;
+  print inner.y;
+  print len(middle) as i64;
+  print len(outer) as i64;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "9\n10\n3\n2\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "struct with both a Vec<T> field and an OwnedStr
+// field, partially moved (one field taken, the other read), then
+// dropped". Checked 2026-08-02, not a bug -- runs correctly on both
+// backends. Separately confirmed via `valgrind --leak-check=full` against
+// native binaries built from this exact program: 0 leaks, balanced
+// alloc/free counts on both backends (not re-run under valgrind in CI --
+// this test covers the correctness half; the memory-safety half was a
+// one-time manual verification recorded in docs/TODO_CURRENT.md).
+#[test]
+fn struct_vec_and_owned_str_fields_partial_move_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_vec_owned_str_partial_move",
+        r#"
+struct Rec { xs: Vec<i64>, name: OwnedStr }
+fn main() -> i64 {
+  let r: Rec = Rec { xs: vec(1, 2, 3), name: "widget" + "" };
+  let taken: Vec<i64> = r.xs;
+  print r.name;
+  print taken[0] + taken[1] + taken[2];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "widget\n6\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-78, found sweeping the testing-matrix's Big-O row (a
+// `#[complexity(...)]`-annotated -- actually just plain, since v1's
+// `--big-o` flag needs no attribute -- fn operating on `Vec<Struct>`/
+// `Array<Tuple,N>`, not just `Vec<i64>`). The --big-o analyzer itself
+// correctly classified Vec<Struct> loops (O(n)/O(n^2)) with no crash --
+// not a bug. But a function taking `Array<Tuple,N>` (or `Array<Struct,N>`)
+// BY VALUE as a parameter crashed the C backend entirely unrelated to
+// Big-O: format_declarator's Array arm used a leaf-only type spelling
+// table instead of the correct per-shape one. This test exercises the
+// real bug end-to-end.
+#[test]
+fn array_of_tuple_and_struct_fn_params_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "array_of_tuple_struct_params",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn sum_array_tuple(arr: [(i64, i64); 5]) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 5 {
+    total = total + arr[i].0 + arr[i].1;
+    i = i + 1;
+  }
+  return total;
+}
+fn sum_array_struct(arr: [Pt; 3]) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < 3 {
+    total = total + arr[i].x + arr[i].y;
+    i = i + 1;
+  }
+  return total;
+}
+fn main() -> i64 {
+  let a: [(i64, i64); 5] = [(1,1),(2,2),(3,3),(4,4),(5,5)];
+  let b: [Pt; 3] = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }];
+  print sum_array_tuple(a);
+  print sum_array_struct(b);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // sum_array_tuple: (1+1)+(2+2)+(3+3)+(4+4)+(5+5) = 30
+        // sum_array_struct: (1+2)+(3+4)+(5+6) = 21
+        assert_eq!(stdout, "30\n21\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep, "parallel for iterating a Vec<Struct> with a
+// reduce accumulating a struct field". Checked 2026-08-02, not a bug --
+// computes correctly on both backends.
+#[test]
+fn parallel_for_reduce_over_vec_struct_field_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "parallel_for_vec_struct_reduce",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let pts: Vec<Pt> = vec(Pt { x: 1, y: 10 }, Pt { x: 2, y: 20 }, Pt { x: 3, y: 30 }, Pt { x: 4, y: 40 });
+  let n: i64 = len(pts) as i64;
+  let sum: i64 = 0;
+  parallel for i from 0 to n
+  reduce sum with +;
+  {
+    sum = sum + pts[i].x;
+  }
+  print sum;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-79, testing-matrix sweep "struct with both a SIMD Vec128/Vec256
+// field AND a plain Vec field": c_element_storage never had arms for
+// Type::Vec128/Vec256/Vec512, so a struct field of that type declared
+// itself with a c_leaf_type placeholder comment ("/* vec128<T> */"),
+// invalid C. Fixed; this test exercises the full row end-to-end on both
+// backends.
+#[test]
+fn struct_with_simd_and_plain_vec_fields_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "struct_simd_and_plain_vec",
+        r#"
+struct Combo { lane: vec128<f64>, xs: Vec<f64> }
+struct Combo2 { lane: vec256<f64>, xs: Vec<f64> }
+fn main() -> i64 {
+  let l: vec128<f64> = simd_splat(3.0 as f64);
+  let c: Combo = Combo { lane: l, xs: vec(1.0 as f64, 2.0 as f64, 3.0 as f64) };
+  let s: f64 = simd_reduce_add(c.lane);
+  let l2: vec256<f64> = simd256_splat(5.0 as f64);
+  let c2: Combo2 = Combo2 { lane: l2, xs: vec(10.0 as f64, 20.0 as f64) };
+  let s2: f64 = simd256_reduce_add(c2.lane);
+  print s;
+  print c.xs[0];
+  print len(c.xs) as i64;
+  print s2;
+  print c2.xs[1];
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // simd_reduce_add(splat(3.0)) over 2 lanes = 6; xs[0]=1; len=3;
+        // simd256_reduce_add(splat(5.0)) over 4 lanes = 20; xs2[1]=20.
+        assert_eq!(stdout, "6\n1\n3\n20\n20\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-80, testing-matrix sweep "Option<Array<T,N>>/Result<Tuple,E>":
+// LLVM was correct throughout; C crashed on Option<[i64;3]> specifically
+// (two layered bugs -- match-arm binding used the wrong C type spelling,
+// then C arrays can't be copy-assigned via `=` even through a typedef;
+// see docs/TODO_CURRENT.md). This test covers the full row end-to-end:
+// Option over an Array payload AND Result over a Tuple payload, both
+// Some/Ok and None/Err paths, on both backends.
+#[test]
+fn option_array_and_result_tuple_payloads_run_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "option_array_result_tuple",
+        r#"
+fn maybe_arr(has: bool) -> Option<[i64; 3]> {
+  if has { return Option.Some([1, 2, 3]); }
+  return Option.None;
+}
+fn safe_div_pair(a: i64, b: i64) -> Result<(i64, i64), i64> {
+  if b == 0 { return Result.Err(0 - 1); }
+  return Result.Ok((a / b, a % b));
+}
+fn main() -> i64 {
+  let oa: Option<[i64; 3]> = maybe_arr(true);
+  let total: i64 = match oa {
+    Option.Some(arr) then arr[0] + arr[1] + arr[2],
+    Option.None then 0 - 999,
+  };
+  let on: Option<[i64; 3]> = maybe_arr(false);
+  let total2: i64 = match on {
+    Option.Some(arr) then arr[0] + arr[1] + arr[2],
+    Option.None then 0 - 999,
+  };
+  let r1: Result<(i64, i64), i64> = safe_div_pair(17, 5);
+  let s1: i64 = match r1 {
+    Result.Ok(pair) then pair.0 * 100 + pair.1,
+    Result.Err(_) then 0 - 1,
+  };
+  let r2: Result<(i64, i64), i64> = safe_div_pair(1, 0);
+  let s2: i64 = match r2 {
+    Result.Ok(pair) then pair.0 * 100 + pair.1,
+    Result.Err(e) then e,
+  };
+  print total;
+  print total2;
+  print s1;
+  print s2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // total = 1+2+3 = 6; total2 (None) = -999;
+        // s1: 17/5 = 3 rem 2 -> 3*100+2 = 302; s2 (Err(-1)) = -1
+        assert_eq!(stdout, "6\n-999\n302\n-1\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Testing-matrix sweep (final row): "Vec<Option<Struct>> -- Option of a
+// non-Copy struct, stored in a Vec (three-level: Vec -> Option -> Struct)".
+// The non-Copy-struct half of this row isn't reachable in v1 at all (a
+// clean, general enum-payload-admission restriction, confirmed separately
+// -- not a bug). The three-level nesting itself, with a Copy struct,
+// compiles and computes correctly on both backends.
+#[test]
+fn vec_of_option_of_copy_struct_runs_correctly_on_both_backends() {
+    let src = write_tmp_vani(
+        "vec_option_copy_struct",
+        r#"
+struct Pt { x: i64, y: i64 }
+fn main() -> i64 {
+  let items: Vec<Option<Pt>> = vec(Option.Some(Pt { x: 1, y: 2 }), Option.None, Option.Some(Pt { x: 3, y: 4 }));
+  let n: i64 = len(items) as i64;
+  let i: i64 = 0;
+  let total: i64 = 0;
+  while i < n {
+    let it: Option<Pt> = items[i];
+    let v: i64 = match it {
+      Option.Some(p) then p.x + p.y,
+      Option.None then 0,
+    };
+    total = total + v;
+    i = i + 1;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(output.status.success(), "{:?}: status {:?}, stderr: {}", backend_args, output.status, String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        // (1+2) + 0 (None) + (3+4) = 10
+        assert_eq!(stdout, "10\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-20 residual fix (2026-08-02): three adjacent guard-wiring gaps
+// left over from the original BUG-20 fix (which only wired guards into
+// the slice-pattern `Slice` arm). (1) A guarded `_` wildcard arm in a
+// slice/array match never read `arm.guard` at all -- always behaved as
+// an unconditional catch-all. (2) `check_match_str` never type-checked
+// or wired `arm.guard` into its generated dispatch -- a guarded string
+// match arm always behaved as if its guard were `true`. (3)
+// `check_match_float` had the identical gap. All three are the
+// "compiles fine but silently produces the wrong answer" class of bug
+// that only a real execution test catches.
+#[test]
+fn slice_pattern_guarded_wildcard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-guarded-wildcard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "slice_guarded_wildcard_e2e";
+fn classify(xs: Vec<i64>, n: i64) -> i64 {
+    return match xs {
+        [a, b] if n > 10 then a + b,
+        _ if n > 5 then 100,
+        _ then -1,
+    };
+}
+fn main() -> i64 {
+    print classify(vec(1, 2), 20);
+    print classify(vec(1, 2, 3), 8);
+    print classify(vec(1, 2, 3), 1);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "3\n100\n-1\n",
+            "guarded wildcard must be evaluated, not treated as unconditional, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn string_match_guard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-str-guard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "string_match_guard_e2e";
+fn classify(s: OwnedStr, n: i64) -> i64 {
+    return match s {
+        "x" if n > 10 then 1,
+        "y" then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify("x" + "", 20);
+    print classify("x" + "", 5);
+    print classify("y" + "", 20);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n0\n2\n",
+            "string match guard must gate the arm, not be silently ignored, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn float_match_guard_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-float-guard-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+intent "float_match_guard_e2e";
+fn classify(x: f64, n: i64) -> i64 {
+    return match x {
+        1.5 if n > 10 then 1,
+        2.5 then 2,
+        _ then 0,
+    };
+}
+fn main() -> i64 {
+    print classify(1.5, 20);
+    print classify(1.5, 5);
+    print classify(2.5, 20);
+    return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n0\n2\n",
+            "float match guard must gate the arm, not be silently ignored, for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-66 residual fix (2026-08-02): a closure with a heap-owning
+// capture (moved in, not `ref`-captured) stored into a struct field
+// used to crash both backends at build/run time (LLVM: `lli` rejects
+// the emitted IR as unsized; C: double-free at runtime). The checker
+// now rejects the pattern with a clean diagnostic instead. This is an
+// execution-level (real `vanic` binary) confirmation that `check`
+// exits non-zero with a real diagnostic, not just an in-process
+// `compile_to_c` check -- mirrors the "doesn't compile with a real
+// toolchain" verification style used for BUG-22 above.
+#[test]
+fn closure_with_heap_owning_capture_in_struct_field_is_cleanly_rejected() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-closure-aff-field-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Handler { cb: Closure(i64) -> i64 }
+fn main() -> i64 {
+  let data: Vec<i64> = vec(1, 2, 3, 4);
+  let cb = fn(extra: i64) -> i64 { return data[0] + extra; };
+  let h: Handler = Handler { cb: cb };
+  let f: Closure(i64) -> i64 = h.cb;
+  print f(5);
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    let _ = fs::remove_file(&src);
+
+    assert!(
+        !output.status.success(),
+        "expected a clean rejection, got success (this pattern used to crash \
+         the backend at build/run time instead of being caught here)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("heap-owning") && stderr.contains("struct field"),
+        "expected the BUG-66-residual diagnostic to mention the heap-owning \
+         capture and struct field, got:\n{}",
+        stderr
+    );
+}
+
+// BUG-36 (2026-08-02): the "single mutable borrow" exclusivity rule
+// ("`ref` can multiply, `mut ref` must be exclusive") was documented
+// but never enforced by the checker at all. `let r: mut ref Vec<i64>
+// = mut ref xs; push(r, 4); print xs[0];` used to compile and run
+// cleanly on both backends with no diagnostic. Real-binary
+// confirmation (not just an in-process `compile()` check) that
+// `vanic check` now rejects this with the exclusivity diagnostic.
+#[test]
+fn mut_ref_exclusivity_violation_is_cleanly_rejected() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mut-ref-exclusivity-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: mut ref Vec<i64> = mut ref xs;
+  push(r, 4);
+  print xs[0];
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    let _ = fs::remove_file(&src);
+
+    assert!(
+        !output.status.success(),
+        "expected a clean rejection, got success (this exact shape used to \
+         compile and run cleanly with no diagnostic at all before the fix)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("mutably borrowed by 'r'"),
+        "expected the exclusivity diagnostic, got:\n{}",
+        stderr
+    );
+}
+
+// Companion positive test: a named `mut ref` binding used the
+// ordinary, non-aliasing way (created, used, its scope ends, THEN
+// the source is read again) must still compile and run correctly on
+// both backends -- confirms the fix's lexical-scope model doesn't
+// over-reject legitimate, non-overlapping usage.
+#[test]
+fn mut_ref_used_normally_still_compiles_and_runs_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mut-ref-normal-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  if true {
+    let r: mut ref Vec<i64> = mut ref xs;
+    push(r, 4);
+  }
+  print xs[0];
+  print len(xs) as i64;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n4\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 1: SIMD as a
+// Vec ELEMENT. Two real bugs found and fixed here, one per backend --
+// see the matching src/lib.rs test's doc comment for the full root-
+// cause writeup. This is the execution-level confirmation: the C
+// bug corrupted every generated identifier (a compile-time failure,
+// already caught by the lib.rs test), but the LLVM bug was a runtime
+// heap corruption from an under-sized malloc/realloc that only a
+// real execution (not just successful compilation) can catch.
+#[test]
+fn vec_of_vec128_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-vec-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let a: vec128<f64> = simd_splat(1.0 as f64);
+  let b: vec128<f64> = simd_splat(2.0 as f64);
+  let mut_v: Vec<vec128<f64>> = vec(a, b);
+  let s: f64 = simd_reduce_add(mut_v[0]);
+  print s;
+  push(mut ref mut_v, simd_splat(3.0 as f64));
+  print len(mut_v) as i64;
+  let s2: f64 = simd_reduce_add(mut_v[2]);
+  print s2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\n3\n6\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn array_of_vec128_and_generic_wrapper_vec128_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-array-generic-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Wrapper<T> { v: T }
+fn main() -> i64 {
+  let a: vec128<f64> = simd_splat(1.0 as f64);
+  let b: vec128<f64> = simd_splat(2.0 as f64);
+  let arr: [vec128<f64>; 2] = [a, b];
+  print simd_reduce_add(arr[0]);
+  print simd_reduce_add(arr[1]);
+  let w: Wrapper<vec128<f64>> = Wrapper { v: a };
+  print simd_reduce_add(w.v);
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\n4\n2\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-82 (2026-08-03, same gap-audit pass as the Vec<vec128> tests
+// above, LLVM-only). `Result<vec128<f64>, i64>` -- a MIXED-payload-
+// type enum -- segfaulted `lli` on both construction and match-arm
+// extraction, because neither site's bitcast-through-the-byte-buffer
+// load/store had an explicit alignment, so LLVM assumed the SIMD
+// payload's natural (16-byte) ABI alignment against a buffer that
+// only guarantees 4 bytes. This is a runtime crash a compile-only
+// test can't catch (the C backend, and even LLVM compilation itself,
+// both succeeded before the fix -- only actually RUNNING the LLVM
+// output crashed).
+#[test]
+fn result_of_vec128_mixed_payload_enum_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-result-vec128-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn make(flag: bool) -> Result<vec128<f64>, i64> {
+  if flag {
+    return Result.Ok(simd_splat(4.0 as f64));
+  }
+  return Result.Err(99);
+}
+fn main() -> i64 {
+  let r1: Result<vec128<f64>, i64> = make(true);
+  let r2: Result<vec128<f64>, i64> = make(false);
+  let s: f64 = match r1 {
+    Result.Ok(v) then simd_reduce_add(v),
+    Result.Err(_) then 0.0 as f64,
+  };
+  let e: i64 = match r2 {
+    Result.Ok(_) then -1,
+    Result.Err(code) then code,
+  };
+  print s;
+  print e;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "8\n99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-83/BUG-84 (2026-08-03), feature-combination gap audit category
+// 2: generics x concurrency handles. See the matching src/lib.rs
+// tests' doc comments for the full root-cause writeups:
+// BUG-83 -- collect_mutex_specs/collect_rwlock_specs/
+// collect_channel_specs never recursed into a struct's OWN field
+// types, so a lock used ONLY through a struct field (never a bare
+// local elsewhere) never got its bundle emitted; LLVM needed a
+// SECOND fix (a cross-backend struct-fields-registry fallback) since
+// the C and LLVM backends each populate their own independent copy.
+// BUG-84 -- Mutex<bool>'s guard_get/guard_set never converted between
+// the i1 (bool) and i8 (byte-addressable storage) representations,
+// an LLVM verifier crash for ANY Mutex<bool> at all, not just this
+// combination -- but found via the T=bool instantiation of the same
+// generic Cache<T> struct used for BUG-83.
+#[test]
+fn generic_struct_mutex_field_two_instantiations_produce_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-generic-mutex-cache-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Cache<T> { lock: Mutex<T> }
+fn main() -> i64 {
+  let ci: Cache<i64> = Cache { lock: mutex_new(42) };
+  let vi: i64 = {
+    let gi = mutex_lock(ref ci.lock);
+    guard_get(ref gi)
+  };
+  let cb: Cache<bool> = Cache { lock: mutex_new(true) };
+  let vb: bool = {
+    let gb = mutex_lock(ref cb.lock);
+    guard_get(ref gb)
+  };
+  print vi;
+  print vb;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\ntrue\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Found by the local-model differential-fuzzing harness (tools/localfuzz/),
+// 2026-08-03: a non-ASCII (Devanagari) local variable name crashed the LLVM
+// backend but not the C backend. Root cause: local variable/register names
+// (`%name.addr`, `%arg_name`, etc.) were built directly from the raw source
+// identifier at ~12 call sites in backend_llvm.rs, unlike global function
+// symbols (`@fn_name`), which already routed through the existing
+// `llvm_mangle_ident` helper (non-ASCII chars -> `_uHHHH` hex escapes,
+// producing a valid *bare* LLVM identifier). Fixed by routing all ~12 local
+// binding sites through the same helper. Confirmed general across three
+// unrelated scripts (Devanagari, Hangul, Cyrillic), not Nepali-specific --
+// the checker's lexer explicitly supports arbitrary Unicode identifiers
+// (see `lex_unicode_ident` in lexer.rs), so this could affect any dialect.
+//
+// NOT fixed in the same pass: struct/enum TYPE names (`%Struct_<Name>`,
+// `%Enum_<Name>`) have the same unmangled-identifier gap, at ~28 separate
+// call sites with no shared helper to fix centrally, and no confirmed
+// crashing repro (existing dialect examples all use Latin struct/fn names
+// even when using native-script local variables). Logged, not fixed --
+// needs its own dedicated pass; see docs/TODO_CURRENT.md.
+#[test]
+fn non_ascii_local_variable_name_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    // (source, expected stdout) pairs -- one per script, each using a
+    // non-ASCII local variable name in an otherwise-trivial program.
+    let cases: [(&str, &str); 3] = [
+        // Devanagari (Nepali dialect) -- the original repro.
+        (
+            r#"
+उद्देश्य "Devanagari local variable identifier smoke-test";
+
+कार्य main() -> i64 {
+  माना थैला: i64 = 41;
+  लिखो थैला + 1;
+  लौटाओ 0;
+}
+"#,
+            "42\n",
+        ),
+        // Hangul (Korean dialect).
+        (
+            r#"
+목적 "Korean local variable identifier smoke-test";
+
+함수 main() -> i64 {
+  정의 숫자: i64 = 41;
+  확인 숫자 >= 0;
+  반환 0;
+}
+"#,
+            "",
+        ),
+        // Cyrillic, English keywords -- proves this isn't tied to any one
+        // dialect's keyword set, just the identifier itself.
+        (
+            r#"
+intent "Cyrillic local variable identifier smoke-test";
+
+fn main() -> i64 {
+  let число: i64 = 41;
+  print число + 1;
+  return 0;
+}
+"#,
+            "42\n",
+        ),
+    ];
+
+    for (i, (source, expected_stdout)) in cases.iter().enumerate() {
+        let src: PathBuf = std::env::temp_dir().join(format!(
+            "intentc-non-ascii-local-{}-{}-{}.vani",
+            i,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(&src, source).expect("write src");
+
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                output.status.success(),
+                "case {i}, {:?}: status {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+            assert_eq!(
+                stdout, *expected_stdout,
+                "case {i}, for {:?}; got: {}",
+                backend_args, stdout
+            );
+        }
+        let _ = fs::remove_file(&src);
+    }
+}
+
+// BUG-85/BUG-86 (2026-08-03), feature-combination gap audit category
+// 3. See the matching src/lib.rs tests' doc comments for the full
+// root-cause writeups. BUG-85 (SSA-C only): a bare, SSA-eligible
+// Mutex<i64> failed to compile at all (stale hardcoded naming).
+// BUG-86 (tree-C only): once BUG-85 was fixed, a program with two
+// SEQUENTIAL, non-overlapping lock/unlock cycles on the same mutex
+// (through a block-expression, the tutorial's own idiom) HUNG
+// FOREVER on the second lock -- a real, silent deadlock, not a
+// compile error. This test wraps the invocation in the `timeout`
+// command specifically so a FUTURE regression of BUG-86 fails this
+// test (and CI) instead of hanging the test suite itself forever.
+#[test]
+fn sequential_mutex_lock_unlock_via_block_expr_does_not_deadlock_on_either_backend() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mutex-sequential-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let m: Mutex<i64> = mutex_new(0);
+  let v1: i64 = {
+    let g = mutex_lock(ref m);
+    guard_get(ref g)
+  };
+  {
+    let g = mutex_lock(ref m);
+    guard_set(mut ref g, 99);
+  }
+  let v2: i64 = {
+    let g = mutex_lock(ref m);
+    guard_get(ref g)
+  };
+  print v1;
+  print v2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        // Wrapped in the real `timeout` command: if a future
+        // regression reintroduces the deadlock, this test fails
+        // (non-zero / killed exit) after 20s instead of hanging the
+        // whole suite (and CI) forever.
+        let mut cmd_args = vec!["20", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?} (124 = timeout/deadlock), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "0\n99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+#[test]
+fn tutorial_verbatim_mutex_example_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-mutex-tutorial-verbatim-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let m: Mutex<i64> = mutex_new(0);
+  {
+    let g: Guard<i64> = mutex_lock(ref m);
+    guard_set(mut ref g, 42);
+    let v: i64 = guard_get(ref g);
+    print v;
+  }
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "42\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-89 (2026-08-03), feature-combination gap audit category 5: dyn
+// dispatch x generics. `Vec<dyn Iface>` holding two different
+// monomorphizations of the same blanket-impl'd generic struct crashed
+// both backends because `expand_blanket_impls` never removed the
+// original blanket impl template from `program.impls`, so vtable
+// generation produced a bogus extra trampoline for the unresolved
+// template. See the matching src/lib.rs test's doc comment for the
+// full root-cause writeup.
+#[test]
+fn vec_of_dyn_iface_two_blanket_impl_monomorphizations_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-dyn-blanket-mono-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+interface Printable {
+  fn print_it(self: Self) -> i64;
+}
+struct Wrapper<T> { inner: T }
+implement<T> Printable for Wrapper<T> where T is Printable {
+  fn print_it(self: Wrapper<T>) -> i64 {
+    return self.inner.print_it();
+  }
+}
+struct Dog { name: i64 }
+implement Printable for Dog {
+  fn print_it(self: Dog) -> i64 { return 111; }
+}
+struct Cat { name: i64 }
+implement Printable for Cat {
+  fn print_it(self: Cat) -> i64 { return 222; }
+}
+fn main() -> i64 {
+  let wd: Wrapper<Dog> = Wrapper { inner: Dog { name: 1 } };
+  let wc: Wrapper<Cat> = Wrapper { inner: Cat { name: 2 } };
+  let items: Vec<dyn Printable> = vec(wd as dyn Printable, wc as dyn Printable);
+  let i: u64 = 0;
+  while i < len(items) {
+    print items[i].print_it();
+    i = i + 1;
+  }
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "111\n222\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-90 (2026-08-03), feature-combination gap audit category 6:
+// try/? x containers/generics. `try EXPR` calling a GENERIC function
+// failed with "generic function 'wrap' is declared but never called
+// with concrete types" -- four compounding gaps in the generics/
+// monomorphization pipeline, all the same "sibling walker never
+// learned about a syntax-sugar shape" pattern this session kept
+// hitting: `collect_generic_calls_in_expr` and its sibling
+// `rewrite_generic_calls_in_expr` had no `Match`/`Block` arms (the
+// try-desugar runs BEFORE fn-generics monomorphization, so every
+// `try wrap(n)` is already a `Match{scrutinee: Call(wrap,...)}` by
+// the time these walkers run); `substitute_type_param`'s
+// `Type::Apply` collapse always produced `Type::Struct`, never
+// `Type::Enum`, for a newly-concrete generic return type; and
+// `collect_apply_in_stmt`/`rewrite_apply_in_stmt` never recursed
+// into `Return`/`Assign` exprs to find the try-desugar's nested
+// synthesized `Let` annotations. See the matching src/lib.rs tests'
+// doc comments for the full root-cause writeup.
+#[test]
+fn try_inside_generic_function_call_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-generic-fn-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn lookup(x: i64) -> Option<i64> {
+  if x < 0 { return Option.None; }
+  return Option.Some(x * 2);
+}
+fn wrap<T>(x: T) -> Option<T> {
+  return Option.Some(x);
+}
+fn compute(n: i64) -> Option<i64> {
+  let v: i64 = try lookup(n);
+  let w: i64 = try wrap(v);
+  return Option.Some(w + 1);
+}
+fn main() -> i64 {
+  let r1: i64 = match compute(5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match compute(0 - 1) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "11\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-90 continued: category 6 row 3, `try` propagating through a
+// nested `Option<Result<T, E>>`. Needed the fourth sub-fix above
+// (the nested-Let-annotation walk gap in collect_apply_in_stmt /
+// rewrite_apply_in_stmt).
+#[test]
+fn try_propagates_through_nested_option_result_enum_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-nested-option-result-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn safe_div(a: i64, b: i64) -> Result<i64, i64> {
+  if b == 0 { return Result.Err(-1); }
+  return Result.Ok(a / b);
+}
+fn lookup(x: i64) -> Option<Result<i64, i64>> {
+  if x < 0 { return Option.None; }
+  return Option.Some(safe_div(100, x));
+}
+fn compute(x: i64) -> Option<Result<i64, i64>> {
+  let r: Result<i64, i64> = try lookup(x);
+  return Option.Some(r);
+}
+fn main() -> i64 {
+  let r1: Result<i64, i64> = match compute(4) {
+    Option.Some(v) then v,
+    Option.None then Result.Err(-99),
+  };
+  let out1: i64 = match r1 {
+    Result.Ok(v) then v,
+    Result.Err(e) then e,
+  };
+  let r2: Result<i64, i64> = match compute(0 - 1) {
+    Option.Some(v) then v,
+    Option.None then Result.Err(-99),
+  };
+  let out2: i64 = match r2 {
+    Result.Ok(v) then v,
+    Result.Err(e) then e,
+  };
+  print out1;
+  print out2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "25\n-99\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Category 6 row 1: `try`/`?` inside a function holding a live
+// LOCAL `Vec<Struct>` binding across the early-return path. Checked
+// clean (not a bug); regression-tested for output correctness here.
+// Verified separately with `valgrind --leak-check=full` on native
+// AOT builds of both backends: 0 errors, all heap blocks freed.
+#[test]
+fn try_with_live_local_vec_struct_across_early_return_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-try-vec-struct-dropseq-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Item { id: i64, tag: OwnedStr }
+fn find_positive(x: i64) -> Option<i64> {
+  if x < 0 { return Option.None; }
+  return Option.Some(x * 2);
+}
+fn compute(n: i64) -> Option<i64> {
+  let items: Vec<Item> = vec(
+    Item { id: 1, tag: "a" + "" },
+    Item { id: 2, tag: "b" + "" },
+  );
+  let doubled: i64 = try find_positive(n);
+  let first: Item = clone_at(ref items, 0);
+  let second: Item = clone_at(ref items, 1);
+  let total: i64 = doubled + first.id + second.id;
+  return Option.Some(total);
+}
+fn main() -> i64 {
+  let r1: i64 = match compute(5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match compute(0 - 5) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "13\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 1:
+// iterator-style Vec builtins chained together via named `let`s
+// between each step (the v1-supported pattern -- direct one-
+// expression chaining is rejected per docs, see the matching
+// src/lib.rs test). Verifies actual output VALUES, not just that
+// it compiles.
+#[test]
+fn iterator_combinators_chained_via_named_lets_produce_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-iter-combinator-chain-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn is_even(x: i64) -> bool { return x % 2 == 0; }
+fn double_it(x: i64) -> i64 { return x * 2; }
+fn add(a: i64, b: i64) -> i64 { return a + b; }
+fn mul(a: i64, b: i64) -> i64 { return a * b; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+  let ys: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+  let evens: Vec<i64> = xs.filter(is_even);
+  let doubled: Vec<i64> = evens.map(double_it);
+  let total: i64 = doubled.fold(0, add);
+  print total;
+  let zipped: Vec<i64> = vec_zip_with(ref xs, ref ys, mul);
+  let zipped_evens: Vec<i64> = zipped.filter(is_even);
+  let zipped_sum: i64 = zipped_evens.fold(0, add);
+  print zipped_sum;
+  let taken: Vec<i64> = doubled.take(2);
+  print taken[0];
+  print taken[1];
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "60\n3850\n4\n8\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 2:
+// `task`/`join` call-form with a genuinely multi-block callee body
+// (nested if/else inside a while loop) -- main.rs flags multi-block
+// task bodies as an SSA-LLVM-reject/tree-LLVM-fallback edge case.
+// Verified by hand: worker(10) = 37, worker(20) = 107.
+#[test]
+fn task_join_callform_multiblock_body_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-task-multiblock-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn worker(n: i64) -> i64 {
+  let acc: i64 = 0;
+  let i: i64 = 0;
+  while i < n {
+    if i % 3 == 0 {
+      acc = acc + i * 2;
+    } else {
+      if i % 2 == 0 {
+        acc = acc + i;
+      } else {
+        acc = acc - i;
+      }
+    }
+    i = i + 1;
+  }
+  return acc;
+}
+fn main() -> i64 {
+  let t1: Task<i64> = task worker(10);
+  let t2: Task<i64> = task worker(20);
+  let r1: i64 = join t1;
+  let r2: i64 = join t2;
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "37\n107\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 4:
+// Graph/Bst/Trie/SkipList/UnionFind/BloomFilter actually running
+// end-to-end together, matching advanced/05b_advanced_collections.md's
+// own documented expected values for every call.
+#[test]
+fn advanced_collections_run_correctly_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-advanced-collections-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let g: Graph = graph_new(5);
+  let _ = g.add_edge(0, 1, 4);
+  let _ = g.add_edge(0, 2, 1);
+  let _ = g.add_edge(2, 1, 2);
+  let _ = g.add_edge(1, 3, 1);
+  let _ = g.add_edge(3, 4, 3);
+  print g.num_nodes();
+  print g.num_edges();
+  print g.bfs_reach(0);
+  print g.dfs_reach(0);
+  let dist: Option<i64> = g.dijkstra(0, 4);
+  print option_unwrap_or(dist, -1);
+
+  let b: Bst<i64> = bst_new();
+  let _ = b.insert(5);
+  let _ = b.insert(3);
+  let _ = b.insert(7);
+  let _ = b.insert(1);
+  print b.contains(3);
+  print b.contains(6);
+  print b.len();
+  print option_unwrap_or(b.min(), -1);
+  print option_unwrap_or(b.max(), -1);
+  let _ = b.remove(3);
+  print b.len();
+
+  let t: Trie = trie_new();
+  let _ = t.insert("hello");
+  let _ = t.insert("help");
+  let _ = t.insert("world");
+  print t.contains("hello");
+  print t.contains("hell");
+  print t.starts_with("hel");
+  print t.starts_with("wor");
+  print t.len();
+
+  let sl: SkipList = skiplist_new();
+  let _ = sl.insert(10);
+  let _ = sl.insert(5);
+  let _ = sl.insert(20);
+  let _ = sl.insert(5);
+  print sl.len();
+  print sl.contains(5);
+  print sl.contains(7);
+  print option_unwrap_or(sl.min(), -1);
+  print option_unwrap_or(sl.max(), -1);
+
+  let uf: UnionFind = union_find_new(6);
+  let _ = union_find_union(mut ref uf, 0, 1);
+  let _ = union_find_union(mut ref uf, 1, 2);
+  let _ = union_find_union(mut ref uf, 3, 4);
+  print union_find_count(ref uf);
+  print union_find_connected(mut ref uf, 0, 2);
+  print union_find_connected(mut ref uf, 0, 3);
+
+  let bf: BloomFilter = bloom_filter_new(1024, 4);
+  let _ = bf.insert(42);
+  let _ = bf.insert(100);
+  let _ = bf.insert(7);
+  print bf.contains(42);
+  print bf.contains(99);
+  print bf.len();
+  print bf.count();
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let expected = "5\n5\n5\n5\n7\ntrue\nfalse\n4\n1\n7\n3\ntrue\nfalse\ntrue\ntrue\n3\n3\ntrue\nfalse\n5\n20\n3\ntrue\nfalse\ntrue\nfalse\n1024\n3\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// Feature-combination gap audit (2026-08-03), category 7 row 3
+// neighborhood (the BUG-44 `--target`/`no_std`/`#[no_mangle]`
+// intersection was re-audited for OTHER bugs nearby): found that
+// `examples/language/english/bare_metal.vani` -- the EXACT shipped
+// example BUG-44 fixed -- had never actually been run through
+// `vanic build`/`vanic run` (only its emitted TEXT was grepped for
+// the bare symbol name). Doing so crashes `opt`/`llc` with ill-typed
+// IR from `mmio_read_u8`/`mmio_read_u16` (internally zext'd their
+// narrow load to i64, contradicting the narrow-stays-narrow-until-
+// cast convention SSA-LLVM already follows -- storing that i64 value
+// into a `u8`/`u16`-typed `let`'s i8/i16 alloca produced "defined
+// with type 'i64' but expected 'i8/i16'"). Fixing the read side
+// exposed a SECOND bug in the same builtin family: `mmio_write_u8`/
+// `mmio_write_u16` unconditionally emitted `trunc i64 {val} to i8/
+// i16` assuming `val` was always i64-typed, which is wrong whenever
+// the value being written is ALREADY narrow (any `u8`/`u16`
+// parameter or local, or `mmio_read_u8/u16` after the first fix) --
+// "defined with type 'i8' but expected 'i64'" the other way around.
+// Both only affect tree-LLVM (reached whenever a program contains a
+// `#[no_mangle]` fn anywhere, which routes the WHOLE program there
+// per BUG-44's own fix) -- SSA-LLVM already had the correct
+// convention for all four builtins, used as the reference here.
+// This test builds+links+runs (full opt/llc/cc pipeline) a program
+// combining all four builtins with a `#[no_mangle]` fn to force
+// tree-LLVM routing; `valgrind --leak-check=full` on the resulting
+// native binary: 0 errors.
+#[test]
+fn mmio_narrow_read_write_builtins_build_and_run_correctly_under_no_mangle() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir();
+    let src: PathBuf = dir.join(format!(
+        "intentc-mmio-narrow-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+#[no_mangle]
+fn dummy_export() -> i64 {
+  return 0;
+}
+fn uart_tx_ready() -> bool {
+  let sr: u16 = mmio_read_u16(0x40011000);
+  return (sr as i64) & 0x80 != 0;
+}
+fn uart_send(byte: u8) -> i64 {
+  let _ = mmio_write_u8(0x40011004, byte);
+  return 0;
+}
+fn set_ctrl_reg(v: u16) -> i64 {
+  let _ = mmio_write_u16(0x40011008, v);
+  return 0;
+}
+fn main() -> i64 {
+  print "ok";
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    let bin_path = dir.join(format!(
+        "intentc-mmio-narrow-bin-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "-lm",
+            "-o",
+            bin_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "vanic build failed (mmio narrow read/write under #[no_mangle]):\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run = Command::new(&bin_path).output().expect("binary runs");
+    assert!(
+        run.status.success(),
+        "binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run.status,
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).replace("\r\n", "\n"),
+        "ok\n",
+    );
+    let _ = fs::remove_file(&src);
+    let _ = fs::remove_file(&bin_path);
+}
+
+// Feature-combination gap audit (2026-08-03), category 8 row 1:
+// `extern "C"` fn taking/returning a MONOMORPHIZED GENERIC struct
+// (`Wrapper<i32>`, mangled to `Wrapper__i32`) by value, verified
+// against a REAL linked C shim on both backends (matching BUG-77's
+// verification style, extended to a generic struct's monomorphized
+// shape). 3 + 4 = 7.
+#[test]
+fn extern_c_monomorphized_generic_struct_by_value_runs_correctly_on_both_backends() {
+    use std::fs;
+
+    let src = write_tmp_vani(
+        "extern_generic_struct_by_value",
+        r#"
+struct Wrapper<T> { x: T, y: T }
+extern "C" fn make_wrapper(x: i32, y: i32) -> Wrapper<i32>;
+extern "C" fn wrapper_sum(w: Wrapper<i32>) -> i32;
+fn main() -> i64 {
+  let w: Wrapper<i32> = make_wrapper(3 as i32, 4 as i32);
+  let s: i32 = wrapper_sum(w);
+  print s as i64;
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("wrapper_shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\n\
+         typedef struct { int32_t x; int32_t y; } Wrapper_i32;\n\
+         Wrapper_i32 make_wrapper(int32_t x, int32_t y) { Wrapper_i32 w; w.x = x; w.y = y; return w; }\n\
+         int32_t wrapper_sum(Wrapper_i32 w) { return w.x + w.y; }\n",
+    )
+    .expect("write wrapper_shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let llvm_bin = dir.join("wrapper_prog_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "LLVM backend output mismatch"
+    );
+
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "7\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Feature-combination gap audit (2026-08-03), category 8 row 3: the
+// documented escape hatch (`pure extern "C" fn`) for calling foreign
+// code inside a `task` body genuinely works end-to-end, on both
+// backends, against a real linked C shim.
+#[test]
+fn pure_extern_c_call_inside_task_body_runs_correctly_on_both_backends() {
+    use std::fs;
+
+    let src = write_tmp_vani(
+        "pure_extern_in_task",
+        r#"
+pure extern "C" fn c_add(a: i64, b: i64) -> i64;
+fn main() -> i64 {
+  task worker {
+    let x: i64 = c_add(3, 4);
+  }
+  join worker;
+  print "done";
+  return 0;
+}
+"#,
+    );
+    let dir = src.parent().unwrap().to_path_buf();
+    let shim_c = dir.join("cadd_shim.c");
+    fs::write(
+        &shim_c,
+        "#include <stdint.h>\nint64_t c_add(int64_t a, int64_t b) { return a + b; }\n",
+    )
+    .expect("write cadd_shim.c");
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let llvm_bin = dir.join("pure_extern_task_llvm");
+    let build = Command::new(binary)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--link-with",
+            shim_c.to_str().unwrap(),
+            "-lm",
+            "-o",
+            llvm_bin.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc build runs");
+    assert!(
+        build.status.success(),
+        "LLVM build --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    let run_llvm = Command::new(&llvm_bin).output().expect("LLVM binary runs");
+    assert!(
+        run_llvm.status.success(),
+        "LLVM binary exited non-zero: {:?} (stdout: {}, stderr: {})",
+        run_llvm.status,
+        String::from_utf8_lossy(&run_llvm.stdout),
+        String::from_utf8_lossy(&run_llvm.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_llvm.stdout).replace("\r\n", "\n"),
+        "done\n",
+        "LLVM backend output mismatch"
+    );
+
+    let run_c = Command::new(binary)
+        .args([
+            "run",
+            src.to_str().unwrap(),
+            "--backend=c",
+            "--link-with",
+            shim_c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc run --backend=c --link-with runs");
+    assert!(
+        run_c.status.success(),
+        "C backend run --link-with failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_c.stdout),
+        String::from_utf8_lossy(&run_c.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_c.stdout).replace("\r\n", "\n"),
+        "done\n",
+        "C backend output mismatch"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// BUG-93 (2026-08-03), feature-combination gap audit category 9 row
+// 2: a recursive GENERIC struct (`struct Node<T> { value: T, next:
+// Option<Box<Node<T>>> }`) failed to compile at all -- five
+// compounding gaps in the generics-monomorphization pipeline (four
+// missing Type::Box arms across four separate "walk a Type for
+// nested Apply" copies, plus a single-pass-instead-of-fixed-point
+// generation loop that silently discarded newly-discovered needs
+// from a freshly-monomorphized struct's own fields). See the
+// matching src/lib.rs test's doc comment for the full root-cause
+// writeup, including three separate deferred findings surfaced
+// along the way (enum-ctor-in-struct-literal ambiguity with a
+// working workaround, no field access through a bare Box<T>, and a
+// pre-existing C-backend memory leak in the already-shipped BUG-35
+// example independent of generics).
+#[test]
+fn recursive_generic_struct_node_produces_correct_output_on_both_backends() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-recursive-generic-node-{}-{}.vani",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(
+        &src,
+        r#"
+struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+fn main() -> i64 {
+  let tail: Node<i64> = Node { value: 3, next: Option.None };
+  let tail_next: Option<Box<Node<i64>>> = Option.Some(box(tail));
+  let mid: Node<i64> = Node { value: 2, next: tail_next };
+  let mid_next: Option<Box<Node<i64>>> = Option.Some(box(mid));
+  let head: Node<i64> = Node { value: 1, next: mid_next };
+  print head.value;
+  return 0;
+}
+"#,
+    )
+    .expect("write src");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+    let _ = fs::remove_file(&src);
+}
+
+// BUG-95 (2026-08-03). Direct-struct-literal variant of the BUG-93
+// test above -- same recursive generic struct `Node<T>`, but every
+// `Option.Some(box(...))` enum constructor is written INLINE inside
+// the enclosing struct literal's field, with no intermediate `let`
+// to give the monomorphizer's discovery walk a literal, un-collapsed
+// `Type::Apply` node to find. See the matching src/lib.rs test's doc
+// comment for the full root-cause writeup (two ordering/lookup bugs
+// plus a third, deeper bug where `substitute_type_param`'s eager
+// Type::Apply -> Type::Enum/Struct collapse discarded the very
+// information the discovery worklist needed).
+#[test]
+fn recursive_generic_struct_node_direct_struct_literal_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "recursive-generic-node-direct-structlit",
+        r#"
+struct Node<T> { value: T, next: Option<Box<Node<T>>> }
+fn main() -> i64 {
+  let tail: Node<i64> = Node { value: 3, next: Option.None };
+  let mid: Node<i64> = Node { value: 2, next: Option.Some(box(tail)) };
+  let head: Node<i64> = Node { value: 1, next: Option.Some(box(mid)) };
+  print head.value;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "1\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-96 (2026-08-03). Deferred finding from BUG-93: field access
+// through a bare `Box<T>` (`boxed.x` where `boxed: Box<Point>`) was
+// rejected outright. `Box<T>` (T != dyn Iface) lowers to a bare
+// `T*` in both backends, bit-identical to Ref/RefMut, so field
+// access now peels it the same way. Exercises both a top-level
+// `Box<Point>` binding and a `Box<Point>` struct FIELD (`n.next.x`)
+// to cover the lvalue-chaining path too. See the matching
+// src/lib.rs test's doc comment for the full root-cause writeup.
+#[test]
+fn field_access_through_bare_box_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "box-field-access",
+        r#"
+struct Point { x: i64, y: i64 }
+struct Node { value: Point, next: Box<Point> }
+fn main() -> i64 {
+  let p: Point = Point { x: 3, y: 4 };
+  let boxed: Box<Point> = box(p);
+  print boxed.x;
+  print boxed.y;
+  let n: Node = Node { value: Point { x: 1, y: 2 }, next: box(Point { x: 9, y: 8 }) };
+  print n.next.x;
+  print n.next.y;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "3\n4\n9\n8\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// BUG-97 (2026-08-03). Deferred finding from BUG-93/task #39: the
+// canonical `Node { next: Option<Box<Node>> }` recursive-struct
+// shape (the one the Box<T>/RAII tutorial itself demonstrates)
+// leaked on the C backend -- the checker never even emitted a
+// scope-exit Drop for a `Node` local at all, let alone one that
+// recursed into the Box chain. See the matching src/lib.rs test's
+// doc comment for the full root-cause writeup. This test exercises
+// a longer (3-node) chain where each node ALSO owns a plain
+// `OwnedStr` field alongside the recursive `Box<Self>` edge, to
+// cover both the generated deep-drop helper's non-recursive-field
+// pass and its worklist-push pass in the same run. Correctness
+// (not leak-freedom -- that's separately valgrind-verified, see
+// docs/TODO_CURRENT.md) is what this e2e test actually asserts.
+#[test]
+fn recursive_struct_box_deep_drop_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "recursive-struct-box-deep-drop",
+        r#"
+struct Node { value: i64, name: OwnedStr, next: Option<Box<Node>> }
+fn main() -> i64 {
+  let n0: Node = Node { value: 0, name: "n0" + "", next: Option.None };
+  let n1: Node = Node { value: 1, name: "n1" + "", next: Option.Some(box(n0)) };
+  let n2: Node = Node { value: 2, name: "n2" + "", next: Option.Some(box(n1)) };
+  print n2.value;
+  print n2.name;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "2\nn2\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// BUG-91 (found 2026-08-03, fixed 2026-08-04, task #40). A bare call
+// to a generic function returning `Option<T>`, used directly as a
+// `match` scrutinee with no intermediate `let` binding, failed with
+// "enum 'Option__i64' is not declared" -- the concrete `Option<i64>`
+// instantiation was only ever discoverable through fn-generics' own
+// type inference at this call site, and by the time that ran, the
+// earlier struct/enum decl-monomorphization pass had already
+// finished and dropped the generic template it would have needed to
+// re-specialize from. See the matching src/lib.rs test's doc comment
+// for the full root-cause writeup and fix description.
+#[test]
+fn bare_generic_call_as_match_scrutinee_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "bare-generic-call-match-scrutinee",
+        r#"
+fn foo<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn main() -> i64 {
+  let r1: i64 = match foo(7) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "7\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// BUG-98 (found+fixed 2026-08-04, task #41). A bare enum
+// constructor INSIDE a generic function's OWN body failed to
+// resolve once 2+ distinct concrete instantiations of the same
+// generic enum existed anywhere in the program (here, two
+// DIFFERENT generic fns each internally constructing
+// `Option.Some(a)`, specialized to `Option__i64` and `Option__bool`
+// respectively). See the matching src/lib.rs test's doc comment for
+// the full root-cause writeup.
+#[test]
+fn bare_enum_ctor_inside_generic_fn_body_with_two_instantiations_produces_correct_output_on_both_backends()
+{
+    let src = write_tmp_vani(
+        "bare-enum-ctor-inside-generic-fn-body",
+        r#"
+fn foo1<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn foo2<T>(a: T) -> Option<T> {
+  return Option.Some(a);
+}
+fn main() -> i64 {
+  let r1: i64 = match foo1(7) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match foo2(true) {
+    Option.Some(x) then 1,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "7\n1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// BUG-87 rows 1-2 (found+fixed, task #42, 2026-08-04). `async fn`
+// combined with generics or a built-in generic enum return type was
+// broken. Row 1 (a generic async fn called directly inside
+// `await(...)`) turned out to already be fixed as a side effect of
+// an earlier gap-audit fix; row 2 (an async fn returning
+// `Option<i64>`, awaited then matched) needed a real fix -- see the
+// matching src/lib.rs tests' doc comment for the full writeup.
+#[test]
+fn async_fn_generic_call_inside_await_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "async-fn-generic-call-inside-await",
+        r#"
+async fn identity<T>(x: T) -> T {
+  return x;
+}
+fn main() -> i64 {
+  let r: i64 = await(identity(42));
+  print r;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "42\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+#[test]
+fn async_fn_returning_generic_enum_awaited_and_matched_produces_correct_output_on_both_backends()
+{
+    let src = write_tmp_vani(
+        "async-fn-returning-option-awaited-matched",
+        r#"
+async fn maybe_get(n: i64) -> Option<i64> {
+  if n > 0 {
+    return Option.Some(n);
+  }
+  return Option.None;
+}
+fn main() -> i64 {
+  let r1: i64 = match await(maybe_get(5)) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  let r2: i64 = match await(maybe_get(-3)) {
+    Option.Some(x) then x,
+    Option.None then -1,
+  };
+  print r1;
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "5\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 9 row 3:
+// Box<T> through a generic function boundary, both a struct T and a
+// scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
+#[test]
+fn box_through_generic_function_boundary_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "box_through_generic_fn",
+        r#"
+struct Point { x: i64, y: i64 }
+fn identity<T>(b: Box<T>) -> Box<T> {
+  return b;
+}
+fn main() -> i64 {
+  let p: Point = Point { x: 3, y: 4 };
+  let boxed: Box<Point> = box(p);
+  let round_tripped: Box<Point> = identity(boxed);
+  let n: i64 = 42;
+  let boxed_n: Box<i64> = box(n);
+  let round_tripped_n: Box<i64> = identity(boxed_n);
+  print "ok";
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, "ok\n", "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 9 row 4:
+// `parallel for` over a `Vec<Struct>` with an `OwnedStr` field, each
+// iteration writing to its own distinct index via `clone_at` (no
+// cross-iteration aliasing). Verified memory-safe separately with
+// `valgrind --leak-check=full` on native AOT builds of both
+// backends: 0 errors, all heap blocks freed.
+#[test]
+fn parallel_for_over_vec_struct_with_ownedstr_field_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "parallel_for_ownedstr_struct",
+        r#"
+struct Item { id: i64, label: OwnedStr }
+fn main() -> i64 {
+  let source: Vec<Item> = vec(
+    Item { id: 10, label: "a" + "" },
+    Item { id: 20, label: "b" + "" },
+    Item { id: 30, label: "c" + "" },
+  );
+  let items: Vec<Item> = vec(
+    Item { id: 0, label: "x" + "" },
+    Item { id: 0, label: "y" + "" },
+    Item { id: 0, label: "z" + "" },
+  );
+  parallel for i from 0 to 3 {
+    items[i] = clone_at(ref source, i);
+  }
+  let a: Item = clone_at(ref items, 0);
+  let b: Item = clone_at(ref items, 1);
+  let c: Item = clone_at(ref items, 2);
+  print a.id;
+  print b.id;
+  print c.id;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "10\n20\n30\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 10 row 1: the
+// documented "two flat matches" rewrite of a nested `Result<Option
+// <i64>, i64>` match produces correct output on both backends.
+#[test]
+fn nested_result_option_two_flat_matches_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "nested_result_option_two_flat",
+        r#"
+fn lookup(x: i64) -> Result<Option<i64>, i64> {
+  if x < 0 { return Result.Err(-1); }
+  if x == 0 { return Result.Ok(Option.None); }
+  return Result.Ok(Option.Some(x * 2));
+}
+fn classify(x: i64) -> i64 {
+  let r: Result<Option<i64>, i64> = lookup(x);
+  let inner: Option<i64> = match r {
+    Result.Ok(opt) then opt,
+    Result.Err(e) then Option.None,
+  };
+  let is_err: bool = match r {
+    Result.Ok(_) then false,
+    Result.Err(_) then true,
+  };
+  if is_err {
+    return match r {
+      Result.Ok(_) then 0,
+      Result.Err(e) then e,
+    };
+  }
+  return match inner {
+    Option.Some(v) then v,
+    Option.None then 0,
+  };
+}
+fn main() -> i64 {
+  print classify(5);
+  print classify(0);
+  print classify(0 - 1);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "10\n0\n-1\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 10 row 2: a
+// guarded slice-pattern arm through a generic Vec<T> element type,
+// verified for both an i64 and an f64 instantiation of T.
+#[test]
+fn guarded_slice_pattern_through_generic_vec_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "guarded_slice_pattern_generic",
+        r#"
+fn classify<T>(xs: Vec<T>, n: i64) -> i64 {
+  return match xs {
+    [a, b] if n > 10 then n,
+    _ if n > 5 then 100,
+    _ then -1,
+  };
+}
+fn main() -> i64 {
+  let ints: Vec<i64> = vec(1, 2);
+  print classify(ints, 20);
+  let ints2: Vec<i64> = vec(1, 2);
+  print classify(ints2, 6);
+  let ints3: Vec<i64> = vec(1, 2);
+  print classify(ints3, 1);
+  let floats: Vec<f64> = vec(1.0, 2.0);
+  print classify(floats, 20);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "20\n100\n-1\n20\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 10 row 3: an
+// or-pattern-shaped guard referencing the variant's own payload
+// binding, on both circle and square arms.
+#[test]
+fn or_pattern_guard_referencing_variant_binding_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "or_pattern_guard_variant_binding",
+        r#"
+enum Shape {
+  Circle(i64),
+  Square(i64),
+}
+fn classify(s: Shape) -> i64 {
+  return match s {
+    Shape.Circle(n) if n == 1 || n == 2 then 100,
+    Shape.Circle(n) then n,
+    Shape.Square(n) if n == 1 || n == 2 then 200,
+    Shape.Square(n) then n * 10,
+  };
+}
+fn main() -> i64 {
+  print classify(Shape.Circle(1));
+  print classify(Shape.Circle(5));
+  print classify(Shape.Square(2));
+  print classify(Shape.Square(5));
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "100\n5\n200\n50\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}
+
+// BUG-94 (2026-08-03), feature-combination gap audit category 11 row
+// 1: `HashMap<StructKey, V>` with `self: ref Self` in the `Hash`/`Eq`
+// impls -- exactly what the checker's own diagnostic suggests --
+// crashed both backends outright. See the matching src/lib.rs test's
+// doc comment for the full root-cause writeup (two separate bugs,
+// one per backend, same root cause: the HashMap bundle hard-coded a
+// by-value calling convention instead of matching the impl's real
+// self-parameter convention).
+#[test]
+fn hashmap_struct_key_hash_eq_self_by_ref_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "hashmap_struct_key_self_ref",
+        r#"
+struct Key { a: i64, b: i64 }
+interface Hash { fn hash(self: ref Self) -> i64; }
+interface Eq { fn eq(self: ref Self, other: ref Self) -> bool; }
+implement Hash for Key {
+  fn hash(self: ref Key) -> i64 {
+    return self.a * 1000003 + self.b;
+  }
+}
+implement Eq for Key {
+  fn eq(self: ref Key, other: ref Key) -> bool {
+    return self.a == other.a && self.b == other.b;
+  }
+}
+fn main() -> i64 {
+  let m: HashMap<Key, i64> = hashmap_new();
+  let k1: Key = Key { a: 1, b: 2 };
+  let k2: Key = Key { a: 3, b: 4 };
+  let k3: Key = Key { a: 5, b: 6 };
+  let _ = hashmap_insert(mut ref m, k1, 100);
+  let _ = hashmap_insert(mut ref m, k2, 200);
+  let _ = hashmap_insert(mut ref m, k3, 300);
+  print hashmap_len(ref m);
+  let lookup1: Key = Key { a: 1, b: 2 };
+  print option_unwrap_or(hashmap_get(ref m, lookup1), -1);
+  let lookup2: Key = Key { a: 3, b: 4 };
+  print hashmap_contains_key(ref m, lookup2);
+  let lookup_missing: Key = Key { a: 9, b: 9 };
+  print hashmap_contains_key(ref m, lookup_missing);
+  let update_k: Key = Key { a: 1, b: 2 };
+  let old: i64 = option_unwrap_or(hashmap_insert(mut ref m, update_k, 999), -1);
+  print old;
+  let updated_lookup: Key = Key { a: 1, b: 2 };
+  print option_unwrap_or(hashmap_get(ref m, updated_lookup), -1);
+  let remove_k: Key = Key { a: 5, b: 6 };
+  let removed: i64 = option_unwrap_or(hashmap_remove(mut ref m, remove_k), -1);
+  print removed;
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let expected = "3\n100\ntrue\nfalse\n100\n999\n300\n2\n";
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(stdout, expected, "for {:?}; got: {}", backend_args, stdout);
+    }
+}
+
+// Feature-combination gap audit (2026-08-03), category 11 row 3: a
+// `dyn Iface` method call held across (and between) TWO `.await`
+// points inside an `async fn`. This surfaced a documentation-
+// accuracy gap: `docs/missing_features.md` documented this shape as
+// unsupported ("dyn-method receivers can't be held across suspend
+// points"), but it actually works correctly on both backends --
+// verified with two different concrete types behind the same `dyn`
+// binding and two separate method calls, one before and one after a
+// second await.
+#[test]
+fn dyn_iface_method_across_multiple_await_points_produces_correct_output_on_both_backends() {
+    let src = write_tmp_vani(
+        "dyn_across_multi_await",
+        r#"
+interface Speaker {
+  fn speak(self: Self) -> i64;
+}
+struct Dog { id: i64 }
+implement Speaker for Dog {
+  fn speak(self: Dog) -> i64 { return self.id; }
+}
+struct Cat { id: i64 }
+implement Speaker for Cat {
+  fn speak(self: Cat) -> i64 { return self.id * 10; }
+}
+async fn delay(x: i64) -> i64 {
+  return x;
+}
+async fn use_dyn_multi_await(use_dog: bool) -> i64 {
+  let dog: Dog = Dog { id: 42 };
+  let cat: Cat = Cat { id: 7 };
+  let d: dyn Speaker = if use_dog { dog as dyn Speaker } else { cat as dyn Speaker };
+  let v1: i64 = await(delay(1));
+  let mid: i64 = d.speak();
+  let v2: i64 = await(delay(2));
+  let end: i64 = d.speak();
+  return mid + end + v1 + v2;
+}
+fn main() -> i64 {
+  let r1: i64 = await(use_dyn_multi_await(true));
+  print r1;
+  let r2: i64 = await(use_dyn_multi_await(false));
+  print r2;
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "87\n143\n",
+            "for {:?}; got: {}",
+            backend_args, stdout
+        );
+    }
+}

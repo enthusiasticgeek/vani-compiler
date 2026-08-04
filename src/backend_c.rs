@@ -79,6 +79,28 @@ thread_local! {
     /// scope. T1.2 phase 2b.
     static STRUCT_FIELDS_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, Type)>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Gap-audit fix (2026-08-03): recursion guard for the
+    /// `collect_mutex_specs`/`collect_rwlock_specs`/
+    /// `collect_channel_specs` struct-field-recursion arms. A struct
+    /// CAN legally contain itself indirectly through a `Vec<Self>`
+    /// field (`struct Node { children: Vec<Node> }` -- the shape
+    /// every tree/recursive-walk example needs; unlike direct by-
+    /// value self-nesting, `Vec` is always pointer-indirected, so
+    /// this isn't an infinite-size type and the checker allows it).
+    /// The initial fix for BUG-83 recursed into a struct's fields
+    /// unconditionally, assuming (wrongly) that a struct field graph
+    /// is always a DAG -- true for by-value nesting, but `Vec`/
+    /// `Array`/`Ref`/`RefMut` wrapping breaks that assumption. Without
+    /// this guard, `collect_mutex_specs(Struct(Node))` -> finds field
+    /// `Vec<Node>` -> recurses into the Vec's element -> back to
+    /// `Struct(Node)` -> infinite loop, a real stack overflow
+    /// (confirmed: `self_referential_struct_vec_example_produces_
+    /// correct_output_on_c_backend` crashed with "thread 'main' has
+    /// overflowed its stack"). Tracks which struct names are
+    /// currently being expanded on the current recursive walk; a
+    /// struct already in progress is skipped rather than re-entered.
+    static STRUCT_RECURSION_GUARD: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        std::cell::RefCell::new(std::collections::BTreeSet::new());
     /// Names of structs / enums that have an `implement Drop
     /// for T` impl in the program (hoisted to `T_drop`).
     /// Populated at the start of `emit_c` from the function
@@ -87,6 +109,27 @@ thread_local! {
     /// when the type has no owning fields. T2.7 phase 2.
     static USER_DROP_REGISTRY: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Gap-audit fix (2026-08-03): maps a hoisted method's C function
+    /// name (e.g. "fn_Key_hash") -> whether its FIRST parameter
+    /// (`self`) is by-reference (`ref Self`/`mut ref Self`, compiled
+    /// to a C pointer param) or by-value (compiled to a bare struct
+    /// param). Populated at the start of `emit_c` from
+    /// `program.functions`. `emit_intent_hashmap_struct_pair_c_body`
+    /// (the `HashMap<StructKey, V>` bundle, ARC 1.7) used to
+    /// unconditionally forward-declare the user's `Hash`/`Eq` impl
+    /// methods as by-value (`{k_ctype} self`) regardless of how the
+    /// user actually declared `self` -- the checker's OWN diagnostic
+    /// for "HashMap key must implement Hash" suggests exactly the
+    /// `self: ref Self` form, which the real hoisted function then
+    /// compiles to a POINTER parameter, conflicting with the
+    /// bundle's hard-coded by-value forward declaration ("conflicting
+    /// types for 'fn_Key_hash'": `int64_t(const Struct_Key*)` vs
+    /// `int64_t(Struct_Key)"), and crashing the LLVM path outright.
+    /// This registry lets the bundle match whichever convention the
+    /// user's impl actually uses instead of assuming one.
+    static IMPL_METHOD_SELF_BY_REF_REGISTRY:
+        std::cell::RefCell<std::collections::HashMap<String, bool>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// Per-enum list of variant tags that carry a payload.
     /// Populated alongside `ENUM_PAYLOAD_REGISTRY` at the start
     /// of `emit_c`. The Drop handler reads this to switch on
@@ -252,6 +295,24 @@ pub fn emit_c(program: &TypedProgram) -> String {
             }
         }
     });
+    IMPL_METHOD_SELF_BY_REF_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if let Some(first) = f.params.first() {
+                let by_ref = matches!(first.ty, Type::Ref(_) | Type::RefMut(_));
+                // A hoisted `implement Iface for T { fn m(...) }` method
+                // is stored internally as the bare mangled name
+                // ("Key_hash"); the "fn_" prefix used at the C call
+                // sites (e.g. this HashMap bundle's own `fn_{}_hash`
+                // convention) is only added at emission time, not part
+                // of the function's own stored name. Key the registry
+                // by the emitted "fn_"-prefixed spelling so lookups
+                // elsewhere (which already use that spelling) find it.
+                reg.insert(format!("fn_{}", f.name), by_ref);
+            }
+        }
+    });
     // Emit the body first (Vec bundles + intents + functions + main),
     // then prepend includes + only the runtime helpers it actually
     // references. Keeps the generated C tidy when SMT elision discharges
@@ -268,6 +329,17 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let mut rwlock_specs: Vec<Type> = Vec::new();
     let mut tuple_seen = BTreeSet::<String>::new();
     let mut tuple_shapes: Vec<Vec<Type>> = Vec::new();
+    // BUG-74: declared up here (not down at its original call site
+    // near the Vec-element array-typedef loop) so the SAME `seen`
+    // set covers both that loop and the tuple-shape pass below --
+    // a tuple shape containing an `Array<T,N>` element (e.g. an
+    // enum payload `(i64, [i64; 3])`) needs its `intent_arrN_T`
+    // typedef emitted before `emit_tuple_bundle`'s early-tuple
+    // pass references it, which runs well before the original
+    // Vec-element loop. Using one shared `seen` set also prevents
+    // emitting the same typedef twice if the same array shape shows
+    // up on both axes.
+    let mut array_typedefs_seen = BTreeSet::<String>::new();
     for function in &program.functions {
         collect_vec_elements(&function.return_type, &mut vec_elements, &mut element_types);
         collect_channel_specs(
@@ -371,6 +443,40 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // topo loop, mirroring the Channel/Mutex/RwLock split above.
     fn tuple_shape_needs_full_struct_def(shape: &[Type]) -> bool {
         shape.iter().any(concurrency_element_needs_full_struct_def)
+    }
+    // BUG-74: any tuple element shaped `Array<T,N>` needs its
+    // `intent_arrN_T` typedef declared before `emit_tuple_bundle`
+    // references it -- do this for EVERY collected tuple shape
+    // (early or late; array typedefs have no struct/enum-body
+    // dependency of their own, so it's always safe to emit them
+    // this early) before either bundle-emission loop below runs.
+    // Found via an enum payload `(i64, [i64; 3])`, whose bundle is
+    // emitted in the "early" loop right below -- well before the
+    // original Vec-element-only array-typedef pass further down in
+    // this function ever ran.
+    for shape in &tuple_shapes {
+        for elem in shape {
+            emit_array_typedefs_for(elem, &mut array_typedefs_seen, &mut body);
+        }
+    }
+    // BUG-80: an enum payload that's DIRECTLY `Array<T,N>` (not
+    // nested inside a Tuple -- the case the `tuple_shapes` walk
+    // above covers) needs the same early array-typedef declaration.
+    // `Option<[i64; 3]>`'s match-arm payload-binding codegen
+    // declares its local as `intent_arr3_int64_t v_arr = ...;`
+    // (correct, once the sibling `c_type_name` -> `c_element_storage`
+    // fix at the match-arm call site landed), but nothing walked
+    // enum payload types directly through `emit_array_typedefs_for`
+    // -- only Vec elements and tuple-shape elements were fed in.
+    // `emit_array_typedefs_for` already recurses correctly (Array/
+    // Vec/Tuple arms), so just feed it every enum payload type
+    // directly; it's a no-op for shapes that don't contain an Array.
+    for decl in &program.enums {
+        for payload in &decl.payload_types {
+            if let Some(ty) = payload {
+                emit_array_typedefs_for(ty, &mut array_typedefs_seen, &mut body);
+            }
+        }
     }
     let (tuple_shapes_early, tuple_shapes_late): (Vec<Vec<Type>>, Vec<Vec<Type>>) = tuple_shapes
         .iter()
@@ -1232,6 +1338,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if any_tuple_emitted_here {
         body.push('\n');
     }
+    // BUG-97 (task #39, 2026-08-03): box-recursive structs' deep-
+    // drop helpers. Must land here -- after every struct/enum body
+    // is fully defined (the unified topo loop above already
+    // completed) so the generated function text can reference them
+    // by name -- and before any function body that might drop one
+    // gets emitted below.
+    emit_box_recursive_deep_drop_helpers(program, &mut body);
     // The REMAINING Channel<T,N>/Mutex<T>/RwLock<T> bundles -- ones
     // whose element type needs a full struct/enum/tuple body (e.g.
     // `Channel<UserStruct, N>`) -- land here, AFTER every user
@@ -1270,9 +1383,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // appears as a Vec element (a `Vec<[i64; 4]>` needs
     // `typedef int64_t intent_arr4_int64_t[4];` in scope
     // before its helper bundle). Refines #7 phase 2c. Walks
-    // only the Vec-element axis since arrays NOT inside Vecs
-    // stay inlined in their declarators.
-    let mut array_typedefs_seen = BTreeSet::<String>::new();
+    // the Vec-element axis; the tuple-element axis (BUG-74) is
+    // handled earlier in this function, sharing the same
+    // `array_typedefs_seen` set declared up there so neither pass
+    // double-emits a shape the other already covered.
     for element in &element_types {
         emit_array_typedefs_for(element, &mut array_typedefs_seen, &mut body);
     }
@@ -3499,12 +3613,37 @@ fn emit_intent_hashmap_struct_pair_c_body(
     // codegen (single underscore between type + method).
     let hash_fn = format!("fn_{}_hash", k_name);
     let eq_fn = format!("fn_{}_eq", k_name);
+    // Gap-audit fix (2026-08-03): match the REAL calling convention
+    // the user's `implement Hash`/`implement Eq for K` methods use
+    // (`self: ref Self` -> pointer param; `self: Self` -> by-value
+    // param) instead of always assuming by-value. See
+    // IMPL_METHOD_SELF_BY_REF_REGISTRY's doc comment for the full
+    // root-cause writeup.
+    let hash_by_ref = IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&hash_fn).copied())
+        .unwrap_or(false);
+    let eq_by_ref = IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&eq_fn).copied())
+        .unwrap_or(false);
+    let hash_param_ty = if hash_by_ref {
+        format!("const {}*", k_ctype)
+    } else {
+        k_ctype.to_string()
+    };
+    let eq_param_ty = if eq_by_ref {
+        format!("const {}*", k_ctype)
+    } else {
+        k_ctype.to_string()
+    };
+    let hash_arg_k = if hash_by_ref { "&k".to_string() } else { "k".to_string() };
+    let eq_arg_keys_i = if eq_by_ref { "&m->keys[i]".to_string() } else { "m->keys[i]".to_string() };
+    let eq_arg_k = if eq_by_ref { "&k".to_string() } else { "k".to_string() };
     out.push_str(&format!(
         "typedef struct {{ {k_ctype}* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
          /* Declare the user-defined hash + eq fns; they may be\n\
           * defined later in the same translation unit. */\n\
-         static int64_t {hash_fn}({k_ctype} self);\n\
-         static bool {eq_fn}({k_ctype} self, {k_ctype} other);\n\
+         static int64_t {hash_fn}({hash_param_ty} self);\n\
+         static bool {eq_fn}({eq_param_ty} self, {eq_param_ty} other);\n\
          static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
          \x20 {prefix} m;\n\
          \x20 m.keys = ({k_ctype}*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
@@ -3519,7 +3658,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
          \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
          }}\n\
          static INTENT_UNUSED uint64_t {prefix}__hash_key({k_ctype} k) {{\n\
-         \x20 int64_t raw = {hash_fn}(k);\n\
+         \x20 int64_t raw = {hash_fn}({hash_arg_k});\n\
          \x20 /* FNV-1a over the raw i64 hash so struct hash\n\
           *    impls that return e.g. a single field's value\n\
           *    still distribute across the table. */\n\
@@ -3564,7 +3703,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
          \x20 uint64_t mask = m->capacity - 1;\n\
          \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
          \x20 while (m->occ[i] != 0) {{\n\
-         \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) return true;\n\
+         \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) return true;\n\
          \x20   i = (i + 1) & mask;\n\
          \x20 }}\n\
          \x20 return false;\n\
@@ -3587,6 +3726,8 @@ fn emit_intent_hashmap_struct_pair_c_body(
          }}\n",
         k_ctype = k_ctype, v_ctype = v_ctype,
         prefix = prefix, hash_fn = hash_fn, eq_fn = eq_fn,
+        hash_param_ty = hash_param_ty, eq_param_ty = eq_param_ty,
+        hash_arg_k = hash_arg_k, eq_arg_keys_i = eq_arg_keys_i, eq_arg_k = eq_arg_k,
     ));
     if has_option_v {
         out.push_str(&format!(
@@ -3596,7 +3737,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
              \x20   i = (i + 1) & mask;\n\
              \x20 }}\n\
              \x20 r.tag = 1; r.payload = 0; return r;\n\
@@ -3608,7 +3749,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 int64_t first_tomb = -1;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{\n\
              \x20     r.tag = 0; r.payload = m->values[i];\n\
              \x20     m->values[i] = v;\n\
              \x20     return r;\n\
@@ -3631,7 +3772,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
              \x20 while (m->occ[i] != 0) {{\n\
-             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}({eq_arg_keys_i}, {eq_arg_k})) {{\n\
              \x20     r.tag = 0; r.payload = m->values[i];\n\
              \x20     m->occ[i] = 2;\n\
              \x20     m->len--;\n\
@@ -3644,6 +3785,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              }}\n\n",
             k_ctype = k_ctype, v_ctype = v_ctype,
             prefix = prefix, eq_fn = eq_fn, opt_v = opt_v,
+            eq_arg_keys_i = eq_arg_keys_i, eq_arg_k = eq_arg_k,
         ));
     }
 }
@@ -10620,6 +10762,30 @@ pub(crate) fn vec_c_struct(element: &Type) -> String {
     format!("intent_vec_{}", element_tag(element))
 }
 
+/// Gap-audit fix (2026-08-03): look up a struct's field list for the
+/// `collect_mutex_specs`/`collect_rwlock_specs`/`collect_channel_specs`
+/// struct-field-recursion arms. Checks this module's own
+/// `STRUCT_FIELDS_REGISTRY` first (populated by `emit_c`), falling
+/// back to `backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY` (populated by
+/// `emit_llvm`) -- these three collector functions are SHARED between
+/// both backends (the LLVM backend calls the C-module versions
+/// directly rather than duplicating them), but each backend populates
+/// its own independent copy of the struct-field registry, and only
+/// ONE of the two is actually populated for any given compile run
+/// (whichever backend is active). Without the fallback, a
+/// `--backend=llvm` compile (the default) silently found no fields
+/// for any struct, so a `struct Cache<T> { lock: Mutex<T> }` never
+/// discovered its nested `Mutex<T>` on the LLVM side even after the
+/// same fix made the C backend work correctly -- confirmed directly:
+/// the C output was correct while LLVM still failed with "Cannot
+/// allocate unsized type" (the mutex struct type was never emitted
+/// at all, since the collector silently found zero fields).
+pub(crate) fn lookup_struct_fields_any_backend(name: &str) -> Option<Vec<(String, Type)>> {
+    STRUCT_FIELDS_REGISTRY
+        .with(|r| r.borrow().get(name).cloned())
+        .or_else(|| crate::backend_llvm::LLVM_STRUCT_FIELDS_REGISTRY.with(|r| r.borrow().get(name).cloned()))
+}
+
 /// Build a C-identifier-safe tag for an element type. The tag
 /// is used as the suffix on per-type helper names (e.g. `vec_int64_t`,
 /// `vec_vec_int64_t`, `vec_arr4_int64_t`). Composable so that
@@ -10716,6 +10882,23 @@ pub(crate) fn element_tag(element: &Type) -> String {
         // For `Box<dyn Iface>` the inner is Type::Object whose
         // tag is `dyn_<Iface>` → `box_dyn_<Iface>`.
         Type::Box(inner) => format!("box_{}", element_tag(inner)),
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` (a SIMD
+        // lane type as a CONTAINER ELEMENT, not a struct field --
+        // BUG-79 already fixed the struct-field case in
+        // `c_element_storage`, a separate function that was never
+        // given the matching arm here). The `_ => c_leaf_type(...)`
+        // fallback below returns `c_leaf_type`'s placeholder
+        // comment ("/* vec128<T> */"), and `.replace(' ', "_")`
+        // turns it into `/*_vec128<T>_*/` -- not a valid C
+        // identifier, and embedding it into every generated
+        // `intent_vec_<tag>__*` name corrupts the whole bundle
+        // (confirmed: `cc` rejected the output with a cascade of
+        // "expected '=', ',', ';'..." errors, one per corrupted
+        // identifier). Recursive composition mirrors the
+        // Atomic/Channel/Box arms above.
+        Type::Vec128(inner) => format!("vec128_{}", element_tag(inner)),
+        Type::Vec256(inner) => format!("vec256_{}", element_tag(inner)),
+        Type::Vec512(inner) => format!("vec512_{}", element_tag(inner)),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
@@ -10833,6 +11016,24 @@ pub(crate) fn collect_rwlock_specs(
         }
         Type::Array { element, .. } => collect_rwlock_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_rwlock_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): see the matching comment on
+        // `collect_channel_specs`'s `Type::Struct` arm -- same gap,
+        // same fix, for `RwLock<T>`/`ReadGuard<T>`/`WriteGuard<T>`
+        // struct fields.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_rwlock_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }
@@ -10967,6 +11168,35 @@ pub(crate) fn collect_channel_specs(
         }
         Type::Array { element, .. } => collect_channel_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_channel_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): a struct FIELD of `Channel<T,N>`
+        // type was never discovered when that struct was the only
+        // place `Channel<T,N>` appeared in the whole program (no bare
+        // `let`/param of the same type anywhere else) -- this
+        // function only ever recursed into Vec/Atomic/Mutex/Guard/
+        // Array/Ref/RefMut, never a nominal struct's OWN field types.
+        // `struct Cache<T> { lock: Mutex<T> }` (same bug, different
+        // handle type) confirmed the pattern is real and reachable:
+        // `cc` failed with "implicit declaration of function
+        // 'intent_mutex_int64_t_new'" -- the bundle was simply never
+        // emitted. No cycle-guard needed: a struct field graph is
+        // always a DAG by construction (a struct can't contain
+        // itself by value -- that's an infinite-size type the
+        // checker already rejects), so plain recursion through the
+        // field-types registry can't loop forever.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_channel_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }
@@ -11084,6 +11314,23 @@ pub(crate) fn collect_mutex_specs(ty: &Type, seen: &mut BTreeSet<String>, out: &
         }
         Type::Array { element, .. } => collect_mutex_specs(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_mutex_specs(inner, seen, out),
+        // Gap-audit fix (2026-08-03): see the matching comment on
+        // `collect_channel_specs`'s `Type::Struct` arm -- same gap,
+        // same fix, for `Mutex<T>`/`Guard<T>` struct fields.
+        Type::Struct(name) => {
+            let already_visiting = STRUCT_RECURSION_GUARD
+                .with(|g| !g.borrow_mut().insert(name.clone()));
+            if already_visiting {
+                return;
+            }
+            let fields = lookup_struct_fields_any_backend(name);
+            if let Some(fields) = fields {
+                for (_, fty) in &fields {
+                    collect_mutex_specs(fty, seen, out);
+                }
+            }
+            STRUCT_RECURSION_GUARD.with(|g| { g.borrow_mut().remove(name); });
+        }
         _ => {}
     }
 }
@@ -12583,6 +12830,17 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
             let inner_decl = format_declarator(inner, "").trim_end().to_string();
             format!("{}*", inner_decl)
         }
+        // BUG-79: same gap as Closure/Channel/Mutex above --
+        // `c_leaf_type`'s placeholder-comment fallback
+        // ("/* vec128<T> */") isn't valid C. `c_vec128_type`/
+        // `c_vec256_type`/`c_vec512_type` already exist for the
+        // real `__attribute__((vector_size(N)))` spelling; this
+        // arm was just never added here. Found sweeping a struct
+        // field of `vec128<f64>` type for the testing-matrix pass
+        // (2026-08-02).
+        Type::Vec128(elem) => c_vec128_type(elem),
+        Type::Vec256(elem) => c_vec256_type(elem),
+        Type::Vec512(elem) => c_vec512_type(elem),
         _ => c_leaf_type(ty).to_string(),
     }
 }
@@ -12660,6 +12918,19 @@ pub(crate) fn emit_array_typedefs_for(
         }
         Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner) => {
             emit_array_typedefs_for(inner, seen, out);
+        }
+        // BUG-74: a Tuple element can itself be `Array<T, N>` (e.g.
+        // an enum payload `(i64, [i64; 3])`) — `emit_tuple_bundle`'s
+        // `c_element_storage` call for that element spells it as
+        // `intent_arr3_int64_t`, assuming that typedef already
+        // exists in scope. Without recursing here, nothing ever
+        // triggers its emission for a tuple shape that's never
+        // itself a Vec element (e.g. one that only appears as an
+        // enum payload) — "unknown type name 'intent_arr3_int64_t'".
+        Type::Tuple(elements) => {
+            for e in elements {
+                emit_array_typedefs_for(e, seen, out);
+            }
         }
         _ => {}
     }
@@ -13611,6 +13882,41 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                         out.push_str(&local_name(name));
                         out.push_str(");\n");
                     }
+                    // BUG-97 (task #39, 2026-08-03): Box<Struct>
+                    // local drop. See the matching comment on
+                    // `emit_struct_field_drops`'s own `Type::Box`
+                    // arm for why box-recursive structs need the
+                    // generated iterative helper instead of inline
+                    // recursion.
+                    Type::Struct(inner_name) => {
+                        let local = local_name(name);
+                        if crate::ast::struct_is_box_recursive(inner_name) {
+                            out.push_str(&format!(
+                                "  __box_deep_drop_{}({});\n",
+                                struct_c_name(inner_name),
+                                local
+                            ));
+                        } else {
+                            let inner_fields = STRUCT_FIELDS_REGISTRY
+                                .with(|r| r.borrow().get(inner_name).cloned())
+                                .unwrap_or_default();
+                            if !inner_fields.is_empty() {
+                                let deref_path = format!("(*{})", local);
+                                let empty: std::collections::HashSet<&String> =
+                                    std::collections::HashSet::new();
+                                emit_struct_field_drops(
+                                    &deref_path,
+                                    inner_name,
+                                    &inner_fields,
+                                    &empty,
+                                    out,
+                                );
+                            }
+                            out.push_str("  free(");
+                            out.push_str(&local);
+                            out.push_str(");\n");
+                        }
+                    }
                     _ => {
                         out.push_str("  free(");
                         out.push_str(&local_name(name));
@@ -13791,114 +14097,7 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 );
             }
             Type::Enum(enum_name) => {
-                // Payloaded enums with a heap-shaped payload
-                // free the payload when the active variant
-                // matches. Closure #283: mixed-payload enums
-                // route through per-variant `.u.v_<variant>`
-                // access (one switch case per variant with
-                // owning payload); single-payload enums keep
-                // the legacy `.payload` path.
-                let variant_payloads = ENUM_VARIANT_PAYLOADS_REGISTRY
-                    .with(|r| r.borrow().get(enum_name).cloned());
-                let is_mixed_local = variant_payloads.as_ref().map(|v| {
-                    let payloads: Vec<&Type> =
-                        v.iter().filter_map(|(_, p)| p.as_ref()).collect();
-                    payloads.len() >= 2
-                        && payloads[1..].iter().any(|t| *t != payloads[0])
-                }).unwrap_or(false);
-                let local = local_name(name);
-                if is_mixed_local {
-                    let variants = variant_payloads.unwrap();
-                    let mut cases: Vec<String> = Vec::new();
-                    for (tag, (vname, pty)) in variants.iter().enumerate() {
-                        let Some(pty) = pty.as_ref() else { continue; };
-                        let free_for_variant: Option<String> = match pty {
-                            Type::OwnedStr => Some(format!(
-                                "free((void*){}.u.{})",
-                                local, enum_variant_member(vname)
-                            )),
-                            Type::Vec(element) => Some(format!(
-                                "{}({}.u.{})",
-                                vec_helper(element, "free"),
-                                local, enum_variant_member(vname)
-                            )),
-                            _ => None,
-                        };
-                        if let Some(call) = free_for_variant {
-                            cases.push(format!(
-                                "case {}: {}; break;",
-                                tag, call
-                            ));
-                        }
-                    }
-                    if !cases.is_empty() {
-                        out.push_str(&format!(
-                            "  switch ({}.tag) {{ {} default: break; }}\n",
-                            local,
-                            cases.join(" ")
-                        ));
-                    }
-                    return;
-                }
-                let payload_ty = ENUM_PAYLOAD_REGISTRY
-                    .with(|r| r.borrow().get(enum_name).cloned());
-                let free_expr: Option<String> = match &payload_ty {
-                    Some(Type::OwnedStr) => Some(format!(
-                        "free((void*){}.payload)",
-                        local
-                    )),
-                    Some(Type::Vec(element)) => Some(format!(
-                        "{}({}.payload)",
-                        vec_helper(element, "free"),
-                        local
-                    )),
-                    Some(Type::Box(inner)) => Some(match &**inner {
-                        // Box<dyn Iface>: fat-pointer struct; free the
-                        // owning .data field (the concrete heap slot).
-                        Type::Object(_iface) => format!(
-                            "free({local}.payload.data)",
-                            local = local
-                        ),
-                        // Box<Vec<T>>: free Vec's data buffer, then
-                        // free the Box's heap slot for the Vec struct.
-                        Type::Vec(element) => format!(
-                            "{{ {helper}(*{local}.payload); free({local}.payload); }}",
-                            helper = vec_helper(element, "free"),
-                            local = local
-                        ),
-                        // Box<OwnedStr>: free the string buffer, then
-                        // free the Box's heap slot for the i8* pointer.
-                        Type::OwnedStr => format!(
-                            "{{ free((void*)*{local}.payload); free({local}.payload); }}",
-                            local = local
-                        ),
-                        // Box<T> for scalar/struct T: payload is T*;
-                        // simply free the heap slot.
-                        _ => format!("free({local}.payload)", local = local),
-                    }),
-                    _ => None,
-                };
-                if let Some(free_call) = free_expr {
-                    let payload_tags: Vec<u32> =
-                        ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
-                            r.borrow()
-                                .get(enum_name)
-                                .cloned()
-                                .unwrap_or_default()
-                        });
-                    if !payload_tags.is_empty() {
-                        let cases: Vec<String> = payload_tags
-                            .iter()
-                            .map(|t| format!("case {}", t))
-                            .collect();
-                        out.push_str(&format!(
-                            "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
-                            local,
-                            cases.join(": "),
-                            free_call
-                        ));
-                    }
-                }
+                emit_enum_value_drop(&local_name(name), enum_name, out);
             }
             Type::Array { element, length } => {
                 // Closure #291 Phase 3 + 4: arrays of
@@ -14783,6 +14982,272 @@ fn emit_for_iter(
     }
 }
 
+/// Emit scope-exit drop code for an enum-typed value at `path`
+/// (already a valid C lvalue -- a bare local name or a `foo.field`
+/// chain): frees/recurses into whichever variant's payload owns
+/// heap memory, gated on the currently-stored tag. Factored out of
+/// the bare-local `TypedStmt::Drop` handler (BUG-97, task #39,
+/// 2026-08-03) so `emit_struct_field_drops`'s own `Type::Enum` arm
+/// -- needed for the `next: Option<Box<Node>>` recursive-struct-
+/// field shape -- doesn't duplicate the tag-switch logic a second
+/// time.
+fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
+    // Payloaded enums with a heap-shaped payload free the payload
+    // when the active variant matches. Closure #283: mixed-payload
+    // enums route through per-variant `.u.v_<variant>` access (one
+    // switch case per variant with owning payload); single-payload
+    // enums keep the legacy `.payload` path.
+    let variant_payloads = ENUM_VARIANT_PAYLOADS_REGISTRY
+        .with(|r| r.borrow().get(enum_name).cloned());
+    let is_mixed = variant_payloads.as_ref().map(|v| {
+        let payloads: Vec<&Type> =
+            v.iter().filter_map(|(_, p)| p.as_ref()).collect();
+        payloads.len() >= 2
+            && payloads[1..].iter().any(|t| *t != payloads[0])
+    }).unwrap_or(false);
+    if is_mixed {
+        let variants = variant_payloads.unwrap();
+        let mut cases: Vec<String> = Vec::new();
+        for (tag, (vname, pty)) in variants.iter().enumerate() {
+            let Some(pty) = pty.as_ref() else { continue; };
+            let free_for_variant: Option<String> = match pty {
+                Type::OwnedStr => Some(format!(
+                    "free((void*){}.u.{})",
+                    path, enum_variant_member(vname)
+                )),
+                Type::Vec(element) => Some(format!(
+                    "{}({}.u.{})",
+                    vec_helper(element, "free"),
+                    path, enum_variant_member(vname)
+                )),
+                // BUG-97 note: mixed-payload enums with a
+                // Box<Struct>-shaped variant payload remain a
+                // deferred gap (not needed by the recursive-struct
+                // shape this fix targets, which is single-payload);
+                // see docs/TODO_CURRENT.md.
+                _ => None,
+            };
+            if let Some(call) = free_for_variant {
+                cases.push(format!(
+                    "case {}: {}; break;",
+                    tag, call
+                ));
+            }
+        }
+        if !cases.is_empty() {
+            out.push_str(&format!(
+                "  switch ({}.tag) {{ {} default: break; }}\n",
+                path,
+                cases.join(" ")
+            ));
+        }
+        return;
+    }
+    let payload_ty = ENUM_PAYLOAD_REGISTRY
+        .with(|r| r.borrow().get(enum_name).cloned());
+    let free_expr: Option<String> = match &payload_ty {
+        Some(Type::OwnedStr) => Some(format!(
+            "free((void*){}.payload)",
+            path
+        )),
+        Some(Type::Vec(element)) => Some(format!(
+            "{}({}.payload)",
+            vec_helper(element, "free"),
+            path
+        )),
+        Some(Type::Box(inner)) => Some(match &**inner {
+            // Box<dyn Iface>: fat-pointer struct; free the
+            // owning .data field (the concrete heap slot).
+            Type::Object(_iface) => format!(
+                "free({path}.payload.data)",
+                path = path
+            ),
+            // Box<Vec<T>>: free Vec's data buffer, then
+            // free the Box's heap slot for the Vec struct.
+            Type::Vec(element) => format!(
+                "{{ {helper}(*{path}.payload); free({path}.payload); }}",
+                helper = vec_helper(element, "free"),
+                path = path
+            ),
+            // Box<OwnedStr>: free the string buffer, then
+            // free the Box's heap slot for the i8* pointer.
+            Type::OwnedStr => format!(
+                "{{ free((void*)*{path}.payload); free({path}.payload); }}",
+                path = path
+            ),
+            // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
+            // payload -- the `Option<Box<Node>>` recursive-struct
+            // shape. A box-recursive inner struct calls its
+            // generated iterative deep-drop helper (inlining would
+            // need infinitely much C text to unroll the cycle); a
+            // non-recursive inner struct's owning fields are freed
+            // inline before the box's own slot.
+            Type::Struct(inner_name) => {
+                if crate::ast::struct_is_box_recursive(inner_name) {
+                    format!(
+                        "__box_deep_drop_{}({path}.payload)",
+                        struct_c_name(inner_name),
+                        path = path
+                    )
+                } else {
+                    let inner_fields = STRUCT_FIELDS_REGISTRY
+                        .with(|r| r.borrow().get(inner_name).cloned())
+                        .unwrap_or_default();
+                    if inner_fields.is_empty() {
+                        format!("free({path}.payload)", path = path)
+                    } else {
+                        let deref_path = format!("(*{}.payload)", path);
+                        let mut field_drops = String::new();
+                        let empty: std::collections::HashSet<&String> =
+                            std::collections::HashSet::new();
+                        emit_struct_field_drops(
+                            &deref_path,
+                            inner_name,
+                            &inner_fields,
+                            &empty,
+                            &mut field_drops,
+                        );
+                        format!(
+                            "{{ {} free({path}.payload); }}",
+                            field_drops.trim(),
+                            path = path
+                        )
+                    }
+                }
+            }
+            // Box<T> for scalar T: payload is T*;
+            // simply free the heap slot.
+            _ => format!("free({path}.payload)", path = path),
+        }),
+        _ => None,
+    };
+    if let Some(free_call) = free_expr {
+        let payload_tags: Vec<u32> =
+            ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
+                r.borrow()
+                    .get(enum_name)
+                    .cloned()
+                    .unwrap_or_default()
+            });
+        if !payload_tags.is_empty() {
+            let cases: Vec<String> = payload_tags
+                .iter()
+                .map(|t| format!("case {}", t))
+                .collect();
+            out.push_str(&format!(
+                "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
+                path,
+                cases.join(": "),
+                free_call
+            ));
+        }
+    }
+}
+
+/// BUG-97 (task #39, 2026-08-03). Emit one iterative, heap-
+/// worklist-based "deep drop" function per box-recursive struct
+/// (see `BOX_RECURSIVE_STRUCTS_REGISTRY`'s doc comment in ast.rs
+/// for why this can't just be inline-recursive codegen). Must run
+/// after every struct/enum typedef body is already emitted into
+/// `body` — the generated function text references them by name.
+///
+/// The generated function drains a dynamically-growing pointer
+/// stack instead of recursing at the native C call-stack level, so
+/// an arbitrarily long chain (a long linked list, say) can't blow
+/// the stack the way a naive `free(node->next); free(node);`
+/// recursive C function would.
+fn emit_box_recursive_deep_drop_helpers(program: &TypedProgram, body: &mut String) {
+    for decl in &program.structs {
+        if !crate::ast::struct_is_box_recursive(&decl.name) {
+            continue;
+        }
+        let struct_c = struct_c_name(&decl.name);
+        let fields = STRUCT_FIELDS_REGISTRY
+            .with(|r| r.borrow().get(&decl.name).cloned())
+            .unwrap_or_default();
+        // Split fields into the direct-recursive edge(s) (pushed
+        // onto the worklist instead of freed inline) and everything
+        // else (freed the ordinary way via `emit_struct_field_drops`,
+        // operating on the popped node's `(*__cur)`).
+        let mut push_snippets: Vec<String> = Vec::new();
+        let mut non_recursive_fields: Vec<(String, Type)> = Vec::new();
+        for (field_name, field_ty) in &fields {
+            let mut is_recursive_edge = false;
+            match field_ty {
+                Type::Box(inner) if matches!(&**inner, Type::Struct(n) if n == &decl.name) => {
+                    is_recursive_edge = true;
+                    push_snippets.push(format!(
+                        "    if (__cur->{f}) {{ __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, __cur->{f}); }}\n",
+                        f = field_name, sc = struct_c,
+                    ));
+                }
+                Type::Enum(enum_name) => {
+                    let variants = ENUM_VARIANT_PAYLOADS_REGISTRY
+                        .with(|r| r.borrow().get(enum_name).cloned())
+                        .unwrap_or_default();
+                    let is_mixed = {
+                        let payloads: Vec<&Type> =
+                            variants.iter().filter_map(|(_, p)| p.as_ref()).collect();
+                        payloads.len() >= 2
+                            && payloads[1..].iter().any(|t| *t != payloads[0])
+                    };
+                    for (tag, (vname, pty)) in variants.iter().enumerate() {
+                        if let Some(Type::Box(inner)) = pty {
+                            if matches!(&**inner, Type::Struct(n) if n == &decl.name) {
+                                is_recursive_edge = true;
+                                let member = if is_mixed {
+                                    format!("__cur->{f}.u.{m}", f = field_name, m = enum_variant_member(vname))
+                                } else {
+                                    format!("__cur->{f}.payload", f = field_name)
+                                };
+                                push_snippets.push(format!(
+                                    "    if (__cur->{f}.tag == {tag}) {{ __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, {member}); }}\n",
+                                    f = field_name, tag = tag, sc = struct_c, member = member,
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if !is_recursive_edge {
+                non_recursive_fields.push((field_name.clone(), field_ty.clone()));
+            }
+        }
+        let mut field_drops = String::new();
+        let empty: std::collections::HashSet<&String> = std::collections::HashSet::new();
+        emit_struct_field_drops(
+            "(*__cur)",
+            &decl.name,
+            &non_recursive_fields,
+            &empty,
+            &mut field_drops,
+        );
+        body.push_str(&format!(
+            "static void __box_deep_drop_push_{sc}({sc}*** __stackp, size_t* __spp, size_t* __capp, {sc}* __p) {{\n\
+            \x20 if (*__spp == *__capp) {{ *__capp = *__capp ? *__capp * 2 : 8; *__stackp = ({sc}**)realloc(*__stackp, (*__capp) * sizeof({sc}*)); }}\n\
+            \x20 (*__stackp)[(*__spp)++] = __p;\n\
+            }}\n",
+            sc = struct_c,
+        ));
+        body.push_str(&format!(
+            "static void __box_deep_drop_{sc}({sc}* __n0) {{\n\
+            \x20 {sc}** __stack = NULL; size_t __sp = 0, __cap = 0;\n\
+            \x20 __box_deep_drop_push_{sc}(&__stack, &__sp, &__cap, __n0);\n\
+            \x20 while (__sp > 0) {{\n\
+            \x20\x20 {sc}* __cur = __stack[--__sp];\n\
+            {field_drops}{pushes}\
+            \x20\x20 free(__cur);\n\
+            \x20 }}\n\
+            \x20 free(__stack);\n\
+            }}\n\n",
+            sc = struct_c,
+            field_drops = field_drops,
+            pushes = push_snippets.concat(),
+        ));
+    }
+}
+
 /// Emit per-field free calls for a struct binding at the
 /// given C path (e.g. `v_o` or `v_o.inner`). Recursively
 /// descends into nested struct fields. Heap fields
@@ -14862,6 +15327,44 @@ fn emit_struct_field_drops(
                     out.push_str(field_name);
                     out.push_str(");\n");
                 }
+                // BUG-97 (task #39, 2026-08-03): Box<Struct> field
+                // drop. A non-box-recursive inner struct's own
+                // owning fields are freed inline (safe: DAG-shaped,
+                // so this bottoms out); a box-recursive inner
+                // struct (owns a `Box<Self>` transitively) instead
+                // calls its generated iterative deep-drop helper --
+                // inlining would need infinitely much C text to
+                // unroll a cycle. See `emit_box_recursive_deep_drop_
+                // helpers` and `BOX_RECURSIVE_STRUCTS_REGISTRY`.
+                Type::Struct(inner_name) => {
+                    let field_path = format!("{}.{}", path, field_name);
+                    if crate::ast::struct_is_box_recursive(inner_name) {
+                        out.push_str(&format!(
+                            "  __box_deep_drop_{}({});\n",
+                            struct_c_name(inner_name),
+                            field_path
+                        ));
+                    } else {
+                        let inner_fields = STRUCT_FIELDS_REGISTRY
+                            .with(|r| r.borrow().get(inner_name).cloned())
+                            .unwrap_or_default();
+                        if !inner_fields.is_empty() {
+                            let deref_path = format!("(*{})", field_path);
+                            let empty: std::collections::HashSet<&String> =
+                                std::collections::HashSet::new();
+                            emit_struct_field_drops(
+                                &deref_path,
+                                inner_name,
+                                &inner_fields,
+                                &empty,
+                                out,
+                            );
+                        }
+                        out.push_str("  free(");
+                        out.push_str(&field_path);
+                        out.push_str(");\n");
+                    }
+                }
                 _ => {
                     out.push_str("  free(");
                     out.push_str(path);
@@ -14887,6 +15390,15 @@ fn emit_struct_field_drops(
                         out,
                     );
                 }
+            }
+            // BUG-97 (task #39, 2026-08-03): Enum-typed field drop
+            // (e.g. the `next: Option<Box<Node>>` recursive-struct
+            // shape). Shares the tag-switch + per-variant payload
+            // free logic with the bare-local `TypedStmt::Drop`
+            // handler via `emit_enum_value_drop`.
+            Type::Enum(inner_name) => {
+                let field_path = format!("{}.{}", path, field_name);
+                emit_enum_value_drop(&field_path, inner_name, out);
             }
             _ => {}
         }
@@ -15435,12 +15947,29 @@ fn emit_expr(expr: &TypedExpr) -> String {
             // designated-initializer form. The struct typedef is
             // emitted in the preamble's `emit_tuple_bundle` pass.
             // Refines T1.1 phase 2.
+            // BUG-74: an Array-typed element with an inline `[…]`
+            // ArrayLit initializer needs the same bare-brace `{e1,
+            // e2, …}` form StructLit already uses just below --
+            // gcc rejects assigning a cast compound-literal array
+            // (`((int64_t[3]){1,2,3})`, what plain `emit_expr`
+            // produces for an ArrayLit) to a struct member of array
+            // type ("array initialized from non-constant array
+            // expression").
             let elem_tys: Vec<Type> = elements.iter().map(|e| e.ty.clone()).collect();
             let struct_name = tuple_c_struct(&elem_tys);
             let parts: Vec<String> = elements
                 .iter()
                 .enumerate()
-                .map(|(i, e)| format!("._{} = {}", i, emit_expr(e)))
+                .map(|(i, e)| {
+                    let rhs = match (&e.ty, &e.kind) {
+                        (Type::Array { .. }, TypedExprKind::ArrayLit { elements }) => {
+                            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
+                            format!("{{ {} }}", parts.join(", "))
+                        }
+                        _ => emit_expr(e),
+                    };
+                    format!("._{} = {}", i, rhs)
+                })
                 .collect();
             format!("({}){{ {} }}", struct_name, parts.join(", "))
         }
@@ -15471,10 +16000,11 @@ fn emit_expr(expr: &TypedExpr) -> String {
             format!("({}){{ {} }}", struct_c_name(type_name), parts.join(", "))
         }
         TypedExprKind::FieldAccess { object, field, .. } => {
-            // Through-a-borrow access uses `->`; by-value
-            // uses `.`. Distinguish via the operand's type.
+            // Through-a-borrow (or a Box<T>, which lowers to the
+            // same bare `T*`) access uses `->`; by-value uses `.`.
+            // Distinguish via the operand's type.
             let inner = emit_expr(object);
-            if object.ty.is_any_ref() {
+            if object.ty.is_field_access_indirect() {
                 format!("({})->{}", inner, field)
             } else {
                 format!("({}).{}", inner, field)
@@ -15701,9 +16231,48 @@ fn emit_expr(expr: &TypedExpr) -> String {
                     } else {
                         payload_access
                     };
+                    // BUG-80: `c_type_name`'s `Type::Array` arm
+                    // deliberately spells an array as the RETURN-
+                    // POSITION wrapper struct (`intent_arr_ret_<N>_<T>`,
+                    // Closure #239) -- its own doc comment says as
+                    // much: "the Let path passes through
+                    // format_declarator instead so the array
+                    // declarator form keeps working for locals."
+                    // This match-arm payload binding is exactly such
+                    // a local-binding position (not a function
+                    // return), but it was still calling `c_type_name`
+                    // directly. For `Option<[i64;3]>`, this declared
+                    // `intent_arr_ret_3_int64_t v_arr = __scr.payload;`
+                    // -- a type that was never even emitted for this
+                    // purpose ("unknown type name"), and even if it
+                    // had been, it's a WRAPPER STRUCT (`{ T data[N];
+                    // }`), not a bare array, so `v_arr[0]` wouldn't
+                    // subscript correctly either way. `c_element_storage`
+                    // is the correct choice for every OTHER payload
+                    // shape this call site sees (Tuple, Struct, Vec,
+                    // Ref/RefMut, Closure, Channel, Mutex, ...), but
+                    // Array specifically needs one more twist: C
+                    // arrays (even a raw-array TYPEDEF like
+                    // `intent_arrN_T`) can't be copy-assigned via
+                    // `=` at all ("invalid initializer") -- only
+                    // struct/scalar values can. Declare the binding
+                    // as a POINTER to the element type instead
+                    // (`int64_t* v_arr = __scr.payload;`); `__scr.
+                    // payload` (a raw array member) array-decays to
+                    // a pointer to its first element in this
+                    // expression context, which is valid C and lets
+                    // `v_arr[0]`/etc. in the arm body keep working
+                    // completely unchanged (pointer subscripting is
+                    // the same syntax as array subscripting).
+                    let binding_ty = match bty.deref() {
+                        Type::Array { element, .. } if !bty.is_any_ref() => {
+                            format!("{}*", c_element_storage(element))
+                        }
+                        _ => c_element_storage(bty),
+                    };
                     format!(
                         "{{ {} v_{} = {}; __r = ({}); }}",
-                        c_type_name(bty),
+                        binding_ty,
                         bname,
                         init,
                         body_v
@@ -16023,6 +16592,47 @@ fn emit_expr(expr: &TypedExpr) -> String {
                                     ));
                                 }
                             }
+                        }
+                        // Gap-audit fix (2026-08-03): the block-
+                        // expression Drop handler above has arms for
+                        // OwnedStr/Vec/Struct/Enum but never had one
+                        // for Guard/ReadGuard/WriteGuard -- it fell
+                        // through to the `_ => {}` no-op below,
+                        // silently skipping the RAII unlock. This is
+                        // a completely separate, incomplete
+                        // reimplementation of the TOP-LEVEL statement
+                        // Drop handler (~line 13727 above, which
+                        // already has the correct arms) -- the two
+                        // never got kept in sync. Confirmed as a
+                        // real, silent deadlock: `let v: i64 = { let
+                        // g = mutex_lock(ref m); guard_get(ref g) };`
+                        // used TWICE in a row on the same mutex hung
+                        // forever -- the first guard's drop never
+                        // fired, so the second `mutex_lock` spun on
+                        // a lock that (from the runtime's point of
+                        // view) was still held. No diagnostic, no
+                        // crash -- just a hang, the most dangerous
+                        // failure mode for a concurrency primitive.
+                        Type::Guard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_guard_storage(elt),
+                                local_name(name)
+                            ));
+                        }
+                        Type::ReadGuard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_read_guard_storage(elt),
+                                local_name(name)
+                            ));
+                        }
+                        Type::WriteGuard(elt) => {
+                            body.push_str(&format!(
+                                "{}_unlock(&{}); ",
+                                c_write_guard_storage(elt),
+                                local_name(name)
+                            ));
                         }
                         _ => {}
                     },
@@ -21126,7 +21736,26 @@ fn channel_inner_from_ref(ty: &Type) -> (Type, u64) {
 fn format_declarator(ty: &Type, name: &str) -> String {
     match ty {
         Type::Array { element, length } => {
-            format!("{} {}[{}]", c_leaf_type(element), name, length)
+            // BUG-78: `c_leaf_type` is a LEAF-only spelling table --
+            // for Tuple/Struct/Vec/Channel/Mutex/etc. it deliberately
+            // returns a placeholder comment ("/* tuple */", "/*
+            // struct */", ...), documented there as "a caller forgot
+            // to special-case this and needs to route through the
+            // real per-shape name instead". `c_element_storage`
+            // already has the correct per-shape arms (used
+            // elsewhere for exactly this purpose, e.g. tuple/struct
+            // fields and `emit_array_typedefs_for`'s inner spelling)
+            // but this array-parameter/local declarator was still
+            // using the leaf-only table directly -- a function
+            // parameter shaped `[(i64, i64); 5]` (Array of Tuple)
+            // declared itself as `/* tuple */ v_arr[5]`, not a valid
+            // C type, so gcc rejected the whole file ("unknown type
+            // name 'v_arr'"). Found sweeping the testing-matrix's
+            // Big-O row (`Array<Tuple,N>` as a function parameter),
+            // but the bug itself has nothing to do with Big-O --
+            // ANY function taking `[Tuple; N]`/`[Struct; N]`/etc. by
+            // value hit this.
+            format!("{} {}[{}]", c_element_storage(element), name, length)
         }
         Type::Vec(element) => format!("{} {}", vec_c_struct(element), name),
         Type::Tuple(elements) => format!("{} {}", tuple_c_struct(elements), name),
@@ -21174,7 +21803,10 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             }
         },
         Type::Ref(inner) => match &**inner {
-            Type::Array { element, .. } => format!("const {}* {}", c_leaf_type(element), name),
+            // BUG-78 (ref side): same `c_leaf_type` leaf-only-table
+            // bug as the bare `Type::Array` arm above, for `ref
+            // [Tuple; N]` / `ref [Struct; N]` params.
+            Type::Array { element, .. } => format!("const {}* {}", c_element_storage(element), name),
             Type::Vec(element) => format!("const {}* {}", vec_c_struct(element), name),
             // `&Atomic<T>` drops the `const` qualifier: atomic
             // operations always conceptually mutate the cell;
@@ -21234,7 +21866,8 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             other => format!("const {}* {}", c_leaf_type(other), name),
         },
         Type::RefMut(inner) => match &**inner {
-            Type::Array { element, .. } => format!("{}* {}", c_leaf_type(element), name),
+            // BUG-78 (mut ref side): same fix as the `ref`/bare arms.
+            Type::Array { element, .. } => format!("{}* {}", c_element_storage(element), name),
             Type::Vec(element) => format!("{}* {}", vec_c_struct(element), name),
             Type::Atomic(element) => format!("{}* {}", c_atomic_storage(element), name),
             Type::Channel(element, capacity) => {

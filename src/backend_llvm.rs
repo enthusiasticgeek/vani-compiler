@@ -340,6 +340,23 @@ thread_local! {
     pub(crate) static LLVM_EXTERN_FN_REGISTRY:
         std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Gap-audit fix (2026-08-03): LLVM-backend sibling of
+    /// `backend_c.rs`'s `IMPL_METHOD_SELF_BY_REF_REGISTRY` -- maps a
+    /// hoisted method's `@fn_<name>` symbol to whether its `self`
+    /// parameter is by-reference (compiled to an LLVM pointer arg)
+    /// or by-value (compiled to a bare aggregate arg). Populated at
+    /// the start of `emit_llvm` from `program.functions`. The
+    /// `HashMap<StructKey, V>` bundle (ARC 1.7) used to always CALL
+    /// the user's `Hash`/`Eq` impl methods with a by-value struct
+    /// argument regardless of how `self` was actually declared --
+    /// when the user writes `self: ref Self` (exactly what the
+    /// checker's own "HashMap key must implement Hash" diagnostic
+    /// suggests), the real hoisted function takes a pointer, and
+    /// calling it with a bare struct value crashes `lli`/`llc`
+    /// outright (ill-typed `call` argument).
+    pub(crate) static LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY:
+        std::cell::RefCell<std::collections::HashMap<String, bool>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// Set of `#[no_mangle]` fn names. Populated at the start of
     /// `emit_llvm`. Consulted by the Call emitter to use the bare
     /// vāṇी name (no `fn_` prefix) for calls to these functions.
@@ -800,6 +817,16 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         for f in &program.functions {
             if f.no_mangle {
                 reg.insert(f.name.clone());
+            }
+        }
+    });
+    LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if let Some(first) = f.params.first() {
+                let by_ref = matches!(first.ty, Type::Ref(_) | Type::RefMut(_));
+                reg.insert(format!("fn_{}", f.name), by_ref);
             }
         }
     });
@@ -1562,13 +1589,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         if is_packed {
             out.push_str(&format!(
                 "%Struct_{} = type <{{ {} }}>\n",
-                decl.name,
+                llvm_mangle_ident(&decl.name),
                 parts.join(", "),
             ));
         } else {
             out.push_str(&format!(
                 "%Struct_{} = type {{ {} }}\n",
-                decl.name,
+                llvm_mangle_ident(&decl.name),
                 parts.join(", "),
             ));
         }
@@ -1672,7 +1699,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
             // Trampoline: takes (i64 env_addr, args...). Reads
             // captures from env-struct, calls __anon_fn_<N>.
             let trampoline_name = format!("__anon_trampoline_{}", hoist_name.trim_start_matches("__anon_fn_"));
-            let env_struct_llvm = format!("%Struct_{}", env_struct_name);
+            let env_struct_llvm = format!("%Struct_{}", llvm_mangle_ident(env_struct_name));
             let mut tramp_param_list: Vec<String> = vec!["i64 %env_addr".to_string()];
             for (i, ty_llvm) in args.iter().map(llvm_type_string).enumerate() {
                 tramp_param_list.push(format!("{} %y{}", ty_llvm, i));
@@ -1790,7 +1817,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
             let n = llvm_enum_payload_buffer_size(decl);
             out.push_str(&format!(
                 "%Enum_{} = type {{ i32, [{} x i8] }}\n",
-                decl.name, n
+                llvm_mangle_ident(&decl.name), n
             ));
             any_enum_emitted = true;
             continue;
@@ -1798,7 +1825,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         let payload_ty = decl.payload_types.iter().find_map(|p| p.clone()).unwrap();
         out.push_str(&format!(
             "%Enum_{} = type {{ i32, {} }}\n",
-            decl.name,
+            llvm_mangle_ident(&decl.name),
             llvm_type_string(&payload_ty)
         ));
         any_enum_emitted = true;
@@ -2298,7 +2325,7 @@ fn emit_function(
         out.push_str(&format!(
             "{} %arg_{}",
             llvm_type_string(&param.ty),
-            param.name
+            llvm_mangle_ident(&param.name)
         ));
     }
     out.push_str(&format!("){} {{\n", section_suffix));
@@ -2344,7 +2371,7 @@ fn emit_function(
         if param.ty.is_any_ref() {
             ctx.locals.insert(
                 param.name.clone(),
-                (param.ty.clone(), format!("%arg_{}", param.name)),
+                (param.ty.clone(), format!("%arg_{}", llvm_mangle_ident(&param.name))),
             );
             continue;
         }
@@ -2363,11 +2390,12 @@ fn emit_function(
         // array (mirrors the C backend's by-value parameter
         // semantics, just expressed via LLVM aggregates).
         let ty = llvm_type_string(&param.ty);
-        let addr = format!("%{}.addr", param.name);
+        let mangled_name = llvm_mangle_ident(&param.name);
+        let addr = format!("%{}.addr", mangled_name);
         out.push_str(&format!("  {} = alloca {}\n", addr, ty));
         out.push_str(&format!(
             "  store {} %arg_{}, {}* {}\n",
-            ty, param.name, ty, addr
+            ty, mangled_name, ty, addr
         ));
         ctx.locals.insert(param.name.clone(), (param.ty.clone(), addr));
     }
@@ -2617,7 +2645,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 // alloca.
                 let value = emit_expr(expr, ctx, out);
                 let s_ty = vec_struct_name(element);
-                let addr = format!("%{}.addr", name);
+                let addr = format!("%{}.addr", llvm_mangle_ident(name));
                 if !ctx.loops.is_empty() && !ctx.skip_alloca_hoisting {
                     ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
                 } else {
@@ -2632,7 +2660,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             }
             if let Type::Array { element, length } = ty {
                 let agg = llvm_type_string(ty);
-                let addr = format!("%{}.addr", name);
+                let addr = format!("%{}.addr", llvm_mangle_ident(name));
                 if !ctx.loops.is_empty() && !ctx.skip_alloca_hoisting {
                     ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, agg));
                 } else {
@@ -2724,7 +2752,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // declared in two non-overlapping scopes (e.g., two
             // for-loop bodies in the same function) doesn't
             // collide on `%r.addr`.
-            let addr = format!("{}.{}.addr", ctx.fresh_tmp(), name);
+            let addr = format!("{}.{}.addr", ctx.fresh_tmp(), llvm_mangle_ident(name));
             // Hoist scalar allocas to the function entry block via alloca_preamble
             // so mem2reg can promote all scalar lets to SSA registers regardless of
             // where they appear in the function body. Skipped for outlined functions
@@ -2827,7 +2855,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                             let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
                                 .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
                             if !payload_tags.is_empty() {
-                                let s_ty = format!("%Enum_{}", enum_name);
+                                let s_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                                 let loaded = ctx.fresh_tmp();
                                 out.push_str(&format!(
                                     "  {} = load {}, {}* {}\n",
@@ -3370,7 +3398,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 });
                 if has_user_drop && user_drop_by_ref {
                     if let Some((_, addr)) = ctx.locals.get(name).cloned() {
-                        let s_ty = format!("%Struct_{}", struct_name);
+                        let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
                         let ret = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = call i64 @fn_{}_drop({}* {})\n",
@@ -3380,7 +3408,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     // Fall through to per-field cleanup below.
                 } else if has_user_drop && !has_owning_field {
                     if let Some((_, addr)) = ctx.locals.get(name).cloned() {
-                        let s_ty = format!("%Struct_{}", struct_name);
+                        let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
                         let loaded = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = load {}, {}* {}\n",
@@ -3429,7 +3457,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 }).unwrap_or(false);
                 if is_mixed {
                     if let Some((_, addr)) = ctx.locals.get(name).cloned() {
-                        let s_ty = format!("%Enum_{}", enum_name);
+                        let s_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                         let buf_size = llvm_enum_payload_buffer_size_by_name(enum_name);
                         let buf_ty = format!("[{} x i8]", buf_size);
                         let variants = variant_payloads.unwrap();
@@ -3523,7 +3551,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
                         .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
                     if let Some((_, addr)) = ctx.locals.get(name).cloned() {
-                        let s_ty = format!("%Enum_{}", enum_name);
+                        let s_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                         let loaded = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = load {}, {}* {}\n",
@@ -3869,7 +3897,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 // the scope-exit Drop path above. Without
                 // this, user-Drop silently skipped here.
                 if has_user_drop && !user_drop_by_ref && !has_owning {
-                    let s_ty = format!("%Struct_{}", struct_name);
+                    let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
                     let ret = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = call i64 @fn_{}_drop({} {})\n",
@@ -3878,7 +3906,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     return;
                 }
                 if has_owning || has_user_drop {
-                    let s_ty = format!("%Struct_{}", struct_name);
+                    let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
                     let addr = format!("{}.{}.addr", ctx.fresh_tmp(), "_intent_discard");
                     out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
                     out.push_str(&format!(
@@ -3921,7 +3949,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
                         .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
                     if !payload_tags.is_empty() {
-                        let s_ty = format!("%Enum_{}", enum_name);
+                        let s_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                         let tag = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = extractvalue {} {}, 0\n",
@@ -4229,7 +4257,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // for-loops in the same function with the same loop
             // variable (`for i in 0..n { … } parallel for i in
             // 0..m { … }`) don't collide on `%i.addr`.
-            let i_addr = format!("{}.{}.addr", ctx.fresh_tmp(), var);
+            let i_addr = format!("{}.{}.addr", ctx.fresh_tmp(), llvm_mangle_ident(var));
             out.push_str(&format!("  {} = alloca {}\n", i_addr, lty));
             out.push_str(&format!("  store {} {}, {}* {}\n", lty, start_v, lty, i_addr));
             // Save and restore the previous binding for `var` so
@@ -4395,7 +4423,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
                             .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
                         if !payload_tags.is_empty() {
-                            let s_ty = format!("%Enum_{}", enum_name);
+                            let s_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                             let loaded = ctx.fresh_tmp();
                             out.push_str(&format!(
                                 "  {} = load {}, {}* {}\n",
@@ -4760,7 +4788,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str(&format!("  store i64 0, i64* {}\n", i_addr));
 
             // var alloca (so writes inside the body work the usual way).
-            let var_addr = format!("%{}.addr", var);
+            let var_addr = format!("%{}.addr", llvm_mangle_ident(var));
             out.push_str(&format!("  {} = alloca {}\n", var_addr, elt_lty));
             ctx.locals
                 .insert(var.clone(), (element_ty.clone(), var_addr.clone()));
@@ -5571,7 +5599,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     Type::Enum(n) => n.clone(),
                     _ => unreachable!("try_vec must return Type::Enum(Result__...)"),
                 };
-                let struct_ty = format!("%Enum_{}", result_enum);
+                let struct_ty = format!("%Enum_{}", llvm_mangle_ident(&result_enum));
                 let buf_size = llvm_enum_payload_buffer_size_by_name(&result_enum);
                 let buf_ty = format!("[{} x i8]", buf_size);
                 let vec_ty = vec_struct_name(&Type::I64);
@@ -6496,6 +6524,25 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let val = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = load {}, {}* {}\n", val, payload_ty, payload_ty, value_p));
+                // Gap-audit fix (2026-08-03): `Mutex<bool>` stores its
+                // payload as `i8` (the same Atomic<bool>-style shadow
+                // trick `atomic_storage_llvm`/`atomic_load` already
+                // use -- i1 isn't byte-addressable), but this function
+                // returned the raw i8 SSA value directly instead of
+                // converting it back to i1 -- an LLVM type-mismatch
+                // verifier error the instant the caller tried to use
+                // the result as a bool ("defined with type 'i8' but
+                // expected 'i1'"). Confirmed general, not struct/
+                // generic-specific: a bare `Mutex<bool>` at top level
+                // hit the identical crash. Mirrors `atomic_load`'s
+                // existing `icmp ne i8 X, 0` conversion (not `trunc`,
+                // which would only look at the low bit -- `icmp ne 0`
+                // correctly treats any nonzero byte as true).
+                if matches!(elt, Type::Bool) {
+                    let truncd = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", truncd, val));
+                    return truncd;
+                }
                 return val;
             }
             if name == "guard_set" {
@@ -6523,7 +6570,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
                     value_p, m_ty, m_ty, m_ptr
                 ));
-                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, v, payload_ty, value_p));
+                // Gap-audit fix (2026-08-03): mirror of the guard_get
+                // fix above -- `v` is an i1 bool value but the slot's
+                // real storage type is i8, so storing it directly is
+                // the same class of type mismatch, just on the write
+                // side. `zext i1 to i8` matches `atomic_store`'s
+                // existing Bool handling.
+                let stored = if matches!(elt, Type::Bool) {
+                    let promoted = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = zext i1 {} to i8\n", promoted, v));
+                    promoted
+                } else {
+                    v.clone()
+                };
+                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, stored, payload_ty, value_p));
                 return v;
             }
             // Condvar builtins. Stack-by-value `%intent_condvar
@@ -9836,7 +9896,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     let fields = LLVM_STRUCT_FIELDS_REGISTRY
                         .with(|r| r.borrow().get(struct_name).cloned())
                         .unwrap_or_default();
-                    let s_ty = format!("%Struct_{}", struct_name);
+                    let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
                     let slot_v = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = load {}, {}* {}\n",
@@ -9931,30 +9991,123 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     // registered) the load IS the deep
                     // clone — emit a round-trip via
                     // insertvalue.
-                    let payload_ty = LLVM_ENUM_PAYLOAD_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned());
-                    let payload_tags: Vec<u32> = LLVM_ENUM_PAYLOAD_TAGS_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
-                    let e_ty = format!("%Enum_{}", enum_name);
+                    //
+                    // BUG-75: `LLVM_ENUM_PAYLOAD_REGISTRY` stores a
+                    // SINGLE `payload_ty` per enum — the FIRST
+                    // payload type found across variants
+                    // (`decl.payload_types.iter().find_map(...)`).
+                    // For a mixed-payload-type enum (closure #283 --
+                    // e.g. `Num(i64), Text(OwnedStr), Flag(bool)`)
+                    // where a non-OwnedStr variant happens to be
+                    // declared first, this made `heap_kind` compute
+                    // `None` even though the enum genuinely HAS an
+                    // OwnedStr-payloaded variant -- so `clone_at`
+                    // took the "tag-only" fallback below, which
+                    // discards the ENTIRE payload (round-trips only
+                    // the tag via `insertvalue ... undef, i32 tag,
+                    // 0`, leaving the `[N x i8]` payload byte-buffer
+                    // field `undef`) -- silently zeroing/corrupting
+                    // every payload, not just the missed OwnedStr
+                    // one: `Num(7)` cloned as `Num(0)`, `Flag(true)`
+                    // cloned as `Flag(false)`. The C backend was
+                    // unaffected (its enum clone path already keys
+                    // per-variant, not off one enum-wide type).
+                    // Fixed by computing `owned_str_tags` directly
+                    // from the PER-VARIANT registry
+                    // (`LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`) instead
+                    // of the single-type one -- correctly finds
+                    // Text's tag regardless of declaration order,
+                    // and (just as important) no longer treats
+                    // scalar-payloaded tags as "OwnedStr" purely
+                    // because they happened to share the enum-wide
+                    // `payload_tags` set (the old `payload_tags`
+                    // variable conflated "has ANY payload" with "has
+                    // an OwnedStr payload" -- entering the deep-
+                    // clone-as-string branch for a scalar tag would
+                    // have reinterpreted its raw i64/bool bits as an
+                    // `i8*` and handed that to `intent_str_concat`,
+                    // an out-of-bounds read/crash, not just a wrong
+                    // value).
+                    let variant_payloads: Vec<(String, Option<Type>)> =
+                        LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY
+                            .with(|r| r.borrow().get(enum_name).cloned())
+                            .unwrap_or_default();
+                    // Field 1's REAL declared type in `%Enum_<name>`:
+                    // a byte buffer `[N x i8]` for a genuinely mixed-
+                    // payload-type enum (mirrors
+                    // `llvm_enum_has_mixed_payloads`/the drop-path's
+                    // own `is_mixed` check just above in this file),
+                    // or plain `i8*` when every payloaded variant
+                    // shares one type (the pre-existing, narrower
+                    // case this code was originally written for).
+                    // Needed so the `bitcast` below names the correct
+                    // SOURCE type — using the wrong one is an LLVM
+                    // type-mismatch verifier error, not silently
+                    // wrong codegen.
+                    let is_mixed_payload = {
+                        let payloads: Vec<&Type> =
+                            variant_payloads.iter().filter_map(|(_, p)| p.as_ref()).collect();
+                        payloads.len() >= 2 && payloads[1..].iter().any(|t| *t != payloads[0])
+                    };
+                    let field1_ty = if is_mixed_payload {
+                        format!("[{} x i8]", llvm_enum_payload_buffer_size_by_name(enum_name))
+                    } else {
+                        "i8*".to_string()
+                    };
+                    // Precisely the tags whose OWN payload type is
+                    // OwnedStr — NOT the old `payload_tags` (every
+                    // tag with ANY payload), which would wrongly
+                    // route a scalar-payloaded tag (e.g. `Num(i64)`)
+                    // into the string-deep-clone branch below,
+                    // reinterpreting its raw bits as an `i8*`.
+                    let payload_tags: Vec<u32> = variant_payloads
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, (_, pty))| {
+                            matches!(pty, Some(Type::OwnedStr)).then(|| i as u32)
+                        })
+                        .collect();
+                    let e_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
                     let slot_v = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = load {}, {}* {}\n",
                         slot_v, e_ty, e_ty, slot_p
                     ));
-                    let heap_kind = match &payload_ty {
-                        Some(Type::OwnedStr) => Some("owned_str"),
-                        _ => None,
-                    };
+                    let heap_kind = if payload_tags.is_empty() { None } else { Some("owned_str") };
                     if heap_kind == Some("owned_str") && !payload_tags.is_empty() {
+                        // BUG-75 follow-up: operate through POINTERS
+                        // (GEP + bitcast to i8**), not through
+                        // `extractvalue`/`insertvalue` on the
+                        // already-loaded SSA value. For a genuinely
+                        // mixed-payload-type enum, field 1's real
+                        // LLVM type is `[N x i8]` (a byte buffer, see
+                        // `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY`'s own
+                        // doc comment) — `extractvalue`ing it and
+                        // handing the result directly to
+                        // `@intent_str_concat` (which expects `i8*`)
+                        // is a straight LLVM type mismatch ("defined
+                        // with type '[8 x i8]' but expected 'ptr'"),
+                        // caught immediately by `lli` once `heap_kind`
+                        // started correctly detecting the OwnedStr
+                        // tag (before that fix, this branch was simply
+                        // never reached for a mixed enum, which is
+                        // exactly why this second bug stayed latent).
+                        // Starting `dest_slot` from a full `store` of
+                        // `slot_v` (before any conditional payload
+                        // overwrite) also naturally preserves every
+                        // OTHER tag's raw payload bytes untouched —
+                        // no separate "tag-only" reconstruction path
+                        // needed.
                         let tag_v = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = extractvalue {} {}, 0\n",
                             tag_v, e_ty, slot_v
                         ));
-                        let payload_v = ctx.fresh_tmp();
+                        let dest_slot = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = alloca {}\n", dest_slot, e_ty));
                         out.push_str(&format!(
-                            "  {} = extractvalue {} {}, 1\n",
-                            payload_v, e_ty, slot_v
+                            "  store {} {}, {}* {}\n",
+                            e_ty, slot_v, e_ty, dest_slot
                         ));
                         let mut prev = "i1 false".to_string();
                         for t in &payload_tags {
@@ -9972,13 +10125,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         }
                         let cond = prev.trim_start_matches("i1 ").to_string();
                         let pay_lbl = ctx.fresh_label("cat_enum_pay");
-                        let tag_lbl = ctx.fresh_label("cat_enum_tag");
                         let join_lbl = ctx.fresh_label("cat_enum_join");
                         out.push_str(&format!(
                             "  br i1 {}, label %{}, label %{}\n",
-                            cond, pay_lbl, tag_lbl
+                            cond, pay_lbl, join_lbl
                         ));
                         out.push_str(&format!("{}:\n", pay_lbl));
+                        let src_pf_p = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            src_pf_p, e_ty, e_ty, slot_p
+                        ));
+                        let src_pf_i8pp = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast {}* {} to i8**\n",
+                            src_pf_i8pp, field1_ty, src_pf_p
+                        ));
+                        let payload_v = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load i8*, i8** {}\n",
+                            payload_v, src_pf_i8pp
+                        ));
                         let empty_p = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = getelementptr [1 x i8], [1 x i8]* @.empty_str_clone, i64 0, i64 0\n",
@@ -9989,23 +10156,25 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             "  {} = call i8* @intent_str_concat(i8* {}, i32 0, i8* {}, i32 0)\n",
                             cloned_payload, payload_v, empty_p
                         ));
-                        let new_enum_p1 = ctx.fresh_tmp();
+                        let dst_pf_p = ctx.fresh_tmp();
                         out.push_str(&format!(
-                            "  {} = insertvalue {} undef, i32 {}, 0\n",
-                            new_enum_p1, e_ty, tag_v
+                            "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            dst_pf_p, e_ty, e_ty, dest_slot
                         ));
-                        let new_enum_p2 = ctx.fresh_tmp();
+                        let dst_pf_i8pp = ctx.fresh_tmp();
                         out.push_str(&format!(
-                            "  {} = insertvalue {} {}, i8* {}, 1\n",
-                            new_enum_p2, e_ty, new_enum_p1, cloned_payload
+                            "  {} = bitcast {}* {} to i8**\n",
+                            dst_pf_i8pp, field1_ty, dst_pf_p
                         ));
-                        out.push_str(&format!("  br label %{}\n", join_lbl));
-                        out.push_str(&format!("{}:\n", tag_lbl));
+                        out.push_str(&format!(
+                            "  store i8* {}, i8** {}\n",
+                            cloned_payload, dst_pf_i8pp
+                        ));
                         out.push_str(&format!("  br label %{}\n", join_lbl));
                         out.push_str(&format!("{}:\n", join_lbl));
                         out.push_str(&format!(
-                            "  {} = phi {} [ {}, %{} ], [ {}, %{} ]\n",
-                            dest, e_ty, new_enum_p2, pay_lbl, slot_v, tag_lbl
+                            "  {} = load {}, {}* {}\n",
+                            dest, e_ty, e_ty, dest_slot
                         ));
                         ctx.current_block = join_lbl;
                     } else {
@@ -10922,6 +11091,29 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return "0".to_string();
             }
             if name == "mmio_read_u8" {
+                // Gap-audit fix (2026-08-03): `mmio_read_u8`'s
+                // checker-declared return type is `u8`, so any
+                // consumer (a `let x: u8 = mmio_read_u8(...);`,
+                // an `as i64` cast, ...) expects an i8-width SSA
+                // value here -- matching the established
+                // narrow-stays-narrow-until-cast convention SSA-
+                // LLVM already follows for ordinary u8/u16
+                // arithmetic. This used to `zext i8 ... to i64`
+                // internally, producing an i64-typed temp; storing
+                // that into a `u8`-typed `let`'s `i8` alloca (tree-
+                // LLVM's generic scalar Let codegen, which expects
+                // emit_expr's result to already match the
+                // destination width) emitted ill-typed IR
+                // ("defined with type 'i64' but expected 'i8'"),
+                // caught by `opt`/`llc` on ANY program using this
+                // builtin that also routes through tree-LLVM (e.g.
+                // any program containing a `#[no_mangle]` fn
+                // elsewhere, which routes the WHOLE program to
+                // tree-LLVM) -- found via `examples/language/
+                // english/bare_metal.vani`, which `vanic run`/
+                // `vanic build` had apparently never actually been
+                // exercised through (only emission text was
+                // grepped for BUG-44's `#[no_mangle]` fix).
                 let addr = emit_expr(&args[0], ctx, out);
                 let ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -10933,14 +11125,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load volatile i8, i8* {}, align 1\n",
                     raw, ptr
                 ));
-                let result = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = zext i8 {} to i64\n",
-                    result, raw
-                ));
-                return result;
+                return raw;
             }
             if name == "mmio_read_u16" {
+                // See mmio_read_u8's comment just above -- same fix,
+                // same root cause, for the u16 width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -10952,14 +11141,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load volatile i16, i16* {}, align 2\n",
                     raw, ptr
                 ));
-                let result = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = zext i16 {} to i64\n",
-                    result, raw
-                ));
-                return result;
+                return raw;
             }
             if name == "mmio_write_u8" {
+                // Gap-audit fix (2026-08-03): the checker's
+                // `mmio_write_u8` typing (`coerce_checked(...,
+                // &Type::U8, ...)`) means `args[1]`'s checker type
+                // is unconditionally `u8` already -- so `emit_expr`
+                // here returns a value that's ALREADY i8-width
+                // (matching the narrow-stays-narrow convention:
+                // e.g. a `byte: u8` parameter loads as a native
+                // `i8`, not i64). The old blind `trunc i64 {val} to
+                // i8` assumed `val` was always i64-typed, which
+                // produced ill-typed IR ("defined with type 'i8'
+                // but expected 'i64'") the instant the write's
+                // value came from an already-narrow source (any u8
+                // parameter/local, or `mmio_read_u8` after that
+                // builtin's own over-widening was fixed just above)
+                // -- masked until now because whatever DID feed
+                // this path before happened to be genuinely i64-
+                // sourced. No conversion is needed at all: the
+                // value already matches the store's declared width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let val = emit_expr(&args[1], ctx, out);
                 let ptr = ctx.fresh_tmp();
@@ -10967,18 +11169,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = inttoptr i64 {} to i8*\n",
                     ptr, addr
                 ));
-                let trunc = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = trunc i64 {} to i8\n",
-                    trunc, val
-                ));
                 out.push_str(&format!(
                     "  store volatile i8 {}, i8* {}, align 1\n",
-                    trunc, ptr
+                    val, ptr
                 ));
                 return "0".to_string();
             }
             if name == "mmio_write_u16" {
+                // See mmio_write_u8's comment just above -- same
+                // fix, same root cause, for the u16 width.
                 let addr = emit_expr(&args[0], ctx, out);
                 let val = emit_expr(&args[1], ctx, out);
                 let ptr = ctx.fresh_tmp();
@@ -10986,14 +11185,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = inttoptr i64 {} to i16*\n",
                     ptr, addr
                 ));
-                let trunc = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = trunc i64 {} to i16\n",
-                    trunc, val
-                ));
                 out.push_str(&format!(
                     "  store volatile i16 {}, i16* {}, align 2\n",
-                    trunc, ptr
+                    val, ptr
                 ));
                 return "0".to_string();
             }
@@ -16316,6 +16510,46 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 symbol,
                 arg_strs.join(", ")
             ));
+            // BUG-77: the call above correctly uses the System V
+            // x86-64 packed-register LOWERED type (`ret_ll`, e.g.
+            // `i64`) for the `call` instruction itself, matching
+            // cc's actual ABI -- but `dest` is therefore still in
+            // that lowered form, not the real `%Struct_X` type
+            // `expr.ty` says this expression has. Every OTHER
+            // consumer of `emit_expr`'s return value (a `let`
+            // binding's `store`, a further struct-field read, ...)
+            // assumes the returned SSA value's type matches
+            // `expr.ty` exactly, and blindly stores/uses it as
+            // `%Struct_X` -- an LLVM type mismatch ("defined with
+            // type 'i64' but expected '%Struct_Point'"), since the
+            // param-passing side of this same ABI lowering (just
+            // above) already had the matching un-lower step but the
+            // return side never did. Fixed by spilling the lowered
+            // value to an alloca, bitcasting to the real struct
+            // pointer type, and loading -- the mirror image of the
+            // param-passing lowering above.
+            if is_extern {
+                if let Some(lowered) = llvm_ffi_struct_lowered_ty(&expr.ty) {
+                    let struct_ty = llvm_type_string(&expr.ty);
+                    let spill = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = alloca {}\n", spill, lowered));
+                    out.push_str(&format!(
+                        "  store {} {}, {}* {}\n",
+                        lowered, dest, lowered, spill
+                    ));
+                    let cast_ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast {}* {} to {}*\n",
+                        cast_ptr, lowered, spill, struct_ty
+                    ));
+                    let unlowered = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        unlowered, struct_ty, struct_ty, cast_ptr
+                    ));
+                    return unlowered;
+                }
+            }
             dest
             } // close the `else` from the `__intent_atomic_` branch
         }
@@ -16870,7 +17104,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             if !payloaded {
                 return format!("{}", tag);
             }
-            let struct_ty = format!("%Enum_{}", enum_name);
+            let struct_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
             // Closure #283 LLVM half: mixed-payload enums
             // route through `[N x i8]` byte buffer. The
             // payload-less variant alloca's the struct, sets
@@ -16939,9 +17173,21 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 // Aggregate payloads use `zeroinitializer`
                 // for the all-zero placeholder when the
                 // variant has no user-provided payload.
+                // BUG-76 (2026-08-02): `Type::Enum(_)` was missing
+                // from this list -- same bug class as BUG-29/BUG-35
+                // just above (a payload-less sibling variant's zero
+                // placeholder needs the right LLVM zero-value form
+                // for the OTHER variant's payload type). Found via
+                // `Option<MyResult>.None` where `MyResult` is a
+                // user-defined payloaded enum: fell through to the
+                // `_ => "0"` default, producing invalid IR
+                // (`insertvalue %Enum_Option__MyResult %t, %Enum_MyResult
+                // 0, 1` -- "integer constant must have integer type"),
+                // identical symptom to BUG-29/BUG-35.
                 Type::Vec(_)
                 | Type::Tuple(_)
                 | Type::Struct(_)
+                | Type::Enum(_)
                 | Type::Array { .. }
                 | Type::Task
                 | Type::Mutex(_)
@@ -16964,7 +17210,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // T1.3 phase 2b LLVM: build the tagged-union
             // struct via two insertvalues (tag, then
             // the payload's evaluated SSA value).
-            let struct_ty = format!("%Enum_{}", enum_name);
+            let struct_ty = format!("%Enum_{}", llvm_mangle_ident(enum_name));
             let payload_ll = llvm_type_string(payload_ty);
             let payload_val = emit_expr(payload, ctx, out);
             // Closure #283 LLVM half: mixed-payload enums
@@ -17008,8 +17254,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = bitcast i8* {} to {}*\n",
                     pay_typed_ptr, first_elem, payload_ll
                 ));
+                // Gap-audit fix (2026-08-03): the byte buffer's real
+                // alignment is only whatever the `{i32, [N x i8]}`
+                // struct naturally provides (4 bytes, from the tag
+                // field) -- but a SIMD payload type (`vec128<T>` etc.)
+                // needs up to 64-byte alignment for its native
+                // aligned load/store instructions. Without an
+                // explicit `align 1` here, LLVM assumes the pointee
+                // type's ABI alignment (16/32/64 bytes for vec128/
+                // 256/512) and may emit an aligned SSE/AVX store,
+                // segfaulting on the actually-4-byte-aligned buffer
+                // (confirmed: `Result<vec128<f64>, i64>` crashed `lli`
+                // with a bare segfault, no diagnostic). `align 1`
+                // tells LLVM to use unaligned move instructions --
+                // always correct regardless of the buffer's real
+                // alignment, for every payload type this path
+                // handles, not just SIMD ones.
                 out.push_str(&format!(
-                    "  store {} {}, {}* {}\n",
+                    "  store {} {}, {}* {}, align 1\n",
                     payload_ll, payload_val, payload_ll, pay_typed_ptr
                 ));
                 let loaded = ctx.fresh_tmp();
@@ -17227,8 +17489,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 "  {} = bitcast i8* {} to {}*\n",
                                 typed_ptr, first_elem, bty_ll
                             ));
+                            // Gap-audit fix (2026-08-03): matching
+                            // construction-site fix above -- `align 1`
+                            // so LLVM doesn't assume the byte buffer
+                            // meets the payload type's natural ABI
+                            // alignment (a SIMD payload needs up to
+                            // 64 bytes; the buffer only guarantees 4,
+                            // from the enum struct's leading i32 tag).
                             out.push_str(&format!(
-                                "  {} = load {}, {}* {}\n",
+                                "  {} = load {}, {}* {}, align 1\n",
                                 extracted, bty_ll, bty_ll, typed_ptr
                             ));
                         } else {
@@ -17319,12 +17588,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             phi
         }
         TypedExprKind::FieldAccess { object, field_index, .. } => {
-            // Through a ref we have a pointer to the struct;
-            // load + extractvalue. Otherwise extract directly.
+            // Through a ref (or a Box<T>, which lowers to the same
+            // bare pointer) we have a pointer to the struct; load +
+            // extractvalue. Otherwise extract directly.
             let inner = emit_expr(object, ctx, out);
             let dest = ctx.fresh_tmp();
-            if object.ty.is_any_ref() {
-                let underlying = object.ty.deref();
+            if object.ty.is_field_access_indirect() {
+                let underlying = object.ty.deref_through_box();
                 let struct_ty = llvm_type_string(underlying);
                 let loaded = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -17408,7 +17678,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     TypedStmt::Let { name, ty, expr: rhs } => {
                         let value = emit_expr(rhs, ctx, out);
                         let lty = llvm_type_string(ty);
-                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), name);
+                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), llvm_mangle_ident(name));
                         out.push_str(&format!("  {} = alloca {}\n", addr, lty));
                         out.push_str(&format!(
                             "  store {} {}, {}* {}\n",
@@ -17755,7 +18025,7 @@ fn emit_vec_let_from_literal(
     ));
 
     // Alloca + store into the binding.
-    let addr = format!("%{}.addr", name);
+    let addr = format!("%{}.addr", llvm_mangle_ident(name));
     out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
     out.push_str(&format!("  store {} {}, {}* {}\n", s_ty, s2, s_ty, addr));
     ctx.locals.insert(
@@ -31944,9 +32214,74 @@ fn emit_intent_hashmap_struct_pair_llvm(
 ) {
     let s = format!("intent_hashmap_Struct_{}_{}", k_name, v_tag);
     let opt_v = format!("Enum_Option__{}", v_mangle);
-    let k_llvm = format!("%Struct_{}", k_name);
+    let k_llvm = format!("%Struct_{}", llvm_mangle_ident(k_name));
     let hash_fn = format!("fn_{}_hash", k_name);
     let eq_fn = format!("fn_{}_eq", k_name);
+    // Gap-audit fix (2026-08-03): match the REAL calling convention
+    // of the user's `implement Hash`/`implement Eq for K` methods
+    // (`self: ref Self` -> LLVM pointer arg; `self: Self` -> bare
+    // aggregate arg) instead of always calling with a bare struct
+    // value. Unlike C, an LLVM SSA value isn't directly addressable
+    // -- getting a pointer to `%k` (a by-value function parameter)
+    // needs an explicit `alloca`+`store` spill first; a value
+    // already loaded from the table via `getelementptr` (`%kcell`)
+    // is ALREADY a pointer, so the by-ref path skips the redundant
+    // `load` entirely and passes `%kcell` straight through. See
+    // `LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY`'s doc comment for the
+    // full root-cause writeup (this is the LLVM-backend sibling of
+    // the analogous C-backend fix in `emit_intent_hashmap_struct_
+    // pair_c_body`).
+    let hash_by_ref = LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&hash_fn).copied())
+        .unwrap_or(false);
+    let eq_by_ref = LLVM_IMPL_METHOD_SELF_BY_REF_REGISTRY
+        .with(|r| r.borrow().get(&eq_fn).copied())
+        .unwrap_or(false);
+    // Spills `%k` (the by-value HashMap-API parameter every one of
+    // these functions takes) into a fresh stack slot so its address
+    // can be passed to a by-ref hash/eq impl. A no-op string when
+    // the impl is by-value.
+    let hash_k_slot_prep = if hash_by_ref {
+        format!(" %hk_slot = alloca {k}\n \x20 store {k} %k, {k}* %hk_slot\n", k = k_llvm)
+    } else {
+        String::new()
+    };
+    let hash_call_arg = if hash_by_ref {
+        format!("{}* %hk_slot", k_llvm)
+    } else {
+        format!("{} %k", k_llvm)
+    };
+    let eq_k_slot_prep = if eq_by_ref {
+        format!(" %eqk_slot = alloca {k}\n \x20 store {k} %k, {k}* %eqk_slot\n", k = k_llvm)
+    } else {
+        String::new()
+    };
+    // The table-slot side of an eq call: by-ref skips the `load`
+    // (the getelementptr result `%kcell` is already a pointer);
+    // by-value loads it into `%kv` exactly as before.
+    let eq_kv_load = if eq_by_ref {
+        String::new()
+    } else {
+        format!(" %kv = load {k}, {k}* %kcell\n", k = k_llvm)
+    };
+    let eq_call_args = if eq_by_ref {
+        format!("{k}* %kcell, {k}* %eqk_slot", k = k_llvm)
+    } else {
+        format!("{k} %kv, {k} %k", k = k_llvm)
+    };
+    // `_remove`'s check-eq block reuses the same logic under `_rm`-
+    // suffixed local names (a separate top-level function's own SSA
+    // namespace).
+    let eq_kv_load_rm = if eq_by_ref {
+        String::new()
+    } else {
+        format!(" %kv_rm = load {k}, {k}* %kcell_rm\n", k = k_llvm)
+    };
+    let eq_call_args_rm = if eq_by_ref {
+        format!("{k}* %kcell_rm, {k}* %eqk_slot", k = k_llvm)
+    } else {
+        format!("{k} %kv_rm, {k} %k", k = k_llvm)
+    };
     out.push_str(&format!(
         "%{s} = type {{ {k}*, {v}*, i8*, i64, i64, i64 }}\n\
          define %{s} @{s}_new() {{\n\
@@ -31997,7 +32332,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret void\n\
          }}\n\
          define internal i64 @{s}__hash_key({k} %k) {{\n\
-         \x20 %raw = call i64 @{hash_fn}({k} %k)\n\
+         {hash_k_slot_prep}\
+         \x20 %raw = call i64 @{hash_fn}({hash_call_arg})\n\
          \x20 %h_p = alloca i64\n\
          \x20 store i64 -3750763034362895579, i64* %h_p\n\
          \x20 %i_p = alloca i64\n\
@@ -32023,9 +32359,11 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret i64 %final\n\
          }}\n",
         s = s, k = k_llvm, v = v_llvm, hash_fn = hash_fn,
+        hash_k_slot_prep = hash_k_slot_prep, hash_call_arg = hash_call_arg,
     ));
     out.push_str(&format!(
         "define internal void @{s}__insert_raw(%{s}* %m, {k} %k, {v} %v) {{\n\
+         {eq_k_slot_prep}\
          \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
          \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
          \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
@@ -32049,8 +32387,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 br i1 %is_empty, label %ir_store, label %ir_check_eq\n\
          ir_check_eq:\n\
          \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-         \x20 %kv = load {k}, {k}* %kcell\n\
-         \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+         {eq_kv_load}\
+         \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
          \x20 br i1 %eq, label %ir_update, label %ir_next\n\
          ir_update:\n\
          \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
@@ -32152,6 +32490,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret void\n\
          }}\n\
          define i1 @{s}_contains_key(%{s}* %m, {k} %k) {{\n\
+         {eq_k_slot_prep}\
          \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
          \x20 %cap = load i64, i64* %cp\n\
          \x20 %is_zero = icmp eq i64 %cap, 0\n\
@@ -32178,8 +32517,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 br i1 %is_occ_ck, label %ck_check, label %ck_next\n\
          ck_check:\n\
          \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-         \x20 %kv = load {k}, {k}* %kcell\n\
-         \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+         {eq_kv_load}\
+         \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
          \x20 br i1 %eq, label %ck_yes, label %ck_next\n\
          ck_next:\n\
          \x20 %i_p1 = add i64 %i, 1\n\
@@ -32197,10 +32536,12 @@ fn emit_intent_hashmap_struct_pair_llvm(
          \x20 ret i64 %len\n\
          }}\n",
         s = s, k = k_llvm, v = v_llvm, vsz = v_size, eq_fn = eq_fn,
+        eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
     ));
     if has_option_v {
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, {k} %k) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %cap = load i64, i64* %cp\n\
              \x20 %is_zero = icmp eq i64 %cap, 0\n\
@@ -32229,8 +32570,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_g, label %g_check, label %g_next\n\
              g_check:\n\
              \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-             \x20 %kv = load {k}, {k}* %kcell\n\
-             \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+             {eq_kv_load}\
+             \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
              \x20 br i1 %eq, label %g_some, label %g_next\n\
              g_next:\n\
              \x20 %i_p1 = add i64 %i, 1\n\
@@ -32249,6 +32590,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, {k} %k, {v} %v) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
              \x20 %tp = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
@@ -32291,8 +32633,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_ins, label %ins_check_eq, label %ins_test_tomb\n\
              ins_check_eq:\n\
              \x20 %kcell = getelementptr {k}, {k}* %keys, i64 %i\n\
-             \x20 %kv = load {k}, {k}* %kcell\n\
-             \x20 %eq = call i1 @{eq_fn}({k} %kv, {k} %k)\n\
+             {eq_kv_load}\
+             \x20 %eq = call i1 @{eq_fn}({eq_call_args})\n\
              \x20 br i1 %eq, label %ins_update, label %ins_next\n\
              ins_test_tomb:\n\
              \x20 %ft_cur = load i64, i64* %first_tomb_p\n\
@@ -32344,6 +32686,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, {k} %k) {{\n\
+             {eq_k_slot_prep}\
              \x20 %cp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
              \x20 %cap_rm = load i64, i64* %cp_rm\n\
              \x20 %is_zero_rm = icmp eq i64 %cap_rm, 0\n\
@@ -32374,8 +32717,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 br i1 %is_occ_rm, label %hmr_check_eq, label %hmr_next\n\
              hmr_check_eq:\n\
              \x20 %kcell_rm = getelementptr {k}, {k}* %keys_rm, i64 %i_rm\n\
-             \x20 %kv_rm = load {k}, {k}* %kcell_rm\n\
-             \x20 %eq_rm = call i1 @{eq_fn}({k} %kv_rm, {k} %k)\n\
+             {eq_kv_load_rm}\
+             \x20 %eq_rm = call i1 @{eq_fn}({eq_call_args_rm})\n\
              \x20 br i1 %eq_rm, label %hmr_yes, label %hmr_next\n\
              hmr_next:\n\
              \x20 %i_p1_rm = add i64 %i_rm, 1\n\
@@ -32401,6 +32744,8 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, k = k_llvm, v = v_llvm, eq_fn = eq_fn, opt = opt_v,
+            eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
+            eq_kv_load_rm = eq_kv_load_rm, eq_call_args_rm = eq_call_args_rm,
         ));
     }
     // clear() always emitted
@@ -42897,7 +43242,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                     .unwrap_or_default();
                 let has_owning = fields.iter().any(|(_, ty)| !ty.is_copy());
                 if has_owning {
-                    let s_struct = format!("%Struct_{}", name);
+                    let s_struct = format!("%Struct_{}", llvm_mangle_ident(name));
                     let mut tmp_counter: usize = 0;
                     emit_vec_element_struct_drop(
                         &s_struct,
@@ -42919,7 +43264,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                     _ => None,
                 };
                 if heap_kind.is_some() && !payload_tags.is_empty() {
-                    let s_enum = format!("%Enum_{}", name);
+                    let s_enum = format!("%Enum_{}", llvm_mangle_ident(name));
                     out.push_str(&format!(
                         "  %old = load {}, {}* %p\n",
                         s_enum, s_enum
@@ -43206,7 +43551,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                 if !has_owning {
                     "%src_v".to_string()
                 } else {
-                    let s_ty = format!("%Struct_{}", name);
+                    let s_ty = format!("%Struct_{}", llvm_mangle_ident(name));
                     let mut acc = "undef".to_string();
                     for (idx, (_, fty)) in fields.iter().enumerate() {
                         let f_src = format!("%f_src_{}", idx);
@@ -43360,7 +43705,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                     .unwrap_or_default();
                 if !fields.is_empty() {
                     needs_loop = true;
-                    let s_struct = format!("%Struct_{}", name);
+                    let s_struct = format!("%Struct_{}", llvm_mangle_ident(name));
                     emit_vec_element_struct_drop(
                         &s_struct,
                         "%elt_p",
@@ -43391,7 +43736,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                         .with(|r| r.borrow().get(name).cloned().unwrap_or_default());
                     if !payload_tags.is_empty() {
                         needs_loop = true;
-                        let s_enum = format!("%Enum_{}", name);
+                        let s_enum = format!("%Enum_{}", llvm_mangle_ident(name));
                         let loaded = next_tmp(&mut tmp_counter);
                         body.push_str(&format!(
                             "  {} = load {}, {}* %elt_p\n",
@@ -43643,7 +43988,7 @@ fn emit_vec_element_struct_drop(
                         "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
                         fp, s_ty, s_ty, addr, idx
                     ));
-                    let inner_s_ty = format!("%Struct_{}", inner_name);
+                    let inner_s_ty = format!("%Struct_{}", llvm_mangle_ident(inner_name));
                     emit_vec_element_struct_drop(
                         &inner_s_ty,
                         &fp,
@@ -43721,7 +44066,7 @@ pub(crate) fn vec_element_size_expr(element: &Type) -> String {
             )
         }
         Type::Struct(name) => {
-            let s_ty = format!("%Struct_{}", name);
+            let s_ty = format!("%Struct_{}", llvm_mangle_ident(name));
             format!(
                 "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
                 s_ty, s_ty, s_ty
@@ -43749,7 +44094,7 @@ pub(crate) fn vec_element_size_expr(element: &Type) -> String {
             let payloaded = LLVM_ENUM_PAYLOAD_REGISTRY
                 .with(|r| r.borrow().contains_key(name));
             if payloaded {
-                let e_ty = format!("%Enum_{}", name);
+                let e_ty = format!("%Enum_{}", llvm_mangle_ident(name));
                 format!(
                     "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
                     e_ty, e_ty, e_ty
@@ -43853,6 +44198,24 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
             Type::Object(_) => 16,
             _ => 8,
         },
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` and friends.
+        // `Type::bits()` returns `None` for SIMD lane types (they're
+        // not a `bits`-classified scalar width), so the `_` fallback
+        // below silently computed `64 / 8 = 8` bytes for a REAL
+        // 16/32/64-byte SIMD register -- under-allocating the Vec's
+        // malloc buffer by half (vec128) to 1/8th (vec512) of what
+        // it needs, corrupting the heap on the second element's
+        // store. Exact same failure class as every prior BUG-6x
+        // under-allocation fix (`realloc(): invalid next size` /
+        // `free(): invalid pointer`). These are fixed 16/32/64-byte
+        // constants regardless of the SIMD lane element type T
+        // (`llvm_byte_size` above already gets this right; this
+        // sibling function -- the one Vec push/literal/growth
+        // codegen actually calls via `vec_element_size_expr`'s
+        // fallback -- never got the matching arm).
+        Type::Vec128(_) => 16,
+        Type::Vec256(_) => 32,
+        Type::Vec512(_) => 64,
         _ => (element.bits().unwrap_or(64) / 8) as u64,
     }
 }
@@ -44183,6 +44546,16 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // C backend's `box_<inner_tag>` shape so cross-backend
         // identifier names match.
         Type::Box(inner) => format!("box_{}", vec_struct_tag(inner)),
+        // Gap-audit fix (2026-08-03): `Vec<vec128<T>>` -- a SIMD
+        // lane type as a Vec ELEMENT. Same shape as every other arm
+        // in this match: without it, the `_` fallback calls
+        // `llvm_type(Vec128(_))`, which is `unreachable!` (SIMD
+        // vector types can't be expressed as a single `&'static
+        // str`, same reason FnPtr/Tuple/Struct above needed their
+        // own arms). Mirrors the C backend's `element_tag` fix.
+        Type::Vec128(inner) => format!("vec128_{}", vec_struct_tag(inner)),
+        Type::Vec256(inner) => format!("vec256_{}", vec_struct_tag(inner)),
+        Type::Vec512(inner) => format!("vec512_{}", vec_struct_tag(inner)),
         // Note: Type::Vec(_) and Type::Array { .. } are handled
         // by the leading arms of this match (lines 38416-38418) —
         // earlier-arm shadowing made the trailing duplicates
@@ -44354,7 +44727,7 @@ fn emit_llvm_struct_field_drops(
     ctx: &mut FnCtx,
     out: &mut String,
 ) {
-    let s_ty = format!("%Struct_{}", struct_name);
+    let s_ty = format!("%Struct_{}", llvm_mangle_ident(struct_name));
     for (idx, (field_name, field_ty)) in fields.iter().enumerate().rev() {
         if moved.contains(field_name) {
             continue;
@@ -44946,7 +45319,7 @@ fn emit_task_via_pthread(
     // --- Spawn-site code in the parent function. ---
     // The task handle alloca lives in the parent's locals map
     // so the matching join can find it later.
-    let handle_addr = format!("%{}.addr", name);
+    let handle_addr = format!("%{}.addr", llvm_mangle_ident(name));
     out.push_str(&format!(
         "  {} = alloca %intent_task_handle\n",
         handle_addr
@@ -45092,7 +45465,7 @@ fn emit_task_via_pthread(
             // value. Load it into a local SSA name that the
             // emit path recognizes via locals.insert.
             let lty = llvm_type_string(cap_ty);
-            let loaded = format!("%arg_{}", cap_name);
+            let loaded = format!("%arg_{}", llvm_mangle_ident(cap_name));
             deferred.push_str(&format!(
                 "  {} = load {}, {}* {}\n",
                 loaded, lty, lty, slot_p
@@ -45111,7 +45484,7 @@ fn emit_task_via_pthread(
                 "  {} = load {}, {}* {}\n",
                 loaded, lty, lty, slot_p
             ));
-            let local_addr = format!("%{}.addr", cap_name);
+            let local_addr = format!("%{}.addr", llvm_mangle_ident(cap_name));
             deferred.push_str(&format!("  {} = alloca {}\n", local_addr, lty));
             deferred.push_str(&format!(
                 "  store {} {}, {}* {}\n",
@@ -46103,7 +46476,7 @@ fn is_scalar(ty: &Type) -> bool {
 fn hashmap_llvm_dispatch_with_k(k: &Type, v: &Type) -> (String, String, &'static str, String) {
     let (prefix, v_llvm, opt) = hashmap_llvm_dispatch(k, v);
     let k_llvm = match k {
-        Type::Struct(name) => format!("%Struct_{}", name),
+        Type::Struct(name) => format!("%Struct_{}", llvm_mangle_ident(name)),
         // ARC 4.5: f64 K — LLVM key type is `double`.
         Type::F64 => "double".to_string(),
         // ARC 4.1: OwnedStr K — LLVM key type is `i8*`.
@@ -46446,7 +46819,7 @@ pub fn llvm_type_string(ty: &Type) -> String {
         // User-declared struct types lower to named LLVM
         // struct types (`%Struct_<Name>`), declared in the
         // module preamble. T1.2 phase 1.
-        Type::Struct(name) => format!("%Struct_{}", name),
+        Type::Struct(name) => format!("%Struct_{}", llvm_mangle_ident(name)),
         // T1.3 phase 2b: payloaded enums lower to named
         // tagged-union struct types (`%Enum_<Name>`)
         // declared in the preamble; plain enums stay as
@@ -46455,7 +46828,7 @@ pub fn llvm_type_string(ty: &Type) -> String {
             let payloaded = LLVM_ENUM_PAYLOAD_REGISTRY
                 .with(|r| r.borrow().contains_key(name));
             if payloaded {
-                format!("%Enum_{}", name)
+                format!("%Enum_{}", llvm_mangle_ident(name))
             } else {
                 "i32".to_string()
             }
@@ -46621,7 +46994,7 @@ fn emit_dyn_iface_llvm_vtables(out: &mut String, used: &std::collections::HashSe
                 // self type. Heterogeneous Vec<dyn Iface>
                 // depends on each trampoline knowing its own
                 // impl's storage shape.
-                let impl_storage = format!("%Struct_{}", type_name);
+                let impl_storage = format!("%Struct_{}", llvm_mangle_ident(&type_name));
                 let self_forward = match self_ty {
                     Type::Struct(_) | Type::Enum(_) => {
                         body.push_str(&format!(
