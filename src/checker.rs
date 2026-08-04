@@ -10248,53 +10248,65 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
             }
             if args.iter().all(is_concrete) {
                 if let Type::Apply { name, args } = ty.clone() {
-                    if args.len() == 1 {
-                        // Bug found 2026-08-04 hunting for more
-                        // feature-combination gaps after BUG-91/95/98:
-                        // this collapse used `type_mangle` (the
-                        // FUNCTION-specialization mangling convention,
-                        // which prefixes nominal types with
-                        // "Enum_"/"Struct_" -- see its own doc
-                        // comment) instead of `type_mangle_for_decl`
-                        // (the DECL-mangling convention `mangle_
-                        // generic_decl`/`monomorphize_type_decls_in_
-                        // program`'s worklist actually uses, which
-                        // spells a nominal type's own bare name with
-                        // no prefix -- see ITS doc comment: "so nested
-                        // instantiations read as `Option__Option__i64`
-                        // rather than `Option__Enum_Option__i64`").
-                        // For a nested-generic type arg (e.g. `T`
-                        // substituted with an already-resolved
-                        // `Option<i64>` while collapsing the OUTER
-                        // `Option<T>`), the two conventions disagree,
-                        // and this collapse built a `Type::Enum`
-                        // reference to a name ("Option__Enum_Option__
-                        // i64") that the decl-generation worklist
-                        // (which correctly uses `type_mangle_for_decl`
-                        // via `mangle_generic_decl`) never actually
-                        // materializes a decl for -- a genuine type
-                        // mismatch, not a missing-decl error, since
-                        // the WRONG name still happens to LOOK like a
-                        // plausible enum name. Repro: `fn wrap<T>(x:
-                        // T) -> Option<Option<T>> { return Option.Some
-                        // (Option.Some(x)); }`.
-                        let mangled = format!("{}__{}", name, type_mangle_for_decl(&args[0]));
-                        let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
-                            .with(|c| c.borrow().contains(&name));
-                        // Gap-audit follow-up fix (2026-08-03): record
-                        // what this collapsed FROM so the struct/enum-
-                        // decl worklist can still discover it needs
-                        // generating -- see NEWLY_COLLAPSED_GENERIC_
-                        // APPLIES's doc comment for the full writeup.
-                        NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
-                            q.borrow_mut().push((name.clone(), args.clone(), is_enum));
-                        });
-                        *ty = if is_enum {
-                            Type::Enum(mangled)
-                        } else {
-                            Type::Struct(mangled)
-                        };
-                    }
+                    // Bug found 2026-08-04 hunting for more feature-
+                    // combination gaps after BUG-91/95/98/99/100/101/
+                    // 102/103: this collapse used to be gated on
+                    // `args.len() == 1`, silently skipping (never
+                    // collapsing) a 2+-argument generic Apply -- the
+                    // shape a builtin `Result<T, E>` produces when
+                    // used as a generic function's return type with
+                    // only ONE of its two args depending on that
+                    // function's own T (`fn wrap<T>(x: T) -> Result
+                    // <Option<T>, i64>`). The gate's own original
+                    // comment said it "matches the v1-supported
+                    // template.type_params.len() != 1 check at fn-
+                    // mono" -- but that restriction is about USER-
+                    // DEFINED GENERIC FUNCTIONS having at most one
+                    // type parameter, which is unrelated to how many
+                    // ARGS a builtin generic ENUM/STRUCT `Type::Apply`
+                    // node this collapse fires on can have (`mangle_
+                    // generic_decl`, used by the decl-generation
+                    // worklist for the exact same purpose, already
+                    // mangles an arbitrary number of args correctly;
+                    // this collapse just never matched it). Removed
+                    // the length gate entirely -- `mangle_generic_
+                    // decl` already loops over `args` generically, so
+                    // reusing it here instead of hand-building the
+                    // mangled name works for 1, 2, or N args exactly
+                    // the same way.
+                    //
+                    // Also (2026-08-04, BUG-101): use `type_mangle_
+                    // for_decl` (via `mangle_generic_decl`), the DECL-
+                    // mangling convention `monomorphize_type_decls_in_
+                    // program`'s worklist actually uses, NOT
+                    // `type_mangle` (the FUNCTION-specialization
+                    // convention, which prefixes nominal types with
+                    // "Enum_"/"Struct_"). For a nested-generic type
+                    // arg (e.g. `T` substituted with an already-
+                    // resolved `Option<i64>` while collapsing the
+                    // OUTER `Option<T>`), the two conventions
+                    // disagree, and using the wrong one here built a
+                    // `Type::Enum` reference to a name the decl-
+                    // generation worklist never actually materializes
+                    // a decl for -- a genuine type mismatch, not a
+                    // missing-decl error, since the wrong name still
+                    // happens to look like a plausible enum name.
+                    let mangled = mangle_generic_decl(&name, &args);
+                    let is_enum = GENERIC_ENUM_TEMPLATE_NAMES
+                        .with(|c| c.borrow().contains(&name));
+                    // Gap-audit follow-up fix (2026-08-03): record
+                    // what this collapsed FROM so the struct/enum-
+                    // decl worklist can still discover it needs
+                    // generating -- see NEWLY_COLLAPSED_GENERIC_
+                    // APPLIES's doc comment for the full writeup.
+                    NEWLY_COLLAPSED_GENERIC_APPLIES.with(|q| {
+                        q.borrow_mut().push((name.clone(), args.clone(), is_enum));
+                    });
+                    *ty = if is_enum {
+                        Type::Enum(mangled)
+                    } else {
+                        Type::Struct(mangled)
+                    };
                 }
             }
         }

@@ -84,9 +84,9 @@ applies to every line. Top of the pyramid: explicit + opt-in.
 
 ```
               +--------------------------+
-              |  Runtime: assert /       |  <- fires abort() on bad input
-              |  prove / requires not    |     at the failing line
-              |  discharged by SMT       |
+              |  Runtime: assert /       |  <- fires exit(3) (assert) or
+              |  prove / requires not    |     abort() (prove/requires)
+              |  discharged by SMT       |     on bad input at the line
               +--------------------------+
             +------------------------------+
             |  Runtime: bounds check /     |  <- fires abort() on first

@@ -1738,8 +1738,32 @@ fn emit_instr(
                 // If the assert carries a custom message
                 // (lowered as a `StrLit` `Str` arg), emit
                 // `fprintf(stderr, "assertion failed: %s\n",
-                // msg); abort();` — matches tree-C's shape so
+                // msg); exit(3);` — matches tree-C's shape so
                 // tests that scrape the stderr text agree.
+                //
+                // Bug found 2026-08-04 by `tools/localfuzz`
+                // (backend-divergence): this used to call
+                // `abort()`, raising SIGABRT -- the exact
+                // "misleading crash" shape MATH-3 (2026-07-20)
+                // already fixed for the LLVM backend's own
+                // assert-failure path, and that tree-C's own
+                // `TypedStmt::Assert` codegen was ALSO just fixed
+                // to match (see its own doc comment in
+                // backend_c.rs). This SSA fast-path emitter is a
+                // separate, independent codegen implementation
+                // from tree-C, so it needed the identical fix
+                // applied a third time. `vanic run --backend=c`
+                // tries this path FIRST for any SSA-eligible
+                // program (`emit_c_via_ssa` in main.rs), so a
+                // plain top-level `assert expr, "msg";` (which
+                // qualifies for the SSA path) kept diverging from
+                // LLVM (`vanic run --backend=c` reported `1`,
+                // an artifact of `run_program`'s `status.code().
+                // unwrap_or(1)` fallback for signal-terminated
+                // processes -- vs. LLVM's clean, intentional `3`)
+                // even after the tree-C fix landed, since tree-C
+                // is only reached as a fallback when the SSA path
+                // rejects a program.
                 if let Some(arg) = args.first() {
                     writeln!(
                         out,
@@ -1748,7 +1772,7 @@ fn emit_instr(
                     )
                     .unwrap();
                 }
-                writeln!(out, "  abort();").unwrap();
+                writeln!(out, "  exit(3);").unwrap();
                 return Ok(());
             }
             if name == "intent_str_cmp" {

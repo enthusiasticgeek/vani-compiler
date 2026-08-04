@@ -7544,44 +7544,97 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
   test --release --workspace`, 0 failed, no regression on the
   existing generics/async/pattern-matching test surface built up
   over this whole session.
-  **Still-open finding from the same hunt, NOT yet fixed** (deferred
-  to keep this batch reviewable): a THIRD level of nesting
-  (`Option<Option<Option<T>>>`) runs correctly on the LLVM backend
-  but fails to COMPILE on the C backend (`cc` error: "unknown type
-  name 'Enum_Option__Option__i64'; did you mean 'Enum_Option__i64'?"
-  -- the C backend's OWN enum-payload-typedef emission independently
-  derives a payload type name and gets it wrong one level deeper than
-  BUG-101 fixed, suggesting a duplicate of the same type_mangle-vs-
-  type_mangle_for_decl mismatch living in backend_c.rs itself, not
-  yet located). Also: `Result<Option<T>, i64>` as a generic
+  **Two smaller findings from the same hunt, deferred to keep this
+  batch reviewable**: a THIRD level of nesting
+  (`Option<Option<Option<T>>>`) ran correctly on the LLVM backend
+  but failed to COMPILE on the C backend -- **FIXED separately as
+  BUG-103, see below**. Also: `Result<Option<T>, i64>` as a generic
   function's return type (a 2-argument builtin generic enum where
-  only ONE arg depends on T) never resolves at all -- `substitute_
-  type_param`'s `Type::Apply` collapse is hard-gated on `args.len()
-  == 1`, so a 2-arg Apply is silently skipped and never collapses,
-  even though `mangle_generic_decl` itself already mangles an
-  arbitrary number of args correctly. Both repros preserved below for
-  whoever picks these up.
-  ```
-  // C-backend-only failure (LLVM is fine):
-  fn wrap<T>(x: T) -> Option<Option<Option<T>>> {
-    return Option.Some(Option.Some(Option.Some(x)));
-  }
-  fn main() -> i64 {
-    let r: i64 = match wrap(5) {
-      Option.Some(mid) then match mid {
-        Option.Some(inner) then match inner {
-          Option.Some(v) then v,
-          Option.None then -1,
-        },
-        Option.None then -2,
-      },
-      Option.None then -3,
-    };
-    print r;
-    return 0;
-  }
+  only ONE arg depends on T) never resolved at all -- **FIXED
+  separately as BUG-104, see below**.
 
-  // Result<Option<T>, i64> return type -- fails on both backends:
+- [x] **BUG-103 (found+fixed 2026-08-04, task #44). Three levels of
+  nested generic enum (`Option<Option<Option<T>>>`) ran correctly on
+  LLVM but failed to COMPILE on the C backend** -- `cc` error:
+  "unknown type name 'Enum_Option__Option__i64'; did you mean
+  'Enum_Option__i64'?".
+  Root cause: `emit_c`'s "unified topological emit" loop (the system
+  deciding emission order for structs/enums whose fields/payloads
+  reference each other) has THREE parallel sub-loops -- Vec bundles,
+  structs, and deferred payloaded enums -- each checking whether ITS
+  OWN dependencies are already emitted before emitting itself. The
+  STRUCT sub-loop correctly checks struct deps (`sdeps`/`sok`),
+  Vec-bundle deps (`vdeps`/`vok`), AND enum deps (`edeps`/`eok`,
+  added 2026-06-09 per its own comment). The DEFERRED-ENUM sub-loop
+  -- which exists specifically to handle an enum whose OWN payload
+  needs a full struct/enum/tuple definition, deferred from the
+  earlier eager pre-emit pass -- computed `sdeps`/`vdeps` from its
+  payload types but NEVER `edeps`, so an enum whose payload is
+  ANOTHER deferred enum (exactly what 3+ levels of `Option<T>`
+  nesting produces: the outer two levels both defer, since a
+  `Type::Enum` payload needs a full def) could get emitted before
+  the enum it depends on. Same "duplicate walker missing a case"
+  root-cause family as BUG-99/100/101/102 (found in the SAME
+  session) -- just living in backend_c.rs's own topological-emission
+  system instead of the checker's generics-monomorphization
+  pipeline.
+  Fixed by adding the missing `edeps`/`eok` check to the deferred-
+  enum sub-loop, mirroring the struct sub-loop's existing pattern
+  exactly.
+  Considered (and reverted after confirming it wasn't needed) an
+  alternative checker-level fix that sorted `monomorphize_type_
+  decls_in_program`'s freshly-generated decls into dependency order
+  before appending them to `program.structs`/`program.enums` --
+  verified working on its own, but proven UNNECESSARY once this
+  backend_c.rs fix landed (the C backend's own topo-loop now
+  correctly self-corrects regardless of input order; LLVM never
+  needed correct input order in the first place, which is why it was
+  never affected). Kept the smaller, more targeted fix rather than
+  shipping the redundant one.
+  Verified against the original 3-level repro AND a 4-level variant
+  (`Option<Option<Option<Option<T>>>>`) on both backends, plus full
+  `cargo test --release --workspace`: 0 failed.
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`.
+
+- [x] **BUG-104 (found+fixed 2026-08-04, task #45, user-requested
+  after BUG-99..103 landed: "fix it"). `Result<Option<T>, i64>` as a
+  generic function's return type -- a 2-argument BUILTIN generic
+  enum where only ONE arg depends on the function's own T -- never
+  resolved at all.**
+  Root cause: `substitute_type_param`'s own `Type::Apply` collapse
+  (the same collapse BUG-101 already touched) was hard-gated on
+  `args.len() == 1`, so a 2-arg Apply was silently SKIPPED and never
+  collapsed to `Type::Enum`/`Type::Struct` in the first place -- the
+  checker never even attempted to resolve it, so the diagnostic
+  showed the raw, un-collapsed `Type::Apply`'s own Display output
+  ("Result<Option__i64, i64>", not a mangled name) instead of a
+  "not declared" or type-mismatch error.
+  The gate's own original comment said it "matches the v1-supported
+  `template.type_params.len() != 1` check at fn-mono" -- but that
+  restriction is about USER-DEFINED GENERIC FUNCTIONS having at most
+  one type parameter (a real, still-enforced v1 limit), which has
+  nothing to do with how many args a BUILTIN generic enum/struct
+  `Type::Apply` node this collapse fires on can have.
+  `mangle_generic_decl` -- used by the decl-generation worklist for
+  the exact same "build a mangled name from a template name +
+  concrete args" purpose -- already looped over an arbitrary number
+  of args correctly; this collapse just never matched it, both in
+  the length gate AND (per BUG-101) in which mangling convention it
+  used.
+  Fixed by removing the length gate entirely and reusing `mangle_
+  generic_decl` directly (instead of hand-building the mangled
+  name), so 1-arg (`Option<T>`), 2-arg (`Result<T,E>`), and any
+  future N-arg generic all collapse through the same unified code
+  path.
+  Verified against `Result<Option<T>, i64>` with a scalar-T `Ok`
+  payload's `Some`/`None` and a genuine `Err` path (three distinct
+  concrete tag combinations exercised in one program), plus a
+  simpler `Result<T, i64>` (no nested `Option`) Ok/Err round trip, on
+  both backends. No regression on BUG-101/102's own nested-`Option
+  <Option<T>>` tests (the same collapse site, now handling both the
+  1-arg and 2-arg shapes through one unified path instead of two).
+  Repro (fails without the fix, on both backends):
+  ```
   fn wrap<T>(x: T) -> Result<Option<T>, i64> {
     return Result.Ok(Option.Some(x));
   }
@@ -7597,3 +7650,129 @@ covered (nested generic-enum-of-generic-enum, generic calls inside
     return 0;
   }
   ```
+  New tests: 1 `src/lib.rs` + 1 `tests/run_end_to_end.rs`. Full
+  `cargo test --release --workspace`: 0 failed.
+
+This closes out the 2026-08-04 bug hunt: all six findings (BUG-99
+through BUG-104) are now fixed and shipped, alongside the separate
+BUG-36 documentation reconciliation from earlier the same day. No
+further open items from this pass.
+
+## localfuzz sweep (2026-08-04) -- FIXED, shipped commit 79dc457
+
+`tools/localfuzz/` runs continuously in a separate worktree
+(`/home/virgo/source/vani-compiler-localfuzz`, branch
+`local-fuzz-findings`), mutating the shipped example programs and
+diffing C-vs-LLVM behavior via a local Ollama qwen2.5-coder:1.5b
+model. `scripts/localfuzz_status.py` clusters and dedupes its
+findings for review. This pass reviewed the 2 findings clusters it
+flagged as needing a real look; both were genuine, fixed below.
+
+- **BUG-105 (found by tools/localfuzz, finding
+  20260804-151851-backend-divergence-a0a31dce79). Two function
+  parameters with DIFFERENT non-ASCII names collided into the SAME C
+  identifier, failing to compile on the C backend while the LLVM
+  backend compiled and ran fine.**
+  Repro (Burmese, mutated from `examples/language/burmese/keywords.
+  vani`): `fn ပေါင်း(က: i64, ခ: i64) -> i64 { return က + ခ; }`. C:
+  `cc` error `redefinition of parameter 'v__'` (both params sanitized
+  to the literal identifier `v__`). LLVM: ran fine, "OK 7".
+  Root cause: `sanitize_ident` (backend_c.rs), used by both
+  `function_name` (`fn_<sanitized>`) and `local_name`
+  (`v_<sanitized>`) to turn a vāṇी identifier into a valid C
+  identifier, mapped EVERY non-ASCII character to a single literal
+  `_` regardless of which character it was -- so any two non-ASCII
+  names of the same byte length (like two single-character Burmese
+  parameter names) sanitized to the identical string. Purely a
+  C-backend concern: the LLVM backend doesn't route source
+  identifiers through this sanitizer.
+  Fixed by encoding each non-ASCII character's Unicode codepoint as
+  `_u<hex>_` instead of collapsing it to `_`, making the mangling
+  collision-resistant while staying a valid C identifier.
+  New tests: 1 `src/lib.rs` (`non_ascii_identifier_collision_
+  compiles_to_c_lib`, checks the generated C for the specific
+  duplicate-parameter shape) + 1 `tests/run_end_to_end.rs`
+  (`non_ascii_identifier_collision_produces_correct_output_on_both_
+  backends`, full subprocess run + output check on both backends).
+
+- **BUG-106 (found by tools/localfuzz, finding
+  20260804-135616-backend-divergence-d515a0fcc9, plus a follow-up
+  hand-written bare-assert probe during triage). A failed `assert`
+  diverged between the C and LLVM backends in two independent ways.**
+  Repro A (Sinhala, mutated from `examples/language/sinhala/
+  option_types.vani`, deliberately-wrong assertion): failing
+  `assert x == 1, ...`-style (message-carrying) assert. C: exit 1,
+  stderr `Assertion \`(v_x == 1)' failed.` (glibc `assert()` /
+  `abort()` -> SIGABRT). LLVM: exit 3, `dprintf`-based message
+  (already fixed for asserts back in MATH-3, 2026-07-20).
+  Repro B (hand-written, to isolate the message-less case): `fn
+  main() -> i64 { let x: i64 = 2; assert x == 1; return 0; }` run via
+  `vanic run` (LLVM, default backend) crashed `lli` outright with a
+  garbage stack-dump, rather than exiting cleanly at all.
+  Root cause, Part A (exit code / message, message-carrying asserts):
+  both the tree C backend (`backend_c.rs`) and the SSA fast-path C
+  backend (`ssa_backend_c.rs`, tried FIRST by `vanic run`'s
+  `emit_c_via_ssa`, tree is only the fallback) independently called
+  `abort()` on a failed assert -- two separate copies of the same
+  codegen, same "duplicate code path missed a fix" pattern as the
+  BUG-99..104 hunt. SIGABRT termination makes `status.code()` return
+  `None` in `main.rs`'s process driver, which then falls into
+  `.unwrap_or(1)`. The LLVM backend already used `exit(3)` (MATH-3),
+  precisely to avoid `vanic run`/`lli` misreporting a failed assert
+  as an apparent native stack overflow.
+  Fixed by switching both C codegen paths to `exit(3)`: added a
+  `VANIC_ASSERT` macro to backend_c.rs's C preamble (used for the
+  no-message arm, preserving glibc `assert()`'s own file/line/
+  function/condition diagnostic format without letting it actually
+  `abort()`), and switched the message-carrying arm's `abort();` to
+  `exit(3);` in both backend_c.rs and ssa_backend_c.rs's
+  `intent_assert_fail` handler. `#include <assert.h>` stays in the
+  preamble -- two OTHER, unrelated native `assert()` call sites exist
+  for `requires`-clause precondition codegen, and both backends
+  already consistently `abort()` there (verified against
+  backend_llvm.rs's own `requires`-clause codegen) -- not a
+  divergence, deliberately left untouched.
+  Root cause, Part B (true undefined behavior, message-LESS asserts,
+  SSA fast path only -- the default for `vanic run`): the shared SSA
+  lowering (`ssa.rs`, `TypedStmt::Assert`) skipped calling the
+  runtime abort helper (`intent_assert_fail`) entirely when the
+  assert had no message, terminating the fail block with
+  `Terminator::Unreachable` on the assumption ("the SMT pass should
+  already have proven it can't be reached") that isn't actually
+  enforced anywhere -- there is no proof requirement gating an
+  ordinary runtime `assert expr;` statement in the checker. The two
+  SSA backends disagree on what `Terminator::Unreachable` means: the
+  C SSA backend (`ssa_backend_c.rs`) lowers it to a safe `abort()`
+  everywhere, which happened to mask this bug there; the LLVM SSA
+  backend (`ssa_backend_llvm.rs`) lowers it to LLVM's actual
+  `unreachable` instruction, which is genuine undefined behavior if
+  control reaches it at runtime -- reproducing exactly as the `lli`
+  JIT stack-dump crash in repro B.
+  Fixed by having the message-less case in `ssa.rs` ALSO call
+  `intent_assert_fail` (with an empty-string message, reusing the
+  same call path as the message-carrying case), so the fail block is
+  a real, well-defined `exit(3)` call on both backends instead of an
+  unproven "unreachable" assumption. Output for a message-less
+  failed assert is now `assertion failed: ` (empty trailing message)
+  on the SSA path -- a minor, pre-existing-style cosmetic asymmetry
+  vs. the tree LLVM backend's fully-silent bare-assert exit(3) (never
+  printed anything for the no-message case either), not a new
+  regression.
+  Note: `ssa_backend_llvm.rs`'s own `intent_assert_fail` handler
+  already correctly emitted `call void @exit(i32 3)` -- confirmed by
+  reading it directly -- so no separate LLVM-side fix was needed
+  there; the LLVM SSA path's bug was entirely that message-less
+  asserts never reached that handler at all (Part B above).
+  New tests: 1 `src/lib.rs` (`failed_assert_exit_code_and_message_
+  match_across_backends_lib`, compiles both a message-carrying and a
+  message-less failing assert on both backends) + 1
+  `tests/run_end_to_end.rs`
+  (`failed_assert_exit_code_and_message_match_across_backends`, full
+  subprocess run checking actual process exit code == 3 and matching
+  stderr content across backends for both shapes).
+  Also updated 3 pre-existing `src/lib.rs` tests
+  (`assert_without_message_still_uses_c_assert`,
+  `assert_without_message_uses_c_assert_macro`,
+  `assert_with_message_lowers_to_custom_abort`) that had hard-coded
+  the OLD `assert(...)`/`abort();` C output shape from before this
+  fix.

@@ -1006,9 +1006,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let decl = enum_by_name.get(name.as_str()).unwrap();
             let mut sdeps: Vec<String> = Vec::new();
             let mut vdeps: Vec<String> = Vec::new();
+            // Bug found 2026-08-04 (task #44): this loop computed
+            // `sdeps`/`vdeps` from the enum's own payload types but
+            // never `edeps` (enum-depends-on-enum) -- unlike the
+            // STRUCT-emission loop just above, which already checks
+            // all three (`sok`/`vok`/`eok`). A deferred enum whose
+            // OWN payload is itself another deferred enum (`Option<
+            // Option<Option<T>>>`'s outer two levels, both deferred
+            // since `Type::Enum` payloads need a full struct def per
+            // `enum_payload_needs_full_struct_def`) could therefore
+            // get emitted before the enum it depends on -- "unknown
+            // type name 'Enum_Option__Option__i64'" (referenced by
+            // `Enum_Option__Option__Option__i64`'s typedef, emitted
+            // first). Add the missing `edeps`/`eok` check, mirroring
+            // the struct loop's pattern exactly.
+            let mut edeps: Vec<String> = Vec::new();
             for pty in decl.payload_types.iter().filter_map(|t| t.as_ref()) {
                 struct_deps_in_ty(pty, &mut sdeps);
                 vec_bundle_deps_in_ty(pty, &mut vdeps);
+                enum_deps_in_ty(pty, &mut edeps);
             }
             let sok = sdeps
                 .iter()
@@ -1019,7 +1035,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let vok = vdeps
                 .iter()
                 .all(|t| emitted_vec_typedefs.contains(t) || !vec_elements_by_tag.contains_key(t));
-            if sok && vok {
+            let eok = edeps
+                .iter()
+                .all(|d| emitted_enums.contains(d) || !enum_by_name.contains_key(d.as_str()));
+            if sok && vok && eok {
                 // Inline the typedef emission (mirrors the
                 // logic in the post-emit pass below); marking
                 // the enum as emitted prevents the post-emit
@@ -1842,6 +1861,41 @@ pub fn emit_c(program: &TypedProgram) -> String {
         out.push_str("#include <stdlib.h>\n");
         out.push_str("#include <string.h>\n");
         out.push_str("#include <math.h>\n");
+        // Bug found 2026-08-04 by `tools/localfuzz`: a bare (no
+        // custom-message) `assert expr;` used to lower to the native
+        // `assert(cond)` macro, which stringifies + `abort()`s on
+        // failure -- raising SIGABRT, the exact "misleading crash"
+        // shape MATH-3 (2026-07-20) already fixed for the LLVM
+        // backend's own assert-failure path (switched to a clean
+        // `exit(3)` specifically so `vanic run`/lli wouldn't
+        // misreport a plain failing assert as an apparent native
+        // stack overflow -- see the matching comment in ssa_backend_
+        // llvm.rs's `intent_assert_fail` lowering). The C backend's
+        // `TypedStmt::Assert` codegen was never given the same
+        // treatment, so this ONE shape (a bare `assert`, both with
+        // and without a custom message) diverged from LLVM in both
+        // its exit code (`vanic run --backend=c` reported `1` -- an
+        // artifact of `run_program`'s `status.code().unwrap_or(1)`
+        // fallback for signal-terminated processes, not an
+        // intentional convention -- vs. LLVM's clean, intentional
+        // `3`) and its underlying termination mechanism (a raw
+        // signal vs. a clean `exit()` call).
+        // Deliberately scoped to ONLY `TypedStmt::Assert` -- the
+        // `requires`-clause precondition check (a separate codegen
+        // site, both here and in backend_llvm.rs) already calls
+        // `abort()` consistently on BOTH backends, so it isn't a
+        // divergence and is left untouched; `<assert.h>` stays
+        // included for that site's own `assert(...)` calls.
+        // This macro preserves glibc's own `assert()` diagnostic
+        // format (file, line, function, and the failing condition's
+        // own source text, via the preprocessor's `#cond`
+        // stringification) while calling `exit(3)` instead of
+        // letting it `abort()`.
+        out.push_str(
+            "#define VANIC_ASSERT(cond) do { if (!(cond)) { \
+             fprintf(stderr, \"%s:%d: %s: Assertion `%s' failed.\\n\", \
+             __FILE__, __LINE__, __func__, #cond); exit(3); } } while (0)\n",
+        );
     }
     // INTENT_UNUSED is referenced by every Vec helper and
     // by the threading wrappers below, so define it
@@ -14444,17 +14498,25 @@ return __intent_ret; }}\n",
             out.push_str(";\n");
         }
         TypedStmt::Assert { expr, message } => {
-            // C `assert` macro stringifies its sole argument. To emit a
-            // custom message, fall back to `if (!cond) { fprintf(stderr,...);
-            // abort(); }` which keeps the same abort-on-failure shape.
+            // Bug found 2026-08-04 by `tools/localfuzz` (backend-
+            // divergence): both arms used to `abort()` on failure
+            // (raising SIGABRT) instead of the clean `exit(3)` the
+            // LLVM backend's assert-failure path already used (see
+            // the preamble's `VANIC_ASSERT` macro doc comment for
+            // the full writeup). Fixed by switching both arms to a
+            // clean `exit(3)`: the custom-message arm calls it
+            // directly after its own `fprintf`; the no-message arm
+            // uses `VANIC_ASSERT`, which preserves glibc's own
+            // `assert()` diagnostic format (file/line/function/
+            // condition text) without letting it `abort()`.
             if let Some(msg) = message {
                 out.push_str("  if (!(");
                 out.push_str(&emit_expr(expr));
                 out.push_str(")) { fprintf(stderr, \"assertion failed: ");
                 out.push_str(&escape_c_string(msg));
-                out.push_str("\\n\"); abort(); }\n");
+                out.push_str("\\n\"); exit(3); }\n");
             } else {
-                out.push_str("  assert(");
+                out.push_str("  VANIC_ASSERT(");
                 out.push_str(&emit_expr(expr));
                 out.push_str(");\n");
             }
@@ -22210,16 +22272,37 @@ fn local_name(name: &str) -> String {
     format!("v_{}", sanitize_ident(name))
 }
 
+/// Bug found 2026-08-04 by `tools/localfuzz` (Ollama qwen2.5-coder
+/// harness), finding `20260804-151851-backend-divergence-a0a31dce79`:
+/// this used to collapse EVERY non-ASCII-alphanumeric character to a
+/// single `_`, which is lossy/non-injective -- two DISTINCT non-ASCII
+/// identifiers of the same character-count (e.g. Burmese single-
+/// character parameter names `က` and `ခ`) collapsed to the exact
+/// same mangled C identifier, "redefinition of parameter" once both
+/// appeared in the same function signature (`fn_______(int64_t v__,
+/// int64_t v__)`). `sanitize_ident` is used by both `function_name`
+/// (`fn_<sanitized>`) and `local_name` (`v_<sanitized>`), so this
+/// affected both parameter/local names AND could in principle also
+/// cause two differently-named FUNCTIONS to silently collide (a
+/// worse failure mode than a compile error -- wrong linkage). LLVM
+/// backend has no equivalent sanitizer and was unaffected.
+/// Fixed by encoding each non-ASCII character's own Unicode codepoint
+/// into the output (`_u<hex>_`) instead of discarding it -- distinct
+/// codepoints now always produce distinct sanitized substrings, so
+/// two source identifiers can only sanitize to the same C identifier
+/// if they were already identical (impossible in a program that
+/// type-checked, since the checker enforces no-shadowing/no-
+/// duplicate-name within the same scope on the ORIGINAL names).
 fn sanitize_ident(name: &str) -> String {
-    name.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push_str(&format!("_u{:x}_", ch as u32));
+        }
+    }
+    out
 }
 
 /// Escape a string for safe inclusion as a C string literal (already

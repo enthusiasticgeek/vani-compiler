@@ -147,8 +147,9 @@ bug. `assert` is for that:
 assert len(xs) > 0, "list must not be empty";
 ```
 
-`assert` calls `abort()` on failure. There is no recovery. Reserve it
-for programmer errors (invariants), not user input or external failures.
+`assert` terminates the process on failure (exit code 3, with a
+diagnostic on stderr). There is no recovery. Reserve it for programmer
+errors (invariants), not user input or external failures.
 
 ---
 

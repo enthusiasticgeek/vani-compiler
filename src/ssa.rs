@@ -694,27 +694,36 @@ fn lower_stmt(
                 else_args: Vec::new(),
             });
             b.set_current(fail);
-            // If the assertion carried a user-facing message,
-            // emit a call to the runtime abort helper with the
-            // message as a literal string operand. Otherwise the
-            // fail block just terminates as unreachable — the
-            // SMT pass should already have proven it can't be
-            // reached.
-            if let Some(msg) = message {
-                let msg_v = b.emit(
-                    Type::Str,
-                    expr.span,
-                    InstrKind::StrLit(msg.clone()),
-                );
-                b.emit(
-                    Type::I64,
-                    expr.span,
-                    InstrKind::Call {
-                        name: "intent_assert_fail".to_string(),
-                        args: vec![Operand::Value(msg_v)],
-                    },
-                );
-            }
+            // Always call the runtime abort helper, even when the
+            // assertion carries no user-facing message (using an
+            // empty string in that case). This block is reached by
+            // a genuine runtime condition, NOT a statically-proven
+            // dead path — nothing upstream guarantees the SMT pass
+            // proved it unreachable, so terminating with a bare
+            // `Terminator::Unreachable` is unsound: the LLVM SSA
+            // backend lowers that terminator to LLVM's `unreachable`
+            // instruction, which is true undefined behavior if
+            // control ever actually reaches it (observed as `lli`
+            // JIT crashes / stack-dump garbage on a failed bare
+            // `assert expr;` with no message — the C SSA backend
+            // masked the same bug by lowering `Unreachable` to a
+            // safe `abort()`, so this only reproduced on LLVM).
+            // Routing both cases through `intent_assert_fail` keeps
+            // the fail block a real, well-defined `exit(3)` call on
+            // both backends.
+            let msg_v = b.emit(
+                Type::Str,
+                expr.span,
+                InstrKind::StrLit(message.clone().unwrap_or_default()),
+            );
+            b.emit(
+                Type::I64,
+                expr.span,
+                InstrKind::Call {
+                    name: "intent_assert_fail".to_string(),
+                    args: vec![Operand::Value(msg_v)],
+                },
+            );
             b.terminate(Terminator::Unreachable);
             b.set_current(ok);
             Ok(())
