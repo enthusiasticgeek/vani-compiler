@@ -1057,3 +1057,12 @@ Fix attempt: `tools/localfuzz/findings/20260804-001040-backend-divergence-bdea3d
 
 #### **Test Case Details:**
 - **Corpus File:** `/home/virgo/source/vani-compiler-localf
+
+---
+
+### Candidate: 20260804-001435-backend-divergence-6c96d8f994
+
+Repro: `tools/localfuzz/findings/20260804-001435-backend-divergence-6c96d8f994/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-001435-backend-divergence-6c96d8f994/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
