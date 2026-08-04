@@ -1,0 +1,11 @@
+--- a/src/backend_c.rs
++++ b/src/backend_c.rs
+@@ -50,7 +50,7 @@ fn add_floats(f1: f64, f2: f64) -> f64 {
+     let res = unsafe { libc::fadd64(f1, f2) };
+     res
+ }
+-// Add a right operand to a float constant, ensuring it's treated as an integer.
++// Add a right operand to a float constant, explicitly casting one of the operands to int.
+ pub fn add_float_to_int(float_const: f64, int_operand: i32) -> f64 {
+     let res = unsafe { libc::fadd64(float_const, int_operand as f64) };
+     res
