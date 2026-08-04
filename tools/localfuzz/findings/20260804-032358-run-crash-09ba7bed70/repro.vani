@@ -1,0 +1,21 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/finnish/async_cancel_auto.vani --backend=c  # C
+
+tarkoitus "Finnish async/await smoke";
+
+async funktio delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  palaa v;
+}
+
+fn main() -> i64 {
+  olkoon a: i64 = await(delay(9223372036854775807, 42));
+  olkoon b: i64 = await(delay(10, 7));
+
+  vahvista a == 42;
+  vahvista b == 7;
+  palaa 0;
+}

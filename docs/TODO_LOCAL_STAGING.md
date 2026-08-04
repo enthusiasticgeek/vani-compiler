@@ -1204,3 +1204,38 @@ Repro: `tools/localfuzz/findings/20260804-025511-backend-divergence-937ffb77f7/r
 Fix attempt: `tools/localfuzz/findings/20260804-025511-backend-divergence-937ffb77f7/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-032358-run-crash-09ba7bed70
+
+Repro: `tools/localfuzz/findings/20260804-032358-run-crash-09ba7bed70/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-032358-run-crash-09ba7bed70/fix_attempt.md`
+
+```plaintext
+Running a test case on finnish async/await code:
+
+- Compiler backend: LLVM
+- Mutation source:
+  ```
+  tarkoitus "Finnish async/await smoke";
+
+  async funktio delay(ms: i64, v: i64) -> i64 {
+    sleep_ms(ms);
+    palaa v;
+  }
+
+  fn main() -> i64 {
+    olkoon a: i64 = await(delay(9223372036854775807, 42));
+    olkoon b: i64 = await(delay(10, 7));
+
+    vahvista a == 42;
+    vahvista b == 7;
+    palaa 0;
+  }
+  ```
+
+- Found a run-crash in LLVM backend.
+
+STATUS: needs human/frontier root-cause review.
+```
