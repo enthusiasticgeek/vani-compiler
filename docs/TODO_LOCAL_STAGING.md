@@ -2023,3 +2023,14 @@ Generated Source (Mutant):
 // Note: Tibetan has no native struct keyword; enum + functions tested instead.
 
 
+
+---
+
+### Candidate: 20260804-161440-backend-divergence-ec889eea76
+
+Repro: `tools/localfuzz/findings/20260804-161440-backend-divergence-ec889eea76/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-161440-backend-divergence-ec889eea76/fix_attempt.md`
+
+VANIC: [build] /home/virgo/source/vani-compiler-localfuzz/examples/language/english/tracker.vani --backend=c
+
+STATUS: needs human/frontier root-cause review.
