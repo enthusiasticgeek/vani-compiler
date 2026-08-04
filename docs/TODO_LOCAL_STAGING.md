@@ -1318,3 +1318,21 @@ Fix attempt: `tools/localfuzz/findings/20260804-050008-backend-divergence-745cdf
 STAGING ENTRY: `/home/virgo/source/vani-compiler-localfuzz/examples/language/persian/async_cancel_auto.vani` has been submitted with a backend-divergence finding for LLVM and C backends, resulting in rc=1 and rc=3 respectively. The failure was due to an assertion error `v_a == (-1)` in the main function of the generated code when running on both LLVM and C backends.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-053000-backend-divergence-93add3d3a3
+
+Repro: `tools/localfuzz/findings/20260804-053000-backend-divergence-93add3d3a3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-053000-backend-divergence-93add3d3a3/fix_attempt.md`
+
+```json
+{
+  "compiler": "vanic",
+  "corpus": "/home/virgo/source/vani-compiler-localfuzz/examples/language/english/concurrency.vani",
+  "mutant_source": "Please provide the specific mutant/source that was generated or modified.",
+  "observed_symptom": "backend-divergence, cc failed while compiling '/tmp/vanic-candidate-2447537-1785821399239511051.c'.",
+  "affected_backend(s)": ["C", "LLVM"],
+  "status": "needs human/frontier root-cause review."
+}
+```
