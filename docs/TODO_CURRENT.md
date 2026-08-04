@@ -3258,14 +3258,29 @@ verifying the four fixes above against their tutorial worked examples
   `Box<Vec<T>>`, `Box<OwnedStr>`, `Box<dyn Iface>`, `Option<Box<T>>`
   type declaration) verified correct.
 
-- [ ] **BUG-36 (found, NOT fixed — a documented core safety
-  guarantee that the checker doesn't currently enforce at all;
-  this is a missing subsystem, not a bug in the traditional
-  sense). The "single mutable borrow" exclusivity rule (`ref`
+- [x] **BUG-36 -- STATUS CORRECTION (2026-08-04): this entry
+  originally read "found, NOT fixed" (below, preserved for
+  history/context) and was deliberately left open through several
+  later passes as too risky to rush ("a substantial new checker
+  subsystem... could itself introduce false rejections across a
+  huge amount of existing working code"). It was, in fact, FIXED
+  2026-08-02 -- a separate pass landed a deliberately narrow,
+  lexical-scope (not full NLL), named-`let`-binding-only
+  enforcement, validated against a full test run PLUS a byte-
+  identical before/after `vanic check` diff of all 1034 `.vani`
+  files under `examples/` (zero new rejections). This doc simply
+  never got reconciled after that fix landed, so the entry sat
+  contradicting itself two ways in this same file. Full writeup:
+  search "BUG-36 (fixed 2026-08-02" below. Re-verified directly
+  2026-08-04 against the exact repro in this entry -- correctly
+  rejected on both backends with a clear diagnostic
+  ("cannot use 'xs' while it is mutably borrowed by 'r'").
+  Original "found, NOT fixed" writeup, preserved for context:
+  The "single mutable borrow" exclusivity rule (`ref`
   can multiply, `mut ref` must be exclusive — the rule that's
   supposed to make aliased mutation, and therefore data races, a
   compile error) is not enforced by the checker in any tested
-  shape.** Found auditing
+  shape. Found auditing
   `intermediate/03b_affine_deeper_primer.md`'s own worked
   example, which explicitly claimed this compiles-error:
   ```vani
@@ -3280,49 +3295,15 @@ verifying the four fixes above against their tutorial worked examples
   passed inline (`push(mut ref xs, 4); print xs[0];`), and
   whether the conflicting access on the other alias is a read or
   a write (`set(r, 0, 99); print xs[0];` also compiles clean).
-  Searched `checker.rs` for any exclusivity-tracking diagnostic
-  text ("mutably borrowed", "already borrowed", "shared XOR
-  mutable", etc.) — found exactly one unrelated hit (a check
-  about what CAN be the *source* of a `mut ref`, not about
-  excluding concurrent access to the same binding). Only the
-  **affine move rule** is enforced (a value can't be read after
-  being *moved*) — there is no pass tracking "an outstanding
-  `mut ref` alias makes the original binding temporarily
-  unreadable." **Not fixed this session**: implementing real
-  borrow-exclusivity tracking (a non-lexical-lifetime-style
-  analysis over every `mut ref`'s live range, checked against
-  every other access to the same binding) is a substantial new
-  checker subsystem, not a quick fix — well outside what's
-  reasonable to attempt under time pressure in an audit session,
-  and if implemented incorrectly could itself introduce false
-  rejections across a huge amount of existing working code.
-  Corrected `03b_affine_deeper_primer.md`'s "Borrow scopes"
-  section, its "two-way trade" section (removed "data races"
-  from the list of bugs affine ownership eliminates — that
-  specifically depends on this unenforced rule — with a pointer
-  to how the concurrency chapters handle shared mutable state in
-  practice today), and its summary bullet to state the real,
-  current enforcement boundary instead of the aspirational one.
-  **Follow-up for whoever picks this up**: cross-check
-  `advanced/02a_parallelism_primer.md` and the other concurrency
-  chapters (not yet audited this session) for the same "shared
-  XOR mutable eliminates data races" claim — this finding likely
-  has implications there too.
-  **Deliberately still not attempted 2026-08-01**, in the "fix
-  documented TODO bugs" pass that fixed BUG-33/34/38/45/46/47:
-  this is the one item on that list explicitly out of scope, for
-  the same reason logged above (a real new checker subsystem, not
-  a bug fix) — flagged to the user rather than silently skipped.
-  Did do the doc follow-up check: `advanced/02a_parallelism_primer.md`
-  (already audited earlier in the tutorial-track arc) makes its
-  "if it compiles, no data races" claim specifically about
-  CROSS-THREAD sharing, which is a different, actually-enforced
-  mechanism (task-spawn/parallel-for require Copy captures; moving
-  a value across threads without an explicit `Mutex`/`Channel`/
-  `Atomic` is rejected) — distinct from BUG-36's finding, which is
-  about a `mut ref`/`ref` aliasing the SAME binding within a
-  SINGLE thread. So that file's claim was NOT found to need a
-  correction from this finding; no doc change made.
+  [Note (2026-08-04): the fix below deliberately does NOT cover
+  the inline-call-argument shape -- it's structurally untracked by
+  design, matching the tutorials' own pre-existing "borrow ends at
+  call return" model. Only the NAMED-`let`-binding shape shown in
+  the repro above is enforced.]
+  Only the **affine move rule** was enforced (a value can't be
+  read after being *moved*) — there was no pass tracking "an
+  outstanding `mut ref` alias makes the original binding
+  temporarily unreadable."
 
 - [x] **`03b_affine_deeper_primer.md`'s "conditional moves" flagship
   example also didn't demonstrate what it claimed — fixed
