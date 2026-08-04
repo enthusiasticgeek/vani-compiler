@@ -1,0 +1,68 @@
+// candidate regression, qwen-generated (qwen2.5-coder:1.5b), UNREVIEWED
+// features: match with guards over enum payloads, Task<R> spawn and join
+// compiled and ran cleanly on both backends -- candidate for examples/ or
+// tests/run_end_to_end.rs after human/frontier-model review.
+
+// build & run:
+//   vanic run examples/language/english/match_guard_chain_join.vani
+//   vanic run examples/language/english/match_guard_chain_join.vani --backend=c
+
+intent "Regression: a chain of 3+ guarded match arms sharing the same dispatch tag (multiple guarded wildcards, or a guarded enum variant repeated) must fold into a real if/else-if chain, not just the immediately-preceding arm. Before the fix, only the LAST guarded arm merged with the following unguarded arm; every EARLIER guarded arm in the chain became unreachable dead code sharing the same dispatch tag, so its guard was silently never evaluated — dispatch always took the first arm's body regardless of the actual guard condition.";
+
+fn grade(score: i64) -> Str {
+  return match score {
+    100 then "perfect",
+    _ if score >= 90 then "A",
+    _ if score >= 80 then "B",
+    _ if score >= 70 then "C",
+    _ if score >= 60 then "D",
+    _ then "F",
+  };
+}
+
+enum Status { Active, Idle }
+
+fn classify(s: Status, secs: i64) -> Str {
+  return match s {
+    Status.Active if secs > 3600 then "active-long",
+    Status.Active if secs > 60 then "active-medium",
+    Status.Active then "active-short",
+    Status.Idle then "idle",
+  };
+}
+
+fn main() -> i64 {
+  print grade(100);
+  print grade(95);
+  print grade(85);
+  print grade(75);
+  print grade(65);
+  print grade(50);
+
+  print classify(Status.Active, 4000);
+  print classify(Status.Active, 500);
+  print classify(Status.Active, 5);
+  print classify(Status.Idle, 0);
+
+  // Spawn two tasks and wait for both to complete.
+  task peer1 {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(9999);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+  task peer2 {
+    let _ = sleep_ms(20);
+    let c: i64 = tcp_connect_local(9999);
+    let _ = tcp_send_str(c, "cde");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  join peer1;
+  join peer2;
+
+  return 0;
+}
+
