@@ -1875,3 +1875,48 @@ Repro: `tools/localfuzz/findings/20260804-142552-backend-divergence-37f3f8fa69/r
 Fix attempt: `tools/localfuzz/findings/20260804-142552-backend-divergence-37f3f8fa69/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260804-145413-backend-divergence-5d61f9e78b
+
+Repro: `tools/localfuzz/findings/20260804-145413-backend-divergence-5d61f9e78b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260804-145413-backend-divergence-5d61f9e78b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Summary:
+A vanic candidate bug report has been generated for the vani-compiler project's local staging log, focusing on a bug related to backend-divergence in the LLVM backend. The mutant/generated source code is provided below:
+
+```
+// build & run:
+//   vanic run examples/language/english/tuple_eq.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/tuple_eq.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/tuple_eq.vani -o /tmp/tuple_eq && /tmp/tuple_eq   # native binary
+
+intent "Tuple auto-equality — compiler-derived field-by-field `==`";
+intent "Tuple auto-equality — compiler-derived field-by-field `==`";
+
+// Tuples are anonymous, so there's no user `implement Eq for
+// (i64, i64)` path. The checker derives equality by walking
+// the element types and AND-chaining per-element comparisons:
+//   (a, b) == (c, d)  →  a == c && b == d
+// Primitive elements use built-in `==`; nominal element types
+// (Struct / Enum with `Eq`) dispatch through the hoisted
+// `<T>_eq` method. v1 requires both operands to be tuples of
+// the same shape (matching arity + matching element types).
+
+interface Eq { fn eq(self: Point, other: Point) -> bool; }
+
+struct Point { x: i64, y: i64 }
+
+implement Eq for Point {
+  fn eq(self: Point, other: Point) -> bool {
+    if self.x != other.x { return false; }
+    if self.y != other.y { return false; }
+    return true;
+  }
+}
+
+fn main() -> i64 {
+  // Tuples of primitives —
