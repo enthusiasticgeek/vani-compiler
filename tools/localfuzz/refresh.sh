@@ -13,6 +13,18 @@
 # hand. Every failure mode below leaves the PREVIOUS known-good binary
 # in place rather than limping on with something broken or half-built.
 set -u
+# 2026-08-05: the systemd --user timer's environment doesn't source
+# ~/.bashrc/~/.profile, so `cargo` (installed under ~/.cargo/bin via
+# rustup) isn't on PATH when this script runs unattended -- the
+# nightly refresh silently failed with "cargo: command not found",
+# merged main into the worktree anyway (git doesn't need cargo), but
+# left the OLD binary in place, so the harness kept fuzzing a stale
+# build without any obvious signal beyond a line in refresh.log. This
+# script's own docstring promises "safe to run unattended (systemd
+# timer)" -- source cargo's env file here (its own PATH-prepend logic
+# is idempotent, safe to source from either an interactive shell or a
+# bare systemd unit) so that promise actually holds.
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1   # -> tools/localfuzz
 LOCALFUZZ_DIR="$(pwd)"
 WORKTREE_DIR="$(cd ../.. && pwd)"               # -> worktree root
