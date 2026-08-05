@@ -22,13 +22,23 @@ REPO="$(cd "$HERE/../.." && pwd)"
 OLLAMA_DIST="${OLLAMA_DIST:-$HOME/.local/share/vani-localfuzz/ollama-dist}"
 OLLAMA_BIN="$OLLAMA_DIST/bin/ollama"
 OLLAMA_DATA="$HOME/.local/share/vani-localfuzz/ollama-models"
+# Ollama generates an SSH-style identity keypair (id_ed25519) under
+# $HOME/.ollama on first use of some code paths, even for plain `serve`
+# on some builds. ProtectHome=tmpfs replaces $HOME with an empty,
+# per-invocation tmpfs, so that mkdir fails -- confirmed crash-looping
+# ("could not create directory mkdir /home/.../.ollama: read-only file
+# system") on a from-scratch sandboxed start (e.g. after a host reboot,
+# where nothing has ever populated this path inside the tmpfs before).
+# Give it a real, persistent, already-allowlisted-tree home for that
+# instead of touching the user's actual $HOME/.ollama.
+OLLAMA_HOME="$HOME/.local/share/vani-localfuzz/ollama-home"
 
 if [ ! -x "$OLLAMA_BIN" ]; then
   echo "Ollama not found at $OLLAMA_BIN -- see README.md 'First-time setup'." >&2
   exit 1
 fi
 
-mkdir -p "$OLLAMA_DATA"
+mkdir -p "$OLLAMA_DATA" "$OLLAMA_HOME/.ollama"
 source "$HERE/sandbox_lib.sh"
 
 if systemctl --user is-active --quiet vani-localfuzz-ollama.service 2>/dev/null; then
@@ -39,6 +49,7 @@ else
     -p Restart=on-failure -p RestartSec=15 \
     -p ProtectSystem=strict -p ProtectHome=tmpfs \
     -p "BindPaths=$OLLAMA_DATA" -p "BindReadOnlyPaths=$OLLAMA_DIST" \
+    -p "BindPaths=$OLLAMA_HOME/.ollama:$HOME/.ollama" \
     -p PrivateTmp=yes -p NoNewPrivileges=yes \
     -E OLLAMA_MODELS="$OLLAMA_DATA" \
     -E OLLAMA_HOST=127.0.0.1:11434 \
