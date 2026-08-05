@@ -725,10 +725,13 @@ fn emit_function(
         out.push_str("  %__bd_new = add i32 %__bd_cur, 1\n");
         out.push_str(&format!("  store i32 %__bd_new, i32* {}\n", counter));
         out.push_str(&format!("  %__bd_over = icmp sgt i32 %__bd_new, {}\n", bound));
+        // BUG-117 (2026-08-05): same misleading-`lli`-crash-report
+        // class as BUG-113/115/116's other guards -- see
+        // backend_llvm.rs's mirror of this fix for the full note.
         out.push_str(&format!(
             "  br i1 %__bd_over, label %__bd_abort, label %bb{}\n\
              __bd_abort:\n\
-             ; recursion bound exceeded — abort\n  call void @abort()\n  unreachable\n",
+             ; recursion bound exceeded — exit(3)\n  call void @exit(i32 3)\n  unreachable\n",
             entry_id
         ));
     }

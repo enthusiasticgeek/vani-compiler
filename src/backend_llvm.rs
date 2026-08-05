@@ -2395,9 +2395,14 @@ fn emit_function(
         out.push_str(&format!("  store i32 %__bd_new, i32* {}\n", counter));
         out.push_str(&format!("  %__bd_over = icmp sgt i32 %__bd_new, {}\n", bound));
         let body_lbl = ctx.fresh_label("bd_body");
+        // BUG-117 (2026-08-05): same misleading-`lli`-crash-report
+        // class as BUG-113/115 -- `abort()` here made `lli` print
+        // its "PLEASE submit a bug report" internal-crash dump for
+        // a clean, expected `#[bounded(N)]` violation. `exit(3)`
+        // matches every other vāṇी runtime trap.
         out.push_str(&format!(
             "  br i1 %__bd_over, label %__bd_abort, label %{}\n\
-             __bd_abort:\n  call void @abort()\n  unreachable\n\
+             __bd_abort:\n  call void @exit(i32 3)\n  unreachable\n\
              {}:\n",
             body_lbl, body_lbl
         ));

@@ -155,17 +155,12 @@ SSA fast path silently drops a runtime guard the tree path has."
 - `#[bounded(N)]` recursion-depth guard (`backend_c.rs` line ~13317,
   seen while reading around the `requires` codegen above) -- is this
   emitted on the SSA path at all, or only tree? Same audit as A/above,
-  same file region, cheap to check while already there. **STILL
-  OPEN as of 2026-08-05**: confirmed via grep that
-  `backend_llvm.rs`'s `#[bounded(N)]` codegen (~line 731 in
-  `ssa_backend_llvm.rs` has the SSA-side one too) still uses raw
-  `call void @abort()` -- same BUG-115 class, noticed via a broader
-  grep AFTER BUG-115 landed but deliberately not folded in
-  opportunistically (out of that pass's agreed scope). Same
-  mechanical fix (`exit(3)`) should apply; needs its own repro +
-  regression test pair (a `#[bounded(N)]` function that genuinely
-  exceeds its bound under `lli`, confirming the crash-report goes
-  away the same way BUG-115's cases did).
+  same file region, cheap to check while already there. **RESOLVED
+  as BUG-117** (2026-08-05, picked up separately as a low-risk
+  follow-up after BUG-115 landed): both `backend_llvm.rs` (tree) and
+  `ssa_backend_llvm.rs` (SSA) had the same raw `call void @abort()`
+  -- both switched to `exit(3)`, regression tests added. See
+  `docs/TODO_CURRENT.md`'s BUG-117 entry.
 - SSA-vs-tree parity for `checked` **specifically inside a function
   with a `requires` clause** -- BUG-116 fixed the case where the
   precondition itself is never enforced, but didn't audit whether

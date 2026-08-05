@@ -11562,3 +11562,41 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-117 (2026-08-05): the `#[bounded(N)]` recursion-depth guard
+// (both tree-LLVM and SSA-LLVM) used the same raw `call void
+// @abort()` as BUG-113/115/116's other guards, found via a broader
+// grep after that pass landed. Same fix: `exit(3)`.
+#[test]
+fn bounded_attribute_violation_exits_cleanly_instead_of_crashing_lli() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src_path = write_tmp_vani(
+        "bug117-bounded-abort",
+        r#"
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src_path.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "expected a clean exit(3) for a #[bounded(N)] violation, not an lli \
+         crash-report signal; status {:?}, stderr: {}",
+        output.status,
+        stderr
+    );
+    assert!(
+        !stderr.contains("PLEASE submit a bug report"),
+        "lli still produced its misleading internal-crash report:\n{}",
+        stderr
+    );
+}

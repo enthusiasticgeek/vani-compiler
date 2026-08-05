@@ -42495,11 +42495,13 @@ função main() -> i64 {
             fn main() -> i64 { return deep(3); }
         "#;
         let ll = compile_to_llvm(source).expect("bounded fn compiles to LLVM");
+        // BUG-117 (2026-08-05): switched from `abort()` to `exit(3)`,
+        // same misleading-lli-crash-report fix as BUG-113/115/116.
         assert!(
             ll.contains("@__intent_depth_deep = thread_local global i32 0")
                 && ll.contains("icmp sgt i32")
-                && ll.contains("call void @abort()"),
-            "expected thread-local depth counter + bound check + abort emit, got:\n{}",
+                && ll.contains("call void @exit(i32 3)"),
+            "expected thread-local depth counter + bound check + exit(3) emit, got:\n{}",
             ll
         );
     }

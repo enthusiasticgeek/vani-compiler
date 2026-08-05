@@ -8457,3 +8457,18 @@ not opportunistically folded in).
 
 Full `cargo test --release --workspace` (2755 lib tests + 189 end-to-end subprocess
 tests) clean, zero regressions, across all four fixes.
+
+## BUG-117 (2026-08-05) -- `#[bounded(N)]` recursion-depth guard also used raw abort()
+
+Found via a broader grep for `call void @abort()` after BUG-115 landed (noted as a
+follow-up in `docs/BUG_PATTERN_AUDIT_TODO.md` category B, deliberately not folded into
+that pass; picked up separately as a low-risk, low-token-cost fix). Same class exactly:
+both `backend_llvm.rs` (tree, `emit_function`'s bounded-fn entry sequence) and
+`ssa_backend_llvm.rs` (SSA, its own bounded-fn entry sequence) branched to a
+`__bd_abort` block that called raw `abort()` on a `#[bounded(N)]` violation, giving
+`lli` its misleading "PLEASE submit a bug report" crash report for a clean, expected
+trap. Fixed by switching both to `exit(3)`. Updated the pre-existing
+`bounded_attribute_emits_depth_counter_on_llvm_backend` (`src/lib.rs`, hard-coded the
+old `abort()` IR text) + new `tests/run_end_to_end.rs` test
+`bounded_attribute_violation_exits_cleanly_instead_of_crashing_lli`. Full `cargo test
+--release --workspace` clean.
