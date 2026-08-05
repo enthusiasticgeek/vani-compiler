@@ -2779,6 +2779,29 @@ verifying the four fixes above against their tutorial worked examples
   attempted this session given the scope already spent on the
   C-backend half.
 
+  **UPDATE (2026-08-05): LLVM side re-verified as already working,
+  no further root-causing needed.** Re-checked while auditing
+  `docs/LOCALFUZZ_HANDOFF_2026-08-05.md` section 3's "not new work"
+  items (one of which was this exact repro, re-surfaced by
+  localfuzz as `20260804-204024-backend-divergence-ffadfdc1f9`) --
+  `vanic run` (LLVM/`lli`) now prints `1\n2\n3\n` correctly, and
+  `vanic build`'s emitted `.ll` run directly through `lli` does too.
+  The originally-described symptom (silent crash, zero output, exit
+  116/127) no longer reproduces on current `main`. Most likely
+  explanation: this was fixed as an unintended side effect of
+  BUG-108/109/110's extensive `backend_llvm.rs`/`ssa_backend_llvm.rs`
+  Vec-handling changes (BUG-108 in particular touched Vec
+  index/bounds-check codegen broadly), not by any change targeting
+  this bug specifically -- consistent with this doc's own candidate
+  root-cause guess above (a Vec-adjacent byte-size/codegen path).
+  `vanic build` (native binary) initially still failed, but for an
+  UNRELATED reason discovered during re-verification: see BUG-112
+  below (missing `-lm` on the host link line) -- once that's fixed,
+  `vanic build`'s output also runs correctly. Example's header
+  comment, `tutorials/src/beginner/05a_recursion_primer.md`, and
+  `tests/run_end_to_end.rs`'s test for this example all updated to
+  drop the `--backend=c`-only caveat and cover both backends.
+
 - [x] **BUG-32. LLVM backend: an `eprint` string-literal item that
   never also appears in a `print` statement anywhere in the
   program is silently dropped from output -- not even an empty
@@ -8250,3 +8273,43 @@ digest's keyword matcher as a possible BUG-76 match purely because both mention
   a `compile_to_llvm` string-content assertion wouldn't catch on its own). Full `cargo
   test --release --workspace` (2753 lib tests + 185 end-to-end subprocess tests) clean,
   zero regressions.
+
+## BUG-112 FIXED (2026-08-05) -- `vanic build` missing `-lm` on host POSIX link
+
+Found while re-verifying BUG-31's LLVM-backend counterpart (see that entry's 2026-08-05
+update above) -- not a localfuzz finding, discovered manually during that
+investigation.
+
+- **`vanic build` (LLVM AOT native-binary compile, `src/main.rs`'s `build`
+  subcommand) omitted `-lm` from its host-POSIX link command, so ANY program could
+  fail to link with `undefined reference to 'exp'` (or `erf`, `fmod`, ...) depending
+  on the host's default `cc`/linker behavior.** Every vāṇी program's runtime
+  unconditionally emits math-builtin helper functions (`intent_f64_normal_pdf`,
+  `intent_f64_normal_cdf`, `intent_f64_wrap`, etc.) that reference libm symbols,
+  regardless of whether the program actually calls any of them -- so this wasn't
+  limited to math-heavy programs; it could hit literally any `vanic build` invocation
+  on a host where the default `cc` link step doesn't already implicitly pull in libm.
+  Root cause: `src/main.rs`'s LLVM-build link-command construction has three branches
+  by target -- `bare_metal` (correctly no `-lm`, no libc at all), `is_cross`
+  (correctly adds `-lm`), and the host-POSIX `else` branch, which only added
+  `-lpthread` and never `-lm`. The near-identical host-C-backend link command a few
+  hundred lines earlier in the same file (`src/main.rs`, "Closure #299" comment)
+  already added `-lm` correctly for the exact same reason -- this was specifically a
+  gap in the LLVM-build path's own, separate link-command construction, not a
+  copy-paste of the already-correct C-backend one. `vanic run` (LLVM via `lli`) was
+  never affected, because `lli` auto-resolves libc/libm symbols itself at JIT time
+  (see this file's own "LLVM-JIT via lli auto-resolves" comment) -- only the AOT
+  `vanic build` path, which shells out to `cc` for linking, needed the explicit flag.
+  This stayed hidden because `vanic run` is the far more common/tested path, and
+  because whether it manifests depends on the host's own `cc` defaults (some distros'
+  gcc specs implicitly pull in libm even without `-lm`; this bug reproduced concretely
+  on this project's own dev machine).
+  Fixed by adding `link_cmd.arg("-lm");` to the host-POSIX branch, mirroring the
+  `is_cross` branch immediately above it and the C-backend's own host link command.
+  New test: `vanic_build_links_self_referential_struct_vec_example_without_manual_lm_flag`
+  in `tests/run_end_to_end.rs` -- a real `vanic build` + execute-the-linked-native-
+  binary subprocess test (not a string check, since the bug is specifically a linker
+  failure that `emit`/`compile_to_llvm` assertions wouldn't exercise), reusing the
+  self-referential-struct-Vec example (BUG-31's repro) since that's exactly the
+  program that surfaced this while re-verifying that bug's LLVM side. Full `cargo test
+  --release --workspace` clean, zero regressions.

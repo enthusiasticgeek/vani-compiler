@@ -4129,6 +4129,24 @@ fn build_program_llvm(
     } else {
         // Host POSIX build — intent_pool_run uses pthreads; no OpenMP needed.
         link_cmd.arg("-lpthread");
+        // BUG-112: this branch omitted `-lm`, unlike the identical
+        // host-C-backend link command a few hundred lines up (see
+        // its own "Closure #299" comment) and unlike the `is_cross`
+        // branch just above, which both correctly link libm. Every
+        // vāṇी program's runtime unconditionally emits math-builtin
+        // helper functions (`intent_f64_normal_pdf` / `_cdf`,
+        // `intent_f64_wrap`, etc.) referencing libm symbols
+        // (`exp`/`erf`/`fmod`/...) whether or not the program
+        // actually calls them, so `vanic build` (LLVM AOT, this
+        // path) failed to link ANY program on a host whose default
+        // `cc` invocation doesn't already implicitly pull in libm
+        // (`ld: undefined reference to 'exp'` etc.) unless the user
+        // manually passed `-lm` via `-l<name>`. `vanic run` (LLVM
+        // via `lli`) was unaffected (`lli` auto-resolves libc/libm
+        // symbols — see this file's own "LLVM-JIT via lli
+        // auto-resolves" comment) which is why this stayed hidden
+        // despite `vanic run` being the far more common path.
+        link_cmd.arg("-lm");
     }
     // Layer 4.1 of `unsafe.md` — same toolchain hardening on
     // the LLVM-backend link path. See `apply_embedded_cc_hardening`.

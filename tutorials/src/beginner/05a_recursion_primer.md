@@ -131,9 +131,7 @@ fn visit(node: ref Node) -> i64 {
 ```
 
 (Run this shape yourself: `examples/language/english/self_referential_struct_vec.vani`
-in the compiler's own repo -- build with `--backend=c`; the LLVM
-backend has an unrelated, open bug on self-referential structs
-like `Node` as of this writing.)
+in the compiler's own repo -- works on both backends.)
 
 The shape of the code mirrors the shape of the data. Trying
 to flatten this into a loop usually requires an explicit

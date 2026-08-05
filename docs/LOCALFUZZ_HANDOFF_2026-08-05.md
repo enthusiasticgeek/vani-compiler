@@ -1,13 +1,20 @@
 # localfuzz handoff — 2026-08-05
 
-**STATUS (2026-08-05, later same day): fully closed out.** The one real bug this file
-tracked (section 2, the SSA-LLVM int-literal-to-float `let` bug) is FIXED and shipped
-as **BUG-111** — see `docs/TODO_CURRENT.md`'s BUG-111 entry for the full root-cause
-writeup and fix. The two items in section 3 remain explicitly NOT new work (unchanged
-from when this file was written). Section 2 below is left as-is (historical record of
-how the bug was found/scoped, matching the style of the previous handoff once its
-issues were closed) rather than rewritten — read it as "what was true when this file
-was written," not as still-open work.
+**STATUS (2026-08-05, later same day): fully closed out, including both section-3
+items.** The one real bug this file originally tracked (section 2, the SSA-LLVM
+int-literal-to-float `let` bug) is FIXED and shipped as **BUG-111**. The
+self-referential-struct/`Vec<Self>` LLVM item in section 3 turned out to already be
+fixed when re-verified (most likely an unintended side effect of BUG-108/109/110's
+Vec-related `backend_llvm.rs` work) — see `docs/TODO_CURRENT.md`'s BUG-31 entry's
+2026-08-05 update. Re-verifying it also surfaced a genuinely separate, new bug
+(`vanic build` missing `-lm` on the host link line), fixed and shipped as **BUG-112**.
+The Hebrew `first_negative` item was re-confirmed as not a compiler bug at all — no fix
+needed or possible there, since the defect is in the fuzzer-generated test program's
+own loop logic, not the compiler. See `docs/TODO_CURRENT.md`'s BUG-111/BUG-112 entries
+for full root-cause writeups. Section 2 below is left as-is (historical record of how
+the bug was found/scoped, matching the style of the previous handoff once its issues
+were closed) rather than rewritten — read it as "what was true when this file was
+written," not as still-open work.
 
 Read this whole file before touching anything. Fresh session, zero memory of how this
 list was produced. This is a MUCH smaller handoff than
@@ -125,7 +132,11 @@ and isolated to a 4-line reproduction.
   test, run `cargo test --release --workspace` clean, write the `BUG-N` entry into
   `docs/TODO_CURRENT.md` using a number checked fresh per section 1, push, poll CI.
 
-## 3. NOT new work — don't re-investigate these
+## 3. Originally "NOT new work" — both now resolved (2026-08-05, later same day)
+
+This section originally listed two items as explicitly not worth re-investigating. Both
+have since been resolved; left below as a historical record of the original framing,
+with resolution notes appended to each.
 
 - **`20260804-204024-backend-divergence-ffadfdc1f9`** (self-referential struct holding
   `Vec<Self>`, e.g. `struct Node { children: Vec<Node> }`, on the LLVM backend) — this
@@ -138,6 +149,13 @@ and isolated to a 4-line reproduction.
   yesterday — it's been a known gap for longer. Worth a `BUG-N` if someone
   root-causes and fixes it, but don't write "found by localfuzz" in the entry; it's
   more accurate to say "long-standing known gap, LLVM counterpart of BUG-31."
+  **RESOLVED**: re-verified and found to already work correctly on current `main` —
+  no root-causing needed after all, most likely fixed as an unintended side effect of
+  BUG-108/109/110's extensive Vec-related `backend_llvm.rs`/`ssa_backend_llvm.rs`
+  changes. See `docs/TODO_CURRENT.md`'s BUG-31 entry, 2026-08-05 update, for the full
+  re-verification writeup. Re-verifying it (specifically, testing `vanic build`'s
+  native-binary path) surfaced a genuinely separate, new bug — `vanic build` missing
+  `-lm` on the host link line — fixed and shipped as **BUG-112**.
 - **`20260804-222218-run-crash-d66ccbb300`** (Hebrew `first_negative`-style example) —
   **not a compiler bug**, a fuzzer-broken test program. The `while` loop's counter
   (`ע`) is only ever incremented... it isn't — there's no increment statement anywhere
@@ -147,6 +165,11 @@ and isolated to a 4-line reproduction.
   the "Lower priority, not investigated further" pattern from yesterday's handoff
   (BOTH backends hanging identically = broken test program, not a divergence). Skip
   unless you're specifically doing a sweep of that whole low-priority cluster.
+  **RESOLVED (re-confirmed 2026-08-05)**: still not a compiler bug — there is nothing
+  in `vanic` to fix here. The defect is entirely in the fuzzer-generated `.vani`
+  source's own loop logic (missing counter increment), and both backends already do
+  the objectively correct thing (hang on a genuinely infinite loop, exactly as any
+  correct language implementation would). No action taken, none needed.
 
 ## 4. Tools available to you
 
