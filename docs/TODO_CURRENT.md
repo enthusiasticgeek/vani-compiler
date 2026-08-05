@@ -8169,3 +8169,84 @@ runtime-safety-check machinery affecting essentially every ordinary vāṇी pr
   `false` on a `Binary` instruction incorrectly -- this fix only makes the SSA backends
   RESPECT the flag they're given, it does not re-verify that the flag's VALUE (as
   already computed by the checker before SSA lowering ever sees it) is always sound.
+
+## BUG-111 FIXED (2026-08-05) -- SSA-LLVM invalid IR for int-literal-to-float `let`
+
+From `docs/LOCALFUZZ_HANDOFF_2026-08-05.md` (found via 4 localfuzz findings -- Korean,
+Tibetan x2, plus hand-written minimal repros -- originally mis-clustered by the
+digest's keyword matcher as a possible BUG-76 match purely because both mention
+"integer constant must have integer type" for unrelated reasons).
+
+- **BUG-111: `let x: f64 = <integer literal>;` (and the `f32` equivalent) made
+  SSA-LLVM emit LLVM IR that `lli` rejects outright at parse time, before the program
+  ever runs.** Minimal repro:
+  ```vani
+  fn main() -> i64 {
+    let n: f64 = 0;
+    print n;
+    return 0;
+  }
+  ```
+  `vanic run <repro>` (default LLVM/SSA path) failed with:
+  ```
+  lli: .../vanic-....ll:68:27: error: integer constant must have integer type
+    %v_0 = fadd double 0.0, 0
+  ```
+  `vanic run <repro> --backend=c` worked fine (prints `0`), and adding any struct
+  literal (forcing the program onto tree-LLVM instead of SSA-LLVM, same
+  `expr_ssa_supported` mechanism as BUG-108/109/110) also worked fine -- confirming
+  this was SSA-LLVM-specific, not a general LLVM-backend bug. `let x: f64 = 7;` failed
+  identically (`fadd double 0.0, 7`), ruling out anything special about the literal
+  `0`. Blast radius: `let total: f64 = 0;`-style accumulator initialization is an
+  extremely common pattern, not a fuzzer edge case -- this affected a meaningful
+  fraction of real f64-using programs on the default backend.
+  Root cause: the checker desugars an implicit int-literal-to-float coercion (e.g. the
+  RHS of `let n: f64 = 0;`) into a `TypedExprKind::Cast` node wrapping the
+  still-integer-typed literal (`coerce_checked` -> `cast_expr` in `checker.rs`) rather
+  than reinterpreting the literal in place -- correct and necessary, since the inner
+  literal's own `.ty` (`I64`) needs to stay intact for the cast to mean anything.
+  `ssa.rs`'s `lower_expr_to_operand` lowers that `Cast`'s inner literal via
+  `lower_expr_to_operand`, which for a bare `TypedExprKind::Int` produces
+  `Operand::Const(Const::Int(0))` -- a plain constant with NO `ValueId`, carrying no
+  type annotation of its own at the SSA level. `ssa_backend_llvm.rs`'s `emit_instr` for
+  `InstrKind::Cast` then tried to recover the cast's *source* type via
+  `operand_type(x, value_types)` -- but that helper only knows how to look up a type
+  for `Operand::Value(v)` (via the `value_types` map); for `Operand::Const(_)` it
+  unconditionally returned `None`. The old fallback on that `None`,
+  `.unwrap_or_else(|| to.clone())`, defaulted the cast's SOURCE type to its own TARGET
+  type (`F64`) -- turning a genuine int-to-float cast into what looked, at the LLVM
+  emission level, like a same-type "identity" cast. `emit_cast` took its
+  `from_llvm == to_llvm` branch (both sides "F64"), which emits the identity-op
+  pattern `fadd <T> 0.0, <operand text>` -- but `operand_str`/`const_str` render
+  `Const::Int(0)` as the plain integer text `"0"` (correctly so in every OTHER
+  context, e.g. a real `i64`-typed identity op), producing the invalid
+  `fadd double 0.0, 0` instead of a real `sitofp i64 0 to double`. The C backend never
+  hit this: `InstrKind::Cast` there just emits a C-style `(double)(0)` cast expression,
+  which is valid C regardless of any int/float source-type bookkeeping, so this gap
+  was invisible on that path -- exactly the "one codegen path tracks types precisely
+  enough, the other doesn't" shape this project has repeatedly hit (see BUG-107 through
+  BUG-110).
+  Fixed in `ssa_backend_llvm.rs`: added `const_operand_natural_type(op: &Operand) ->
+  Type`, which derives a `Const` operand's own true source type directly from its
+  variant (`Const::Int(v)` -> `I64` unless `v` overflows `i64`'s range, then `U64`,
+  matching `check_expr`'s own int-literal-widening rule in `checker.rs`;
+  `Const::Float(_)` -> `F64`; `Const::Bool(_)` -> `Bool`) rather than guessing the
+  cast's target type. The `InstrKind::Cast` handler's fallback now calls this instead
+  of `to.clone()`: `operand_type(x, value_types).unwrap_or_else(|| const_operand_natural_type(x))`.
+  A genuine int-to-float `Cast` on a bare constant now correctly resolves
+  `from_llvm != to_llvm` and takes `emit_cast`'s real `sitofp`/`uitofp` path.
+  Verified via the emitted IR directly (`sitofp i64 0 to double`, `sitofp i64 7 to
+  float` for the `f64`/`f32` cases respectively) and via `vanic run` on both backends
+  producing identical, correct output.
+  New tests: 1 `src/lib.rs` unit test
+  (`ssa_llvm_int_literal_to_float_let_emits_sitofp`, going through `lower_program` +
+  `ssa_backend_llvm::emit` directly -- NOT `compile_to_llvm`, which calls the tree
+  backend and wouldn't exercise this path at all, the same coverage gap BUG-110's
+  writeup documents -- asserting the emitted IR contains `sitofp` and does NOT contain
+  the invalid integer-spelled `fadd` identity op) + 1 `tests/run_end_to_end.rs`
+  subprocess test (`int_literal_to_float_let_produces_correct_output_on_both_backends`,
+  a real `vanic run` on both backends asserting matching correct output -- necessary
+  because the bug is that `lli` refuses to even PARSE the generated IR, a failure mode
+  a `compile_to_llvm` string-content assertion wouldn't catch on its own). Full `cargo
+  test --release --workspace` (2753 lib tests + 185 end-to-end subprocess tests) clean,
+  zero regressions.

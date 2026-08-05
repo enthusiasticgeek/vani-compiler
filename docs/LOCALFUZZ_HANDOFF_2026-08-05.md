@@ -1,5 +1,14 @@
 # localfuzz handoff — 2026-08-05
 
+**STATUS (2026-08-05, later same day): fully closed out.** The one real bug this file
+tracked (section 2, the SSA-LLVM int-literal-to-float `let` bug) is FIXED and shipped
+as **BUG-111** — see `docs/TODO_CURRENT.md`'s BUG-111 entry for the full root-cause
+writeup and fix. The two items in section 3 remain explicitly NOT new work (unchanged
+from when this file was written). Section 2 below is left as-is (historical record of
+how the bug was found/scoped, matching the style of the previous handoff once its
+issues were closed) rather than rewritten — read it as "what was true when this file
+was written," not as still-open work.
+
 Read this whole file before touching anything. Fresh session, zero memory of how this
 list was produced. This is a MUCH smaller handoff than
 `docs/LOCALFUZZ_HANDOFF_2026-08-04.md` (which is now fully closed out — BUG-107
