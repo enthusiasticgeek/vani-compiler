@@ -11004,3 +11004,60 @@ fn main() -> i64 {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+// BUG-109 (2026-08-04): tree-LLVM's `Vec<bool>` LITERAL construction
+// (`vec(true, true, …)`) used a byte-addressed, one-bool-per-slot
+// buffer layout, incompatible with the packed (64-bools-per-i64-word)
+// layout every other `intent_vec_bool` operation (Index read,
+// IndexAssign write, push) expects. A `Vec<bool>` literal with 2+
+// elements read back garbage for any index whose bit didn't happen to
+// land in byte 0. This surfaced as an apparent LLVM task/async
+// scheduling "hang" in a localfuzz finding
+// (20260803-050543-run-crash-6bd324cd8f) derived near-verbatim from
+// this shipped example: `let alive: Vec<bool> = vec(true, true,
+// true);` then `if alive[j] { poll pool[j] }` in a round-robin
+// scheduler silently read `alive[1]`/`alive[2]` as permanently
+// `false` from construction (not from any later corruption or a real
+// scheduling bug), so those pool slots were never polled again --
+// indistinguishable from an infinite hang without bisecting away the
+// task/async machinery entirely, which is what actually found this.
+// This is a real subprocess run because the bug only manifests once
+// the LLVM IR actually executes under `lli` (a `compile_to_llvm`
+// string check wouldn't catch a data-layout mismatch that still
+// verifies as valid IR).
+#[test]
+fn echo_pool_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/echo_pool.vani",
+        manifest_dir
+    );
+    let expected = "server bound (port > 0): true\ntotal bytes received across pool: 9\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        // Wrapped in the real `timeout` command: if this regresses,
+        // the test fails (killed, non-zero exit) after 30s instead
+        // of hanging the whole suite (and CI) forever, same pattern
+        // as the BUG-86 mutex-deadlock regression test above.
+        let mut cmd_args = vec!["30", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?}: status {:?} (124 = timeout/hang -- BUG-109 regression), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "echo_pool example produced wrong output for {:?}",
+            backend_args
+        );
+    }
+}

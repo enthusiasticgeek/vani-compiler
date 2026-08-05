@@ -7938,3 +7938,94 @@ different and considerably worse.
   bounds-check tests, etc.) still pass -- confirmed no regression.
   Full `cargo test --release --workspace` (2749+ tests) clean on both
   BUG-107 and this fix.
+
+## Issue 3B FIXED as BUG-109 (2026-08-04) -- the real echo_pool bug
+
+Continuation of the localfuzz handoff sweep. `docs/LOCALFUZZ_HANDOFF_2026-08-04.md`'s
+re-scoped Issue 3 section narrowed the still-open `echo_pool` "LLVM hangs" finding to
+"the async fn/Task__handle/__poll_handle machinery" as the likely place to look. Found
+it, and it isn't a scheduling/async bug at all.
+
+- **BUG-109 (found by tools/localfuzz, finding
+  20260803-050543-run-crash-6bd324cd8f -- effectively verbatim from the shipped
+  `examples/language/english/echo_pool.vani`). `Vec<bool>` LITERALS
+  (`vec(true, true, …)`) were silently broken on the tree-walking LLVM
+  backend, reading back wrong values for any index past the first
+  byte -- which looked exactly like an infinite scheduling hang in
+  this repro.**
+  Symptom: `vanic run examples/language/english/echo_pool.vani` (LLVM,
+  default backend) hangs indefinitely; `--backend=c` completes
+  correctly (`total bytes received across pool: 9`). No crash, no
+  error -- just never terminates, matching the handoff's "Issue 3"
+  framing exactly.
+  Root cause: `backend_llvm.rs`'s `emit_vec_let_from_literal` (the
+  tree-LLVM lowering for `let xs: Vec<T> = vec(a, b, …);`) has no
+  special case for `Type::Bool` and falls through to the generic
+  per-element path -- allocate `n * vec_element_byte_size(Bool)`
+  bytes, bitcast to `i1*`, store each element via plain
+  `getelementptr i1, i1* buf, i64 i` / `store i1`. That's a BYTE-
+  addressed layout (8 bytes per bool, since `vec_element_byte_size`
+  wasn't given a bool-specific case either). Every OTHER
+  `intent_vec_bool` operation -- `Index` read, `IndexAssign` write
+  (via `@intent_vec_bool__set_mut`), `push` -- uses the PACKED
+  layout the type itself declares: `%intent_vec_bool = type { i64*,
+  i64, i64 }` (data, len-in-BITS, cap-in-BITS), 64 bools per i64
+  word, addressed via `idx/64` (word) + `idx%64` (bit shift/mask).
+  The two layouts are totally incompatible: reading a `vec(true,
+  true)` literal back through the packed accessor reinterprets the
+  literal's raw byte-addressed storage as ONE i64 word. `xs[0]`
+  happens to land on the right bit (bit 0 of byte 0) and reads
+  correctly; `xs[1]` reads bit 1 of that SAME word -- which is
+  whatever bit 1 of byte 0 (the literal's OWN storage for index 0)
+  happened to be, not index 1's actual stored value at all. In
+  practice: `vec(true, true)` reads back as `[true, false]`, always,
+  regardless of what was written to index 1.
+  Why this looked like a hang, not a wrong-value bug: `echo_pool.vani`
+  uses exactly this shape -- `let alive: Vec<bool> = vec(true, true,
+  true);` then a round-robin scheduler `if alive[j] { poll pool[j] }`.
+  `alive[1]` and `alive[2]` read as `false` from the moment the
+  literal is constructed (not from any later corruption, and not from
+  anything to do with `Task__handle`/`__poll_handle`/`io_recv_async`/
+  epoll at all -- all of which were fully correct and NOT the bug).
+  With `alive[1]`/`alive[2]` wrongly `false`, `pool[1]`/`pool[2]` are
+  simply never polled again after their first (skipped) visit --
+  their peer connections' data sits ready in the kernel socket buffer
+  forever, un-read, while the scheduler loop spins checking `alive[j]`
+  (correctly, per its own now-corrupted data) and finding nothing to
+  do. `total` never reaches 3 peers' worth of bytes, `done` never
+  reaches 3, the loop never exits. Indistinguishable from a genuine
+  infinite scheduling loop without bisecting the async machinery out
+  entirely, which is what actually found this (see the handoff doc's
+  updated Issue 3 section for the bisection trail: ruled out
+  `epoll_wait_one`'s timeout truncation and `task{}`'s threading model
+  before finding this).
+  Only reproduces via tree-LLVM (a struct literal, OR -- as in this
+  repro -- an `async fn` call's own `Task__handle` construction,
+  which the parser's v3.1 desugar lowers via `StructLit`, forces the
+  whole program off the SSA-LLVM fast path per
+  `expr_ssa_supported`'s unconditional `StructLit`/`FieldAccess`
+  rejection in `main.rs`; SSA-LLVM already had its own, separate,
+  correct `Vec<bool>`-literal lowering).
+  Fixed by adding `emit_vec_bool_let_from_literal`, a `Vec<bool>`-
+  specific literal lowering that builds the correctly-shaped packed
+  buffer (`ceil(n/64)` i64 words, zeroed via `memset`) and struct
+  (`len`/`cap` in bits) up front, then reuses the already-correct,
+  already bounds-checked (BUG-108) `@intent_vec_bool__set_mut` helper
+  once per literal element -- rather than re-deriving the packed bit-
+  twiddling (word/bit split, shift, mask) inline a second time.
+  `emit_vec_let_from_literal` now dispatches to it for `Type::Bool`
+  before falling into its generic per-element path.
+  New tests: 1 `src/lib.rs`
+  (`tree_llvm_vec_bool_literal_packs_elements_correctly`, forces
+  tree-LLVM via a struct literal, checks all 5 literal elements of a
+  `Vec<bool>` read back correctly and that the emitted IR uses
+  `@intent_vec_bool__set_mut` rather than an `i1*` byte-addressed
+  buffer) + 1 `tests/run_end_to_end.rs`
+  (`echo_pool_example_produces_correct_output_on_both_backends`, a
+  real subprocess `lli`/`cc` run against the shipped
+  `examples/language/english/echo_pool.vani` example itself, wrapped
+  in the `timeout` command per the established BUG-86-regression
+  pattern so a future regression fails the test after 30s instead of
+  hanging CI forever). All 71 pre-existing Vec<bool>/index/bounds-
+  check `src/lib.rs` tests still pass -- confirmed no regression.
+  Full `cargo test --release --workspace` (2750 tests) clean.
