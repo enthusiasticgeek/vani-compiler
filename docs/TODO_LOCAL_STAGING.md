@@ -148,6 +148,25 @@ Repro: `tools/localfuzz/findings/20260803-033452-run-crash-99db3e1928/repro.vani
 }
 ```
 
+STATUS: FIXED -- BUG-110 on main (2026-08-05). NOT a parallel/sort-library or
+task/async bug (those get loaded unconditionally by every `lli` invocation, a red
+herring). Root cause: `ssa.rs`'s `InstrKind::Binary` silently dropped the checker's
+`checked` flag during SSA lowering, so BOTH SSA backends (the default/preferred path
+for essentially every program) emitted fully unchecked Add/Sub/Mul/Div/Rem/Shl/Shr --
+no overflow guard, no divide-by-zero guard, no shift-range guard -- regardless of what
+the checker determined. This repro's `factorial(n - -1)` (unbounded/increasing
+recursion, fuzzed from `n - 1`) exposed it: with no overflow check, `cc -O2` proved the
+recursive branch unreachable-by-UB and replaced it with an infinite `jmp $` spin
+(confirmed via `-Waggressive-loop-optimizations` + `objdump`) instead of ever running
+it -- that's why C hung forever with 0% real work happening. LLVM had no such static
+optimization available and genuinely recursed, exhausting `lli`'s own interpreter
+stack. Fixed by threading `checked` through SSA lowering and implementing the same
+runtime guards in `ssa_backend_c.rs`/`ssa_backend_llvm.rs` that the tree backends
+already had. See `docs/TODO_CURRENT.md` BUG-110 entry on `main` for the full writeup
+-- also documents that the ENTIRE pre-existing overflow/divisor/shift test suite
+(72 tests) only ever exercised the tree backends via `compile_to_c`/`compile_to_llvm`,
+never the SSA path real users hit by default, which is how this went undetected.
+
 
 ---
 
