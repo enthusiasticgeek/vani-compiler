@@ -1,8 +1,12 @@
 #!/bin/bash
 # Starts Ollama and the fuzz harness, each as its own capped, filesystem-
-# sandboxed, unprivileged `systemd --user` service. On demand only -- does
-# NOT start automatically at login or boot; run this script explicitly
-# each time you want the pipeline running, and stop.sh to stop it.
+# sandboxed, unprivileged `systemd --user` service. Can be run on demand,
+# or automatically at boot via the (not-tracked-in-this-repo)
+# ~/.config/systemd/user/vani-localfuzz-autostart.service, which just
+# wraps this script (`systemctl --user enable vani-localfuzz-autostart`
+# to turn auto-start on/off; requires `loginctl enable-linger $USER` for
+# it to fire without an interactive login). stop.sh stops both services
+# either way.
 #
 # No sudo, no containers -- see README.md for why (this host's kernel
 # lacks CONFIG_CGROUP_BPF, which container runtimes need but plain cgroup
