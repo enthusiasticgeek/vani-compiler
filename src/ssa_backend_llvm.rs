@@ -374,12 +374,23 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // The @llvm.assume in cont: registers the proven condition with
     // LLVM's value-range tracking so downstream uses of the same
     // (idx, len) pair in dominated blocks are also eliminated.
+    // BUG-115 (2026-08-05): `call void @abort()` here (and the three
+    // checked-arithmetic guards below) made `lli` print its
+    // "PLEASE submit a bug report" internal-crash stack dump for a
+    // clean, expected, single-instruction trap -- same misleading-
+    // crash class BUG-106 fixed for `assert` and BUG-113 fixed for
+    // `requires`. Confirmed with a minimal non-recursive repro
+    // (`v[10]` on a 3-element Vec); independent of BUG-108/110's own
+    // "not further fixable" framing, which was specifically about
+    // their repros' genuine stack overflow, not this helper's own
+    // controlled trap. `exit(3)` matches every other vāṇी runtime
+    // trap's exit-code convention.
     out.push_str(
         "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
            br i1 %ok, label %cont, label %oob, !prof !{!\"branch_weights\", i32 1048576, i32 1}\n\
-         oob:\n  call void @abort()\n  unreachable\n\
+         oob:\n  call void @exit(i32 3)\n  unreachable\n\
          cont:\n  \
            call void @llvm.assume(i1 %ok)\n  \
            ret void\n}\n",
@@ -409,7 +420,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
                %r = extractvalue {{{w}, i1}} %pair, 0\n  \
                %ov = extractvalue {{{w}, i1}} %pair, 1\n  \
                br i1 %ov, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @abort()\n  unreachable\n\
+             oob:\n  call void @exit(i32 3)\n  unreachable\n\
              cont:\n  \
                ret {w} %r\n}}\n",
             w = llvm_w,
@@ -426,7 +437,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
              entry:\n  \
                %z = icmp eq {w} %x, 0\n  \
                br i1 %z, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @abort()\n  unreachable\n\
+             oob:\n  call void @exit(i32 3)\n  unreachable\n\
              cont:\n  \
                ret {w} %x\n}}\n",
             w = llvm_w,
@@ -451,7 +462,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
              entry:\n\
              {range_check}  \
                br i1 %bad, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @abort()\n  unreachable\n\
+             oob:\n  call void @exit(i32 3)\n  unreachable\n\
              cont:\n  \
                ret {w} %x\n}}\n",
             w = llvm_w,

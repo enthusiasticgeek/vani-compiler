@@ -3175,7 +3175,18 @@ fn c_const(c: &Const) -> String {
         Const::Int(v) => format!("(int64_t){}LL", v),
         Const::Bool(true) => "true".to_string(),
         Const::Bool(false) => "false".to_string(),
-        Const::Float(v) => format!("{}", v),
+        // `{}` (Display) on f64 omits the decimal point AND never
+        // switches to exponent notation for large whole-number
+        // magnitudes (e.g. 1e30 -> "1000000000000000000000000000000"),
+        // which C's lexer parses as an unsuffixed INTEGER constant --
+        // silently wrong (or a compiler warning + UB truncation) for
+        // any literal beyond `unsigned long long`'s range. `{:?}`
+        // (Debug) is what `backend_c.rs`'s tree-emitter's
+        // `emit_float_literal` already correctly uses (switches to
+        // `1e30`-style notation), matching C's own float-literal
+        // grammar (`digit-sequence exponent-part` is valid without a
+        // decimal point).
+        Const::Float(v) => format!("{:?}", v),
     }
 }
 
@@ -3326,6 +3337,48 @@ mod tests {
         assert!(
             c.contains("shift amount out of range"),
             "expected a shift-range guard in SSA-C output:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn large_float_literal_emits_c_float_syntax_not_bare_integer_digits() {
+        // BUG-114 (2026-08-05): `c_const`'s `Const::Float(v) =>
+        // format!("{}", v)` used Rust's Display formatting, which
+        // for a whole-number-valued f64 omits BOTH the decimal
+        // point and any exponent notation once the value gets
+        // large (e.g. 1e20 -> the 21-digit string
+        // "100000000000000000000" with no "." and no "e"). C's
+        // lexer parses a bare digit sequence with no "." and no
+        // "e" as an INTEGER constant, not a floating-point one --
+        // and once that integer exceeds `unsigned long long`'s
+        // range (~1.8e19), gcc/clang warn "integer constant is too
+        // large for its type" and silently truncate/wrap it before
+        // the implicit int->double conversion, producing a wildly
+        // wrong value with no compiler error and no runtime crash.
+        // Found by hand while root-causing BUG-113 (an unrelated
+        // `requires`-clause repro that happened to assign a large
+        // f64 literal). Fixed by switching to `{:?}` (Debug), which
+        // matches `backend_c.rs`'s tree-emitter's
+        // `emit_float_literal` and switches to `1e20`-style
+        // notation for large magnitudes -- valid C float syntax
+        // (`digit-sequence exponent-part` needs no decimal point).
+        let src = r#"
+            fn main() -> i64 {
+              let z: f64 = 1.0e20;
+              print z;
+              return 0;
+            }
+        "#;
+        let c = lower_and_emit(src);
+        assert!(
+            !c.contains("100000000000000000000"),
+            "found the bare-integer-digit-string spelling of 1e20 (parses as an overflowing C integer constant, not a double) in SSA-C output:\n{}",
+            c
+        );
+        assert!(
+            c.contains("1e20"),
+            "expected the Debug-format `1e20` spelling (valid C float syntax) in SSA-C output:\n{}",
             c
         );
     }

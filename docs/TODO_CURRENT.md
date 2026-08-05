@@ -8313,3 +8313,147 @@ investigation.
   self-referential-struct-Vec example (BUG-31's repro) since that's exactly the
   program that surfaced this while re-verifying that bug's LLVM side. Full `cargo test
   --release --workspace` clean, zero regressions.
+
+## BUG-113/114/115/116 (2026-08-05) -- `requires`-clause bug-pattern audit sweep
+
+Found while drafting `docs/BUG_PATTERN_AUDIT_TODO.md` (a new bug hunt organized by
+root-cause *pattern* rather than feature-pair enumeration, since the two prior sweeps
+exhausted the obvious combinations) and root-causing its top-priority item: whether
+`requires`/`ensures` clauses have any real runtime enforcement. What started as one
+confirmed bug (BUG-113) uncovered three more in the same investigation, escalating in
+severity -- BUG-116 in particular is a genuine silent safety hole, not a cosmetic
+crash-message issue.
+
+- **BUG-113: a `requires`-clause violation on the tree-LLVM backend used a raw `call
+  void @abort()`, making `lli` print its "PLEASE submit a bug report" internal-crash
+  stack dump for a clean, expected precondition failure.** Repro: `fn safe_sqrt(x:
+  f64) -> f64 requires sqrt(x) < 1000000.0; { return sqrt(x); }` called with `1.0e30`
+  -- `sqrt` is on `expr_ssa_supported`'s denylist, forcing tree-LLVM. `--backend=c`
+  already gave a clean assertion message (glibc `assert()` + SIGABRT via a real
+  compiled binary isn't misleading the way `lli`'s JIT crash handler is); only LLVM
+  crashed ugly. This is the exact class BUG-106 fixed for plain `assert` statements
+  -- BUG-106's own writeup explicitly left the `requires`-clause `abort()` call sites
+  "deliberately untouched" as "not a divergence" (both backends called `abort()`
+  consistently there), but consistency doesn't make `lli`'s misleading crash report
+  correct. Fixed by switching `backend_llvm.rs`'s `requires`-clause codegen (in
+  `emit_function`, right after parameter stores) from `call void @abort()` to `call
+  void @exit(i32 3)`, matching the assert fix. New test: updated the pre-existing
+  `lli_aborts_on_violated_requires` (`src/backend_llvm.rs`), which had asserted the
+  OLD abort-signal behavior (`exit == Some(134)` etc.) -- now asserts `exit ==
+  Some(3)`.
+
+- **BUG-114: `ssa_backend_c.rs`'s `c_const` used Rust's Display formatting (`{}`) for
+  `Const::Float`, silently corrupting any f64 literal beyond ~1.8e19 in magnitude on
+  the C backend.** Found by hand while verifying BUG-113's repro also worked on
+  `--backend=c` -- `1.0e30` printed as `5.07694e+18` instead of `1e+30`, with no
+  compiler error. Root cause: Display formatting for f64 omits BOTH the decimal point
+  and any exponent notation for large whole-number magnitudes (`1.0e30` -> the
+  33-digit string `"1000000000000000000000000000000"`, no `.`, no `e`) -- unlike
+  Debug formatting (`{:?}`), which switches to `1e30`-style notation. C's lexer parses
+  a bare digit sequence with neither as an unsuffixed INTEGER constant; once that
+  exceeds `unsigned long long`'s range (~1.8e19), gcc/clang warn "integer constant is
+  too large for its type" and silently truncate/wrap it before the implicit
+  int-to-double conversion. Values below that threshold "accidentally" round-trip
+  correctly (the digit string still parses as a valid, in-range integer constant that
+  converts losslessly to the same double). `backend_c.rs`'s tree-emitter's
+  `emit_float_literal` already correctly used `{:?}` -- this was specifically an
+  `ssa_backend_c.rs` gap, invisible on any test using `compile_to_c` (bypasses SSA
+  entirely, same coverage gap BUG-110's writeup documents) or any float literal below
+  the threshold (essentially every prior test in the suite). Fixed by switching
+  `c_const`'s `Const::Float` arm to `{:?}`. New tests: `src/lib.rs`
+  (`ssa_backend_c::tests::large_float_literal_emits_c_float_syntax_not_bare_integer_digits`)
+  + `tests/run_end_to_end.rs`
+  (`large_float_literal_produces_correct_output_on_both_backends`).
+
+- **BUG-115: the exact same misleading-`lli`-crash-report class as BUG-113 also
+  affected the Vec bounds-check helper (both tree-LLVM and SSA-LLVM) and all three
+  SSA-LLVM checked-arithmetic guards (overflow/divisor/shift, added earlier the same
+  day by BUG-108/110) -- five more `call void @abort()` sites.** Confirmed
+  independently of BUG-108/110's own repros (which involved genuine stack overflow,
+  where their writeups' "an accepted, not-further-fixable characteristic of `lli`"
+  framing legitimately applies) via a minimal, non-recursive out-of-bounds index
+  (`v[10]` on a 3-element `Vec<i64>`, no recursion at all) -- still produced the ugly
+  crash report pre-fix. All five sites are a simple, controlled single-branch trap
+  (`br i1 %ok/%bad, label %cont, label %oob`), structurally identical to `assert`'s own
+  guard shape, so the same fix applies directly. Fixed by switching all five
+  `oob:`-block `call void @abort()` sites to `call void @exit(i32 3)`:
+  `backend_llvm.rs`'s `@__intent_bounds_check` definition, and `ssa_backend_llvm.rs`'s
+  `@__intent_bounds_check` plus the `checked_overflow_ops`/`checked_divisor_tys`/
+  `checked_shift_tys` guard-emission loops. New tests: updated the pre-existing
+  `tests::tree_llvm_out_of_range_vec_index_aborts_instead_of_reading_garbage`
+  (`src/lib.rs`, hard-coded the old `abort()` IR text) + new
+  `tests/run_end_to_end.rs` test
+  `runtime_traps_exit_cleanly_instead_of_crashing_lli_on_llvm_backend`, which drives
+  all five trap categories through a real subprocess `vanic run` and asserts both
+  `exit(3)` and the absence of "PLEASE submit a bug report" in stderr.
+
+- **BUG-116 (the most severe of the four): `requires` clauses were NEVER lowered
+  into SSA at all -- `ssa.rs` never read `function.requires` anywhere -- and the
+  checker uses an unprovable-at-call-site `requires` clause as a licensed ASSUMPTION
+  to elide runtime `checked` guards on operations inside the function body that the
+  precondition makes provably safe. Combined, this meant a violated precondition on
+  the (default, most common) SSA path produced a completely unguarded raw operation
+  -- a genuine hardware trap (SIGFPE for the repro below), not even the misleading-
+  but-at-least-present `abort()` BUG-113/115 were about.** Repro: `fn safe_div(a: i64,
+  b: i64) -> i64 requires b > 0; { return a / b; }`, called as `safe_div(10, id(0))`
+  (the `id()` indirection hides the literal `0` from the SMT verifier, so the checker
+  can't prove-or-disprove the precondition at the call site and silently accepts the
+  program per `verify_call_args_in_expr`'s own documented "Unknown ... stay silent,
+  the runtime `requires` check still fires" policy -- except on this path, nothing
+  ever fires). Confirmed via direct SSA-LLVM IR inspection (not just black-box
+  behavior): the emitted `fn_safe_div` was `%v_2 = sdiv i64 %v_0, %v_1 \n ret i64
+  %v_2` -- a bare `sdiv`, zero guard calls anywhere in the module, because the
+  checker's own SMT reasoning (correctly, GIVEN the precondition) proved `a / b`
+  safe WITHIN `safe_div`'s body and set that Div's `checked` flag to `false`, and
+  nothing anywhere enforces the precondition that safety argument depends on. This
+  is a real violation of the language's own stated safety guarantee (`backend_c.rs`'s
+  overflow-helper comment: "trapped... in ASIL-D / DO-178C contexts"), on the
+  DEFAULT/preferred code path, for a completely ordinary defensive-programming
+  pattern (guard a function with a `requires` clause instead of an in-body `assert`).
+  Fixed in two places:
+  - `ssa.rs`'s `lower_function`: lowers each `f.requires` clause into the same guard
+    shape `TypedStmt::Assert` already uses (evaluate the condition, branch, on
+    failure call `intent_assert_fail` with a synthesized message
+    `"precondition violated in '<fn>'"` / `"... (requires #N)"` for 2+ clauses, then
+    `Terminator::Unreachable`), emitted in the function's entry block right after
+    parameter bindings and before the body -- so it reuses the exact same runtime
+    helper (and therefore the exact same `exit(3)`-on-LLVM /
+    `assert()`-macro-on-C semantics, per BUG-106) as an ordinary failed `assert`.
+  - `main.rs`'s `ssa_path_supports`: now also requires every `f.requires` expression
+    itself pass `expr_ssa_supported`, mirroring the existing body/param/return-type
+    checks. Necessary because the new lowering reuses the body's own expression
+    lowerer, which (correctly) has no idea how to handle a construct
+    `expr_ssa_supported` would already reject in the body (e.g. a denylisted builtin
+    like `sqrt`) -- without this gate, a `requires` clause using such a construct
+    produced invalid IR (confirmed: a bare `sqrt(x) < N` clause with no `sqrt` call
+    in the body previously compiled to a reference to a nonexistent `@fn_sqrt`,
+    since nothing had ever exercised this combination before this fix started
+    lowering `requires` at all). With the gate, such a function correctly falls back
+    to the tree backend instead, which has always handled arbitrary `requires`
+    expressions.
+  New tests: `src/ssa.rs`
+  (`tests::requires_clause_lowers_to_a_runtime_guard_at_function_entry`, lowers the
+  `safe_div`/`id` repro directly via `lower_function` and asserts a `Branch`
+  terminator + an `intent_assert_fail` call exist) + `tests/run_end_to_end.rs`
+  (`requires_clause_violation_traps_and_valid_call_still_works_on_both_backends`,
+  real subprocess runs confirming BOTH that a valid call still succeeds -- no false
+  positives from the new guard -- and a violating call traps with `exit(3)` on both
+  backends). Manually re-verified the `sqrt`-in-requires-not-in-body fallback case
+  (no dedicated automated test; low risk, covered structurally by
+  `expr_ssa_supported`'s existing extensive test coverage) produces correct output on
+  both backends post-fix.
+
+Follow-up not done here (logged in `docs/BUG_PATTERN_AUDIT_TODO.md` category A/B for
+a future session): `ensures` clauses have no `TypedFunction` field at all (purely a
+checker.rs/SMT-time concept, per BUG-68) and so have zero runtime backstop on ANY
+backend -- unlike `requires`, there's no obvious single injection point (would need
+to intercept every `return` site and substitute the return value), and no confirmed
+live repro yet showing an actual wrong-answer consequence (only the theoretical gap).
+Also: the `#[bounded(N)]` recursion-depth guard (`backend_c.rs`/`backend_llvm.rs`)
+still uses raw `abort()` on the LLVM side, same BUG-115 class, left untouched --
+out of the agreed scope for this pass (the 5 sites fixed were the ones flagged
+before starting; this one was noticed afterward via a broader grep and deliberately
+not opportunistically folded in).
+
+Full `cargo test --release --workspace` (2755 lib tests + 189 end-to-end subprocess
+tests) clean, zero regressions, across all four fixes.

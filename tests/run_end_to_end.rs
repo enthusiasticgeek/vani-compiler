@@ -11351,3 +11351,214 @@ fn main() -> i64 {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+// BUG-113/115 (2026-08-05): a family of runtime traps -- the
+// `requires`-clause precondition guard (tree-LLVM), the Vec bounds
+// check (both tree-LLVM and SSA-LLVM), and the checked-overflow /
+// checked-divisor / checked-shift guards (SSA-LLVM, added by
+// BUG-108/110 the same day) -- all used a raw `call void @abort()`.
+// Under `lli`'s JIT, a raw `abort()` produces "PLEASE submit a bug
+// report to https://github.com/llvm/llvm-project/issues/..." and a
+// full internal-crash stack dump instead of a clean process exit --
+// misleading for what is actually a well-defined, expected language-
+// level trap. This is the exact class BUG-106 already fixed for
+// plain `assert` statements; these sites just hadn't been touched
+// yet. Fixed by switching every one of them to `exit(3)`, matching
+// every other vāṇी runtime trap's exit-code convention. Confirmed via
+// a minimal NON-recursive out-of-bounds index (no stack overflow
+// involved at all) that this reproduces independent of BUG-108/110's
+// own repros, whose writeups had (incorrectly, for this general case)
+// called the `lli` crash report "an accepted, not-further-fixable
+// characteristic."
+#[test]
+fn runtime_traps_exit_cleanly_instead_of_crashing_lli_on_llvm_backend() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let cases: &[(&str, &str)] = &[
+        (
+            "requires-violated",
+            r#"
+fn safe_sqrt(x: f64) -> f64 requires sqrt(x) < 1000000.0; {
+  return sqrt(x);
+}
+fn main() -> i64 {
+  let y: f64 = safe_sqrt(1.0e30);
+  print y;
+  return 0;
+}
+"#,
+        ),
+        (
+            "bounds-check-tree-llvm",
+            r#"
+struct Foo { a: i64 }
+fn main() -> i64 {
+  let g: Foo = Foo { a: 1 };
+  let v: Vec<i64> = vec(1, 2, 3);
+  print v[10];
+  return 0;
+}
+"#,
+        ),
+        (
+            "bounds-check-ssa-llvm",
+            r#"
+fn main() -> i64 {
+  let v: Vec<i64> = vec(1, 2, 3);
+  print v[10];
+  return 0;
+}
+"#,
+        ),
+        (
+            "checked-divisor-ssa-llvm",
+            r#"
+fn id(x: i64) -> i64 { return x; }
+fn main() -> i64 {
+  return 10 / id(0);
+}
+"#,
+        ),
+    ];
+    for (name, src) in cases {
+        let src_path = write_tmp_vani(&format!("bug115-{name}"), src);
+        let output = Command::new(binary)
+            .args(["run", src_path.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run {} should execute: {e}", name));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{}: expected a clean exit(3), not an lli crash-report signal; \
+             status {:?}, stderr: {}",
+            name,
+            output.status,
+            stderr
+        );
+        assert!(
+            !stderr.contains("PLEASE submit a bug report"),
+            "{}: lli still produced its misleading internal-crash report:\n{}",
+            name,
+            stderr
+        );
+    }
+}
+
+// BUG-114 (2026-08-05): `ssa_backend_c.rs`'s `c_const` used Rust's
+// Display formatting (`{}`) for `Const::Float`, which omits both the
+// decimal point AND any exponent notation for a large whole-number
+// f64 (e.g. `1e20` -> the 21-digit string
+// "100000000000000000000", no "." and no "e"). C's lexer parses a
+// bare digit sequence with neither as an INTEGER constant -- once
+// that exceeds `unsigned long long`'s range (~1.8e19), gcc/clang warn
+// "integer constant is too large for its type" and silently
+// truncate/wrap it before the implicit int->double conversion,
+// corrupting the value with no compiler error and no runtime crash
+// (confirmed: `1.0e30` printed as `5.07694e+18` instead of `1e+30`).
+// Found by hand while root-causing BUG-113 (a `requires`-clause repro
+// that happened to assign a large f64 literal). Fixed by switching to
+// `{:?}` (Debug), matching `backend_c.rs`'s tree-emitter's
+// `emit_float_literal`, which already correctly produces `1e30`-style
+// notation -- valid C float syntax (`digit-sequence exponent-part`
+// needs no decimal point).
+#[test]
+fn large_float_literal_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src_path = write_tmp_vani(
+        "bug114-large-float-literal",
+        r#"
+fn main() -> i64 {
+  let z: f64 = 1.0e30;
+  print z;
+  return 0;
+}
+"#,
+    );
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, "1e+30\n",
+            "{:?}: large f64 literal produced the wrong value (BUG-114)",
+            backend_args
+        );
+    }
+}
+
+// BUG-116 (2026-08-05): `f.requires` was never lowered into SSA at
+// all (`ssa.rs` never read the field). The checker uses an
+// unprovable-at-call-site `requires` clause as a licensed ASSUMPTION
+// to elide runtime `checked` guards on operations inside the function
+// body that the precondition makes provably safe -- e.g. `requires b
+// > 0` lets `a / b` skip its divide-by-zero guard -- but with no
+// SSA-side enforcement of the precondition itself, calling such a
+// function with a violating argument hit a completely unguarded
+// operation (confirmed via direct IR inspection: a bare `sdiv`, zero
+// guard calls anywhere in the module) instead of a controlled trap --
+// a raw hardware SIGFPE, not even the (now-fixed) misleading `lli`
+// crash report, on a default `vanic run` with no struct literal or
+// denylisted builtin anywhere in the program. Fixed by lowering each
+// `requires` clause into the same guard shape `TypedStmt::Assert`
+// already uses, emitted at function entry before the body; gated
+// `ssa_path_supports` (main.rs) to also require every `requires`
+// expression itself be SSA-supported, so a clause using an
+// SSA-denylisted builtin (e.g. `sqrt`) correctly falls back to the
+// tree backend instead of emitting invalid IR.
+#[test]
+fn requires_clause_violation_traps_and_valid_call_still_works_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = r#"
+fn safe_div(a: i64, b: i64) -> i64
+requires b > 0;
+{
+  return a / b;
+}
+fn id(x: i64) -> i64 { return x; }
+fn main() -> i64 {
+  print safe_div(10, id(2));
+  print safe_div(10, id(0));
+  return 0;
+}
+"#;
+    let src_path = write_tmp_vani("bug116-requires-enforcement", src);
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains('5'),
+            "{:?}: the VALID call (safe_div(10, 2) == 5) must still succeed; \
+             stdout: {}, stderr: {}",
+            backend_args,
+            stdout,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{:?}: the VIOLATING call (safe_div(10, 0)) must trap with exit(3), \
+             not run to completion or crash uncontrolled; status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

@@ -40070,10 +40070,13 @@ função main() -> i64 {
         "#;
         let ll = crate::backend_llvm::LlvmBackend
             .emit(&compile(source).expect("struct + empty-Vec index compiles").ir);
+        // BUG-115 (2026-08-05): the oob block now calls `exit(3)`
+        // instead of `abort()` -- same misleading-`lli`-crash-report
+        // fix as BUG-106/113, applied to this helper too.
         assert!(
             ll.contains("br i1 %ok, label %cont, label %oob")
-                && ll.contains("oob:\n  call void @abort()\n  unreachable"),
-            "bounds-check helper must branch to a reachable abort-on-oob block:\n{}",
+                && ll.contains("oob:\n  call void @exit(i32 3)\n  unreachable"),
+            "bounds-check helper must branch to a reachable exit(3) oob block:\n{}",
             ll
         );
     }

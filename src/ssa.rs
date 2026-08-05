@@ -621,6 +621,58 @@ pub fn lower_function(f: &TypedFunction) -> Result<Function, LowerError> {
     b.params = param_records;
     b.entry = entry;
 
+    // BUG-116 (2026-08-05): `requires` clauses were never lowered
+    // into SSA at all -- `f.requires` was simply never read
+    // anywhere in this file. The checker uses an unprovable-at-
+    // call-site `requires` clause as a licensed ASSUMPTION for
+    // eliding runtime `checked` guards on operations inside the
+    // function body that the precondition makes provably safe
+    // (e.g. `requires b > 0` lets `a / b` skip the divide-by-zero
+    // guard) -- but with no SSA-side enforcement of the
+    // precondition itself, calling such a function with an
+    // argument that violates it hit a raw, unguarded operation
+    // (confirmed: emitted IR was a bare `sdiv`, no guard call at
+    // all) instead of a controlled trap. The tree backends already
+    // get this right (`for requirement in &function.requires {
+    // assert(...) }` in backend_c.rs / the equivalent `br`+`abort`
+    // in backend_llvm.rs, now `exit(3)` post-BUG-113) -- this is
+    // the SSA-path counterpart, using the exact same
+    // `intent_assert_fail` runtime helper (and therefore the same
+    // `exit(3)` semantics on LLVM, same `assert()`-macro semantics
+    // on C) as `TypedStmt::Assert` just below. Lowered at function
+    // entry, in the same block as the parameter bindings, so every
+    // path through the body is guarded before any use of the
+    // (possibly precondition-dependent) parameters.
+    for (i, req) in f.requires.iter().enumerate() {
+        let cond = lower_expr_to_operand(req, &mut b, &mut locals)?;
+        let ok = b.new_block();
+        let fail = b.new_block();
+        b.terminate(Terminator::Branch {
+            cond,
+            then_block: ok,
+            then_args: Vec::new(),
+            else_block: fail,
+            else_args: Vec::new(),
+        });
+        b.set_current(fail);
+        let message = if f.requires.len() > 1 {
+            format!("precondition violated in '{}' (requires #{})", f.name, i + 1)
+        } else {
+            format!("precondition violated in '{}'", f.name)
+        };
+        let msg_v = b.emit(Type::Str, req.span, InstrKind::StrLit(message));
+        b.emit(
+            Type::I64,
+            req.span,
+            InstrKind::Call {
+                name: "intent_assert_fail".to_string(),
+                args: vec![Operand::Value(msg_v)],
+            },
+        );
+        b.terminate(Terminator::Unreachable);
+        b.set_current(ok);
+    }
+
     lower_stmts(&f.body, &mut b, &mut locals)?;
 
     // If we fell off the end of the body without a terminator,
@@ -2758,6 +2810,72 @@ mod tests {
             .find(|f| f.name == "main")
             .expect("main exists");
         lower_function(main).expect("lower succeeds")
+    }
+
+    #[test]
+    fn requires_clause_lowers_to_a_runtime_guard_at_function_entry() {
+        // BUG-116 (2026-08-05): `f.requires` was never read
+        // anywhere in this file -- an unprovable-at-call-site
+        // `requires` clause was silently dropped entirely on the
+        // SSA path (the default/preferred path for most ordinary
+        // programs), even though the checker uses that same clause
+        // to elide runtime `checked` guards on operations inside
+        // the function body it makes provably safe. Confirmed via
+        // a real repro: `fn safe_div(a: i64, b: i64) -> i64
+        // requires b > 0; { return a / b; }` called as
+        // `safe_div(10, id(0))` (the identity call hides the
+        // literal from the SMT verifier) emitted a completely
+        // unguarded `sdiv` with no `requires` check anywhere in the
+        // module -- a raw hardware division trap (SIGFPE) instead
+        // of a controlled, diagnosable failure. Fixed by lowering
+        // each `requires` clause into the same guard shape
+        // `TypedStmt::Assert` already uses (branch on the
+        // condition, call `intent_assert_fail` + `Unreachable` on
+        // failure), emitted in the function's entry block before
+        // the body.
+        let checked = compile(
+            r#"
+            fn safe_div(a: i64, b: i64) -> i64
+            requires b > 0;
+            {
+              return a / b;
+            }
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return safe_div(10, id(0));
+            }
+        "#,
+        )
+        .expect("source compiles");
+        let safe_div = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "safe_div")
+            .expect("safe_div exists");
+        let fnc = lower_function(safe_div).expect("lower succeeds");
+        let entry = &fnc.blocks[fnc.entry.0 as usize];
+        assert!(
+            matches!(
+                entry.terminator,
+                Terminator::Branch { .. }
+            ),
+            "expected the requires-clause guard to branch at function entry, got: {:?}",
+            entry.terminator
+        );
+        let calls_assert_fail = fnc.blocks.iter().any(|blk| {
+            blk.instructions.iter().any(|instr| {
+                matches!(
+                    &instr.kind,
+                    InstrKind::Call { name, .. } if name == "intent_assert_fail"
+                )
+            })
+        });
+        assert!(
+            calls_assert_fail,
+            "expected a call to intent_assert_fail somewhere in the lowered function: {:#?}",
+            fnc.blocks
+        );
     }
 
     #[test]
