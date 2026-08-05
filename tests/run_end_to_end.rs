@@ -3493,8 +3493,19 @@ fn no_mangle_ssa_fastpath_emits_bare_symbol_on_both_backends() {
     );
 }
 
+// Originally C-backend-only: at the time BUG-31 was fixed, the LLVM
+// backend's counterpart of this bug (self-referential struct owning a
+// Vec<Self>) was still unroot-caused and the example's own header
+// comment steered users to `--backend=c`. Re-verified on 2026-08-05
+// while investigating localfuzz's `docs/LOCALFUZZ_HANDOFF_2026-08-05.md`
+// section 3 items: the LLVM side now works correctly (both `vanic run`,
+// which uses lli, and `vanic build`, which AOT-compiles to a native
+// binary) -- most likely fixed as a side effect of BUG-108/109/110's
+// extensive Vec-related `backend_llvm.rs`/`ssa_backend_llvm.rs` changes
+// rather than by any change targeting this specific bug. Extended to
+// cover both backends to lock that in as a regression guard.
 #[test]
-fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
+fn self_referential_struct_vec_example_produces_correct_output_on_both_backends() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let example = format!(
@@ -3503,23 +3514,91 @@ fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     );
     let expected = "1\n2\n3\n";
 
-    let output = Command::new(binary)
-        .args(["run", &example, "--backend=c"])
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "self-referential struct (Vec<Self> field) tree walk produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-112 (2026-08-05): `vanic build` (LLVM AOT native-binary compile)
+// omitted `-lm` from its host-POSIX link command -- every vāṇी
+// program's runtime unconditionally emits math-builtin helper
+// functions (`intent_f64_normal_pdf`/`_cdf`, `intent_f64_wrap`, etc.)
+// that reference libm symbols (`exp`/`erf`/`fmod`/...) whether or not
+// the program actually calls them, so `cc`'s link step failed with
+// "undefined reference to 'exp'" (etc.) on any host where `cc` doesn't
+// already implicitly pull in libm, for literally any program -- this
+// exact example included, discovered while re-verifying its LLVM-
+// backend `vanic build` path above. `vanic run` (LLVM via `lli`) was
+// unaffected (`lli` auto-resolves libc/libm symbols itself), which is
+// why this stayed hidden despite `run` being the more common path.
+// This is a real subprocess `vanic build` + execute-the-linked-binary
+// test, not a string check, because the bug is specifically a LINKER
+// failure that a `compile_to_llvm`/`emit` string assertion wouldn't
+// exercise at all.
+#[test]
+fn vanic_build_links_self_referential_struct_vec_example_without_manual_lm_flag() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/self_referential_struct_vec.vani",
+        manifest_dir
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-bug112-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let out_bin = dir.join("node_bin");
+
+    let build_output = Command::new(binary)
+        .args(["build", &example, "-o", out_bin.to_str().unwrap()])
         .output()
-        .unwrap_or_else(|e| panic!("intentc run {} --backend=c should execute: {e}", example));
+        .unwrap_or_else(|e| panic!("intentc build {} should execute: {e}", example));
     assert!(
-        output.status.success(),
-        "intentc run {} --backend=c failed with status {:?}\nstderr: {}",
+        build_output.status.success(),
+        "intentc build {} failed (no manual -lm passed) with status {:?}\nstderr: {}",
         example,
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
+        build_output.status,
+        String::from_utf8_lossy(&build_output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let run_output = Command::new(&out_bin)
+        .output()
+        .unwrap_or_else(|e| panic!("built binary {:?} should execute: {e}", out_bin));
+    assert!(
+        run_output.status.success(),
+        "built binary {:?} exited with status {:?}\nstderr: {}",
+        out_bin,
+        run_output.status,
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run_output.stdout).replace("\r\n", "\n");
     assert_eq!(
-        stdout.replace("\r\n", "\n"),
-        expected,
-        "self-referential struct (Vec<Self> field) tree walk produced the wrong result"
+        stdout, "1\n2\n3\n",
+        "built binary produced the wrong output"
     );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

@@ -1,11 +1,12 @@
 // build & run:
+//   vanic run examples/language/english/self_referential_struct_vec.vani
 //   vanic run examples/language/english/self_referential_struct_vec.vani --backend=c
 //
-// NOTE: this example currently only works on --backend=c. The
-// LLVM backend produces a native binary that crashes silently
-// (no output, nonzero exit) on this same program -- a separate,
-// unfixed bug (see docs/TODO_CURRENT.md, "BUG-31" entry, LLVM
-// counterpart not yet root-caused). Tracked as follow-up work.
+// Works on both backends (re-verified 2026-08-05 -- see
+// docs/TODO_CURRENT.md's "BUG-31" entry: the LLVM-backend
+// counterpart noted there as unfixed was found to already be
+// working when re-checked, most likely as a side effect of later
+// Vec-related backend_llvm.rs work for BUG-108/109/110).
 
 intent "Regression for BUG-31: a struct that owns a Vec of its own type (`struct Node { children: Vec<Node> }`, the shape every tree/recursive-tree-walk example needs) used to make the C backend's struct-emission topological sort deadlock on a false self-dependency -- `Struct_Node` was silently never emitted (no diagnostic), and every downstream use failed with a confusing 'incomplete type' error from cc. Fixed by (1) no longer treating a Vec<X> field as requiring X's full struct body for the OUTER struct's own layout (Vec is always pointer-indirected, exactly like Ref/Box/Ptr, which already got this treatment) and (2) splitting each Vec bundle's handle typedef (needs only a forward-declared element type) from its sizeof-dependent helper functions (needs the element type complete), so the handle typedef can be emitted eagerly for every struct field before the topological struct-emission loop runs at all, and (3) forward-declaring each bundle's own __free before __clear, since a self-referential element's __clear recurses into this same bundle's __free on the element's own Vec<Self> field.";
 
