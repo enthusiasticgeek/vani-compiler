@@ -161,35 +161,25 @@ even a compiler bug.
   find a real bug) before spending more time on this one; don't just
   assume it's closeable, but don't expect a normal BUG-N fix either.
 
-- **Repro B** — `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani`
-  (`echo_pool.vani` — genuinely task/async: 3 real `task { }` blocks as
-  TCP clients + an `async fn handle` polled via `Task__handle`/
-  `__poll_handle` as the server, round-robin scheduler, `epoll_wait_one`
-  with a huge timeout between passes). **This one IS still open, still
-  unexplained, not root-caused.** Confirmed still hangs on the BUG-108
-  build (`timeout 10 vanic run <repro>` killed; `--backend=c` completes
-  with the correct `total bytes received across pool: 9`). One dead
-  end ruled out: I suspected `epoll_wait_one`'s `i64` huge-timeout
-  parameter truncating to `-1` (infinite wait) at the `trunc i64 …to
-  i32` / `(int)timeout_ms` cast was LLVM-specific and explained the
-  hang — it isn't; `backend_c.rs`'s Linux `intent_epoll_wait_one` does
-  the exact same C-standard-implementation-defined truncation to `-1`,
-  so both backends pass an infinite timeout to the kernel `epoll_wait`
-  the same way. That's fine functionally as long as SOMETHING eventually
-  makes the awaited fd readable. Also ruled out: `task { }` blocks are
-  NOT a cooperative/single-thread mechanism on either backend — both
-  `backend_c.rs` and `backend_llvm.rs` lower `task` to real
-  `pthread_create`/`CreateThread` OS threads, so `main`'s thread
-  blocking in `epoll_wait_one` shouldn't by itself starve `peer1`/
-  `peer2`/`peer3` on either backend. NOT yet investigated: the
-  `async fn`/`Task__handle`/`__poll_handle`/`io_recv_async` machinery
-  specifically (a separate, likely poll-based concurrency primitive
-  from `task { }`) — this is the most likely place for a genuine
-  LLVM-vs-C codegen divergence and is where I'd start next. Compare
-  `io_recv_async`/`__poll_handle`'s LLVM codegen against C's for
-  anything that could make the "Pending" (`-2`) sentinel never flip to
-  "ready" on LLVM, or make `Task__handle`'s state never get updated by
-  whatever's supposed to service the async I/O.
+- **Repro B — FIXED as BUG-109 (2026-08-04).** Wasn't a task/async bug
+  at all, and wasn't in `Task__handle`/`__poll_handle`/`io_recv_async`/
+  epoll — all of that machinery was fully correct. Root cause: tree-
+  LLVM's `Vec<bool>` LITERAL construction (`emit_vec_let_from_literal`
+  in `backend_llvm.rs`) used a byte-addressed, one-bool-per-slot
+  buffer layout, incompatible with the packed (64-bools-per-i64-word)
+  layout every other `intent_vec_bool` op (`Index` read, `IndexAssign`
+  write, `push`) expects. `let alive: Vec<bool> = vec(true, true,
+  true);` in the repro read `alive[1]`/`alive[2]` back as `false` from
+  the moment of construction — so the round-robin scheduler's `if
+  alive[j] { poll pool[j] }` simply never revisited those two slots
+  again, even though their peers' data was sitting ready in the kernel
+  socket buffer the whole time. Indistinguishable from a genuine
+  infinite scheduling hang without bisecting the async machinery away
+  entirely (which is exactly how this got found — see the BUG-109
+  entry in `docs/TODO_CURRENT.md` on `main` for the full bisection
+  trail and fix). The two dead-end leads noted in the previous version
+  of this section (epoll timeout truncation, `task{}` threading model)
+  were correctly ruled out and are NOT the bug — don't re-chase them.
 
 ### Issue 4 (most severe — double bug): LLVM `lli` crashes outright AND C backend hangs, on the same input
 

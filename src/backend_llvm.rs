@@ -18004,6 +18004,61 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
     }
 }
 
+/// BUG-109: `Vec<bool>` counterpart of `emit_vec_let_from_literal`,
+/// using the packed `%intent_vec_bool` layout (`len`/`cap` in BITS,
+/// data buffer is `ceil(n/64)` i64 words) instead of the generic
+/// one-slot-per-element layout. Builds the struct with the right
+/// shape up front, then reuses `@intent_vec_bool__set_mut` per
+/// literal element rather than re-deriving the packed bit-twiddling
+/// (`idx/64` word + `idx%64` shift/mask) inline.
+fn emit_vec_bool_let_from_literal(
+    name: &str,
+    args: &[TypedExpr],
+    ctx: &mut FnCtx,
+    out: &mut String,
+) {
+    let n = args.len() as i64;
+    let word_count = if n == 0 { 1 } else { (n + 63) / 64 };
+    let bytes = word_count * 8;
+    let raw = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", raw, bytes));
+    let zeroed = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = call i8* @memset(i8* {}, i32 0, i64 {})\n",
+        zeroed, raw, bytes
+    ));
+    let buf = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, raw));
+
+    let cap = if n == 0 { 1 } else { n };
+    let s_ty = "%intent_vec_bool";
+    let s0 = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = insertvalue {} undef, i64* {}, 0\n",
+        s0, s_ty, buf
+    ));
+    let s1 = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = insertvalue {} {}, i64 {}, 1\n", s1, s_ty, s0, n));
+    let s2 = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = insertvalue {} {}, i64 {}, 2\n", s2, s_ty, s1, cap));
+
+    let addr = format!("%{}.addr", llvm_mangle_ident(name));
+    out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
+    out.push_str(&format!("  store {} {}, {}* {}\n", s_ty, s2, s_ty, addr));
+    ctx.locals.insert(
+        name.to_string(),
+        (Type::Vec(Box::new(Type::Bool)), addr.clone()),
+    );
+
+    for (i, e) in args.iter().enumerate() {
+        let v = emit_expr(e, ctx, out);
+        out.push_str(&format!(
+            "  call void @intent_vec_bool__set_mut({}* {}, i64 {}, i1 {})\n",
+            s_ty, addr, i, v
+        ));
+    }
+}
+
 /// Lower `let <name>: Vec<T> = vec(a0, a1, …, aN);`.
 ///
 /// 1. `call i8* @malloc(i64 N*sizeof(T))` to back the buffer.
@@ -18018,6 +18073,39 @@ fn emit_vec_let_from_literal(
     out: &mut String,
 ) {
     let n = args.len() as i64;
+    // BUG-109 (2026-08-04): `Vec<bool>` literals (`vec(true, false,
+    // …)`) have NO special case here at all, so they fell through
+    // to the generic per-element path below -- which allocates
+    // `n * vec_element_byte_size(Bool)` bytes and stores each
+    // element via `getelementptr i1, i1* buf, i64 i` / `store i1`.
+    // That's a plain BYTE-ADDRESSED (one bool per 8-byte slot)
+    // layout. Every OTHER `intent_vec_bool` operation (`Index`
+    // read, `IndexAssign` write via `@intent_vec_bool__set_mut`,
+    // `push`, …) uses the PACKED layout `%intent_vec_bool = type
+    // { i64*, i64, i64 }` (data, len_BITS, cap_BITS) -- 64 bools
+    // per i64 word, addressed via `idx/64` (word) + `idx%64` (bit
+    // shift). The two layouts are completely incompatible: reading
+    // back a `vec(true, true)` literal through the packed accessor
+    // interpreted the literal's raw bytes as ONE i64 word, so
+    // `alive[1]`'s bit (bit 1 of that word) read as whatever byte 1
+    // of the byte-addressed buffer happened to contain -- 0x01,
+    // i.e. bit 0 set / bit 1 clear -- reading back `false` for any
+    // `true` literal at an odd index. Found bisecting a localfuzz
+    // "LLVM hangs" finding (echo_pool, 20260803-050543-run-crash-
+    // 6bd324cd8f): `let alive: Vec<bool> = vec(true, true);` then
+    // `if alive[j] { poll... }` in a round-robin scheduler silently
+    // read `alive[1]` as permanently `false` from construction (not
+    // from any later corruption), so slot 1 was NEVER polled again
+    // -- an apparent infinite hang, not a scheduling/async bug at
+    // all. Fixed by building the correctly-shaped packed struct
+    // (word-count `= ceil(n/64)` malloc, zeroed) up front and
+    // reusing the already-correct, already bounds-checked (BUG-108)
+    // `@intent_vec_bool__set_mut` helper per literal element,
+    // instead of duplicating packed bit-twiddling logic here.
+    if *element == Type::Bool {
+        emit_vec_bool_let_from_literal(name, args, ctx, out);
+        return;
+    }
     // Use the in-buffer value spelling so arrays slot in as
     // `[N x T]` (not `[N x T]*`). `vec_element_byte_size`
     // gives the per-slot byte count for malloc/realloc.

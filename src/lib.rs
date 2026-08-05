@@ -55199,6 +55199,76 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    #[test]
+    fn tree_llvm_vec_bool_literal_packs_elements_correctly() {
+        // BUG-109 (2026-08-04): `emit_vec_let_from_literal` (tree-LLVM's
+        // `let xs: Vec<T> = vec(a, b, …);` lowering) had NO special
+        // case for `Type::Bool`, so a `Vec<bool>` literal fell
+        // through to the generic per-element path: allocate `n *
+        // vec_element_byte_size(Bool)` bytes and store each element
+        // via plain `getelementptr i1, i1* buf, i64 i` / `store i1`
+        // -- a BYTE-addressed, one-bool-per-slot layout. Every other
+        // `intent_vec_bool` operation (`Index` read, `IndexAssign`
+        // write via `@intent_vec_bool__set_mut`, `push`, …) uses the
+        // PACKED layout (`%intent_vec_bool = type { i64*, i64, i64 }`,
+        // 64 bools per i64 word, addressed via `idx/64` word +
+        // `idx%64` bit). The two layouts are incompatible: reading a
+        // `vec(true, true)` literal back through the packed accessor
+        // reinterpreted the literal's raw byte-addressed storage as
+        // ONE i64 word, so `xs[1]` read whatever bit 1 of that word
+        // happened to be -- garbage, not the literal `true` that was
+        // stored at byte offset 1. This test only reproduces via
+        // tree-LLVM (a struct literal forces the whole program off
+        // the SSA-LLVM fast path, which already had a correct,
+        // separate Vec<bool>-literal lowering) -- confirmed via a
+        // localfuzz finding (echo_pool, 20260803-050543-run-crash-
+        // 6bd324cd8f) that looked like an LLVM task/async scheduling
+        // hang: `let alive: Vec<bool> = vec(true, true); … if
+        // alive[j] { poll... }` silently read `alive[1]` as `false`
+        // from construction (not from any later corruption), so
+        // slot 1's task was never polled again -- an apparent
+        // infinite hang with nothing wrong in the scheduling logic
+        // at all. Fixed by giving `Vec<bool>` literals their own
+        // lowering (`emit_vec_bool_let_from_literal`) that builds
+        // the correctly packed/zeroed buffer up front and reuses the
+        // already-correct `@intent_vec_bool__set_mut` per element
+        // instead of re-deriving packed bit-twiddling inline.
+        let source = r#"
+            struct Foo { a: i64 }
+            fn main() -> i64 {
+              let g: Foo = Foo { a: 1 };
+              let xs: Vec<bool> = vec(true, false, true, true, false);
+              let v0: bool = xs[0];
+              let v1: bool = xs[1];
+              let v2: bool = xs[2];
+              let v3: bool = xs[3];
+              let v4: bool = xs[4];
+              let acc: i64 = 0;
+              if v0 { acc = acc + 1; }
+              if v1 { acc = acc + 10; }
+              if v2 { acc = acc + 100; }
+              if v3 { acc = acc + 1000; }
+              if v4 { acc = acc + 10000; }
+              return acc;
+            }
+        "#;
+        // Expected: v0=T(+1) v1=F(+0) v2=T(+100) v3=T(+1000) v4=F(+0) = 1101.
+        let ir = compile(source).expect("Vec<bool> literal + struct compiles").ir;
+        let ll = crate::backend_llvm::LlvmBackend.emit(&ir);
+        assert!(
+            ll.contains("@intent_vec_bool__set_mut"),
+            "tree-LLVM Vec<bool> literal must build via @intent_vec_bool__set_mut, \
+             not the generic per-element GEP/store path:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        assert!(
+            !ll.contains(" to i1*\n"),
+            "tree-LLVM Vec<bool> literal must NOT bitcast its buffer to i1* (the \
+             byte-addressed, pre-fix bug shape):\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
     // ── XL2: #[test] attribute + is_test propagation ──────────────────────
 
     /// XL2 parse: #[test] attribute parses and sets is_test = true on the function.
