@@ -11194,3 +11194,81 @@ fn odia_keywords_example_produces_correct_output_on_both_backends() {
         );
     }
 }
+
+// BUG-111 (2026-08-05): SSA-LLVM emitted invalid LLVM IR for
+// `let x: f64 = <integer literal>;` (and the f32 equivalent) --
+// `lli` rejected the generated `.ll` outright at parse time with
+// "integer constant must have integer type" before the program
+// ever ran. Root cause: the checker desugars the implicit
+// int-literal-to-float coercion into a `TypedExprKind::Cast` node
+// wrapping the still-integer-typed literal; SSA lowering turns
+// that into `InstrKind::Cast { x: Operand::Const(Const::Int(0)),
+// to: F64 }`. The SSA-LLVM emitter's `operand_type` helper has no
+// `ValueId` to look up for a bare `Operand::Const`, so it returned
+// `None`, and the old fallback defaulted the cast's source type to
+// its OWN TARGET type -- making a real int-to-float cast look like
+// a same-type identity op. That took the "identity" branch in
+// `emit_cast`, emitting `fadd double 0.0, 0` (the literal's plain
+// integer spelling) instead of a real `sitofp`. This is a real
+// subprocess/`lli` run, not a string-content check, because the
+// bug is that `lli` refuses to even PARSE the generated IR --
+// exactly the class of failure a `compile_to_llvm` string
+// assertion wouldn't catch (the tree-LLVM backend, which this
+// program's lack of any struct literal keeps it OFF of, doesn't
+// hit this path at all -- see `expr_ssa_supported` in
+// src/main.rs).
+#[test]
+fn int_literal_to_float_let_produces_correct_output_on_both_backends() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-bug111-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src = dir.join("f64_lit.vani");
+    fs::write(
+        &src,
+        r#"
+fn main() -> i64 {
+  let n: f64 = 0;
+  let total: f64 = 7;
+  let half: f32 = 3;
+  print n;
+  print total;
+  print half;
+  return 0;
+}
+"#,
+    )
+    .expect("write");
+    let expected = "0\n7\n3\n";
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "int-literal-to-float let produced wrong output for {:?}",
+            backend_args
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

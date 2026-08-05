@@ -3292,7 +3292,22 @@ fn emit_instr(
             emit_binary(*op, l, r, &lhs_ty, &instr.ty, instr.result, *checked, out)?;
         }
         InstrKind::Cast { x, to } => {
-            let from_ty = operand_type(x, value_types).unwrap_or_else(|| to.clone());
+            // BUG-111: `operand_type` returns `None` for a bare
+            // `Operand::Const` (it has no `ValueId` to look up in
+            // `value_types`), so the old fallback here defaulted
+            // `from_ty` to `to` itself -- turning e.g. an
+            // int-literal-to-f64 cast (`let n: f64 = 0;`) into a
+            // same-type "identity" cast at the LLVM level. That
+            // took the `from_llvm == to_llvm` branch in `emit_cast`,
+            // which emits `fadd double 0.0, <literal text>` for
+            // float targets -- but the literal text for
+            // `Const::Int(0)` is `"0"`, not `"0.0"`, which `lli`
+            // rejects ("integer constant must have integer type").
+            // A `Const` operand's own variant always tells us its
+            // true source type regardless of the cast target, so
+            // derive `from_ty` from that instead of guessing `to`.
+            let from_ty = operand_type(x, value_types)
+                .unwrap_or_else(|| const_operand_natural_type(x));
             emit_cast(x, &from_ty, to, instr.result, out)?;
         }
         InstrKind::Call { name, args } => {
@@ -5613,6 +5628,30 @@ fn operand_type(op: &Operand, value_types: &BTreeMap<ValueId, Type>) -> Option<T
     match op {
         Operand::Value(v) => value_types.get(v).cloned(),
         Operand::Const(_) => None,
+    }
+}
+
+/// BUG-111: a bare `Operand::Const` has no `ValueId`, so it isn't
+/// in `value_types` -- but its `Const` variant already tells us
+/// its true source type (int literals check as `I64`/`U64`, float
+/// literals as `F64`, matching `check_expr` in checker.rs), which
+/// is always correct regardless of what it's about to be cast to.
+/// Used as the `operand_type` fallback specifically for
+/// `InstrKind::Cast`, where guessing the target type instead (the
+/// old behavior) turns a real int-to-float cast into a bogus
+/// same-type "identity" cast.
+fn const_operand_natural_type(op: &Operand) -> Type {
+    match op {
+        Operand::Value(_) => Type::I64,
+        Operand::Const(Const::Bool(_)) => Type::Bool,
+        Operand::Const(Const::Float(_)) => Type::F64,
+        Operand::Const(Const::Int(v)) => {
+            if *v <= i64::MAX as i128 && *v >= i64::MIN as i128 {
+                Type::I64
+            } else {
+                Type::U64
+            }
+        }
     }
 }
 

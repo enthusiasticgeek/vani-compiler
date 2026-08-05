@@ -30498,6 +30498,55 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn ssa_llvm_int_literal_to_float_let_emits_sitofp() {
+        // BUG-111: `let n: f64 = 0;` (an integer-literal RHS
+        // implicitly cast to a float-typed let) lowers to
+        // `InstrKind::Cast { x: Operand::Const(Const::Int(0)),
+        // to: F64 }` in the SSA IR. `operand_type` returns `None`
+        // for a bare `Operand::Const` (no `ValueId` to look up),
+        // so `emit_instr`'s old fallback defaulted `from_ty` to
+        // `to` itself — making the cast look like a same-type
+        // "identity" op. That took `emit_cast`'s
+        // `from_llvm == to_llvm` branch, which emits
+        // `fadd double 0.0, <operand text>` — but the operand
+        // text for `Const::Int(0)` is `"0"`, not `"0.0"`, which
+        // `lli` rejects ("integer constant must have integer
+        // type"). Fix: derive `from_ty` from the `Const`
+        // variant's own natural type when the operand has no
+        // `ValueId`, so a genuine int-to-float cast takes the
+        // `sitofp` path instead.
+        let source = r#"
+            fn main() -> i64 {
+              let n: f64 = 0;
+              let m: f32 = 7;
+              print n;
+              print m;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errs: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("SSA-LLVM emit");
+        assert!(
+            ll.contains("sitofp i64 0 to double"),
+            "expected sitofp for int-literal-to-f64 let, got:\n{}",
+            ll.lines().take(80).collect::<Vec<_>>().join("\n")
+        );
+        assert!(
+            ll.contains("sitofp i64 7 to float"),
+            "expected sitofp for int-literal-to-f32 let, got:\n{}",
+            ll.lines().take(80).collect::<Vec<_>>().join("\n")
+        );
+        assert!(
+            !ll.contains("fadd double 0.0, 0\n") && !ll.contains("fadd float 0.0, 7\n"),
+            "must NOT emit an integer-spelled fadd identity op (lli rejects); got:\n{}",
+            ll.lines().take(80).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
     fn len_of_ref_owned_str_dereferences_through_borrow() {
         // Closure #262: `len(ref s)` for `s: OwnedStr`
         // previously emitted invalid LLVM IR ("'%v_3' defined
