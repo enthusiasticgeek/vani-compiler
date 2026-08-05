@@ -2237,3 +2237,50 @@ Repro: `tools/localfuzz/findings/20260805-144709-run-crash-cc1ce9a3ad/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260805-144709-run-crash-cc1ce9a3ad/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260805-225926-run-crash-00aefb32bc
+
+Repro: `tools/localfuzz/findings/20260805-225926-run-crash-00aefb32bc/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260805-225926-run-crash-00aefb32bc/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+```plaintext
+**ANF Lift Test Result**
+
+Test case: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/echo_anf_lift.vani
+
+Generated source:
+```
+vani
+// Arc 8 v3.1 Phase 2.2 — ANF lifting for nested io_*_async.
+//
+// Phase 2.1 required `io_*_async` calls to appear ONLY as
+// the direct RHS of a `let` (so the segment collector
+// recognizes them as suspend points). Phase 2.2 lifts that
+// restriction: a pre-pass walks every expression in the
+// async fn body, replacing each nested `io_*_async(args)`
+// with a fresh `__anf_N` Var reference and emitting a Let
+// for it BEFORE the original statement.
+//
+// build & run:
+//   vanic run examples/language/english/echo_anf_lift.vani                # LLVM
+//   vanic run examples/language/english/echo_anf_lift.vani --backend=c    # C
+
+intent "Phase 2.2 — ANF lifting for nested io_*_async";
+
+async fn anf_compose(fd: i64, bias: i64) -> i64 {
+  // Two nested io_*_async calls inside an arithmetic
+  // expression. Phase 2.2 ANF lifts to:
+  //   let __anf_0 = io_recv_async(fd, 64);
+  //   let result = __anf_0 + bias;
+  //   return result;
+  let result: i64 = io_recv_async(fd, 64) + bias;
+  return result;
+}
+
+fn drive(ep: i64, t: mut ref Task__anf_compose) -> i64 {
+  while true {
+    let r: i64 = __poll_an
