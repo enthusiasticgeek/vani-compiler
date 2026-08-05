@@ -125,6 +125,32 @@ function whose own `requires` clause the first function's `ensures`
 is meant to discharge), and see whether wrong output silently
 propagates.
 
+**Related doc-accuracy gap found 2026-08-05** (while sweeping
+tutorials for staleness after BUG-113/115/116/117 -- pre-existing,
+not caused by today's fixes): `tutorials/src/intermediate/
+10b_runtime_errors_primer.md`'s Row 2 message-text table claims
+specific diagnostic strings for `requires`/`ensures`/`invariant`/
+bounds failures that don't match what actually ships:
+- `requires`'s documented message
+  (`"precondition failed: <expr> on call to <fn>"`, embedding the
+  actual clause text) doesn't match BUG-116's real message
+  (`"precondition violated in '<fn>'"` -- function name only, no
+  expr text, no runtime expr-to-string pretty-printer was built for
+  this).
+- `ensures` and `invariant` rows document runtime failure messages
+  for constructs that have **zero runtime enforcement on any
+  backend** (confirmed via grep -- see the `ensures` paragraph
+  above; same is true for `invariant`, no `"invariant failed"`/
+  `invariant_fail` hit anywhere in any backend either).
+- The bounds-check row's documented message
+  (`"index out of bounds: i=<n>, len=<n>"`) doesn't match the actual
+  emitted string (`"index out of bounds"`, no operands).
+Not fixed -- would mean either implementing real `ensures`/
+`invariant` runtime checks (ties into the still-open item above) or
+walking back the tutorial's promised message formats, both bigger
+edits than a token-budget-conscious pass warranted. Worth a dedicated
+look alongside whoever picks up the `ensures` item.
+
 ## B. SSA-vs-tree safety-check parity audit (🔴)
 
 BUG-108 (Vec bounds) and BUG-110 (checked arithmetic) were both "the
