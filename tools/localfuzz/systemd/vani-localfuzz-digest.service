@@ -1,0 +1,7 @@
+[Unit]
+Description=vani-localfuzz: generate deduped digest of new findings since last run
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/virgo/source/vani-compiler-localfuzz/tools/localfuzz
+ExecStart=/usr/bin/python3 /home/virgo/source/vani-compiler-localfuzz/tools/localfuzz/digest.py

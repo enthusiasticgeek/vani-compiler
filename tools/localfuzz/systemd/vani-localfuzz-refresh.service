@@ -1,0 +1,7 @@
+[Unit]
+Description=vani-localfuzz: merge main + rebuild vanic so the fuzz harness stays current
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/virgo/source/vani-compiler-localfuzz/tools/localfuzz/refresh.sh

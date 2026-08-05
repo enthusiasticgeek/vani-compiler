@@ -1,0 +1,13 @@
+[Unit]
+Description=vani-localfuzz: start sandboxed harness + ollama on boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/virgo/source/vani-compiler-localfuzz/tools/localfuzz/start.sh
+ExecStop=/home/virgo/source/vani-compiler-localfuzz/tools/localfuzz/stop.sh
+
+[Install]
+WantedBy=default.target

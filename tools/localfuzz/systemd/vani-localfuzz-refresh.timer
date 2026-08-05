@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly: keep vani-localfuzz's vanic binary current with main
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

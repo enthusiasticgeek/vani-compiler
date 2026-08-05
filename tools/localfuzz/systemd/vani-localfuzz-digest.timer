@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly: dedup-digest new vani-localfuzz findings for handoff review
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
