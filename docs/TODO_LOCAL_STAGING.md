@@ -163,7 +163,20 @@ Status: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260803-050543-run-crash-6bd324cd8f/repro.vani`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-109 on main (2026-08-04).
+
+Looked like an LLVM task/async scheduling hang (near-verbatim from
+`examples/language/english/echo_pool.vani`); wasn't. Root cause:
+tree-LLVM's `Vec<bool>` LITERAL construction (`emit_vec_let_from_
+literal` in `backend_llvm.rs`) used a byte-addressed one-bool-per-
+slot layout incompatible with the packed (64-bools-per-i64-word)
+layout every other `intent_vec_bool` op expects -- `let alive:
+Vec<bool> = vec(true, true, true);` read `alive[1]`/`alive[2]` back
+as `false` from construction, so the round-robin poller's `if
+alive[j] { poll pool[j] }` never revisited those slots again. Nothing
+wrong with `Task__handle`/`__poll_handle`/`io_recv_async`/epoll at
+all. See `docs/TODO_CURRENT.md` BUG-109 entry on `main` for the full
+writeup + fix + tests.
 
 ---
 
