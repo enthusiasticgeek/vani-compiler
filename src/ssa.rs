@@ -94,7 +94,41 @@ pub enum InstrKind {
     /// initialized to a literal).
     Const(Const),
     Unary { op: UnaryOp, x: Operand },
-    Binary { op: BinaryOp, l: Operand, r: Operand },
+    /// BUG-110 (2026-08-05): `checked` mirrors `TypedExprKind::
+    /// Binary`'s field of the same name -- whether the runtime
+    /// safety guard is still required after the checker's SMT-
+    /// discharge pass (Default true; flipped to false only when
+    /// provably safe). Semantics per op, same as the typed-IR field:
+    ///   Div/Rem      -> divisor != 0
+    ///   Shl/Shr      -> 0 <= rhs < bits(lhs)
+    ///   Add/Sub/Mul (integer) -> result does not overflow the type
+    /// Ignored for comparison ops and float arithmetic. Before this
+    /// field existed, `checked` was silently DROPPED when lowering
+    /// `TypedExprKind::Binary` into this instruction (the old
+    /// variant had no field to carry it), so BOTH SSA backends
+    /// (ssa_backend_c.rs, ssa_backend_llvm.rs) emitted fully
+    /// unchecked arithmetic regardless of what the checker
+    /// determined -- unlike the tree backends (backend_c.rs,
+    /// backend_llvm.rs), which always respected it. Since the SSA
+    /// path is the DEFAULT/preferred one for any program without a
+    /// struct literal, field access, or a handful of denylisted
+    /// builtins (see `expr_ssa_supported` in main.rs), this meant
+    /// most ordinary vāṇी programs ran with NO overflow/divide-by-
+    /// zero/shift-range protection at all on either backend, exposed
+    /// directly to C's undefined-behavior-on-signed-overflow
+    /// optimizations (gcc silently transformed an unreachable-by-UB
+    /// recursive branch into an infinite `jmp $` spin loop) and to
+    /// raw hardware traps (SIGFPE on division by zero surfacing as
+    /// an ugly `lli`-internal crash instead of a clean, message-
+    /// carrying abort). Found via a localfuzz finding
+    /// (20260803-033452-run-crash-99db3e1928) originally attributed
+    /// to "parallel/sort library loading" in the handoff doc; the
+    /// actual repro is a factorial fuzzed from `n - 1` to `n - -1`
+    /// (unbounded/increasing recursion), and the "parallel/sort
+    /// libs" mentioned in the `lli` invocation are unconditionally
+    /// loaded regardless of whether the program uses them -- a red
+    /// herring.
+    Binary { op: BinaryOp, l: Operand, r: Operand, checked: bool },
     Call { name: String, args: Vec<Operand> },
     /// First-class function pointer to a top-level function.
     /// The IR keeps the source name so backends emit the
@@ -259,7 +293,14 @@ impl fmt::Display for Instruction {
         match &self.kind {
             InstrKind::Const(c) => write!(f, "const {}", c),
             InstrKind::Unary { op, x } => write!(f, "{} {}", op_unary_symbol(*op), x),
-            InstrKind::Binary { op, l, r } => write!(f, "{} {} {}", l, op.display_symbol(), r),
+            InstrKind::Binary { op, l, r, checked } => write!(
+                f,
+                "{} {} {}{}",
+                l,
+                op.display_symbol(),
+                r,
+                if *checked { " checked" } else { "" }
+            ),
             InstrKind::Call { name, args } => {
                 write!(f, "call @{}(", name)?;
                 for (i, a) in args.iter().enumerate() {
@@ -1252,6 +1293,7 @@ fn lower_for_iter(
             op: BinaryOp::Lt,
             l: Operand::Value(i_header),
             r: Operand::Value(len_v),
+            checked: false,
         },
     );
     let header_to_exit: Vec<Operand> = carry
@@ -1320,6 +1362,7 @@ fn lower_for_iter(
             op: BinaryOp::Add,
             l: Operand::Value(i_step),
             r: Operand::Const(Const::Int(1)),
+            checked: false,
         },
     );
     let mut back_args: Vec<Operand> = vec![Operand::Value(inc)];
@@ -1729,6 +1772,7 @@ fn lower_integer_for(
             op: cmp_op,
             l: Operand::Value(i_header),
             r: end_op.clone(),
+            checked: false,
         },
     );
     // The exit-edge from header forwards i_header (as the
@@ -1786,6 +1830,7 @@ fn lower_integer_for(
             op: BinaryOp::Add,
             l: Operand::Value(i_step),
             r: Operand::Const(Const::Int(1)),
+            checked: false,
         },
     );
     let mut back_args: Vec<Operand> = vec![Operand::Value(inc)];
@@ -2000,7 +2045,7 @@ fn lower_expr_to_operand(
             );
             Ok(Operand::Value(v))
         }
-        TypedExprKind::Binary { op, left, right, .. } => {
+        TypedExprKind::Binary { op, left, right, checked, .. } => {
             // 2026-06-09: short-circuit lowering for `&&` and `||`.
             // Eagerly evaluating both operands as a single Binary
             // instruction breaks the short-circuit contract — when
@@ -2158,6 +2203,7 @@ fn lower_expr_to_operand(
                         op: *op,
                         l: Operand::Value(cmp),
                         r: Operand::Const(Const::Int(0)),
+                        checked: false,
                     },
                 );
                 return Ok(Operand::Value(v));
@@ -2165,7 +2211,7 @@ fn lower_expr_to_operand(
             let v = b.emit(
                 expr.ty.clone(),
                 expr.span,
-                InstrKind::Binary { op: *op, l, r },
+                InstrKind::Binary { op: *op, l, r, checked: *checked },
             );
             Ok(Operand::Value(v))
         }

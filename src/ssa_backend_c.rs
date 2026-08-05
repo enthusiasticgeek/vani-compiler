@@ -1624,7 +1624,73 @@ fn emit_instr(
             )
             .unwrap();
         }
-        InstrKind::Binary { op, l, r } => {
+        InstrKind::Binary { op, l, r, checked } => {
+            // BUG-110: emit the same runtime guards the tree C
+            // backend's `emit_binary` does for Add/Sub/Mul
+            // (overflow), Div/Rem (divide-by-zero), and Shl/Shr
+            // (shift-amount range) when `checked` is still set
+            // (the SMT-discharge pass didn't prove it unnecessary).
+            // Inline per-call-site, matching this file's own
+            // `InstrKind::Index` bounds-check convention just above
+            // -- no shared preamble helper needed since `l`/`r` are
+            // already-evaluated SSA operands (plain `v_N` reads or
+            // constants), safe to reference twice.
+            let result_ty = instr.ty.clone();
+            if *checked && result_ty.is_integer() {
+                let ty_c = c_type(&result_ty)?;
+                match op {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
+                        let builtin = match op {
+                            BinaryOp::Add => "__builtin_add_overflow",
+                            BinaryOp::Sub => "__builtin_sub_overflow",
+                            BinaryOp::Mul => "__builtin_mul_overflow",
+                            _ => unreachable!(),
+                        };
+                        let op_name = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            _ => unreachable!(),
+                        };
+                        writeln!(
+                            out,
+                            "  if (__builtin_expect({}(({ty})({l}), ({ty})({r}), &v_{res}), 0)) {{ fprintf(stderr, \"integer overflow in {tyname} {op_name}\\n\"); abort(); }}",
+                            builtin,
+                            ty = ty_c,
+                            l = c_operand(l),
+                            r = c_operand(r),
+                            res = instr.result.0,
+                            tyname = ty_c,
+                            op_name = op_name,
+                        )
+                        .unwrap();
+                        return Ok(());
+                    }
+                    BinaryOp::Div | BinaryOp::Rem => {
+                        writeln!(
+                            out,
+                            "  if (({}) == 0) {{ fprintf(stderr, \"division by zero\\n\"); abort(); }}",
+                            c_operand(r)
+                        )
+                        .unwrap();
+                    }
+                    BinaryOp::Shl | BinaryOp::Shr => {
+                        let bits = result_ty.bits().unwrap_or(64);
+                        let range_check = if result_ty.is_signed_integer() {
+                            format!("(({r}) < 0 || (uint64_t)({r}) >= {bits}ULL)", r = c_operand(r), bits = bits)
+                        } else {
+                            format!("((uint64_t)({r}) >= {bits}ULL)", r = c_operand(r), bits = bits)
+                        };
+                        writeln!(
+                            out,
+                            "  if {} {{ fprintf(stderr, \"shift amount out of range\\n\"); abort(); }}",
+                            range_check
+                        )
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
             writeln!(
                 out,
                 "  v_{} = ({}) {} ({});",
@@ -3200,6 +3266,68 @@ mod tests {
         let c = lower_and_emit(src);
         assert!(c.contains("*"), "expected `*` operator in:\n{}", c);
         assert!(c.contains("+"), "expected `+` operator in:\n{}", c);
+    }
+
+    #[test]
+    fn checked_binary_emits_runtime_guards_on_ssa_c() {
+        // BUG-110 (2026-08-05): `InstrKind::Binary`'s `checked` flag
+        // (mirroring `TypedExprKind::Binary`'s field of the same
+        // name, set by the checker and refined by SMT elision) was
+        // silently DROPPED during SSA lowering -- `ssa.rs`'s old
+        // `InstrKind::Binary { op, l, r }` had no field to carry it,
+        // so BOTH SSA backends emitted fully unchecked arithmetic
+        // regardless of what the checker determined. This is the
+        // DEFAULT/preferred backend path for any program without a
+        // struct literal, field access, or a handful of denylisted
+        // builtins (`expr_ssa_supported` in main.rs) -- i.e. most
+        // ordinary programs -- so this silently stripped overflow /
+        // divide-by-zero / shift-range protection from nearly
+        // everything. `compile_to_c`/`compile_to_llvm` (used by
+        // essentially every other overflow-related test in this
+        // codebase) call the TREE backends DIRECTLY and never
+        // exercise this SSA path at all, which is how this went
+        // undetected -- this test deliberately goes through
+        // `lower_program` + `ssa_backend_c::emit`, the actual path
+        // `vanic run`'s default (no `--backend=c` even needed since
+        // this IS the emit_c_via_ssa fast path) exercises for a
+        // struct-literal-free program. Found via a localfuzz finding
+        // (20260803-033452-run-crash-99db3e1928) originally
+        // attributed to "parallel/sort library loading"; the actual
+        // repro is a factorial fuzzed from `n - 1` to `n - -1`
+        // (unbounded increasing recursion) whose eventual-overflow
+        // path gcc silently proved unreachable (UB) and replaced
+        // with an infinite `jmp $` spin -- once the check below
+        // exists, that transformation is no longer legal (the check
+        // is a real, must-respect side effect), so gcc must actually
+        // recurse, which then overflows the real native stack --
+        // an honest crash instead of a silent forever-spin.
+        let src = r#"
+            fn checked_sub(n: i64) -> i64 { return n - -1; }
+            fn checked_div(a: i64, b: i64) -> i64 { return a / b; }
+            fn checked_shift(x: i64, n: i64) -> i64 { return x << n; }
+            fn main() -> i64 {
+              let r: i64 = checked_sub(5);
+              let d: i64 = checked_div(10, 2);
+              let s: i64 = checked_shift(1, 4);
+              return r + d + s;
+            }
+        "#;
+        let c = lower_and_emit(src);
+        assert!(
+            c.contains("__builtin_sub_overflow"),
+            "expected the checked-subtraction path (__builtin_sub_overflow) in SSA-C output for a non-constant `n - -1`:\n{}",
+            c
+        );
+        assert!(
+            c.contains("division by zero"),
+            "expected a divide-by-zero guard in SSA-C output:\n{}",
+            c
+        );
+        assert!(
+            c.contains("shift amount out of range"),
+            "expected a shift-range guard in SSA-C output:\n{}",
+            c
+        );
     }
 
     #[test]

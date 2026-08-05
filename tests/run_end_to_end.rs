@@ -11061,3 +11061,136 @@ fn echo_pool_example_produces_correct_output_on_both_backends() {
         );
     }
 }
+
+// BUG-110 (2026-08-05): `InstrKind::Binary`'s `checked` flag (mirroring
+// the typed-IR field of the same name, set by the checker and refined
+// by SMT elision) was silently DROPPED during SSA lowering, so BOTH
+// SSA backends (ssa_backend_c.rs, ssa_backend_llvm.rs) emitted fully
+// unchecked arithmetic regardless of what the checker determined. This
+// is the DEFAULT/preferred backend path for any program without a
+// struct literal, field access, or a handful of denylisted builtins
+// (`expr_ssa_supported` in main.rs) -- i.e. most ordinary programs --
+// so this silently stripped overflow/divide-by-zero/shift-range
+// protection from nearly everything, exposed directly to C's
+// undefined-behavior-on-signed-overflow optimizations and to raw
+// hardware traps.
+//
+// Found via a localfuzz finding (20260803-033452-run-crash-
+// 99db3e1928) originally attributed to "parallel/sort library
+// loading" in the handoff doc -- the parallel/sort libs the `lli`
+// invocation loads are unconditionally loaded regardless of whether
+// the program uses them (a red herring). The actual repro is
+// `examples/language/odia/keywords.vani`'s factorial fuzzed from
+// `n - 1` to `n - -1` (unbounded/increasing recursion instead of
+// bounded/decreasing). Before this fix: `--backend=c` hung forever
+// (100% CPU, flat stack -- gcc statically proved the recursive branch
+// unreachable-by-UB since it would eventually signed-overflow, and
+// replaced it with an infinite `jmp $` spin, confirmed via `-
+// Waggressive-loop-optimizations` and objdump disassembly); the
+// default LLVM backend crashed via a raw, uncontrolled deep-recursion
+// stack exhaustion inside `lli`'s own interpreter. After this fix:
+// both backends now genuinely recurse (the overflow check is a real,
+// must-respect side effect gcc can no longer prove away) and
+// correctly, honestly crash FAST from real stack exhaustion --
+// `SIGSEGV` on C (confirmed via direct `cc`-compiled-binary
+// inspection), an abort()-driven `lli` crash on LLVM -- instead of
+// hanging on one backend and doing an uncontrolled crash on the
+// other. This test's contract is deliberately narrow: NOT "produces
+// correct output" (the input is a genuinely broken, unbounded-
+// recursion program -- there's no correct output), just "terminates
+// quickly on both backends" (proving neither hangs).
+#[test]
+fn odia_factorial_unbounded_recursion_fails_fast_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/odia/keywords.vani",
+        manifest_dir
+    );
+    // Same single-character mutation the localfuzz finding used:
+    // `n - 1` (bounded/decreasing) -> `n - -1` (unbounded/increasing).
+    let source = std::fs::read_to_string(&example)
+        .expect("read examples/language/odia/keywords.vani")
+        .replacen("factorial(n - 1)", "factorial(n - -1)", 1);
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-bug110-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let src = dir.join("unbounded_factorial.vani");
+    std::fs::write(&src, &source).expect("write");
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        // `timeout` proves this isn't a hang (BUG-110's pre-fix C
+        // symptom): a fast non-zero/killed exit is EXPECTED here (the
+        // program is genuinely broken), a `timeout`-triggered kill
+        // (status 124) is the regression this test guards against.
+        let mut cmd_args = vec!["15", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            !output.status.success(),
+            "unbounded recursion must crash/abort, not succeed, for {:?}",
+            backend_args
+        );
+        assert_ne!(
+            output.status.code(),
+            Some(124),
+            "must fail fast, not hang until the 15s timeout kills it (BUG-110 regression) for {:?} -- stdout: {}, stderr: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// BUG-110 regression guard, correct-usage side: the REAL shipped
+// example (unmodified, bounded/decreasing `n - 1` recursion) must
+// still produce the right answer on both backends -- the new checked-
+// arithmetic guards must not fire as false positives on ordinary,
+// non-overflowing recursion/arithmetic.
+#[test]
+fn odia_keywords_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/odia/keywords.vani",
+        manifest_dir
+    );
+    // Odia dialect renders integers with Odia-script digits, not
+    // ASCII (confirmed by running the example directly; both
+    // backends already agreed on this before BUG-110's fix, so it's
+    // not itself part of what this test guards).
+    let expected = "5! = \u{0B67}\u{0B68}\u{0B66}  6! = \u{0B6D}\u{0B68}\u{0B66}\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            stdout, expected,
+            "odia keywords example produced wrong output for {:?}",
+            backend_args
+        );
+    }
+}

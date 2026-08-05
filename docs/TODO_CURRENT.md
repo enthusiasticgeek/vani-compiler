@@ -8029,3 +8029,143 @@ it, and it isn't a scheduling/async bug at all.
   hanging CI forever). All 71 pre-existing Vec<bool>/index/bounds-
   check `src/lib.rs` tests still pass -- confirmed no regression.
   Full `cargo test --release --workspace` (2750 tests) clean.
+
+## Issue 4 FIXED as BUG-110 (2026-08-05) -- systemic gap, most impactful fix of the sweep
+
+Final item from `docs/LOCALFUZZ_HANDOFF_2026-08-04.md`. The original framing ("neither
+backend handles this input correctly... possibly related to parallel/sort library
+loading") undersold it enormously -- this is not about parallel/sort libs at all (those
+get loaded by every `lli` invocation regardless of use, a total red herring), and the
+actual bug is not specific to this one repro's `factorial` function. It's a gap in the
+runtime-safety-check machinery affecting essentially every ordinary vāṇी program.
+
+- **BUG-110 (found by tools/localfuzz, finding 20260803-033452-run-crash-99db3e1928
+  -- `examples/language/odia/keywords.vani`'s factorial, fuzzed from `n - 1` to
+  `n - -1`). BOTH SSA backends (the DEFAULT/preferred codegen path for essentially
+  every program without a struct literal, field access, or a handful of denylisted
+  builtins) silently emit fully UNCHECKED arithmetic -- no overflow guard on Add/Sub/
+  Mul, no divide-by-zero guard on Div/Rem, no range guard on Shl/Shr -- regardless of
+  what the checker/SMT-elision pass determined was actually needed.**
+  Symptom as originally reported: `vanic run <repro> --backend=c` hung indefinitely
+  (100% CPU, no progress); the default LLVM backend crashed immediately with an
+  `lli`-internal-looking stack dump. Root cause has nothing to do with the specific
+  `factorial` shape, parallel/sort libraries, or task/async machinery: `n - -1` (i.e.
+  `n + 1`) makes `factorial`'s recursion UNBOUNDED/INCREASING instead of bounded/
+  decreasing -- a genuinely broken test program (any language's compiler will
+  eventually crash on this), but the OBSERVABLE FAILURE MODE exposed a real, much
+  bigger compiler bug: `TypedExprKind::Binary.checked` (set by `check_numeric_binary`/
+  `check_integer_remainder` in `checker.rs`, doc'd as guarding "Add/Sub/Mul (integer)
+  -> result does not overflow", "Div/Rem -> divisor != 0", "Shl/Shr -> 0 <= rhs <
+  bits(lhs)", refined to `false` only by the SMT-discharge pass when provably safe) was
+  UNCONDITIONALLY DROPPED when lowering into SSA form -- `ssa.rs`'s `InstrKind::Binary`
+  had no field to carry it at all (`TypedExprKind::Binary { op, left, right, .. } =>`
+  discarded it via `..`). Both `ssa_backend_c.rs` and `ssa_backend_llvm.rs` therefore
+  emit plain `a - b` / `a / b` / `a << b` with zero runtime guard, no matter how
+  dangerous the operation. The TREE backends (`backend_c.rs`, `backend_llvm.rs`) always
+  respected `checked` correctly -- this was purely an SSA-path regression/gap, and since
+  SSA is the FAST/PREFERRED path (`emit_c_via_ssa`/`emit_llvm_via_ssa` in `main.rs` only
+  fall back to tree for struct literals, field access, or ~a hundred denylisted
+  builtins), this meant MOST ordinary vāṇी programs ran with ZERO overflow/divide-by-
+  zero/shift-range protection on EITHER backend -- directly contradicting the language's
+  own stated safety guarantee (see `backend_c.rs`'s overflow-helper comment: "Both
+  signed and unsigned overflow are trapped... in ASIL-D / DO-178C contexts" -- this is a
+  real safety-critical-language guarantee, not a cosmetic nicety).
+  Two concrete consequences, both confirmed via disassembly/direct testing, not just
+  inferred:
+  1. **C backend**: unchecked `int64_t` arithmetic is undefined behavior on signed
+     overflow per the C standard. `cc -O2` on the generated code for this repro emitted
+     the warning `iteration 9223372036854775802 invokes undefined behavior
+     [-Waggressive-loop-optimizations]` and compiled `fn_factorial`'s recursive branch
+     into a literal `jmp $` (self-jump) infinite spin loop -- gcc PROVED (correctly, per
+     the C standard, given no overflow check exists) that the branch could never
+     terminate without hitting UB, and therefore treated it as unreachable, deleting the
+     real recursive call/multiply entirely. Confirmed via `objdump -d`: the whole
+     `else` branch is `1146: jmp 1146`. This is why the process burned 100% CPU forever
+     with a perfectly flat `VmStk` (no real recursion was happening at all -- just an
+     infinite no-op spin) instead of ever crashing.
+  2. **LLVM backend**: `lli`'s ugly "PLEASE submit a bug report" crash pattern was
+     already the case pre-fix and remains post-fix for this SPECIFIC repro (see below)
+     -- but for the more common case (e.g. plain division by zero on a non-constant
+     divisor, confirmed with a minimal `fn divide(a,b) { return a/b; }` repro), the
+     PRE-fix behavior let a raw hardware SIGFPE propagate straight into `lli`'s crash
+     handler (which prints the scary LLVM-internal-bug-report message for what is
+     actually a completely ordinary, expected-by-the-language trap condition) instead of
+     a clean, single `abort()` -- and the C backend crashed with ZERO output at all
+     (silent SIGFPE, no message whatsoever) instead of `backend_c.rs`'s intended
+     "division by zero" diagnostic.
+  Fixed in three files:
+  - `ssa.rs`: added `checked: bool` to `InstrKind::Binary`, threaded through every
+    construction site (the main `TypedExprKind::Binary` lowering propagates the
+    checker's value; compiler-synthesized Binary instructions -- for-loop/for-iter
+    counter comparisons and increments, string-comparison-vs-zero -- get `checked:
+    false`, matching how the tree backends never guard their own synthesized loop
+    counters either) and the Display impl. `ssa_pass.rs`'s constant-folding match arms
+    updated to ignore the new field (folding a compile-time-constant pair is safe
+    regardless of the flag -- `checked_add`/`checked_sub`/etc. already return `None`,
+    leaving the original checked instruction in place, whenever a fold WOULD overflow).
+  - `ssa_backend_c.rs`: `InstrKind::Binary`'s emission now mirrors `backend_c.rs`'s tree
+    logic inline (no shared preamble helper needed -- SSA operands are already-
+    evaluated `v_N` reads or constants, safe to reference twice, matching this file's
+    own existing `InstrKind::Index` bounds-check convention): Add/Sub/Mul emit a
+    `__builtin_{add,sub,mul}_overflow` guard + `fprintf`+`abort()` on overflow; Div/Rem
+    emit a `== 0` guard before the division; Shl/Shr emit a range guard (`x < 0 ||
+    (uint64_t)x >= bits` for signed, `(uint64_t)x >= bits` for unsigned) before the
+    shift.
+  - `ssa_backend_llvm.rs`: added a pre-scan (mirroring the existing Vec-element-
+    collection pass in `emit()`) that walks every function's instructions for
+    `checked: true` Binary ops, collecting exactly the `(type, op)` combinations
+    actually used, and emits ONLY those as `alwaysinline` helper functions in the
+    preamble (`@__intent_checked_{add,sub,mul}_{ty}` via `llvm.{s,u}{add,sub,mul}.
+    with.overflow.<width>` + abort-on-overflow, matching `@__intent_bounds_check`'s
+    existing shape from BUG-108; `@__intent_checked_divisor_{ty}` /
+    `@__intent_checked_shift_{ty}` as simple validate-and-return-the-operand helpers).
+    `emit_binary` calls these via plain `call` instructions (no new basic blocks at the
+    call site -- deliberately NOT inline branching, since that's a proven-risky pattern
+    for this file's block-sequential per-instruction emission; the existing
+    `@__intent_bounds_check` precedent already established call-a-shared-helper as the
+    safe approach here).
+  Net effect on the actual repro: BOTH backends now genuinely recurse (the overflow
+  check is a real, must-respect side effect gcc can no longer optimize away) and both
+  now fail FAST and HONESTLY -- confirmed via direct `cc`-compiled-binary execution: a
+  clean `Segmentation fault` (exit 139, genuine native stack overflow) on C instead of
+  an eternal spin; `lli` still crashes with its characteristic noisy "PLEASE submit a
+  bug report" pattern on LLVM (same as before -- this is `lli`'s own interpreter
+  genuinely exhausting its stack under deep real recursion, an expected, not-further-
+  fixable consequence of the input program's actual infinite/unbounded recursion, not a
+  vāṇी-compiler bug; also matches how BUG-108's bounds-check aborts already look under
+  `lli`, an established, accepted characteristic of this tool throughout this sweep).
+  The original "C hangs, LLVM crashes" ASYMMETRY is resolved -- both now terminate
+  quickly.
+  A critical, sobering discovery made while root-causing this: `compile_to_c`/
+  `compile_to_llvm` (the helpers essentially the ENTIRE existing overflow/divisor/shift
+  test suite in `src/lib.rs` uses -- 72 pre-existing passing tests, checked during this
+  fix) call `backend_c::CBackend.emit`/`backend_llvm::LlvmBackend.emit` DIRECTLY,
+  completely bypassing `emit_c_via_ssa`/`emit_llvm_via_ssa` (what `vanic run` actually
+  uses). Every one of those 72 tests was exercising ONLY the tree backends, which were
+  never broken -- meaning the extensive-looking existing coverage provided ZERO
+  protection against this bug in the path real users actually hit by default. New
+  tests for this fix deliberately go through `lower_program` + `ssa_backend_c::emit` /
+  `ssa_backend_llvm::emit` directly (or a subprocess `vanic run` with no `--backend`
+  flag and no struct literal in the source) specifically BECAUSE of this gap.
+  New tests: 2 `src/lib.rs`/module-inline unit tests
+  (`ssa_backend_c::tests::checked_binary_emits_runtime_guards_on_ssa_c`,
+  `ssa_backend_llvm::tests::checked_binary_emits_runtime_guards_on_ssa_llvm`, each
+  compiling a small struct-literal-free program exercising all three guard categories
+  and asserting the checked-helper names appear in the emitted C/LLVM IR) + 2
+  `tests/run_end_to_end.rs` subprocess tests
+  (`odia_factorial_unbounded_recursion_fails_fast_on_both_backends`, running the actual
+  fuzzed repro shape wrapped in `timeout 15` on both backends and asserting neither
+  hangs -- status code != 124 -- nor succeeds; and
+  `odia_keywords_example_produces_correct_output_on_both_backends`, the REAL unmodified
+  shipped example with correct/bounded `n - 1` recursion, confirming the new guards
+  produce ZERO false positives on ordinary non-overflowing arithmetic). All 72
+  pre-existing tree-backend overflow/divisor/shift/SMT-elision `src/lib.rs` tests still
+  pass unchanged -- confirmed no regression (expected: this fix never touches
+  `backend_c.rs`/`backend_llvm.rs`, only the SSA path). Full `cargo test --release
+  --workspace` (2752 lib tests + 184 end-to-end subprocess tests) clean.
+  Follow-up worth flagging for a future session (not done here, out of scope for a
+  single-repro-driven fix): audit whether `ssa_pass.rs`'s SMT-elision-adjacent passes
+  (or any future SSA optimization pass) could ever flip `checked` from `true` to
+  `false` on a `Binary` instruction incorrectly -- this fix only makes the SSA backends
+  RESPECT the flag they're given, it does not re-verify that the flag's VALUE (as
+  already computed by the checker before SSA lowering ever sees it) is always sound.

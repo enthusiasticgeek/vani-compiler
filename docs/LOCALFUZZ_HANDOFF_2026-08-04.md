@@ -181,25 +181,37 @@ even a compiler bug.
   of this section (epoll timeout truncation, `task{}` threading model)
   were correctly ruled out and are NOT the bug — don't re-chase them.
 
-### Issue 4 (most severe — double bug): LLVM `lli` crashes outright AND C backend hangs, on the same input
+### Issue 4 — FIXED as BUG-110 (2026-08-05), by far the most impactful fix in this whole sweep
 
-- **Repro**: `tools/localfuzz/findings/20260803-033452-run-crash-99db3e1928/repro.vani` (Odia-language keywords example; also exercises the parallel/sort runtime libs — the `lli` invocation loads `libgomp.so.1`, a `vanic-sortlib-*.so`, and a `vanic-parlib-*.so`)
-- **Reproduce**:
-  - `vanic run <repro>` (LLVM): crashes immediately with
-    `PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/` and a stack dump inside `libLLVM.so.19.1` — this is `lli` itself crashing, not a vani-level error.
-  - `timeout 10 vanic run <repro> --backend=c`: hangs, gets killed by timeout.
-- **Lead**: neither backend handles this input correctly, which makes
-  it the highest-value target even though it'll probably take the most
-  digging. Since `lli` is crashing inside LLVM's own machinery (not a
-  clean "invalid IR" parse error like BUG-88's class), the generated
-  `.ll` is likely passing IR verification but constructing something
-  that trips up the JIT at a lower level (possibly related to the
-  parallel/sort library loading shown in the `lli` invocation args —
-  worth checking whether this repro is exercising `sort`/`parallel`
-  constructs specifically, and whether backend_llvm.rs's codegen for
-  those interacts badly with something else in this file). Get the
-  full `lli` stack dump (`vanic run <repro> 2>&1 | head -50`) before
-  starting — I only captured the first few frames.
+The "parallel/sort library loading" lead in the original version of this section was a
+total red herring (those libs get loaded by every `lli` invocation unconditionally,
+whether or not the program uses them). The repro (`examples/language/odia/keywords.vani`
+fuzzed from `factorial(n - 1)` to `factorial(n - -1)`, i.e. unbounded/increasing instead
+of bounded/decreasing recursion — a genuinely broken test program) exposed something with
+nothing to do with Odia, factorial, or recursion specifically: **both SSA backends (the
+default/preferred codegen path for essentially every ordinary program — anything without
+a struct literal, field access, or one of ~100 denylisted builtins) silently emit fully
+UNCHECKED arithmetic.** No overflow guard on Add/Sub/Mul, no divide-by-zero guard on
+Div/Rem, no range guard on Shl/Shr — regardless of what the checker/SMT-elision pass
+determined was needed. `ssa.rs`'s `InstrKind::Binary` had no field to carry
+`TypedExprKind::Binary`'s `checked` flag at all; it was silently dropped on every SSA
+lowering. The tree backends (`backend_c.rs`/`backend_llvm.rs`) always respected it
+correctly — this was purely an SSA-path gap, but since SSA is the FAST/PREFERRED path,
+it meant most ordinary vāṇी programs ran with zero overflow/divide-by-zero/shift-range
+protection on either backend, silently contradicting the language's own stated
+ASIL-D/DO-178C-oriented safety guarantee. Confirmed via disassembly: with no overflow
+check, `cc -O2` legally proved the repro's recursive branch unreachable-by-UB (would
+eventually signed-overflow) and replaced it with a literal `jmp $` infinite spin —
+that's why C hung forever burning 100% CPU while touching ZERO stack (no real
+recursion was ever happening). LLVM had no equivalent optimization available and
+genuinely recursed, exhausting `lli`'s own interpreter stack — hence its crash. Fixed
+by threading `checked` through SSA lowering (`ssa.rs`) and implementing the same
+runtime guards `ssa_backend_c.rs`/`ssa_backend_llvm.rs` were missing. A second,
+important discovery made while root-causing this: the ENTIRE pre-existing overflow/
+divisor/shift test suite (72 tests) used `compile_to_c`/`compile_to_llvm`, which call
+the tree backends DIRECTLY — none of that coverage ever exercised the actual SSA path
+`vanic run` uses by default, which is how this went completely undetected. See
+`docs/TODO_CURRENT.md`'s BUG-110 entry on `main` for the full writeup.
 
 ### Lower priority, not investigated further
 

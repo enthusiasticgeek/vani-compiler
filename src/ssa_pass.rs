@@ -189,11 +189,13 @@ fn try_fold(instr: &Instruction) -> Option<Const> {
             op,
             l: Operand::Const(Const::Int(a)),
             r: Operand::Const(Const::Int(b)),
+            checked: _,
         } => fold_int_binary(*op, *a, *b),
         InstrKind::Binary {
             op,
             l: Operand::Const(Const::Bool(a)),
             r: Operand::Const(Const::Bool(b)),
+            checked: _,
         } => fold_bool_binary(*op, *a, *b),
         InstrKind::Cast {
             x: Operand::Const(Const::Int(v)),

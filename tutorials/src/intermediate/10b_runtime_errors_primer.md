@@ -209,6 +209,29 @@ When one of the conditions above fires:
    `abort()` is signal-terminated, exiting with
    `128 + SIGABRT = 134` on POSIX.
 
+**If you're running via `vanic run` (LLVM JIT) and one of the
+non-`assert` rows fires** -- an out-of-bounds index, an
+overflowing `+`/`-`/`*`, a `/`/`%` by zero, or an out-of-range
+shift -- you'll see `lli` print `PLEASE submit a bug report to
+https://github.com/llvm/llvm-project/issues/` followed by a
+stack dump through `libLLVM.so`. **This is not an LLVM bug.**
+It's the exact same JIT-misreporting `assert` used to have
+(the note above) -- `lli`'s crash handler treats any signal
+during JIT execution, including this `SIGABRT` from your own
+program's `abort()` call, as if `lli` itself crashed. Only
+`assert` was switched to the signal-free `exit(3)` path; the
+other checks still use `abort()` (matching the C backend's
+`abort()`-based diagnostics, which print a clean message with
+no such noise), so this scary-looking output is expected and
+harmless whenever you deliberately trip a bounds/overflow/
+divide-by-zero/shift check while iterating on the LLVM
+backend. Look for your check's own diagnostic line in stderr
+above the stack dump -- that's the real cause; the dump itself
+is just `lli` being dramatic about a completely ordinary
+`SIGABRT`. If the noise is more than you want to see routinely,
+`--backend=c` reports the identical set of checks with a single
+clean stderr line and no JIT stack dump.
+
 This is **graceful in the diagnostic sense** -- a named,
 deterministic event with a printable cause -- but **terminal
 in the cleanup sense** -- no chance to recover, no chance to

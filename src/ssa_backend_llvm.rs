@@ -226,6 +226,54 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         }
     }
 
+    // BUG-110 (2026-08-05): scan for `InstrKind::Binary {
+    // checked: true, .. }` result types needing a runtime
+    // overflow/divide-by-zero/shift-range guard -- same idea as
+    // the Vec-element scan just above, so only the (type, op)
+    // combinations actually used get a helper emitted (a program
+    // that's all `i64` shouldn't pay for 7 other widths' worth of
+    // dead helper functions). Mirrors `backend_c.rs`'s
+    // `used_overflows`/`used_divisors`/`used_shifts` gating.
+    let mut checked_overflow_ops: std::collections::BTreeSet<(&'static str, &'static str)> =
+        std::collections::BTreeSet::new();
+    let mut checked_divisor_tys: std::collections::BTreeSet<&'static str> =
+        std::collections::BTreeSet::new();
+    let mut checked_shift_tys: std::collections::BTreeSet<&'static str> =
+        std::collections::BTreeSet::new();
+    for f in &module.functions {
+        for block in &f.blocks {
+            for instr in &block.instructions {
+                let InstrKind::Binary { op, checked: true, .. } = &instr.kind else {
+                    continue;
+                };
+                if !instr.ty.is_integer() {
+                    continue;
+                }
+                let Some(tyname) = int_type_name(&instr.ty) else {
+                    continue;
+                };
+                match op {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
+                        let op_word = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            _ => unreachable!(),
+                        };
+                        checked_overflow_ops.insert((tyname, op_word));
+                    }
+                    BinaryOp::Div | BinaryOp::Rem => {
+                        checked_divisor_tys.insert(tyname);
+                    }
+                    BinaryOp::Shl | BinaryOp::Shr => {
+                        checked_shift_tys.insert(tyname);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     // Build a function-name → (param types, return type)
     // table so Call instructions can recover the per-param
     // LLVM type for Const operands (whose `operand_type`
@@ -336,6 +384,81 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
            call void @llvm.assume(i1 %ok)\n  \
            ret void\n}\n",
     );
+    // BUG-110: overflow / divide-by-zero / shift-range guards for
+    // Add/Sub/Mul, Div/Rem, Shl/Shr -- same `alwaysinline` void/
+    // value-returning-helper shape as `@__intent_bounds_check`
+    // just above (a plain `call`, no new basic blocks at the call
+    // site, so this can drop into `emit_binary`'s straight-line
+    // instruction emission with zero block-management risk). Only
+    // the (type, op) combinations the pre-scan above found actually
+    // `checked: true` get a definition. `llvm.{s,u}{add,sub,mul}.
+    // with.overflow.<W>` is a real LLVM intrinsic per integer width;
+    // no `declare` is needed for `llvm.*` intrinsics used with a
+    // `call` (LLVM recognizes the name by convention), but we still
+    // need one alwaysinline wrapper per (type, op) so the call site
+    // stays a simple, non-branching `call iN @__intent_checked_*`.
+    for (tyname, op_word) in &checked_overflow_ops {
+        let (llvm_w, signed, bits) = int_type_info(tyname);
+        let intr_prefix = if signed { "s" } else { "u" };
+        let intr_word = op_word;
+        let _ = bits;
+        out.push_str(&format!(
+            "define internal {w} @__intent_checked_{op_word}_{ty}({w} %a, {w} %b) alwaysinline {{\n\
+             entry:\n  \
+               %pair = call {{{w}, i1}} @llvm.{p}{iw}.with.overflow.{w}({w} %a, {w} %b)\n  \
+               %r = extractvalue {{{w}, i1}} %pair, 0\n  \
+               %ov = extractvalue {{{w}, i1}} %pair, 1\n  \
+               br i1 %ov, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             oob:\n  call void @abort()\n  unreachable\n\
+             cont:\n  \
+               ret {w} %r\n}}\n",
+            w = llvm_w,
+            op_word = op_word,
+            ty = tyname,
+            p = intr_prefix,
+            iw = intr_word,
+        ));
+    }
+    for tyname in &checked_divisor_tys {
+        let (llvm_w, _signed, _bits) = int_type_info(tyname);
+        out.push_str(&format!(
+            "define internal {w} @__intent_checked_divisor_{ty}({w} %x) alwaysinline {{\n\
+             entry:\n  \
+               %z = icmp eq {w} %x, 0\n  \
+               br i1 %z, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             oob:\n  call void @abort()\n  unreachable\n\
+             cont:\n  \
+               ret {w} %x\n}}\n",
+            w = llvm_w,
+            ty = tyname,
+        ));
+    }
+    for tyname in &checked_shift_tys {
+        let (llvm_w, signed, bits) = int_type_info(tyname);
+        let range_check = if signed {
+            format!(
+                "  %lo = icmp slt {w} %x, 0\n  \
+                   %hi = icmp sge {w} %x, {bits}\n  \
+                   %bad = or i1 %lo, %hi\n",
+                w = llvm_w,
+                bits = bits,
+            )
+        } else {
+            format!("  %bad = icmp uge {w} %x, {bits}\n", w = llvm_w, bits = bits)
+        };
+        out.push_str(&format!(
+            "define internal {w} @__intent_checked_shift_{ty}({w} %x) alwaysinline {{\n\
+             entry:\n\
+             {range_check}  \
+               br i1 %bad, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             oob:\n  call void @abort()\n  unreachable\n\
+             cont:\n  \
+               ret {w} %x\n}}\n",
+            w = llvm_w,
+            ty = tyname,
+            range_check = range_check,
+        ));
+    }
     // Empty string global used by the per-element Vec
     // clone helper (closure #152) and the payloaded-enum
     // payload clone path to round-trip an OwnedStr
@@ -3146,7 +3269,7 @@ fn emit_instr(
                 }
             }
         }
-        InstrKind::Binary { op, l, r } => {
+        InstrKind::Binary { op, l, r, checked } => {
             // Operand type: try the LHS first, then the RHS,
             // then the result type. The result type covers
             // arithmetic ops (where operand_ty == result_ty);
@@ -3166,7 +3289,7 @@ fn emit_instr(
                         instr.ty.clone()
                     }
                 });
-            emit_binary(*op, l, r, &lhs_ty, &instr.ty, instr.result, out)?;
+            emit_binary(*op, l, r, &lhs_ty, &instr.ty, instr.result, *checked, out)?;
         }
         InstrKind::Cast { x, to } => {
             let from_ty = operand_type(x, value_types).unwrap_or_else(|| to.clone());
@@ -5174,6 +5297,7 @@ fn emit_binary(
     op_ty: &Type,
     result_ty: &Type,
     result: ValueId,
+    checked: bool,
     out: &mut String,
 ) -> Result<(), EmitError> {
     // Comparisons return i1; the operand type determines the
@@ -5182,7 +5306,65 @@ fn emit_binary(
     let is_float = matches!(op_ty, Type::F32 | Type::F64);
     let ty_str = llvm_type(op_ty)?;
     let l_s = operand_str(l);
-    let r_s = operand_str(r);
+    let mut r_s = operand_str(r);
+    // BUG-110: route Add/Sub/Mul/Div/Rem/Shl/Shr through the
+    // `@__intent_checked_*` helpers (defined in `emit()`'s
+    // preamble, gated on the pre-scan finding this exact (type,
+    // op) combo) when the checker/SMT-discharge pass still
+    // requires the runtime guard. Add/Sub/Mul return the checked
+    // result directly (their helper computes AND returns the sum/
+    // difference/product, aborting first on overflow) -- short-
+    // circuit before the generic opcode dispatch below. Div/Rem/
+    // Shl/Shr instead validate just the right-hand operand (divisor
+    // / shift amount) and swap `r_s` to the checked value, then
+    // fall through to the normal `sdiv`/`shl`/etc. emission.
+    if checked && !is_float {
+        if let Some(tyname) = int_type_name(op_ty) {
+            match op {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
+                    let op_word = match op {
+                        BinaryOp::Add => "add",
+                        BinaryOp::Sub => "sub",
+                        BinaryOp::Mul => "mul",
+                        _ => unreachable!(),
+                    };
+                    out.push_str(&format!(
+                        "  %v_{} = call {ty} @__intent_checked_{op_word}_{tyname}({ty} {l}, {ty} {r})\n",
+                        result.0,
+                        ty = ty_str,
+                        op_word = op_word,
+                        tyname = tyname,
+                        l = l_s,
+                        r = r_s,
+                    ));
+                    return Ok(());
+                }
+                BinaryOp::Div | BinaryOp::Rem => {
+                    let checked_r = format!("%v_{}.divchk", result.0);
+                    out.push_str(&format!(
+                        "  {dst} = call {ty} @__intent_checked_divisor_{tyname}({ty} {r})\n",
+                        dst = checked_r,
+                        ty = ty_str,
+                        tyname = tyname,
+                        r = r_s,
+                    ));
+                    r_s = checked_r;
+                }
+                BinaryOp::Shl | BinaryOp::Shr => {
+                    let checked_r = format!("%v_{}.shchk", result.0);
+                    out.push_str(&format!(
+                        "  {dst} = call {ty} @__intent_checked_shift_{tyname}({ty} {r})\n",
+                        dst = checked_r,
+                        ty = ty_str,
+                        tyname = tyname,
+                        r = r_s,
+                    ));
+                    r_s = checked_r;
+                }
+                _ => {}
+            }
+        }
+    }
     let opcode = match op {
         BinaryOp::Add => if is_float { "fadd" } else { "add" },
         BinaryOp::Sub => if is_float { "fsub" } else { "sub" },
@@ -5778,6 +5960,40 @@ fn ssa_index_as_i64(
     Ok(dest)
 }
 
+/// BUG-110: canonical `intent_check_*`-style name for an integer
+/// type (`"i64"`, `"u32"`, …), used to name/dedupe the checked-
+/// arithmetic helpers. `None` for non-integer types (float, bool,
+/// etc.) -- those never route through the checked-arithmetic path.
+fn int_type_name(ty: &Type) -> Option<&'static str> {
+    Some(match ty {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        Type::U8 => "u8",
+        Type::U16 => "u16",
+        Type::U32 => "u32",
+        Type::U64 => "u64",
+        _ => return None,
+    })
+}
+
+/// BUG-110: (LLVM width string, is_signed, bit width) for a name
+/// produced by `int_type_name`.
+fn int_type_info(tyname: &str) -> (&'static str, bool, i64) {
+    match tyname {
+        "i8" => ("i8", true, 8),
+        "i16" => ("i16", true, 16),
+        "i32" => ("i32", true, 32),
+        "i64" => ("i64", true, 64),
+        "u8" => ("i8", false, 8),
+        "u16" => ("i16", false, 16),
+        "u32" => ("i32", false, 32),
+        "u64" => ("i64", false, 64),
+        other => unreachable!("int_type_info called with non-integer type name {other:?}"),
+    }
+}
+
 fn llvm_type(ty: &Type) -> Result<&'static str, EmitError> {
     Ok(match ty {
         Type::I8 | Type::U8 => "i8",
@@ -5913,6 +6129,56 @@ mod tests {
         assert!(errs.is_empty());
         let ll = emit(&module).expect("emit succeeds");
         assert!(ll.contains("add i64"), "expected add i64:\n{}", ll);
+    }
+
+    #[test]
+    fn checked_binary_emits_runtime_guards_on_ssa_llvm() {
+        // BUG-110: SSA-LLVM counterpart of
+        // `ssa_backend_c::tests::checked_binary_emits_runtime_
+        // guards_on_ssa_c` -- see that test's writeup for the full
+        // root-cause story. `InstrKind::Binary`'s `checked` flag was
+        // dropped during SSA lowering, so this backend (the
+        // default/preferred path for any program without a struct
+        // literal, field access, or denylisted builtin) emitted
+        // fully unchecked `sub`/`sdiv`/`shl` -- exposing raw
+        // hardware traps (SIGFPE on division-by-zero surfacing as
+        // an `lli`-internal-looking crash instead of a clean, single
+        // `abort()`) and silently-wrapping overflow instead of the
+        // trap-on-overflow semantics the language actually
+        // specifies (see the ASIL-D/DO-178C comment on
+        // `backend_c.rs`'s overflow-helper emission -- this is a
+        // real safety-critical-language guarantee, not a cosmetic
+        // nicety).
+        let src = r#"
+            fn checked_sub(n: i64) -> i64 { return n - -1; }
+            fn checked_div(a: i64, b: i64) -> i64 { return a / b; }
+            fn checked_shift(x: i64, n: i64) -> i64 { return x << n; }
+            fn main() -> i64 {
+              let r: i64 = checked_sub(5);
+              let d: i64 = checked_div(10, 2);
+              let s: i64 = checked_shift(1, 4);
+              return r + d + s;
+            }
+        "#;
+        let checked = compile(src).expect("compiles");
+        let (module, errs) = lower_program(&checked.ir);
+        assert!(errs.is_empty(), "lower errors: {:?}", errs);
+        let ll = emit(&module).expect("emit succeeds");
+        assert!(
+            ll.contains("@llvm.ssub.with.overflow.i64"),
+            "expected the checked-subtraction path (llvm.ssub.with.overflow) for a non-constant `n - -1`:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("@__intent_checked_divisor_i64"),
+            "expected a divide-by-zero guard call:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("@__intent_checked_shift_i64"),
+            "expected a shift-range guard call:\n{}",
+            ll
+        );
     }
 
     #[test]
