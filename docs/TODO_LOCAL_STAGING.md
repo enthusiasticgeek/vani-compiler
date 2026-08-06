@@ -2347,3 +2347,25 @@ The `async-cancel-auto.vani` mutant file exhibits a `run-crash` condition, indic
 ---
 
 **END OF STAGING ENTRY**
+
+---
+
+### Candidate: 20260806-065230-run-crash-bf789d814a
+
+Repro: `tools/localfuzz/findings/20260806-065230-run-crash-bf789d814a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-065230-run-crash-bf789d814a/fix_attempt.md`
+
+Vani-compiler local staging log:
+
+```log
+Build and run:
+vanic run examples/language/english/mut_refs.vani --backend=c              # C backend, gcc
+```
+
+**Crash**
+
+The exact repro source is provided in the `Mutant/generated source` block above.
+
+**Observed Symptom**: The compiler crashes during the execution of the C backend.
+
+**Backend Affected**: C backend.
