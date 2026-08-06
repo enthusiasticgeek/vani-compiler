@@ -2466,3 +2466,12 @@ I have not read the compiler source, so I do not have a root cause for this issu
 To address this issue, further investigation into the compiler's source code will be required. This may involve identifying the specific parts of the code that are causing the timeout and debugging them to understand why they are failing.
 
 Once a root cause is identified, I will update this bug report with more details about how the issue was resolved or if it requires changes to the compiler's behavior.
+
+---
+
+### Candidate: 20260806-174402-run-crash-a823aaed3d
+
+Repro: `tools/localfuzz/findings/20260806-174402-run-crash-a823aaed3d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-174402-run-crash-a823aaed3d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
