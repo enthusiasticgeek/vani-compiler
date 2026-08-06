@@ -2419,3 +2419,12 @@ After removing the conflict and ensuring that the `atoll` function is correctly 
 ---
 
 **END OF STAGING ENTRY.**
+
+---
+
+### Candidate: 20260806-140436-run-crash-f39e189ec9
+
+Repro: `tools/localfuzz/findings/20260806-140436-run-crash-f39e189ec9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-140436-run-crash-f39e189ec9/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
