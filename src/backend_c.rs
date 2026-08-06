@@ -13216,15 +13216,37 @@ pub(crate) fn c_element_deep_clone(slot: &str, ty: &Type) -> String {
     }
 }
 
+/// Standard C library symbols whose signature the C standard
+/// *mandates* use `long long` (or `unsigned long long`), even on
+/// platforms like this one where `int64_t`/`uint64_t` are spelled
+/// `long`/`unsigned long`. An `extern "C" fn` whose name matches
+/// one of these must NOT get its own competing prototype: our
+/// generic `i64 -> int64_t` mapping produces a nominally different
+/// (though same-width) C type than the header's own declaration --
+/// e.g. glibc's `<stdlib.h>` declares `atoll` returning `long long`
+/// while we'd emit `int64_t` (`long` here) -- and `cc` rejects that
+/// as a conflicting redeclaration. Trust the header's prototype
+/// instead. Deliberately narrow (vs. every stdlib/string/stdio
+/// symbol): everything outside this C99-mandated `long long`
+/// family already matches our mapping exactly (e.g. `atoi`'s `int`
+/// return matches `int32_t`), so leaving our own prototype in
+/// place for those keeps existing behavior/tests unchanged --
+/// BUG-118.
+pub(crate) fn is_known_libc_symbol(name: &str) -> bool {
+    matches!(name, "atoll" | "strtoll" | "strtoull" | "llabs" | "lldiv")
+}
+
 fn emit_prototype(function: &TypedFunction, out: &mut String) {
     if function.is_extern {
-        out.push_str("extern ");
-        out.push_str(&c_type_name(&function.return_type));
-        out.push(' ');
-        out.push_str(&function.name);
-        out.push('(');
-        emit_params(function, out);
-        out.push_str(");\n");
+        if !is_known_libc_symbol(&function.name) {
+            out.push_str("extern ");
+            out.push_str(&c_type_name(&function.return_type));
+            out.push(' ');
+            out.push_str(&function.name);
+            out.push('(');
+            emit_params(function, out);
+            out.push_str(");\n");
+        }
         return;
     }
     if function.no_mangle {
@@ -13262,13 +13284,15 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
     // prefix, no `static` storage class) and returns. The
     // linker provides the body.
     if function.is_extern {
-        out.push_str("extern ");
-        out.push_str(&c_type_name(&function.return_type));
-        out.push(' ');
-        out.push_str(&function.name);
-        out.push('(');
-        emit_params(function, out);
-        out.push_str(");\n");
+        if !is_known_libc_symbol(&function.name) {
+            out.push_str("extern ");
+            out.push_str(&c_type_name(&function.return_type));
+            out.push(' ');
+            out.push_str(&function.name);
+            out.push('(');
+            emit_params(function, out);
+            out.push_str(");\n");
+        }
         return;
     }
     // Determine the emitted symbol name: bare for no_mangle, prefixed otherwise.

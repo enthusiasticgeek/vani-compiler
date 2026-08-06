@@ -8472,3 +8472,42 @@ trap. Fixed by switching both to `exit(3)`. Updated the pre-existing
 old `abort()` IR text) + new `tests/run_end_to_end.rs` test
 `bounded_attribute_violation_exits_cleanly_instead_of_crashing_lli`. Full `cargo test
 --release --workspace` clean.
+
+## BUG-118 (2026-08-06) -- C backend's own `atoll` FFI example failed to compile via `cc`
+
+Found by the `vani-localfuzz-ollama` harness's nightly digest as a `backend-divergence`
+cluster (C backend fails, LLVM backend succeeds). Root-caused against the fuzzer's
+`repro.vani`, which turned out to be an (essentially) unmutated copy of the repo's own
+`examples/language/english/ffi.vani` -- i.e. this was already reproducible on plain
+`main`, not a fuzzer-only artifact:
+
+```
+$ vanic run examples/language/english/ffi.vani --backend=c
+cc failed while compiling ...c:149:16: error: conflicting types for 'atoll'; have
+'int64_t(const char *)' {aka 'long int(const char *)'}
+...
+/usr/include/stdlib.h:493:1: note: previous definition of 'atoll' with type
+'long long int(const char *)'
+```
+
+Root cause: both C backends (`backend_c.rs`'s `emit_prototype`/`emit_function` and
+`ssa_backend_c.rs`'s `emit_function_prototype`) spell `i64` as `int64_t` when emitting
+an `extern "C" fn`'s forward declaration. On this LP64 host `int64_t` is `long`, but
+the C standard mandates `atoll` (and `strtoll`/`strtoull`/`llabs`/`lldiv`) return/take
+`long long` -- same width, nominally different type, and `cc` treats redeclaring a
+already-visible libc symbol with a different nominal type as a hard conflict even
+though both backends' generated preamble already unconditionally `#include`s
+`<stdlib.h>` (which declares `atoll` correctly on its own).
+
+Fix: added `backend_c::is_known_libc_symbol`, a narrow allowlist covering exactly the
+five C99-mandated `long long` libc symbols (`atoll`, `strtoll`, `strtoull`, `llabs`,
+`lldiv`). When an `extern "C" fn`'s name matches, both backends now skip emitting
+their own competing prototype and trust the declaration `<stdlib.h>` already provides;
+call sites are unaffected (they already called by bare name). Deliberately did *not*
+widen this to "every stdlib/string/stdio symbol" -- e.g. `atoi`'s `int` return matches
+our `int32_t` mapping exactly, so suppressing its prototype too would have been an
+unnecessary behavior change (and broke the pre-existing
+`extern_c_fn_emits_bare_c_prototype_and_call` test, which asserts `atoi`'s prototype
+*is* emitted). New test `extern_c_atoll_does_not_conflict_with_libc_prototype`
+(`src/lib.rs`) covers both the tree-C and SSA-C backends. Full `cargo test --release`
+(2756 lib tests + 190 end-to-end subprocess tests) clean, zero regressions.

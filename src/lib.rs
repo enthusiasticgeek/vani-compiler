@@ -42012,6 +42012,56 @@ função main() -> i64 {
         );
     }
 
+    // BUG-118 — an `extern "C" fn` named after a C99 symbol whose
+    // standard signature uses `long long` (e.g. `atoll`) must not
+    // get our own `int64_t`-spelled prototype: on LP64 platforms
+    // `int64_t` is `long`, and `cc` treats `long` vs. `long long`
+    // as conflicting types for the same symbol even though both
+    // are 64-bit, rejecting the redeclaration outright. The fix
+    // trusts the declaration `<stdlib.h>` already provides instead
+    // of emitting a competing one.
+    #[test]
+    fn extern_c_atoll_does_not_conflict_with_libc_prototype() {
+        let source = r#"
+            extern "C" fn atoll(x: Str) -> i64;
+
+            fn main() -> i64 {
+              return atoll("42");
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        // Must NOT emit our own competing prototype declaration --
+        // `<stdlib.h>` already declares it with the correct
+        // (`long long`) type spelling. The call site (`atoll("42")`)
+        // legitimately contains the bare name, so check for the
+        // declarator's parameter spelling instead of the name alone.
+        assert!(
+            !c.contains("atoll(const char"),
+            "expected no competing prototype for `atoll` (trust <stdlib.h>), got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("atoll("),
+            "expected the call site to still call `atoll`, got:\n{}",
+            c
+        );
+
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            !ssa_c.contains("atoll(const char"),
+            "expected no competing prototype for `atoll` in SSA-C output, got:\n{}",
+            ssa_c
+        );
+        assert!(
+            ssa_c.contains("atoll("),
+            "expected the call site to still call `atoll` in SSA-C output, got:\n{}",
+            ssa_c
+        );
+    }
+
     // FFI v3 — `pure extern "C" fn name(...) -> R;` opts the
     // foreign function into purity, letting `pure fn` bodies
     // (and parallel-for bodies in the future) call it. Caller's

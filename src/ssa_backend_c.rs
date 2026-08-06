@@ -283,6 +283,16 @@ fn preamble(out: &mut String) {
 }
 
 fn emit_function_prototype(f: &Function, out: &mut String) -> Result<(), EmitError> {
+    // BUG-118: an `extern "C" fn` whose name matches a standard
+    // libc symbol already declared (with the platform's
+    // authoritative type spelling) by the headers this backend
+    // unconditionally includes must not get our own competing
+    // prototype -- see `backend_c::is_known_libc_symbol` for why
+    // that trips `cc`'s conflicting-redeclaration check even when
+    // the width matches (e.g. `atoll`).
+    if f.is_extern && crate::backend_c::is_known_libc_symbol(&f.name) {
+        return Ok(());
+    }
     let ret_c = c_type(&f.return_type)?;
     // Closure #269: `extern "C"` declarations emit an `extern`
     // prototype with the bare C symbol (no `fn_` prefix). The
