@@ -2579,3 +2579,12 @@ The LLVM backend was not executed.
 The bug affects the LLVM backend, which was not executed during the test.
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260806-213628-backend-divergence-4b9c65a80d
+
+Repro: `tools/localfuzz/findings/20260806-213628-backend-divergence-4b9c65a80d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-213628-backend-divergence-4b9c65a80d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
