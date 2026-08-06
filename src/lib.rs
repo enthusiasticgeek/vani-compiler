@@ -12686,6 +12686,94 @@ fn main() -> i64 {
             .expect("Vec<Box<dyn Iface>> struct field must compile to LLVM (BUG-107)");
     }
 
+    // BUG_PATTERN_AUDIT_TODO.md category C audit (2026-08-06):
+    // BUG-107's exact bug shape (a recursive `Type::` walk helper
+    // missing an arm, causing a C forward-declaration/typedef
+    // ordering failure) doesn't recur for a struct field holding a
+    // `Vec<Box<Struct>>` of a CONCRETE struct (not `dyn Iface`) --
+    // clean pass on both backends. Added per the audit doc's own
+    // stated method ("clean pass -> still add the permanent test,
+    // it closes a real coverage gap").
+    #[test]
+    fn vec_box_concrete_struct_field_compiles_on_both_backends() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            struct Container {
+              name: OwnedStr,
+              points: Vec<Box<Point>>,
+            }
+            fn main() -> i64 {
+              let c: Container = Container {
+                name: "demo" + "",
+                points: vec(box(Point { x: 1, y: 2 }), box(Point { x: 3, y: 4 })),
+              };
+              print len(c.points) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<Box<Struct>> struct field must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<Box<Struct>> struct field must compile to LLVM");
+    }
+
+    // Same audit pass: a struct field of `Vec<(vec128<f64>, i64)>`
+    // (a Tuple wrapping a SIMD type, inside a Vec) -- same "wrapper
+    // type forwards the check but the outer container's own helper
+    // forgets to recurse" shape as BUG-107, also a clean pass.
+    #[test]
+    fn vec_of_tuple_wrapping_simd_type_field_compiles_on_both_backends() {
+        let source = r#"
+            struct Holder {
+              items: Vec<(vec128<f64>, i64)>,
+            }
+            fn main() -> i64 {
+              let v: vec128<f64> = simd_splat(1.0);
+              let h: Holder = Holder {
+                items: vec((v, 10)),
+              };
+              print len(h.items) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<(vec128<f64>, i64)> struct field must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<(vec128<f64>, i64)> struct field must compile to LLVM");
+    }
+
+    // Same audit pass: confirms the struct-field-type whitelist
+    // (`checker.rs` ~line 1128) correctly rejects `Tuple<Box<dyn
+    // Iface>>` as a struct field -- explains why BUG-107's bug class
+    // can't recur for Tuple/HashMap/Option/Deque wrapping `Box<dyn
+    // Iface>` (they never reach the codegen the bug lived in).
+    #[test]
+    fn tuple_of_box_dyn_iface_rejected_as_struct_field() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+            }
+            struct Holder {
+              pair: (Box<dyn Drawable>, i64),
+            }
+            fn main() -> i64 {
+              let h: Holder = Holder {
+                pair: (box(Circle { r: 5 } as dyn Drawable), 42),
+              };
+              print h.pair.1;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("Tuple<Box<dyn Iface>> struct field must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("non-Copy type")),
+            "expected a non-Copy-field-type diagnostic, got: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`

@@ -177,7 +177,25 @@ SSA fast path silently drops a runtime guard the tree path has."
   check anywhere, and does it exist on SSA?), `HashMap`/`HashSet` key
   lookup failure modes, `Option`/`Result` unwrap-without-check
   builtins if any exist, `Channel` send-on-closed, `Mutex`
-  double-lock/poisoning.
+  double-lock/poisoning. **AUDITED, no gap found** (2026-08-06):
+  enum-tag validity can't be violated -- there is no `i64 as Enum`
+  cast anywhere in `checker.rs` (only the reverse, `Enum as i64`),
+  and `raw_load`'s pointee is restricted to `i64` only in v1, so
+  there's no way to construct an invalid tag bit-pattern and feed it
+  to `match` in the first place; exhaustiveness is genuinely sound.
+  `hashmap_get`/`btreemap_get` already return `Option<T>` (no
+  unwrap-without-check builtin exists at all -- grepped, none
+  found), so key lookup has no panic path to guard. `Channel` has no
+  `channel_close` builtin (grepped, none found) and is a blocking
+  single-slot rendezvous (send sets value+ready flag, recv
+  spin-waits), so "send-on-closed" isn't a reachable state. Mutex
+  double-lock detection (`compute_locks_params`,
+  `extract_locked_mutex_name`) is a checker-level static analysis
+  shared identically by both backends (not an SSA-vs-tree split) and
+  is already explicitly documented as intentionally non-transitive
+  ("today's check catches the direct case cleanly... future
+  enhancement") -- a known, acknowledged limitation, not a silent
+  gap in the BUG-108/110/119 sense.
 - `#[bounded(N)]` recursion-depth guard (`backend_c.rs` line ~13317,
   seen while reading around the `requires` codegen above) -- is this
   emitted on the SSA path at all, or only tree? Same audit as A/above,
@@ -225,11 +243,25 @@ since they're structurally different from the common Vec/Array/Struct
 cases). Concrete test cases to try once candidates are found:
 - `Vec<Box<Struct>>` (not `dyn Iface`) as a struct field -- does
   BUG-107's exact ordering bug recur for a concrete boxed struct?
+  **AUDITED, no bug** (2026-08-06): compiles and runs correctly on
+  both backends.
 - `Tuple<Box<dyn Iface>>`, `HashMap<K, Box<dyn Iface>>`,
   `Option<Box<dyn Iface>>`, `Deque<Box<dyn Iface>>` as struct fields.
+  **AUDITED, not reachable** (2026-08-06): all four are rejected
+  before codegen by `checker.rs`'s struct-field-type whitelist
+  (~line 1128 -- "v1 supports Copy types, OwnedStr, Vec<T>, [T; N]
+  of Copy elements, Task, Atomic<T>, Mutex<T>, Channel<T, N>,
+  Box<T>, and enum types as struct fields"), which deliberately does
+  NOT include bare Tuple/HashMap/Option/Deque as field types at all
+  when they carry non-Copy content -- so BUG-107's recursive-walk
+  ordering bug class can't recur here; these never reach the
+  C-forward-declaration codegen the bug lives in. A real gap, if
+  any, would be "should the whitelist accept these" (a feature
+  question), not a codegen-ordering bug.
 - `Vec<Tuple<vec128<f64>, i64>>` as a struct field (Tuple-wrapping a
   SIMD type -- same "wrapper type forwards the check but the outer
-  container's own helper forgets to recurse" shape).
+  container's own helper forgets to recurse" shape). **AUDITED, no
+  bug** (2026-08-06): compiles and runs correctly on both backends.
 
 ## D. Trap exit-code / message consistency matrix (🟡)
 
