@@ -2302,3 +2302,48 @@ Repro: `tools/localfuzz/findings/20260806-041544-run-crash-195d1c365a/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260806-041544-run-crash-195d1c365a/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260806-052908-run-crash-9ede1b9751
+
+Repro: `tools/localfuzz/findings/20260806-052908-run-crash-9ede1b9751/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-052908-run-crash-9ede1b9751/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Staging Entry for vani-compiler Local Fuzzing on /home/virgo/source/vani-compiler-localfuzz/examples/language/maithili/async_cancel_auto.vani**
+
+---
+
+### **Run Details**
+The provided mutant generated source exhibits a `run-crash` condition. This indicates that the program did not terminate as expected during execution.
+
+---
+
+### **Observed Symptom**
+The program crashed due to an unhandled exception or unexpected termination of the runtime environment.
+
+---
+
+### **Backend Affected**
+This issue affects both the LLVM and C backends. The failure occurs in the asynchronous/await dialect lift phase, potentially leading to unpredictable behavior or crashes.
+
+---
+
+### **Crash/Hang/Divergent Output**
+The exact crash/hang/divergent output is not provided in the raw result data. However, based on the description of a `run-crash`, it's highly likely that the program attempted to run an asynchronous task indefinitely without proper synchronization mechanisms, leading to a deadlock or unhandled exception.
+
+---
+
+### **Raw Result Data**
+The raw JSON response contains only the run results for both LLVM and C backends. Since there is no crash information provided in this case, we cannot determine the specific cause of the failure from the given data.
+
+---
+
+### **Conclusion**
+The `async-cancel-auto.vani` mutant file exhibits a `run-crash` condition, indicating an issue with the asynchronous/await dialect lift phase. This issue affects both the LLVM and C backends. To resolve this issue, further analysis and debugging are required to identify the root cause of the crash and ensure that proper synchronization mechanisms are in place to prevent such issues in the future.
+
+---
+
+**END OF STAGING ENTRY**
