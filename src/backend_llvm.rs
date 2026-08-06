@@ -923,12 +923,27 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // tree backend doesn't need to depend on ssa_backend_llvm.rs;
     // the two backends never coexist in the same emitted module so
     // there's no symbol collision from sharing the name.
+    // BUG-115 (2026-08-05): `call void @abort()` here (and in every
+    // other alwaysinline runtime-guard helper in this file and
+    // ssa_backend_llvm.rs) makes `lli` print its "PLEASE submit a
+    // bug report" internal-crash stack dump for what is actually a
+    // clean, expected, single-instruction trap -- the exact same
+    // misleading-crash class BUG-106 fixed for plain `assert`
+    // statements (and BUG-113 fixed for `requires`-clause
+    // violations). Confirmed via a minimal non-recursive repro
+    // (`v[10]` on a 3-element Vec, no stack overflow involved) that
+    // this reproduces independent of BUG-108/110's own repros
+    // (which involved genuine stack overflow, where the "not
+    // further fixable" framing in their writeups legitimately
+    // applies -- that framing does NOT apply here). `exit(3)`
+    // matches the process-exit-code convention every other vāṇी
+    // runtime trap uses.
     out.push_str(
         "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
            br i1 %ok, label %cont, label %oob\n\
-         oob:\n  call void @abort()\n  unreachable\n\
+         oob:\n  call void @exit(i32 3)\n  unreachable\n\
          cont:\n  ret void\n}\n",
     );
     out.push_str("declare noalias i8* @malloc(i64)\n");
@@ -2380,9 +2395,14 @@ fn emit_function(
         out.push_str(&format!("  store i32 %__bd_new, i32* {}\n", counter));
         out.push_str(&format!("  %__bd_over = icmp sgt i32 %__bd_new, {}\n", bound));
         let body_lbl = ctx.fresh_label("bd_body");
+        // BUG-117 (2026-08-05): same misleading-`lli`-crash-report
+        // class as BUG-113/115 -- `abort()` here made `lli` print
+        // its "PLEASE submit a bug report" internal-crash dump for
+        // a clean, expected `#[bounded(N)]` violation. `exit(3)`
+        // matches every other vāṇी runtime trap.
         out.push_str(&format!(
             "  br i1 %__bd_over, label %__bd_abort, label %{}\n\
-             __bd_abort:\n  call void @abort()\n  unreachable\n\
+             __bd_abort:\n  call void @exit(i32 3)\n  unreachable\n\
              {}:\n",
             body_lbl, body_lbl
         ));
@@ -2459,7 +2479,16 @@ fn emit_function(
             c, ok, fail
         ));
         out.push_str(&format!("{}:\n", fail));
-        out.push_str("  call void @abort()\n");
+        // exit(3) rather than abort(): same reasoning as the
+        // `TypedStmt::Assert` fix above (BUG-106) -- a raw abort()'s
+        // SIGABRT makes `vanic run`/`lli` misreport a clean,
+        // expected precondition failure as an ugly "PLEASE submit a
+        // bug report" internal-crash stack dump. BUG-106's own
+        // writeup left this call site untouched as "not a
+        // divergence" since both backends called abort() here
+        // consistently -- but consistency with each other doesn't
+        // make `lli`'s misleading crash report correct (BUG-113).
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str(&format!("{}:\n", ok));
     }
@@ -47609,9 +47638,14 @@ mod tests {
         }
         // `safe_div` requires b > 0. Pass b through `id()` which has
         // no ensures, so the verifier can't prove the precondition
-        // and the runtime guard must catch it. Process should be
-        // killed by SIGABRT (exit code 128+6=134 on Linux, or a
-        // Windows exception code like 0xC0000409 on Windows).
+        // and the runtime guard must catch it. BUG-113 (2026-08-05):
+        // this guard used to `call void @abort()`, which `lli`
+        // reports as an internal-crash stack dump (SIGABRT caught by
+        // its own signal handler) rather than a clean process exit
+        // -- misleading in exactly the way BUG-106 already fixed for
+        // plain `assert` statements. Now uses `exit(3)`, same as
+        // BUG-106's fix, so this should be a clean exit code 3, not
+        // a signal.
         let source = r#"
             fn safe_div(a: i64, b: i64) -> i64
             requires b > 0;
@@ -47624,10 +47658,10 @@ mod tests {
             }
         "#;
         let exit = run_lli_full(source);
-        assert!(
-            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
-            "expected abort signal, got code {:?}",
-            exit
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3), not an abort signal (BUG-113)"
         );
     }
 

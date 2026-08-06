@@ -195,42 +195,27 @@ When one of the conditions above fires:
 
 1. The compiler-emitted check prints the diagnostic to
    stderr.
-2. For everything except a failed `assert`: `abort()` from
-   libc is called (POSIX `SIGABRT`; on Windows, `_exit(3)`).
-   A failed `assert` instead calls `exit(3)` directly, on
-   both backends -- deliberately skipping the signal-based
-   path so `vanic run`'s LLVM JIT can't misreport it as an
-   apparent native crash.
+2. The runtime calls `exit(3)` directly, on both backends --
+   deliberately skipping a signal-based `abort()`/`SIGABRT`
+   path so `vanic run`'s LLVM JIT can't misreport the failure
+   as an apparent native crash. This is uniform across every
+   row above (`assert`, `requires`, bounds, overflow,
+   divide-by-zero, shift, `#[bounded(N)]`) as of 2026-08-05
+   (BUG-106/113/115/116/117) -- earlier builds had several of
+   these still calling a raw `abort()`, which made `lli` print
+   a misleading `PLEASE submit a bug report to
+   https://github.com/llvm/llvm-project/issues/` stack dump
+   for what was actually a completely ordinary, expected
+   language-level trap. If you're on an older build and still
+   see that output, it's the same harmless (if noisy) symptom
+   this section used to describe -- your check's own diagnostic
+   line in stderr, above the dump, is the real cause; upgrading
+   is the actual fix.
 3. The process terminates immediately. No destructors run.
    No `finally` blocks. No cleanup beyond what the OS does
    on process exit.
-4. The exit code is platform-conventional: a failed `assert`
-   always exits with code `3`; everything else that calls
-   `abort()` is signal-terminated, exiting with
-   `128 + SIGABRT = 134` on POSIX.
-
-**If you're running via `vanic run` (LLVM JIT) and one of the
-non-`assert` rows fires** -- an out-of-bounds index, an
-overflowing `+`/`-`/`*`, a `/`/`%` by zero, or an out-of-range
-shift -- you'll see `lli` print `PLEASE submit a bug report to
-https://github.com/llvm/llvm-project/issues/` followed by a
-stack dump through `libLLVM.so`. **This is not an LLVM bug.**
-It's the exact same JIT-misreporting `assert` used to have
-(the note above) -- `lli`'s crash handler treats any signal
-during JIT execution, including this `SIGABRT` from your own
-program's `abort()` call, as if `lli` itself crashed. Only
-`assert` was switched to the signal-free `exit(3)` path; the
-other checks still use `abort()` (matching the C backend's
-`abort()`-based diagnostics, which print a clean message with
-no such noise), so this scary-looking output is expected and
-harmless whenever you deliberately trip a bounds/overflow/
-divide-by-zero/shift check while iterating on the LLVM
-backend. Look for your check's own diagnostic line in stderr
-above the stack dump -- that's the real cause; the dump itself
-is just `lli` being dramatic about a completely ordinary
-`SIGABRT`. If the noise is more than you want to see routinely,
-`--backend=c` reports the identical set of checks with a single
-clean stderr line and no JIT stack dump.
+4. The exit code is always `3`, on both backends, for every
+   row above.
 
 This is **graceful in the diagnostic sense** -- a named,
 deterministic event with a printable cause -- but **terminal

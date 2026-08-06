@@ -46,6 +46,28 @@ fn ssa_path_supports(
         if !ssa_type_supported(&f.return_type) {
             return false;
         }
+        // BUG-116 (2026-08-05): `f.requires` is now lowered into a
+        // real runtime guard at function entry (`ssa.rs`'s
+        // `lower_function`) instead of being silently dropped —
+        // but that lowering reuses `lower_expr_to_operand`, the
+        // same expression lowerer the function BODY uses, which
+        // doesn't know how to handle any construct
+        // `expr_ssa_supported` would have rejected there (e.g. a
+        // denylisted builtin like `sqrt` inside the clause).
+        // Previously this was moot since nothing ever read
+        // `f.requires` on this path at all; now an SSA-unsupported
+        // `requires` clause must reject the whole module the same
+        // way an SSA-unsupported body expression already does, so
+        // it falls back to the tree backend (which has always
+        // handled arbitrary `requires` expressions) instead of
+        // emitting invalid IR (confirmed: a bare `sqrt(x)` inside
+        // `requires` with no `sqrt` call in the body previously
+        // produced a reference to a nonexistent `@fn_sqrt`).
+        for req in &f.requires {
+            if !expr_ssa_supported(req) {
+                return false;
+            }
+        }
         if !stmts_ssa_supported(&f.body, &extra_reject) {
             return false;
         }

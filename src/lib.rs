@@ -40070,10 +40070,13 @@ função main() -> i64 {
         "#;
         let ll = crate::backend_llvm::LlvmBackend
             .emit(&compile(source).expect("struct + empty-Vec index compiles").ir);
+        // BUG-115 (2026-08-05): the oob block now calls `exit(3)`
+        // instead of `abort()` -- same misleading-`lli`-crash-report
+        // fix as BUG-106/113, applied to this helper too.
         assert!(
             ll.contains("br i1 %ok, label %cont, label %oob")
-                && ll.contains("oob:\n  call void @abort()\n  unreachable"),
-            "bounds-check helper must branch to a reachable abort-on-oob block:\n{}",
+                && ll.contains("oob:\n  call void @exit(i32 3)\n  unreachable"),
+            "bounds-check helper must branch to a reachable exit(3) oob block:\n{}",
             ll
         );
     }
@@ -42492,11 +42495,13 @@ função main() -> i64 {
             fn main() -> i64 { return deep(3); }
         "#;
         let ll = compile_to_llvm(source).expect("bounded fn compiles to LLVM");
+        // BUG-117 (2026-08-05): switched from `abort()` to `exit(3)`,
+        // same misleading-lli-crash-report fix as BUG-113/115/116.
         assert!(
             ll.contains("@__intent_depth_deep = thread_local global i32 0")
                 && ll.contains("icmp sgt i32")
-                && ll.contains("call void @abort()"),
-            "expected thread-local depth counter + bound check + abort emit, got:\n{}",
+                && ll.contains("call void @exit(i32 3)"),
+            "expected thread-local depth counter + bound check + exit(3) emit, got:\n{}",
             ll
         );
     }
