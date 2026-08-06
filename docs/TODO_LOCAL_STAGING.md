@@ -2414,7 +2414,25 @@ The mutant source provided in the question contains an attempt to declare a pure
 **REMOVAL OF THE BUG:**
 After removing the conflict and ensuring that the `atoll` function is correctly declared as a pure extern with the appropriate signature, the mutant passed the FFI test.
 
-**STATUS: needs human/frontier root-cause review.**
+STATUS: FIXED -- BUG-118 on main (2026-08-06).
+
+Root cause was real (not just in the fuzzer's near-unmutated `repro.vani`) --
+`vanic run examples/language/english/ffi.vani --backend=c` reproduced cleanly
+against a fresh main checkout. Both `backend_c.rs` and `ssa_backend_c.rs` spell
+`i64` as `int64_t` in `extern "C" fn` prototypes; on this LP64 host `int64_t` is
+`long`, but `atoll` is C99-mandated to return `long long` -- same width,
+nominally different type, and `cc` rejects the redeclaration even though
+`<stdlib.h>` (already unconditionally included) declares it correctly on its
+own. Fixed by adding `backend_c::is_known_libc_symbol`, a narrow allowlist of
+the five C99 `long long`-mandated libc symbols (`atoll`, `strtoll`, `strtoull`,
+`llabs`, `lldiv`); both C backends now skip emitting their own competing
+prototype for those names and trust the header's declaration instead.
+Deliberately not widened to every stdlib/string/stdio symbol (e.g. `atoi`'s
+`int` return already matches our `int32_t` mapping, and suppressing its
+prototype too would have broken the pre-existing
+`extern_c_fn_emits_bare_c_prototype_and_call` test). See `docs/TODO_CURRENT.md`
+BUG-118 entry on `main` for the full writeup + new test
+`extern_c_atoll_does_not_conflict_with_libc_prototype`.
 
 ---
 
@@ -2427,7 +2445,14 @@ After removing the conflict and ensuring that the `atoll` function is correctly 
 Repro: `tools/localfuzz/findings/20260806-140436-run-crash-f39e189ec9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-140436-run-crash-f39e189ec9/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- fuzzer mutation artifact (investigated 2026-08-06).
+
+`repro.vani` diffs from the real `examples/language/korean/early_exit.vani` by one
+deleted line: the mutator dropped the loop's `n = n + 1;` increment, so the
+`동안 n < 100 { 만약 n == 5 { 중단; } }` loop body never advances `n` and never hits the
+break condition -- a genuine infinite loop in the *mutated source itself*. Both
+backends correctly hang forever; this is not a compiler bug. Same class as
+20260806-153125-run-crash-bfb7da2412 below.
 
 ---
 
@@ -2436,7 +2461,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260806-153125-run-crash-bfb7da2412/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-153125-run-crash-bfb7da2412/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- fuzzer mutation artifact (investigated 2026-08-06).
+
+`repro.vani` diffs from the real `examples/language/assamese/early_exit.vani` by one
+deleted line: the mutator dropped `count_positive`'s `i = i + 1;` increment, so
+`যতক্ষণ i < len(xs) { ... }` never advances `i` -- a genuine infinite loop in the
+*mutated source itself*, not a compiler bug.
 
 ---
 
@@ -2467,11 +2497,38 @@ To address this issue, further investigation into the compiler's source code wil
 
 Once a root cause is identified, I will update this bug report with more details about how the issue was resolved or if it requires changes to the compiler's behavior.
 
+### UPDATE (2026-08-06): NOT A BUG -- fuzzer mutation artifact.
+`repro.vani` diffs from the real `examples/language/persian/async_cancel_auto.vani`
+by one changed argument: the mutator replaced `delay(10, 7)` with
+`delay(9223372036854775807, 7)`, i.e. `sleep_ms(i64::MAX)`. Both backends correctly
+try to sleep for that duration (~292 million years); the harness's timeout fires
+long before that, exactly as it should. Not a compiler defect, just a pathological
+mutated constant -- a fuzzer-mutator improvement (avoid feeding `sleep_ms`-style
+duration args astronomically large mutated ints) would be the actual fix, not
+anything in `vani-compiler` itself.
+
 ---
 
 ### Candidate: 20260806-174402-run-crash-a823aaed3d
 
 Repro: `tools/localfuzz/findings/20260806-174402-run-crash-a823aaed3d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-174402-run-crash-a823aaed3d/fix_attempt.md`
+
+STATUS: NOT A BUG -- fuzzer mutation artifact (investigated 2026-08-06).
+
+`repro.vani` diffs from the real `examples/language/swedish/for_loops.vani` by one
+changed argument: the mutator replaced `summa_intervall(1, 5)` with
+`summa_intervall(-9223372036854775808, 5)`, i.e. a `för i från start till slut` loop
+from `i64::MIN` to `5` -- ~9.2 quintillion real iterations. Both backends correctly
+grind on that (legitimately enormous, not infinite) amount of work until the
+harness's timeout fires. Not a compiler defect, same pathological-mutated-constant
+class as 20260806-162420-run-crash-3b08e2a115 above.
+
+---
+
+### Candidate: 20260806-193817-run-crash-2767ef4c1c
+
+Repro: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
