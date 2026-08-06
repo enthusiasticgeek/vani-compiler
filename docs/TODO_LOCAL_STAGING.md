@@ -2369,3 +2369,12 @@ The exact repro source is provided in the `Mutant/generated source` block above.
 **Observed Symptom**: The compiler crashes during the execution of the C backend.
 
 **Backend Affected**: C backend.
+
+---
+
+### Candidate: 20260806-074341-run-crash-0bef22ebdc
+
+Repro: `tools/localfuzz/findings/20260806-074341-run-crash-0bef22ebdc/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-074341-run-crash-0bef22ebdc/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
