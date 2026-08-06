@@ -5485,6 +5485,46 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         // the wrong predecessor block and module
                         // verification fails ("Bad module").
                         ctx.current_block = ok;
+
+                        // BUG-119: `MIN / -1` (and `MIN % -1`)
+                        // overflows the representable range -- a
+                        // distinct trap from "divisor is zero" just
+                        // above, which a raw `sdiv`/`srem` doesn't
+                        // guard at all (the CPU itself traps with
+                        // SIGFPE, surfacing as `lli`'s misleading
+                        // "PLEASE submit a bug report" crash dump).
+                        // Unsigned types have no negative divisor,
+                        // so only signed needs this second guard.
+                        if signed {
+                            let bits = left.ty.bits().unwrap_or(64);
+                            let min_val: i128 = -(1i128 << (bits - 1));
+                            let l_is_min = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = icmp eq {} {}, {}\n",
+                                l_is_min, ty, l, min_val
+                            ));
+                            let r_is_neg1 = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = icmp eq {} {}, -1\n",
+                                r_is_neg1, ty, r
+                            ));
+                            let would_overflow = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = and i1 {}, {}\n",
+                                would_overflow, l_is_min, r_is_neg1
+                            ));
+                            let ovf_ok = ctx.fresh_label("div_ovf_ok");
+                            let ovf_fail = ctx.fresh_label("div_ovf_fail");
+                            out.push_str(&format!(
+                                "  br i1 {}, label %{}, label %{}\n",
+                                would_overflow, ovf_fail, ovf_ok
+                            ));
+                            out.push_str(&format!("{}:\n", ovf_fail));
+                            out.push_str("  call void @abort()\n");
+                            out.push_str("  unreachable\n");
+                            out.push_str(&format!("{}:\n", ovf_ok));
+                            ctx.current_block = ovf_ok;
+                        }
                     }
                     BinaryOp::Shl | BinaryOp::Shr => {
                         let bits = left.ty.bits().unwrap_or(64) as i64;
@@ -47682,6 +47722,54 @@ mod tests {
         assert!(
             exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
             "expected abort signal on div by zero, got {:?}",
+            exit
+        );
+    }
+
+    #[test]
+    fn lli_aborts_on_signed_div_min_by_neg_one_overflow() {
+        if !lli_available() {
+            return;
+        }
+        // BUG-119: `i64::MIN / -1` overflows the representable
+        // range -- a distinct trap from "divisor is zero" above,
+        // which the pre-existing guard never covered. Before the
+        // fix this reached a raw `sdiv` and hit a genuine hardware
+        // SIGFPE (surfacing as `lli`'s "PLEASE submit a bug report"
+        // crash banner); now it hits vani's own `abort()` guard,
+        // same clean-signal shape as the div-by-zero case.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return -9223372036854775808 / id(-1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert!(
+            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
+            "expected abort signal on MIN / -1 overflow, got {:?}",
+            exit
+        );
+    }
+
+    #[test]
+    fn lli_aborts_on_signed_rem_min_by_neg_one_overflow() {
+        if !lli_available() {
+            return;
+        }
+        // Same as the Div case above, but for Rem (`i64::MIN % -1`
+        // overflows too -- the quotient would be `i64::MAX + 1`,
+        // which is what makes the remainder undefined as well).
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return -9223372036854775808 % id(-1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert!(
+            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
+            "expected abort signal on MIN % -1 overflow, got {:?}",
             exit
         );
     }

@@ -41105,9 +41105,85 @@ função main() -> i64 {
         "#;
 
         let c = compile_to_c(source).expect("unsafe_div should compile");
+        // BUG-119: signed i64 Div now routes through the combined
+        // divide-by-zero + `MIN / -1`-overflow helper instead of the
+        // old divisor-only check (still used for unsigned/float).
         assert!(
-            c.contains("intent_check_i64_divisor"),
-            "expected divisor helper to remain when unprovable, got:\n{}",
+            c.contains("intent_checked_i64_div"),
+            "expected checked-div helper to remain when unprovable, got:\n{}",
+            c
+        );
+    }
+
+    // BUG-119: `MIN / -1` (and `MIN % -1`) overflows the
+    // representable range for a signed integer -- a genuine trap
+    // distinct from "divisor is zero", which the pre-existing
+    // divisor-only guard never covered (confirmed live against
+    // plain `main` before the fix: `vanic run` crashed with `lli`'s
+    // "PLEASE submit a bug report" banner -- a raw hardware SIGFPE,
+    // not vani's own clean trap). Fixed by routing signed Div/Rem
+    // through a combined helper that checks BOTH operands and
+    // performs the operation itself.
+    #[test]
+    fn checked_signed_div_and_rem_guard_against_min_by_neg_one_overflow() {
+        let source = r#"
+            fn unsafe_div(a: i64, b: i64) -> i64 { return a / b; }
+            fn unsafe_rem(a: i64, b: i64) -> i64 { return a % b; }
+            fn main() -> i64 {
+              let d: i64 = unsafe_div(10, 3);
+              let r: i64 = unsafe_rem(10, 3);
+              print d, r;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_checked_i64_div") && c.contains("intent_checked_i64_rem"),
+            "expected combined checked div/rem helpers, got:\n{}",
+            c
+        );
+        // The helper body must check both the zero case and the
+        // MIN/-1 overflow case, not just one.
+        let div_def_start = c
+            .find("intent_checked_i64_div(int64_t a, int64_t b)")
+            .expect("intent_checked_i64_div definition");
+        let div_def = &c[div_def_start..div_def_start + 400];
+        assert!(
+            div_def.contains("b == 0") && div_def.contains("INT64_MIN"),
+            "expected both the divisor-zero and MIN/-1 overflow checks in intent_checked_i64_div, got:\n{}",
+            div_def
+        );
+
+        // SSA-C emits the same two guards inline instead of via a
+        // named helper -- check both code paths, not just tree-C.
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            ssa_c.contains("== 0") && ssa_c.contains("INT64_MIN"),
+            "expected both guards in SSA-C output, got:\n{}",
+            ssa_c
+        );
+    }
+
+    #[test]
+    fn unsigned_div_still_uses_divisor_only_check_not_combined_helper() {
+        // Unsigned types have no negative divisor, so there's no
+        // `MIN / -1` case -- the plain divisor-only guard remains
+        // correct and shouldn't be replaced.
+        let source = r#"
+            fn unsafe_div(a: u64, b: u64) -> u64 { return a / b; }
+            fn main() -> i64 {
+              let d: u64 = unsafe_div(10, 3);
+              print d;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_check_u64_divisor") && !c.contains("intent_checked_u64_div"),
+            "expected unsigned div to keep the divisor-only check, got:\n{}",
             c
         );
     }

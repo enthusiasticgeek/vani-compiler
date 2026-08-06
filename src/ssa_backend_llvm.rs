@@ -240,6 +240,12 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         std::collections::BTreeSet::new();
     let mut checked_shift_tys: std::collections::BTreeSet<&'static str> =
         std::collections::BTreeSet::new();
+    // BUG-119: signed Div/Rem need the combined divide-by-zero +
+    // `MIN / -1`-overflow helper (both operands); unsigned Div/Rem
+    // keep using `checked_divisor_tys`' divisor-only helper above
+    // (no negative divisor, so no `MIN / -1` case exists for them).
+    let mut checked_signed_div_rem_ops: std::collections::BTreeSet<(&'static str, &'static str)> =
+        std::collections::BTreeSet::new();
     for f in &module.functions {
         for block in &f.blocks {
             for instr in &block.instructions {
@@ -261,6 +267,10 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
                             _ => unreachable!(),
                         };
                         checked_overflow_ops.insert((tyname, op_word));
+                    }
+                    BinaryOp::Div | BinaryOp::Rem if instr.ty.is_signed_integer() => {
+                        let op_word = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
+                        checked_signed_div_rem_ops.insert((tyname, op_word));
                     }
                     BinaryOp::Div | BinaryOp::Rem => {
                         checked_divisor_tys.insert(tyname);
@@ -442,6 +452,36 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
                ret {w} %x\n}}\n",
             w = llvm_w,
             ty = tyname,
+        ));
+    }
+    // BUG-119: combined divide-by-zero + `MIN / -1`-overflow helper
+    // for signed Div/Rem. Takes BOTH operands (unlike
+    // `@__intent_checked_divisor_*` above, which only sees the
+    // divisor) and performs the `sdiv`/`srem` itself, mirroring the
+    // Add/Sub/Mul "return the checked result" helper shape above.
+    for (tyname, op_word) in &checked_signed_div_rem_ops {
+        let (llvm_w, _signed, bits) = int_type_info(tyname);
+        let min_val: i128 = -(1i128 << (bits - 1));
+        let opcode = if *op_word == "div" { "sdiv" } else { "srem" };
+        out.push_str(&format!(
+            "define internal {w} @__intent_checked_{op_word}_{ty}({w} %a, {w} %b) alwaysinline {{\n\
+             entry:\n  \
+               %z = icmp eq {w} %b, 0\n  \
+               br i1 %z, label %oob, label %nz1, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             nz1:\n  \
+               %amin = icmp eq {w} %a, {min}\n  \
+               %bneg1 = icmp eq {w} %b, -1\n  \
+               %ovf = and i1 %amin, %bneg1\n  \
+               br i1 %ovf, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             oob:\n  call void @exit(i32 3)\n  unreachable\n\
+             cont:\n  \
+               %r = {opcode} {w} %a, %b\n  \
+               ret {w} %r\n}}\n",
+            w = llvm_w,
+            op_word = op_word,
+            ty = tyname,
+            min = min_val,
+            opcode = opcode,
         ));
     }
     for tyname in &checked_shift_tys {
@@ -5368,6 +5408,26 @@ fn emit_binary(
                     ));
                     return Ok(());
                 }
+                // BUG-119: signed Div/Rem route through the combined
+                // divide-by-zero + `MIN / -1`-overflow helper, which
+                // takes both operands and returns the checked result
+                // directly (same early-return shape as Add/Sub/Mul
+                // above) -- unlike the unsigned case just below, a
+                // signed divisor-only check can't see the numerator,
+                // so it can never catch `MIN / -1`.
+                BinaryOp::Div | BinaryOp::Rem if signed => {
+                    let op_word = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
+                    out.push_str(&format!(
+                        "  %v_{} = call {ty} @__intent_checked_{op_word}_{tyname}({ty} {l}, {ty} {r})\n",
+                        result.0,
+                        ty = ty_str,
+                        op_word = op_word,
+                        tyname = tyname,
+                        l = l_s,
+                        r = r_s,
+                    ));
+                    return Ok(());
+                }
                 BinaryOp::Div | BinaryOp::Rem => {
                     let checked_r = format!("%v_{}.divchk", result.0);
                     out.push_str(&format!(
@@ -6222,9 +6282,12 @@ mod tests {
             "expected the checked-subtraction path (llvm.ssub.with.overflow) for a non-constant `n - -1`:\n{}",
             ll
         );
+        // BUG-119: signed i64 Div/Rem now route through the combined
+        // divide-by-zero + `MIN / -1`-overflow helper instead of the
+        // divisor-only check (still used for unsigned Div/Rem).
         assert!(
-            ll.contains("@__intent_checked_divisor_i64"),
-            "expected a divide-by-zero guard call:\n{}",
+            ll.contains("@__intent_checked_div_i64"),
+            "expected a checked-div guard call:\n{}",
             ll
         );
         assert!(

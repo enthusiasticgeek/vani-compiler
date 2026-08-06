@@ -198,7 +198,14 @@ SSA fast path silently drops a runtime guard the tree path has."
   partially covers an op's safety (e.g. `requires b != 0` but the
   op is `a % b` where `a` could still be `i64::MIN` and `b` could
   still be `-1`, the other overflow case for signed division/rem)?
-  Worth one repro targeting exactly that gap.
+  Worth one repro targeting exactly that gap. **RESOLVED as BUG-119**
+  (2026-08-06) -- turned out bigger than the elision-soundness
+  question posed: the repro crashed identically with the `requires`
+  clause removed entirely, proving no backend had ANY runtime guard
+  for `MIN / -1`/`MIN % -1` at all (not an elision gap -- the
+  divisor-only check literally couldn't see the numerator). All four
+  backends fixed to validate both operands for signed Div/Rem. See
+  `docs/TODO_CURRENT.md`'s BUG-119 entry.
 
 ## C. Recursive type-walk helper exhaustiveness audit (🟡)
 

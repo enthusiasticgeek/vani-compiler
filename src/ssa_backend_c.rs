@@ -1683,6 +1683,32 @@ fn emit_instr(
                             c_operand(r)
                         )
                         .unwrap();
+                        // BUG-119: `MIN / -1` (and `MIN % -1`) overflows
+                        // the representable range -- a distinct trap
+                        // from "divisor is zero" above. Only signed
+                        // types have a negative divisor at all.
+                        if result_ty.is_signed_integer() {
+                            let min_macro = match result_ty {
+                                Type::I8 => "INT8_MIN",
+                                Type::I16 => "INT16_MIN",
+                                Type::I32 => "INT32_MIN",
+                                Type::I64 => "INT64_MIN",
+                                _ => unreachable!(
+                                    "signed integer Binary result must be I8/I16/I32/I64"
+                                ),
+                            };
+                            let op_name = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
+                            writeln!(
+                                out,
+                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); abort(); }}",
+                                r = c_operand(r),
+                                l = c_operand(l),
+                                min = min_macro,
+                                ty = ty_c,
+                                op_name = op_name,
+                            )
+                            .unwrap();
+                        }
                     }
                     BinaryOp::Shl | BinaryOp::Shr => {
                         let bits = result_ty.bits().unwrap_or(64);

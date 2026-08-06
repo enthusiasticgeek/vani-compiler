@@ -8511,3 +8511,53 @@ unnecessary behavior change (and broke the pre-existing
 *is* emitted). New test `extern_c_atoll_does_not_conflict_with_libc_prototype`
 (`src/lib.rs`) covers both the tree-C and SSA-C backends. Full `cargo test --release`
 (2756 lib tests + 190 end-to-end subprocess tests) clean, zero regressions.
+
+## BUG-119 (2026-08-06) -- signed `MIN / -1` (and `MIN % -1`) had no runtime guard at all
+
+Picked up from `docs/BUG_PATTERN_AUDIT_TODO.md` category B's own suggested next repro
+("does `requires b != 0` correctly cover `a % b`'s *other* overflow case?"). The
+`requires`-based repro (`requires b != 0` on `fn safe_rem(a: i64, b: i64)`, called with
+`(i64::MIN, -1)`) crashed `vanic run` (default LLVM) with `lli`'s misleading "PLEASE
+submit a bug report" banner -- a genuine hardware SIGFPE, not a clean vani trap.
+Stripping the `requires` clause entirely still crashed the same way, proving this
+isn't a `requires`-elision gap at all (unlike BUG-116): **no backend had ANY runtime
+guard for this case, requires clause or not.** Both `--backend=c` and default LLVM hit
+it for both `/` and `%`; the C backend happened not to crash (gcc's own codegen
+sidesteps the hardware trap here) but LLVM's raw `sdiv`/`srem` reached actual hardware
+overflow.
+
+Root cause: all four backends' Div/Rem "checked" guard only ever validated the
+divisor (`b == 0`) -- `intent_check_i64_divisor` (tree-C), the inline `(r) == 0` check
+(SSA-C), and `@__intent_checked_divisor_i64` (SSA-LLVM) all take just the RHS operand,
+so none of them could ever see the `a == i64::MIN` half of the `MIN / -1` overflow
+condition; tree-LLVM's inline guard had the identical one-operand shape. Only signed
+types have this case at all (no negative divisor for unsigned).
+
+Fix: for signed integer Div/Rem specifically, replaced the divisor-only guard with a
+combined helper/inline-check that validates BOTH operands and performs the operation
+itself (same "return the checked result" shape the pre-existing Add/Sub/Mul overflow
+helpers already use) -- `intent_checked_{ty}_div`/`_rem` (tree-C, new preamble
+helpers), an added inline `(r) == -1 && (l) == {TY}_MIN` check after the existing
+zero-check (SSA-C), a second `icmp`/`br`/`abort()` guard block after the existing
+divisor-zero block (tree-LLVM, matching that function's existing raw-`abort()`
+convention), and `@__intent_checked_div_{ty}`/`@__intent_checked_rem_{ty}` -- new
+preamble helpers taking both operands, `exit(3)` on failure (matching SSA-LLVM's
+existing clean-trap convention) -- replacing `@__intent_checked_divisor_{ty}` for
+signed types only (unsigned Div/Rem keeps the old divisor-only helper unchanged, since
+it's still correct there). Updated three pre-existing tests whose assertions named the
+old divisor-only helper for a signed `i64` case (`divisor_check_remains_when_safety_is_
+not_provable` in `src/lib.rs`, `checked_binary_emits_runtime_guards_on_ssa_llvm` in
+`src/ssa_backend_llvm.rs`) to expect the new combined-helper name instead -- the
+elision-based tests (`smt_elides_divisor_check_when_requires_proves_nonzero` and the
+`safe_at` bounds+divisor test) needed no change, since `requires b > 0` already rules
+out `b == -1` and the elision stays sound. New tests: `checked_signed_div_and_rem_
+guard_against_min_by_neg_one_overflow` + `unsigned_div_still_uses_divisor_only_check_
+not_combined_helper` (`src/lib.rs`, covering tree-C and SSA-C), `lli_aborts_on_signed_
+div_min_by_neg_one_overflow` + `_rem_` variant (`src/backend_llvm.rs`, tree-LLVM via
+`lli`). Full `cargo test --release` (2762 lib tests + 190 end-to-end subprocess tests)
+clean, zero regressions.
+
+Note: message text still differs cosmetically between tree-C ("i64") and SSA-C
+("int64_t") for this new check, same as the pre-existing Add/Sub/Mul overflow
+messages -- a known, already-accepted inconsistency (`docs/BUG_PATTERN_AUDIT_TODO.md`
+category D), not something this fix changed or needs to fix.
