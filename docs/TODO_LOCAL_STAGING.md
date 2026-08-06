@@ -2387,3 +2387,35 @@ Repro: `tools/localfuzz/findings/20260806-095440-run-crash-db4aa42d2b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260806-095440-run-crash-db4aa42d2b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260806-131124-backend-divergence-8b9ba83096
+
+Repro: `tools/localfuzz/findings/20260806-131124-backend-divergence-8b9ba83096/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-131124-backend-divergence-8b9ba83096/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+**FINDING: backend-divergence**
+**REPRODUCED FROM: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/ffi.vani**
+
+**FOUND BY: vanic run examples/language/english/ffi.vani --backend=c**
+
+**SYMPTOMS:**
+ - `cc` failed while compiling `/tmp/vanic-candidate-416370-1786021883269489619.c`
+ - Error in conflicting types for `atoll`
+
+**BEHIND REPRODUCTION:**
+The mutant source provided in the question contains an attempt to declare a pure extern function `atoll` with a conflicting type signature. This conflict arises because the function is defined as a `long long int` in C, which does not match the prototype declared in the vāṇī code.
+
+**REMOVAL OF THE BUG:**
+After removing the conflict and ensuring that the `atoll` function is correctly declared as a pure extern with the appropriate signature, the mutant passed the FFI test.
+
+**STATUS: needs human/frontier root-cause review.**
+
+---
+
+**END OF STAGING ENTRY.**
