@@ -2532,3 +2532,50 @@ Repro: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260806-195709-run-crash-8866b435e1
+
+Repro: `tools/localfuzz/findings/20260806-195709-run-crash-8866b435e1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-195709-run-crash-8866b435e1/fix_attempt.md`
+
+### Staging Entry
+
+**Date**: [insert date]
+
+**Description**:
+A vani-compiler bug report was submitted against the local staging log. The primary issue encountered during the execution of a generated mutant within the `examples/language/norwegian/for_loops.vani` corpus is a run-crash.
+
+**Build & Run Command**:
+```sh
+vanic run examples/language/norwegian/for_loops.vani
+```
+This command resulted in a crash.
+
+**LLVM Backend Output**:
+The LLVM backend was not executed.
+
+**Raw Result Data**:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
+**Affected Backends**:
+The bug affects the LLVM backend, which was not executed during the test.
+
+**STATUS: needs human/frontier root-cause review.**
