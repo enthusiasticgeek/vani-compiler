@@ -2284,3 +2284,12 @@ async fn anf_compose(fd: i64, bias: i64) -> i64 {
 fn drive(ep: i64, t: mut ref Task__anf_compose) -> i64 {
   while true {
     let r: i64 = __poll_an
+
+---
+
+### Candidate: 20260806-033737-run-crash-ea3a66e1a1
+
+Repro: `tools/localfuzz/findings/20260806-033737-run-crash-ea3a66e1a1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260806-033737-run-crash-ea3a66e1a1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
