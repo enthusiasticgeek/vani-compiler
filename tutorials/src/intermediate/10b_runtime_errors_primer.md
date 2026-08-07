@@ -270,6 +270,15 @@ actually touched, and only on the paths those fixes covered:
    which backend compiled it -- check the STDERR MESSAGE TEXT
    (present on the C backend, absent on LLVM), not just the
    exit code, if you need to detect which check actually fired.
+   One more wrinkle, fixed 2026-08-07: raw `abort()` does NOT
+   flush stdio the way `exit()` does, so any `print` output your
+   program had already buffered before one of these 4 traps fired
+   used to vanish on the C backend -- LLVM's `exit(3)` preserved
+   it, making the two backends' crash output look like it
+   disagreed even when the underlying trap was identical. The C
+   backend now calls `fflush(stdout)` immediately before each of
+   these 4 `abort()` calls, so buffered `print` output survives
+   the crash on both backends.
 3. The process terminates immediately in every case above. No
    destructors run. No `finally` blocks. No cleanup beyond what
    the OS does on process exit.

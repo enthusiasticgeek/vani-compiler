@@ -12329,3 +12329,48 @@ fn main() -> i64 { return deep(10); }
         );
     }
 }
+
+// BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
+// backend-divergence finding -- reported as a divergence because the C
+// backend's raw `abort()` (deliberately kept for bounds/overflow/div-by-
+// zero/shift, per the same BUG-106-class scoping decision documented in
+// `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2) does
+// not flush stdio, so every `print` statement buffered before the trap
+// was silently lost -- while the LLVM backend's `exit(3)` (BUG-120)
+// preserves it. Same underlying trap, same computed values, but the C
+// backend's stdout looked empty next to LLVM's, reading like the two
+// backends disagreed when they didn't. Fixed by adding `fflush(stdout);`
+// immediately before each of these `abort()` calls.
+#[test]
+fn c_backend_preserves_buffered_stdout_before_a_raw_abort_trap() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug136-stdout-lost-before-abort",
+        r#"
+fn main() -> i64 {
+  print "line one";
+  print "line two";
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let i: i64 = -1;
+  print xs[i];
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("line one") && stdout.contains("line two"),
+        "BUG-136 regression: buffered stdout before an abort()-raising trap was \
+         lost on the C backend; stdout: {stdout:?}, stderr: {stderr:?}, status: {:?}",
+        output.status
+    );
+    assert!(
+        stderr.contains("index out of bounds"),
+        "expected the bounds-check message on stderr, got: {stderr:?}"
+    );
+}

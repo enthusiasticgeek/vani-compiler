@@ -22267,6 +22267,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect(index < 0 || index >= length, 0)) {\n\
         fprintf(stderr, \"index out of bounds: %lld, len %lld\\n\",\n\
                 (long long)index, (long long)length);\n\
+        fflush(stdout);\n\
         abort();\n\
     }\n\
     if (index < 0 || index >= length) __builtin_unreachable();\n\
@@ -22319,6 +22320,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     {c} r;\n\
     if (__builtin_expect({bl}(a, b, &r), 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     return r;\n\
@@ -22343,10 +22345,12 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
             "static INTENT_UNUSED inline {c} intent_checked_{t}_{op}({c} a, {c} b) {{\n\
     if (__builtin_expect(b == 0, 0)) {{\n\
         fprintf(stderr, \"division by zero\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     if (__builtin_expect(b == -1 && a == {min}, 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     return a {c_op} b;\n\

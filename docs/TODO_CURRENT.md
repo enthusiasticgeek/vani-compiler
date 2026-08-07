@@ -9501,3 +9501,66 @@ Not a `docs/UNRESOLVED_GAPS_TODO.md` item (that document's scope is fully closed
 BUG-134 above) -- found by re-reading BUG-130's own "not fixed, out of scope" aside
 when asked to pick the next item to work on, since no open item remained in any of the
 tracked TODO docs.
+
+## BUG-136 (2026-08-07) -- C backend's raw `abort()` traps silently discarded buffered stdout, unlike LLVM's `exit(3)`
+
+Found via localfuzz: its `graph_algo2.vani` (English) fuzzer mutation reported a
+"backend-divergence" finding where the C backend's stdout was completely empty and the
+LLVM backend's showed 5+ prior `print` lines, for what looked like the same crash.
+Re-running the repro against a fresh build confirmed both backends actually agree on
+the underlying trap (an out-of-bounds index of `-1` into a length-5 Vec/array -- a bug
+in the fuzzed *test program* itself, not a compiler wrong-answer) -- the divergence was
+purely a diagnostic artifact: raw `abort()` does NOT flush stdio buffers the way
+`exit()` does, so any `print` output the C-backend binary had already buffered before
+the trap fired was silently lost, while LLVM's `exit(3)` (BUG-120) flushed and
+preserved it. A second localfuzz finding from the same batch (`vec_invariants.vani`,
+Arabic, a genuine silent-wrong-answer divergence from `while`-loop-carried overflow)
+turned out to already be fixed on current main -- a duplicate of BUG-127 earlier today,
+closed out in the localfuzz worktree's staging log with no compiler change needed. The
+other 3 candidates in the same batch (2x `sleep_ms(i64::MAX)` mutations, 1x a racy
+double-`tcp_connect_local` mutation) were false positives -- fuzzer-introduced bugs in
+the *test programs*, not the compiler; also closed out in the staging log.
+
+Scoped this fix to exactly the 4 "Row 2" trap categories `tutorials/src/intermediate/
+10b_runtime_errors_primer.md` documents as deliberately-still-`abort()` on the C
+backend: bounds checks, integer overflow, divide-by-zero (+ `MIN / -1` overflow),
+and shift-past-width. Added `fflush(stdout);` immediately before each of these traps'
+`abort()` call, on both C codegen paths (tree-C in `backend_c.rs`: bounds ~line 22270,
+overflow ~line 22323, div-by-zero/overflow ~lines 22348/22353; SSA-C in
+`ssa_backend_c.rs`: overflow ~line 1667, div-by-zero/overflow ~lines 1682/1703, shift
+~line 1722, bounds ~lines 2774/2800/2872/2916 -- 4 sites because reads and writes each
+have a checked/unchecked-length variant). Deliberately did NOT touch the much larger
+set of OOM-guard `abort()` calls (`if (!ptr) abort();`) scattered through the runtime
+helpers, nor the Vec-builtin-method contract checks (`swap_remove`/`insert`/`set`/
+`set_mut`/`pop`, which use the same `fprintf`+`abort()` shape but aren't part of the
+tutorial's documented Row 2 surface) -- flagged as a similar-but-separate follow-up,
+not chased here.
+
+Also discovered tree-C's `intent_check_<ty>_divisor`/`intent_check_<ty>_shift` helper
+functions (using a plain C library `assert()`, which a build with a `-DNDEBUG` cc flag
+would silently compile away) are dead code -- defined but never actually called by any
+tree-C codegen emission site (grepped for call sites, found none outside the
+self-referential `body.contains(...)` filter that gates whether to emit the helper at
+all). Not a live bug since nothing reaches them; noted here in case a future change
+makes them reachable again.
+
+Verified directly against a current build: `graph_algo2`'s repro now shows the same
+buffered `print` output on the C backend as LLVM (previously empty on C). Manually
+confirmed all 4 trap categories preserve prior `print` output on both codegen paths
+(SSA-C by default; tree-C forced via an unrelated `#[no_mangle] fn` per
+`ssa_path_supports` in `main.rs`).
+
+Added `c_backend_flushes_stdout_before_abort_on_all_four_row2_traps` to `src/lib.rs`
+(compile-only, asserts `fflush(stdout); abort();` appears together at each of the 4
+trap sites on both SSA-C and tree-C). Added
+`c_backend_preserves_buffered_stdout_before_a_raw_abort_trap` to
+`tests/run_end_to_end.rs` (real subprocess run: two `print` lines followed by a
+provably-out-of-bounds Vec index, asserts both lines survive on stdout after the C
+backend's `abort()`-driven exit 134).
+
+`tutorials/src/intermediate/10b_runtime_errors_primer.md`'s "What actually happens
+when one fires" section gained a short addendum noting the stdout-preservation fix
+(no prior claim was false here -- this was previously undocumented behavior, not a
+stale claim -- so this is an addition, not a correction like BUG-129/130's sweep).
+
+Full `cargo test --release` clean (2801 lib tests + all integration suites, 0 failed).

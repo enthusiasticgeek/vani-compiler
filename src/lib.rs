@@ -30710,6 +30710,116 @@ fn main() -> i64 {
         );
     }
 
+    // BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
+    // backend-divergence finding. The bounds / overflow / divide-by-zero
+    // / shift traps on the C backend are deliberately still raw
+    // `abort()` (out of scope for the BUG-106/113/116/120/129/135
+    // `exit(3)` conversions -- see `tutorials/src/intermediate/
+    // 10b_runtime_errors_primer.md`'s Row 2). But `abort()` does NOT
+    // flush stdio, unlike `exit()` -- so any `print` output buffered
+    // before the trap fired was silently discarded on the C backend
+    // while the LLVM backend's `exit(3)` preserved it, making the two
+    // backends' crash diagnostics look like they disagreed (a "backend
+    // divergence") even when the underlying trap condition matched
+    // exactly. Fixed by adding `fflush(stdout);` immediately before
+    // each `abort()` at these 4 trap categories, on both C codegen
+    // paths (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
+    // Deliberately NOT touching the many OOM-guard `abort()` calls
+    // (`if (!ptr) abort();`) scattered through the runtime helpers --
+    // a different class, out of scope here.
+    #[test]
+    fn c_backend_flushes_stdout_before_abort_on_all_four_row2_traps() {
+        let overflow_source = r#"
+            fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return add_it(9223372036854775807, 1); }
+        "#;
+        let checked = compile(overflow_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("integer overflow in") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             overflow trap in SSA-C output, got:\n{c}"
+        );
+
+        let div_source = r#"
+            fn div_it(a: i64, b: i64) -> i64 { return a / b; }
+            fn main() -> i64 { return div_it(10, 0); }
+        "#;
+        let checked = compile(div_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("division by zero") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             divide-by-zero trap in SSA-C output, got:\n{c}"
+        );
+
+        let shift_source = r#"
+            fn shift_it(a: i64, k: i64) -> i64 { return a << k; }
+            fn main() -> i64 { return shift_it(1, 99); }
+        "#;
+        let checked = compile(shift_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("shift amount out of range") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             shift trap in SSA-C output, got:\n{c}"
+        );
+
+        let bounds_source = r#"
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              return read(ref xs, 1);
+            }
+        "#;
+        let checked = compile(bounds_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("index out of bounds") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             bounds trap in SSA-C output, got:\n{c}"
+        );
+
+        // Tree-C: bounds and overflow (div-by-zero/overflow share the
+        // same two-guard helper; shift's tree-C helper is unreachable
+        // dead code -- never emitted by any call site, so not tested
+        // here). Force the whole module onto tree-C via `#[no_mangle]`.
+        let tree_c_source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+            fn div_it(a: i64, b: i64) -> i64 { return a / b; }
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let _ = read(ref xs, 1);
+              let _ = div_it(10, 0);
+              return add_it(9223372036854775807, 1);
+            }
+        "#;
+        let c = compile_to_c(tree_c_source).expect("tree-C compiles");
+        for (needle, label) in [
+            ("index out of bounds", "bounds"),
+            ("integer overflow in", "overflow"),
+            ("division by zero", "division by zero"),
+        ] {
+            let idx = c.find(needle).unwrap_or_else(|| panic!("expected {label} guard in tree-C output, got:\n{c}"));
+            let window = &c[idx..(idx + 200).min(c.len())];
+            assert!(
+                window.contains("fflush(stdout)") && window.contains("abort()"),
+                "expected fflush(stdout) before abort() near the {label} guard in tree-C output, got:\n{window}"
+            );
+        }
+    }
+
     #[test]
     fn ssa_llvm_emits_bounds_check_helper_call_on_unprovable_vec_index() {
         // Counterpart of `ssa_c_emits_bounds_check_on_unprovable_vec_index`
