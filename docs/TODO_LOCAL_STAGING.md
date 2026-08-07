@@ -3114,3 +3114,12 @@ Repro: `tools/localfuzz/findings/20260807-171043-run-crash-3ebdb63967/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260807-171043-run-crash-3ebdb63967/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-175822-run-crash-a0b9cfcb2b
+
+Repro: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
