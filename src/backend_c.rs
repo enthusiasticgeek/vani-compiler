@@ -13715,6 +13715,59 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
             expr,
             drop_old,
         } => {
+            // BUG-126: `xs = [...]` (including same-scope
+            // `let`-shadowing, which the checker desugars into
+            // this same Reassign node — see checker.rs's
+            // "Same-scope let -> Reassign" comment) on an
+            // Array-typed binding used to fall through to the
+            // generic `name = expr;` catch-all below, which is
+            // invalid C — arrays aren't assignable via `=`.
+            // Write into the existing storage instead, mirroring
+            // the Let path's array handling just without a new
+            // declaration.
+            if let Type::Array { element, length } = ty {
+                if let TypedExprKind::ArrayLit { elements } = &expr.kind {
+                    let element_strs: Vec<String> = elements.iter().map(emit_expr).collect();
+                    for (i, es) in element_strs.iter().enumerate() {
+                        out.push_str("  ");
+                        out.push_str(&local_name(name));
+                        out.push('[');
+                        out.push_str(&i.to_string());
+                        out.push_str("] = ");
+                        out.push_str(es);
+                        out.push_str(";\n");
+                    }
+                } else {
+                    let needs_struct_unwrap = matches!(
+                        &expr.kind,
+                        TypedExprKind::Call { .. }
+                            | TypedExprKind::Block { .. }
+                            | TypedExprKind::IfExpr { .. }
+                            | TypedExprKind::Match { .. }
+                    );
+                    if needs_struct_unwrap {
+                        let wrapper = array_return_struct_name(element, *length);
+                        out.push_str(&format!(
+                            "  {} _intent_reassign_{} = {};\n  memcpy({}, _intent_reassign_{}.data, sizeof({}));\n",
+                            wrapper,
+                            name,
+                            emit_expr(expr),
+                            local_name(name),
+                            name,
+                            local_name(name),
+                        ));
+                    } else {
+                        out.push_str("  memcpy(");
+                        out.push_str(&local_name(name));
+                        out.push_str(", ");
+                        out.push_str(&emit_expr(expr));
+                        out.push_str(", sizeof(");
+                        out.push_str(&local_name(name));
+                        out.push_str("));\n");
+                    }
+                }
+                return;
+            }
             if *drop_old {
                 // Heap-shaped reassign: evaluate the RHS into
                 // a temp first, free the OLD value, then move

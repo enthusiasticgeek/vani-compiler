@@ -7,9 +7,10 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-126** (re-check before committing -- see
+Next free `BUG-N`: **BUG-127** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
-automated process lands fixes to this repo's `main` too).
+automated process lands fixes to this repo's `main` too). BUG-126
+(item A1 below) was fixed 2026-08-07.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -25,9 +26,21 @@ run the full `cargo test --release` suite, then log it here as
 These three were found chasing `tools/localfuzz`'s unmatched-cluster
 digest from 2026-08-07 down to root cause, then reduced to minimal,
 mutation-free repros to confirm they're real (not fuzzer artifacts).
-None have a `BUG-N` yet.
+A1 is now fixed as BUG-126; A2 and A3 don't have a `BUG-N` yet.
 
-### A1. `let`-shadowing corrupts codegen -- different failure per type, per backend
+### A1. `let`-shadowing corrupts codegen -- different failure per type, per backend -- **FIXED as BUG-126 (2026-08-07)**
+
+Root cause was NOT shadowing-specific, and NOT a storage-reuse/alloca
+mixup as originally hypothesized below (kept verbatim for the
+record) -- it was `TypedStmt::Reassign` codegen missing an
+Array arm (C backend) and wrongly assuming every reassignable
+binding has a real alloca address (LLVM backend, broke specifically
+for `ref T`). Same-scope `let`-shadowing merely happens to desugar
+to a `Reassign` node (see `checker.rs`'s "Same-scope let ->
+Reassign" comment) -- a PLAIN `xs = [...]` / `r = ...;` reassignment
+(no shadowing at all) reproduces both bugs identically. Full writeup,
+fix, and regression tests: see `## BUG-126` in `docs/TODO_CURRENT.md`.
+Original hypothesis and repros kept below for traceability.
 
 Redeclaring the same variable name via a second `let` in the same
 scope (legal in this language -- shadowing, not an error) breaks
@@ -54,14 +67,14 @@ cc failed while compiling ...:
       |        ^
 ```
 
-Root-cause hypothesis (unconfirmed): the second `let xs = ...`'s
-codegen appears to treat the redeclaration as an ASSIGNMENT into the
-FIRST `xs`'s existing storage (`v_xs = (compound literal)`) rather
-than allocating fresh, independent storage for the new binding --
-which is invalid C for an array type (C arrays aren't assignable via
-`=`; needs `memcpy` or a per-element loop, the same shape the
-non-shadowed `let`-array-literal path presumably already uses
-correctly).
+Root-cause hypothesis (UNCONFIRMED -- see actual root cause above):
+the second `let xs = ...`'s codegen appears to treat the
+redeclaration as an ASSIGNMENT into the FIRST `xs`'s existing storage
+(`v_xs = (compound literal)`) rather than allocating fresh,
+independent storage for the new binding -- which is invalid C for an
+array type (C arrays aren't assignable via `=`; needs `memcpy` or a
+per-element loop, the same shape the non-shadowed `let`-array-literal
+path presumably already uses correctly).
 
 **`ref T`-typed: LLVM backend silently returns a wrong (garbage-
 looking) value; C backend is correct.**
@@ -84,26 +97,29 @@ fn main() -> i64 {
 uninitialized-memory or aliased-pointer read), expected `63`.
 `vanic run --backend=c`: correctly prints `63`.
 
-Root-cause hypothesis (unconfirmed): likely the SAME underlying
-"second `let` with the same name reuses the first's storage/alloca
-incorrectly" mechanism as A1's array case, just manifesting as a
-silently-wrong pointer read on LLVM instead of a hard C compile
-error (since `ref T` is pointer-sized, a storage-reuse bug wouldn't
-necessarily trip any C-level type check the way an array literal's
-compound-literal assignment does).
+Root-cause hypothesis (UNCONFIRMED -- see actual root cause above):
+likely the SAME underlying "second `let` with the same name reuses
+the first's storage/alloca incorrectly" mechanism as A1's array case,
+just manifesting as a silently-wrong pointer read on LLVM instead of
+a hard C compile error (since `ref T` is pointer-sized, a
+storage-reuse bug wouldn't necessarily trip any C-level type check
+the way an array literal's compound-literal assignment does).
 
-**Suggested investigation starting point**: find wherever
-`TypedStmt::Let` codegen decides the target `alloca`/storage slot
-for a NEW `let` binding, in both `backend_llvm.rs` and `backend_c.rs`
-(and their SSA counterparts) -- check whether it's keyed purely by
-NAME (which would incorrectly reuse a shadowed name's old slot) vs.
-by a unique per-declaration ID the checker/IR should already be
-assigning. This is exactly the kind of "one construction path uses a
-different assumption than the others" root-cause shape this project
-has hit repeatedly (BUG-107, BUG-109, BUG-121, BUG-122) -- likely
-worth checking EVERY type category (struct, `Vec<T>`, `OwnedStr`,
-tuples, enums), not just array and `ref T`, once the real mechanism
-is found.
+**Suggested investigation starting point** (SUPERSEDED -- actual fix
+was in `Reassign`, not `Let`): find wherever `TypedStmt::Let` codegen
+decides the target `alloca`/storage slot for a NEW `let` binding, in
+both `backend_llvm.rs` and `backend_c.rs` (and their SSA
+counterparts) -- check whether it's keyed purely by NAME (which
+would incorrectly reuse a shadowed name's old slot) vs. by a unique
+per-declaration ID the checker/IR should already be assigning. This
+is exactly the kind of "one construction path uses a different
+assumption than the others" root-cause shape this project has hit
+repeatedly (BUG-107, BUG-109, BUG-121, BUG-122) -- likely worth
+checking EVERY type category (struct, `Vec<T>`, `OwnedStr`, tuples,
+enums), not just array and `ref T`, once the real mechanism is found.
+(BUG-126's actual fix DID check all these types via direct repros --
+struct, `Vec<i64>`, `Str`, tuple, enum, and `ref Vec<i64>` were all
+confirmed unaffected; only Array-on-C and ref-on-LLVM had the bug.)
 
 **Original localfuzz findings** (both in `~/source/vani-compiler-localfuzz`,
 both fuzzer-mutated by literally duplicating one `let` line -- the

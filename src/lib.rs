@@ -1016,6 +1016,66 @@ mod tests {
     }
 
     #[test]
+    fn bug126_array_reassign_uses_memcpy_not_invalid_c_assignment() {
+        // BUG-126: same-scope `let`-shadowing of an Array binding
+        // desugars to a Reassign node (see checker.rs's "Same-scope
+        // let -> Reassign" comment); the C backend's Reassign arm
+        // used to fall through to a generic `name = expr;`, which
+        // is invalid C for array types (arrays aren't assignable
+        // via `=`). It must now write into the existing storage
+        // via memcpy/per-element store instead.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 5] = [1, 2, 3, 4, 5];
+              let xs: [i64; 5] = [10, 20, 30, 40, 50];
+              return xs[0];
+            }
+        "#;
+
+        let c = compile_to_c(source).expect("array shadowing should compile");
+        assert!(
+            !c.contains("v_xs = ((int64_t[5])"),
+            "BUG-126 regression: array Reassign emitted an invalid C \
+             array assignment again, got: {c}"
+        );
+        assert!(
+            c.contains("v_xs[0] = ") || c.contains("memcpy(v_xs"),
+            "expected per-element store or memcpy into the existing \
+             array storage, got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug126_ref_reassign_rebinds_pointer_value_not_store_through_it_on_llvm() {
+        // BUG-126: reassigning a `ref T` binding on the LLVM tree
+        // backend used to `store` the new pointer value THROUGH the
+        // OLD pointer value (since ref bindings hold the raw
+        // pointer itself in `ctx.locals`, not an alloca address --
+        // see the L4(B) comment on the Let path) -- corrupting
+        // whatever the old ref pointed at. It must now rebind
+        // `ctx.locals` to the new value with no `store` at all.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn shared(p: ref Point) -> ref Point { return p; }
+            fn area(p: ref Point) -> i64 { return p.x * p.y; }
+            fn main() -> i64 {
+              let pt: Point = Point { x: 7, y: 9 };
+              let r: ref Point = shared(ref pt);
+              let r: ref Point = shared(ref pt);
+              return area(r);
+            }
+        "#;
+
+        let llvm = compile_to_llvm(source).expect("ref shadowing should compile");
+        assert!(
+            !llvm.contains("Struct_Point**"),
+            "BUG-126 regression: ref Reassign reinterpreted the ref's \
+             pointer value as a pointer-to-pointer storage address \
+             again, got: {llvm}"
+        );
+    }
+
+    #[test]
     fn let_shadowing_drops_old_vec() {
         let source = r#"
             fn main() -> i64 {

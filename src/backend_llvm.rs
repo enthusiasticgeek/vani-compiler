@@ -2826,6 +2826,20 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.locals.insert(name.clone(), (ty.clone(), addr));
         }
         TypedStmt::Reassign { name, ty, expr, drop_old } => {
+            // BUG-126: ref-typed bindings don't have an alloca at
+            // all — the Let path above (`ty.is_any_ref()`) stores
+            // the raw pointer VALUE itself in `ctx.locals[name].1`,
+            // not a memory address (see the L4(B) comment there).
+            // Falling through to the generic `store {value},
+            // {ty}* {addr}` below would reinterpret that pointer
+            // VALUE as an ADDRESS and corrupt whatever it points
+            // at. Rebinding a ref is a pure SSA-style "point the
+            // name at a new value" — mirror the Let carve-out.
+            if ty.is_any_ref() {
+                let value = emit_expr(expr, ctx, out);
+                ctx.locals.insert(name.clone(), (ty.clone(), value));
+                return;
+            }
             // Same alloca/store path as Let — Vec / Array /
             // scalar all just need a store into the existing
             // binding's address. `drop_old: true` (non-Copy

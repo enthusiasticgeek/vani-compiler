@@ -11703,3 +11703,54 @@ fn main() -> i64 { return deep(10); }
         stderr
     );
 }
+
+// BUG-126 (2026-08-07): reassigning an Array-typed binding (via
+// `x = [...]` or same-scope `let`-shadowing, which the checker
+// desugars into the same Reassign node) produced invalid C --
+// `v_xs = ((int64_t[5]){...});`, which `cc` rejects since C arrays
+// aren't assignable via `=`. Separately, reassigning a `ref
+// T`-typed binding corrupted memory on LLVM: `ctx.locals[name]`
+// for a ref holds the raw pointer VALUE (not an alloca address --
+// see the L4(B) Let-path comment in backend_llvm.rs), but Reassign
+// unconditionally `store`d into it as though it WERE an address,
+// silently overwriting the first field of whatever the ref pointed
+// at. Found via localfuzz backend-divergence findings (tracked
+// pre-fix in docs/UNRESOLVED_GAPS_TODO.md item A1). Fixed by
+// special-casing `Type::Array` in backend_c.rs's Reassign arm
+// (memcpy/per-element store into the existing storage instead of
+// `=`) and `ty.is_any_ref()` in backend_llvm.rs's Reassign arm
+// (rebind `ctx.locals` to the new pointer value instead of
+// `store`ing through the old one, mirroring the Let path).
+#[test]
+fn reassign_array_and_ref_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/reassign_array_and_ref.vani",
+        manifest_dir
+    );
+    let expected = "10\n63\n63\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "reassigning an Array binding (C backend) or a ref binding \
+             (LLVM backend) produced the wrong result for {:?} -- see \
+             BUG-126",
+            backend_args
+        );
+    }
+}

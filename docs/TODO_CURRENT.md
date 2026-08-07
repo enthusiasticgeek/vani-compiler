@@ -8864,3 +8864,69 @@ cross-compiled and linked cleanly without `-lpthread` on the same real toolchain
 modern glibc folds pthread symbols into libc itself, matching the existing `-lm`
 helper's own comment about this) and found to be correct as-is, not a bug. Category H
 is now fully audited.
+
+## BUG-126 (2026-08-07) -- reassigning an Array binding broke C, reassigning a `ref T` binding corrupted memory on LLVM
+
+Found picking up item A1 from `docs/UNRESOLVED_GAPS_TODO.md` (itself found chasing a
+localfuzz backend-divergence finding). Two independent bugs sharing one root shape --
+both live in `TypedStmt::Reassign` codegen, and both are reachable two ways: an
+explicit `x = ...;` reassignment, or same-scope `let`-shadowing (`checker.rs`
+deliberately desugars a same-scope `let` with a matching type into a `Reassign` node --
+see its "Same-scope let -> Reassign" comment -- so shadowing and explicit reassignment
+share the exact same codegen path).
+
+**C backend, Array type**: `let xs: [i64; 5] = [1,2,3,4,5]; xs = [10,20,30,40,50];`
+compiled to `v_xs = ((int64_t[5]){ 10, 20, 30, 40, 50 });` -- a hard `cc` error
+(`assignment to expression with array type`), since C arrays aren't assignable via `=`.
+`backend_c.rs`'s `Reassign` arm special-cases `Vec`/`OwnedStr`/`Struct`/`Enum` for
+`drop_old` handling but had no `Type::Array` arm at all, so it fell into the generic
+`name = expr;` catch-all -- the exact same catch-all the `Let` arm avoids by declaring
+with a proper `T name[N] = {...};` initializer instead.
+
+**LLVM backend, `ref T` type**: `let r: ref Point = shared(ref pt); r = shared(ref pt);
+print area(r);` silently printed garbage (observed `1266547254094656` instead of `63`)
+-- reading LLVM IR directly showed the smoking gun: `%t3 = call %Struct_Point*
+@fn_shared(...)` (the first `let`'s result, no alloca -- see the L4(B) comment on the
+Let arm: ref-typed lets skip the alloca and store the raw pointer VALUE itself in
+`ctx.locals[name].1`), then `%t4 = call %Struct_Point* @fn_shared(...)` (the reassign's
+new value), then `store %Struct_Point* %t4, %Struct_Point** %t3` -- reinterpreting
+`%t3`, a `%Struct_Point*` VALUE (the address of `pt`), as though it were a
+`%Struct_Point**` storage slot, and writing `%t4` into the first 8 bytes of `pt`
+itself (its `x` field) as a raw pointer-bit-pattern. The later `call i64 @fn_area(
+%Struct_Point* %t3)` then read `p.x` back as that garbage pointer value truncated to
+an integer. `backend_llvm.rs`'s generic `Reassign` arm assumes `ctx.locals.get(name)`
+always yields a real alloca address to `store` into; that assumption is simply false
+for refs.
+
+Fix: gave `Reassign` its own early carve-out in each affected backend, mirroring the
+`Let` arm's existing special-casing instead of extending the generic path.
+- `backend_c.rs`: `Type::Array` now writes into the EXISTING storage instead of
+  declaring anything new -- per-element `v_xs[i] = ...;` stores for an `ArrayLit` RHS,
+  `memcpy(v_xs, ..., sizeof(v_xs))` for any other RHS shape (including the
+  struct-wrapper-unwrap case for a Call/Block/IfExpr/Match RHS), matching the `Let`
+  arm's own two RHS shapes just without the leading declaration.
+- `backend_llvm.rs`: `ty.is_any_ref()` now evaluates the RHS and rebinds
+  `ctx.locals[name]` directly to the new pointer value -- no `store` at all, exactly
+  mirroring the `Let` arm's own ref carve-out and matching true SSA rebind semantics
+  (confirmed `ssa.rs`'s pure-SSA `Reassign` lowering already does the analogous
+  "just remap the name to the new value" with zero store instructions -- this was
+  purely a tree-LLVM gap, not present in the SSA path).
+
+Checked all other let-shadowable types (struct, `Vec<i64>`, `Str`, tuple, enum,
+`ref Vec<i64>`) via direct repros on both backends -- none showed the bug; it was
+specifically Array-on-C and ref-on-LLVM. Root-caused via `vanic emit`'s raw C/LLVM IR
+output rather than guessing -- the exact assignment-into-existing-storage vs.
+declare-fresh-storage divergence was visible directly in the emitted C, and the
+value-vs-address confusion was visible directly in the emitted LLVM IR.
+
+Added `examples/language/english/reassign_array_and_ref.vani` plus an end-to-end test
+(`reassign_array_and_ref_example_produces_correct_output_on_both_backends` in
+`tests/run_end_to_end.rs`, real `vanic run` on both backends, checks actual stdout) and
+two fast compile-only regression tests in `src/lib.rs`
+(`bug126_array_reassign_uses_memcpy_not_invalid_c_assignment`,
+`bug126_ref_reassign_rebinds_pointer_value_not_store_through_it_on_llvm`) pinning the
+emitted C/LLVM text shape so a regression fails fast without needing a `cc`/`lli`
+round-trip.
+
+Full `cargo test --release` clean (2789 lib tests + all integration suites, 0 failed),
+including the 3 new tests above.
