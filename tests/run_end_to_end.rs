@@ -11808,3 +11808,49 @@ fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_bac
         );
     }
 }
+
+// BUG-129 (2026-08-07): tree-C's `requires`-clause runtime guard
+// still used the raw libc `assert()` macro (SIGABRT on failure) long
+// after BUG-116 gave the SSA-C path's own `requires` lowering a
+// clean `fprintf(stderr, "assertion failed: %s\n", msg); exit(3);`
+// shape. `vanic build` falls back to tree-C for the WHOLE module
+// whenever ANY function uses an SSA-unsupported feature (here,
+// `match` in `pick`), so this affected `f`'s `requires` clause too
+// even though `f` itself has nothing SSA-unsupported about it. Real
+// subprocess run (not a `compile_to_c` string check) because the
+// actual bug is in the SIGNAL behavior at runtime -- a string check
+// can't distinguish `exit(3)` from a `SIGABRT`-raising `assert()`
+// that happens to print similar-looking text.
+#[test]
+fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/requires_guard_survives_tree_c_fallback.vani",
+        manifest_dir
+    );
+
+    let output = Command::new(binary)
+        .args(["run", &example, "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "BUG-129 regression: a requires-clause violation on tree-C fell back to \
+         raw assert()/SIGABRT instead of a clean exit(3); status {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "5\n",
+        "the first (satisfied) requires call should still print normally before \
+         the second (violating) call traps"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("precondition violated in 'f'"),
+        "expected a clean precondition-violated message on stderr, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

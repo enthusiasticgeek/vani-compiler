@@ -9061,3 +9061,56 @@ it mirrors (same body, `let`/`return` swapped) -- asserts `compile()` now reject
 either diagnostic.
 
 Full `cargo test --release` clean (2792 lib tests + all integration suites, 0 failed).
+
+## BUG-129 (2026-08-07) -- tree-C's `requires` guard still raised SIGABRT via raw assert(), not exit(3)
+
+Found picking up the first previously-known gap from `docs/UNRESOLVED_GAPS_TODO.md`
+section C (originally noted while updating tutorials 2026-08-07, not chased at the
+time). A `requires` clause violated at a call site SMT can't resolve either way
+(discharges to a runtime guard, not a compile-time rejection) correctly gave
+`"assertion failed: precondition violated in '<fn>'"` + clean `exit(3)` on the C
+backend for a plain scalar parameter -- but the SAME shape for a function taking a
+`ref Vec<T>` parameter instead gave a raw glibc `assert()`-macro crash and a real
+`SIGABRT`.
+
+Root cause: `ref Vec<T>` isn't the actual trigger -- it just reliably forces the
+WHOLE MODULE off the SSA-C fast path onto tree-C (`ssa_path_supports` in `main.rs` is
+a module-wide gate: if ANY function anywhere in the program uses an SSA-unsupported
+feature, EVERY function falls back to tree codegen, not just the unsupported one).
+Confirmed directly: a program with a plain scalar `requires` clause and a completely
+unrelated `match` statement elsewhere in the same file shows the identical raw-`assert()`
+crash for the scalar case too. `backend_c.rs`'s tree-walking `requires`-clause codegen
+(two call sites: the normal function path and the `#[bounded(N)]` path) still emitted
+the raw C `assert(EXPR);` macro. BUG-116 (2026-08-05) gave the SSA-C path's own
+`requires` lowering (`ssa.rs`) a real runtime guard via `intent_assert_fail`, which
+`ssa_backend_c.rs` inlines as `fprintf(stderr, "assertion failed: %s\n", msg);
+exit(3);` -- but tree-C's `requires` codegen was explicitly, deliberately left
+untouched by an EARLIER fix (the comment on tree-C's `TypedStmt::Assert` fix reads:
+"the `requires`-clause precondition check ... already calls `abort()` consistently on
+BOTH backends, so it isn't a divergence"). That was true when written -- before
+BUG-116 existed, when tree-C and tree-LLVM's `requires` guards matched each other.
+BUG-116 introduced a NEW divergence this comment never anticipated: SSA-C's `requires`
+moved to the clean `exit(3)` shape while tree-C's (and tree-LLVM's -- see below)
+stayed on the old one.
+
+Fix: added `emit_requires_guards` in `backend_c.rs`, replacing both raw-`assert()`
+call sites with the same `if (!(EXPR)) { fprintf(stderr, "assertion failed: %s\n",
+"<message>"); exit(3); }` shape `ssa_backend_c.rs` uses, with the identical message
+format `ssa.rs` generates (`"precondition violated in '<fn>'"`, or `"... (requires
+#<n>)"` per clause for a multi-`requires` function). Checked tree-LLVM's own
+`requires` codegen (`backend_llvm.rs`) for the same class of staleness: it already
+uses `exit(3)` (fixed separately by BUG-113), just without a message string -- a much
+smaller cosmetic gap than tree-C's SIGABRT-vs-clean-exit divergence, and left
+out of scope here since it isn't the acute "misleading crash" problem this bug is
+about.
+
+Added `examples/language/english/requires_guard_survives_tree_c_fallback.vani` (a
+scalar `requires` clause forced onto tree-C by an unrelated `match` elsewhere in the
+file, with the violating call routed through an indirection that also defeats SMT's
+compile-time call-site proof) plus an end-to-end test
+(`requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3` in
+`tests/run_end_to_end.rs`, a real subprocess run since the bug is specifically about
+SIGNAL behavior, not just stderr text) and a fast compile-only test in `src/lib.rs`
+(`bug129_tree_c_requires_guard_uses_exit3_not_raw_assert`).
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).

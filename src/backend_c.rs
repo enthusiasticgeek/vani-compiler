@@ -13343,11 +13343,7 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
             }}\n",
             counter_name, bound, function.name, bound
         ));
-        for requirement in &function.requires {
-            out.push_str("  assert(");
-            out.push_str(&emit_expr(requirement));
-            out.push_str(");\n");
-        }
+        emit_requires_guards(function, out);
         for stmt in &function.body {
             emit_stmt(stmt, out);
         }
@@ -13367,17 +13363,57 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
     emit_params(function, out);
     out.push_str(") {\n");
 
-    for requirement in &function.requires {
-        out.push_str("  assert(");
-        out.push_str(&emit_expr(requirement));
-        out.push_str(");\n");
-    }
+    emit_requires_guards(function, out);
 
     for stmt in &function.body {
         emit_stmt(stmt, out);
     }
 
     out.push_str("}\n");
+}
+
+/// BUG-129: emit each `requires` clause as a runtime guard matching
+/// `ssa_backend_c.rs`'s `intent_assert_fail` shape (`fprintf(stderr,
+/// "assertion failed: %s\n", <msg>); exit(3);`) instead of the raw
+/// libc `assert()` macro. BUG-116 (2026-08-05) added this exact
+/// shape for the SSA path's own `requires` lowering, but tree-C's
+/// requires codegen was deliberately left on the OLD `assert()`
+/// shape at the time -- a comment on tree-C's `TypedStmt::Assert`
+/// fix (a few hundred lines up in this file) explains why: "the
+/// `requires`-clause precondition check ... already calls `abort()`
+/// consistently on BOTH backends, so it isn't a divergence" -- true
+/// when written (before BUG-116 existed), but BUG-116 introduced a
+/// NEW divergence this comment didn't anticipate: SSA-C's `requires`
+/// moved to `exit(3)` + a real message while tree-C's (and tree-
+/// LLVM's) stayed on raw `assert()`/`abort()`. Since `vanic build`
+/// silently falls back from SSA-C to tree-C whenever ANY function in
+/// the module uses an SSA-unsupported feature (see `ssa_path_
+/// supports` in main.rs -- a whole-MODULE gate, not per-function),
+/// this affected any `requires` clause in a program that also
+/// happened to contain something SSA-C doesn't support elsewhere
+/// (e.g. a `ref Vec<T>` parameter, a `match`) -- not just the
+/// specific function with the unsupported feature. Message text
+/// mirrors `ssa.rs`'s `lower_function`: `"precondition violated in
+/// '<fn>'"`, or `"... (requires #<n>)"` per clause when a function
+/// has more than one `requires`.
+fn emit_requires_guards(function: &TypedFunction, out: &mut String) {
+    let n = function.requires.len();
+    for (i, requirement) in function.requires.iter().enumerate() {
+        let message = if n > 1 {
+            format!(
+                "precondition violated in '{}' (requires #{})",
+                function.name,
+                i + 1
+            )
+        } else {
+            format!("precondition violated in '{}'", function.name)
+        };
+        out.push_str("  if (!(");
+        out.push_str(&emit_expr(requirement));
+        out.push_str(")) { fprintf(stderr, \"assertion failed: %s\\n\", \"");
+        out.push_str(&escape_c_string(&message));
+        out.push_str("\"); exit(3); }\n");
+    }
 }
 
 fn emit_params(function: &TypedFunction, out: &mut String) {

@@ -1,0 +1,29 @@
+// BUG-129 (2026-08-07): tree-C's `requires`-clause runtime guard
+// still used the raw libc `assert()` macro (SIGABRT on failure) long
+// after BUG-116 gave the SSA-C path's own `requires` lowering a
+// clean `fprintf(stderr, "assertion failed: %s\n", msg); exit(3);`
+// shape. `vanic build` falls back to tree-C for the WHOLE module
+// whenever ANY function uses an SSA-unsupported feature -- here,
+// `match` in `pick` -- so this affects `f`'s `requires` clause too,
+// even though `f` itself has nothing SSA-unsupported about it. The
+// `pick` indirection also defeats SMT's compile-time call-site
+// proof (a direct literal argument would be a hard build error
+// instead of a runtime guard), so this must actually run to trap.
+
+fn f(n: i64) -> i64
+  requires n >= 0;
+{
+  return n;
+}
+
+fn pick(mode: i64, a: i64, b: i64) -> i64 {
+  return match mode {
+    0 then f(a),
+    _ then f(b)
+  };
+}
+
+fn main() -> i64 {
+  print pick(0, 5, 0 - 5);
+  return pick(1, 5, 0 - 5);
+}

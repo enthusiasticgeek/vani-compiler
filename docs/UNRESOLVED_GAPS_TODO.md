@@ -7,11 +7,12 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-129** (re-check before committing -- see
+Next free `BUG-N`: **BUG-130** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
-(item A1), BUG-127 (item A2), and BUG-128 (item A3) were all fixed
-2026-08-07 -- section A is now fully closed out.
+(item A1), BUG-127 (item A2), BUG-128 (item A3), and BUG-129 (item
+C1) were all fixed 2026-08-07 -- section A is fully closed out; C2-C5
+remain open in section C.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -277,13 +278,22 @@ Recorded so a future pass doesn't re-investigate these from scratch.
 
 ---
 
-## C. Previously-known gaps, found this session, documented but not fixed
+## C. Previously-known gaps, found this session
 
-All four of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
+All five of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
 (the auto-memory system) with fuller context; summarized here so
-they're not scattered across two places when picking work.
+they're not scattered across two places when picking work. C1 is now
+fixed (2026-08-07); C2-C5 remain open.
 
-### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path
+### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path -- **FIXED as BUG-129 (2026-08-07)**
+
+Confirmed root cause was exactly the hypothesized tree-C-vs-SSA-C parity gap, with one
+correction: it's not `ref Vec<T>` specifically -- ANY SSA-unsupported feature ANYWHERE
+in the same module forces the WHOLE program onto tree-C (`ssa_path_supports` in
+main.rs is module-wide, not per-function), so a plain scalar `requires` clause hit the
+identical raw-`assert()`/SIGABRT bug whenever the file also happened to contain
+something else SSA-C doesn't support. Full writeup, fix, and regression tests: see
+`## BUG-129` in `docs/TODO_CURRENT.md`. Original repro kept below for traceability.
 
 Found verifying tutorial accuracy (2026-08-07). A `requires` clause
 on a function taking a SCALAR parameter (e.g. `requires n >= 0;`)

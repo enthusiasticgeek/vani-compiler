@@ -1116,6 +1116,50 @@ mod tests {
     }
 
     #[test]
+    fn bug129_tree_c_requires_guard_uses_exit3_not_raw_assert() {
+        // BUG-129: tree-C's `requires`-clause runtime guard still
+        // used the raw libc `assert()` macro (SIGABRT on failure)
+        // long after BUG-116 (2026-08-05) gave the SSA-C path's own
+        // `requires` lowering a clean `fprintf(stderr, "assertion
+        // failed: %s\n", msg); exit(3);` shape. A comment on tree-C's
+        // `TypedStmt::Assert` fix explains why this was left alone at
+        // the time -- "the requires-clause precondition check ...
+        // already calls abort() consistently on BOTH backends, so it
+        // isn't a divergence" -- true before BUG-116 existed, but
+        // BUG-116 created exactly that divergence (SSA-C moved to
+        // exit(3), tree-C didn't) without this comment being
+        // revisited. Since `vanic build` falls back to tree-C for
+        // the WHOLE module whenever ANY function uses an SSA-
+        // unsupported feature (not just the one with `requires`),
+        // this affected any program mixing a `requires` clause with
+        // something SSA-C doesn't support elsewhere -- a `ref
+        // Vec<T>` parameter, a `match`, etc. `compile_to_c` always
+        // exercises tree-C directly (unconditionally, unlike `vanic
+        // run`'s SSA-eligibility dispatch), so no such indirection
+        // is needed to reach the buggy code path in this test.
+        let source = r#"
+            fn f(n: i64) -> i64
+              requires n >= 0;
+            {
+              return n;
+            }
+            fn main() -> i64 { return f(3); }
+        "#;
+
+        let c = compile_to_c(source).expect("requires clause should compile");
+        assert!(
+            !c.contains("assert(v_n"),
+            "BUG-129 regression: tree-C emitted the raw assert() macro for a \
+             requires clause again, got: {c}"
+        );
+        assert!(
+            c.contains("precondition violated in 'f'") && c.contains("exit(3)"),
+            "expected the requires guard to use the exit(3) + message shape, \
+             got: {c}"
+        );
+    }
+
+    #[test]
     fn let_shadowing_drops_old_vec() {
         let source = r#"
             fn main() -> i64 {
