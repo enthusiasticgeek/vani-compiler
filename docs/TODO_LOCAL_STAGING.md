@@ -2732,3 +2732,12 @@ A crash or hang occurred. The specific symptoms were not described in the provid
 
 ** WHICH BACKENDS IT AFFECTS:**
 This bug affects both the LLVM backend and the C backend of the vani compiler.
+
+---
+
+### Candidate: 20260807-081658-run-crash-3127119dac
+
+Repro: `tools/localfuzz/findings/20260807-081658-run-crash-3127119dac/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-081658-run-crash-3127119dac/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
