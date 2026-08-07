@@ -84,20 +84,24 @@ applies to every line. Top of the pyramid: explicit + opt-in.
 
 ```
               +--------------------------+
-              |  Runtime: assert /       |  <- fires exit(3) (assert) or
-              |  prove / requires not    |     abort() (prove/requires)
-              |  discharged by SMT       |     on bad input at the line
+              |  Runtime: assert /       |  <- fires on bad input at
+              |  requires not            |     the line (exit code +
+              |  discharged by SMT       |     message: see Sec.10b)
               +--------------------------+
             +------------------------------+
-            |  Runtime: bounds check /     |  <- fires abort() on first
-            |  overflow guard /            |     out-of-bounds access
-            |  div-by-zero guard           |
-            |  (only when SMT can't prove) |
+            |  Runtime: bounds check /     |  <- fires on first bad
+            |  overflow guard /            |     access (exit code +
+            |  div-by-zero guard           |     message differ by
+            |  (only when SMT can't prove) |     backend: see Sec.10b)
             +------------------------------+
         +--------------------------------------+
-        |  Compile-time: SMT solver discharges |  <- proves
-        |  requires/ensures/invariant clauses  |     contracts statically
-        |  via Z3                              |
+        |  Compile-time: SMT solver discharges |  <- proves contracts
+        |  requires/ensures/invariant/prove    |     statically; `prove`
+        |  clauses via Z3                      |     specifically has NO
+        |                                      |     runtime fallback at
+        |                                      |     all -- undischarged
+        |                                      |     `prove` fails the
+        |                                      |     BUILD, not the run
         +--------------------------------------+
     +----------------------------------------------+
     |  Compile-time: scope-escape analyzer rejects |  <- rejects

@@ -336,6 +336,11 @@ explicit `f64_to_str` calls.
   gone, not just hidden from display. If you need the value back
   losslessly, keep the `f64` around and only format for display;
   don't parse the printed string back with `parse_float`.
+  (Confirmed directly on both backends against a current build --
+  a bare float literal passed straight to `print`, with no
+  intermediate `let`, used to crash the LLVM backend outright and
+  print the wrong value on the C backend, BUG-123, fixed
+  2026-08-06.)
 - **Verified backend-parity gap in scientific-notation exponent
   width on Windows.** Once a magnitude is large/small enough that
   `%g` switches to scientific notation, the C backend and the LLVM

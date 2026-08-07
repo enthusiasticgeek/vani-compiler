@@ -4255,7 +4255,30 @@ fn apply_embedded_cc_hardening(cmd: &mut Command) {
 
 /// Returns true for target triples that target bare-metal / no-OS environments.
 /// These triples have no C runtime, no kernel ABI, and cannot be JIT-run on the host.
+///
+/// BUG-124: the substring checks below (`"none"` / `"eabi"` / `"-elf"`) are a
+/// proxy for "this is a freestanding microcontroller target" -- but "eabi"
+/// also appears in a large family of REAL Linux userspace triples that use
+/// the EABI calling convention (soft/hard float) while still having a full
+/// OS and libc: `arm-unknown-linux-gnueabi`, `arm-unknown-linux-gnueabihf`,
+/// `armv7-unknown-linux-gnueabihf`, ... (the Debian armel/armhf family --
+/// Raspberry Pi OS 32-bit is exactly this). Before this fix,
+/// `vanic build --target=arm-unknown-linux-gnueabi` (with a real, working
+/// cross-toolchain + sysroot) took the bare-metal link branch -- which adds
+/// no `-lm` at all -- and failed with `undefined reference to 'exp'/'erf'/
+/// 'fmod'` for ANY program, since every vāṇी runtime unconditionally emits
+/// math-helper functions that reference libm (same underlying gap BUG-112
+/// fixed for the host-POSIX branch). Confirmed against a real
+/// `arm-linux-gnueabi-gcc` + sysroot cross-toolchain. Checking for a real OS
+/// component FIRST (before the freestanding-heuristic substrings) fixes
+/// this: any triple naming an actual kernel/OS is never bare-metal,
+/// regardless of its ABI suffix.
 fn is_bare_metal_triple(triple: &str) -> bool {
+    if triple.contains("linux") || triple.contains("darwin") || triple.contains("windows")
+        || triple.contains("freebsd") || triple.contains("android")
+    {
+        return false;
+    }
     triple.contains("none") || triple.contains("eabi") || triple.ends_with("-elf")
         || triple.contains("-unknown-elf")
 }
@@ -4502,6 +4525,26 @@ mod tests {
             "aarch64-linux is not bare metal");
         assert!(!is_bare_metal_triple("x86_64-unknown-linux-musl"),
             "x86_64-musl is not bare metal");
+        // BUG-124: these all contain "eabi" (part of the ABI suffix
+        // "gnueabi"/"gnueabihf"), which the old heuristic treated as
+        // a bare-metal signal -- but they're all real Linux userspace
+        // targets with a full OS + libc (the Debian armel/armhf
+        // family; Raspberry Pi OS 32-bit is exactly this). Confirmed
+        // against a real `arm-linux-gnueabi-gcc` + sysroot: before
+        // this fix, `vanic build --target=arm-unknown-linux-gnueabi`
+        // failed to link ANY program with `undefined reference to
+        // 'exp'` (the bare-metal branch adds no `-lm`).
+        assert!(!is_bare_metal_triple("arm-unknown-linux-gnueabi"),
+            "arm-linux-gnueabi is a real Linux target, not bare metal");
+        assert!(!is_bare_metal_triple("arm-unknown-linux-gnueabihf"),
+            "arm-linux-gnueabihf is a real Linux target, not bare metal");
+        assert!(!is_bare_metal_triple("armv7-unknown-linux-gnueabihf"),
+            "armv7-linux-gnueabihf is a real Linux target, not bare metal");
+        // Genuinely bare-metal EABI triples must still classify correctly
+        // (the fix must not weaken detection for the triples it already
+        // got right).
+        assert!(is_bare_metal_triple("arm-unknown-none-eabi"),
+            "arm-unknown-none-eabi is still bare metal");
     }
 
     #[test]

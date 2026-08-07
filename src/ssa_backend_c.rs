@@ -283,6 +283,16 @@ fn preamble(out: &mut String) {
 }
 
 fn emit_function_prototype(f: &Function, out: &mut String) -> Result<(), EmitError> {
+    // BUG-118: an `extern "C" fn` whose name matches a standard
+    // libc symbol already declared (with the platform's
+    // authoritative type spelling) by the headers this backend
+    // unconditionally includes must not get our own competing
+    // prototype -- see `backend_c::is_known_libc_symbol` for why
+    // that trips `cc`'s conflicting-redeclaration check even when
+    // the width matches (e.g. `atoll`).
+    if f.is_extern && crate::backend_c::is_known_libc_symbol(&f.name) {
+        return Ok(());
+    }
     let ret_c = c_type(&f.return_type)?;
     // Closure #269: `extern "C"` declarations emit an `extern`
     // prototype with the bare C symbol (no `fn_` prefix). The
@@ -1673,6 +1683,32 @@ fn emit_instr(
                             c_operand(r)
                         )
                         .unwrap();
+                        // BUG-119: `MIN / -1` (and `MIN % -1`) overflows
+                        // the representable range -- a distinct trap
+                        // from "divisor is zero" above. Only signed
+                        // types have a negative divisor at all.
+                        if result_ty.is_signed_integer() {
+                            let min_macro = match result_ty {
+                                Type::I8 => "INT8_MIN",
+                                Type::I16 => "INT16_MIN",
+                                Type::I32 => "INT32_MIN",
+                                Type::I64 => "INT64_MIN",
+                                _ => unreachable!(
+                                    "signed integer Binary result must be I8/I16/I32/I64"
+                                ),
+                            };
+                            let op_name = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
+                            writeln!(
+                                out,
+                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); abort(); }}",
+                                r = c_operand(r),
+                                l = c_operand(l),
+                                min = min_macro,
+                                ty = ty_c,
+                                op_name = op_name,
+                            )
+                            .unwrap();
+                        }
                     }
                     BinaryOp::Shl | BinaryOp::Shr => {
                         let bits = result_ty.bits().unwrap_or(64);
@@ -1717,9 +1753,25 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "intent_print_item expects 1 argument".to_string(),
                 })?;
+                // BUG-123: same class as BUG-111 -- a bare
+                // `Operand::Const` has no `ValueId`, so it's never
+                // in `value_types`. The old fallback blindly assumed
+                // `I64` regardless of the constant's real type,
+                // which for `print 5.5;` (a float literal passed
+                // directly, no intermediate `let`) misformatted the
+                // print entirely: `%lld` with a truncating
+                // `(long long)` cast, silently printing `5` instead
+                // of `5.5`. Derive the constant's own true type from
+                // its variant instead of guessing.
                 let aty = match arg {
                     Operand::Value(v) => value_types.get(v).cloned(),
-                    Operand::Const(_) => None,
+                    Operand::Const(Const::Bool(_)) => Some(Type::Bool),
+                    Operand::Const(Const::Float(_)) => Some(Type::F64),
+                    Operand::Const(Const::Int(v)) => Some(if *v <= i64::MAX as i128 && *v >= i64::MIN as i128 {
+                        Type::I64
+                    } else {
+                        Type::U64
+                    }),
                 }
                 .unwrap_or(Type::I64);
                 // Bool prints as the human-readable

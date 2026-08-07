@@ -5414,7 +5414,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                     let after = ctx.fresh_label("after_sub");
                                     out.push_str(&format!("  br label %{}\n", after));
                                     out.push_str(&format!("{}:\n", fail));
-                                    out.push_str("  call void @abort()\n");
+                                    // BUG-120: `exit(3)`, not raw `abort()` --
+                                    // same misleading-`lli`-crash-report class
+                                    // BUG-106/113/115/117 already fixed for
+                                    // every OTHER trap type; this checked-
+                                    // arithmetic block was the one BUG-115's
+                                    // sweep missed (it explicitly fixed
+                                    // SSA-LLVM's checked-arithmetic guards but
+                                    // not tree-LLVM's own).
+                                    out.push_str("  call void @exit(i32 3)\n");
                                     out.push_str("  unreachable\n");
                                     out.push_str(&format!("{}:\n", after));
                                     ctx.current_block = after;
@@ -5450,7 +5458,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             }
                         }
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         ctx.current_block = ok;
@@ -5472,7 +5482,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             nz, ok, fail
                         ));
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // LLVM phi-block-tracking fix: subsequent
@@ -5485,6 +5497,48 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         // the wrong predecessor block and module
                         // verification fails ("Bad module").
                         ctx.current_block = ok;
+
+                        // BUG-119: `MIN / -1` (and `MIN % -1`)
+                        // overflows the representable range -- a
+                        // distinct trap from "divisor is zero" just
+                        // above, which a raw `sdiv`/`srem` doesn't
+                        // guard at all (the CPU itself traps with
+                        // SIGFPE, surfacing as `lli`'s misleading
+                        // "PLEASE submit a bug report" crash dump).
+                        // Unsigned types have no negative divisor,
+                        // so only signed needs this second guard.
+                        if signed {
+                            let bits = left.ty.bits().unwrap_or(64);
+                            let min_val: i128 = -(1i128 << (bits - 1));
+                            let l_is_min = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = icmp eq {} {}, {}\n",
+                                l_is_min, ty, l, min_val
+                            ));
+                            let r_is_neg1 = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = icmp eq {} {}, -1\n",
+                                r_is_neg1, ty, r
+                            ));
+                            let would_overflow = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = and i1 {}, {}\n",
+                                would_overflow, l_is_min, r_is_neg1
+                            ));
+                            let ovf_ok = ctx.fresh_label("div_ovf_ok");
+                            let ovf_fail = ctx.fresh_label("div_ovf_fail");
+                            out.push_str(&format!(
+                                "  br i1 {}, label %{}, label %{}\n",
+                                would_overflow, ovf_fail, ovf_ok
+                            ));
+                            out.push_str(&format!("{}:\n", ovf_fail));
+                            // BUG-120: exit(3), not abort() -- see the
+                            // comment on the unsigned-Sub `fail` block above.
+                            out.push_str("  call void @exit(i32 3)\n");
+                            out.push_str("  unreachable\n");
+                            out.push_str(&format!("{}:\n", ovf_ok));
+                            ctx.current_block = ovf_ok;
+                        }
                     }
                     BinaryOp::Shl | BinaryOp::Shr => {
                         let bits = left.ty.bits().unwrap_or(64) as i64;
@@ -5521,7 +5575,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             in_range, ok, fail
                         ));
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // Same phi-block-tracking fix as the
@@ -9524,6 +9580,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     Type::Vec(element) => element,
                     _ => unreachable!("vec() must return Vec<_>"),
                 };
+                // BUG-122: a nested `vec(true, false, …)` (most
+                // commonly an element literal inside an outer
+                // `vec(...)`, e.g. `vec(vec(true, true), vec(false))`)
+                // needs the same packed-bit construction the `let`-
+                // bound path already special-cases -- the generic
+                // byte-addressed fallback below produces a value
+                // every OTHER `intent_vec_bool` accessor misreads.
+                if **element == Type::Bool {
+                    return emit_vec_bool_literal_value(args, ctx, out);
+                }
                 let n = args.len() as i64;
                 let elt_ty = vec_element_value_str(element);
                 // For struct / tuple elements the size is a
@@ -16810,6 +16876,55 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     } else {
                         field_addr
                     };
+                    // BUG-122: `t.field[i]` — struct-FIELD-based
+                    // Vec<bool> read had no packed-bit special case
+                    // at all (unlike the Var-base arm above, whose
+                    // check only fires when the indexed array is a
+                    // bare `Var(name)`, never `FieldAccess`), so
+                    // `h.flags[i]` fell straight through to the
+                    // generic byte-addressed path below -- treating
+                    // the packed `i64*` word buffer as if it were
+                    // an `i1*` array. Same packed word/bit math as
+                    // the Var arm, just addressed via `base_addr`
+                    // (the field's own Vec-struct address) instead
+                    // of a `ctx.locals`-registered alloca.
+                    if *element == Type::Bool {
+                        let data_p = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr {}, {}* {}, i64 0, i32 0\n",
+                            data_p, s_ty, s_ty, base_addr
+                        ));
+                        let data = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load i64*, i64** {}\n", data, data_p));
+                        let idx_v = emit_expr(index, ctx, out);
+                        let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                        let bool_len_p = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                            bool_len_p, s_ty, s_ty, base_addr
+                        ));
+                        let bool_len_v = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load i64, i64* {}\n", bool_len_v, bool_len_p));
+                        out.push_str(&format!(
+                            "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                            idx_i64, bool_len_v
+                        ));
+                        let wi = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = udiv i64 {}, 64\n", wi, idx_i64));
+                        let bi = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = urem i64 {}, 64\n", bi, idx_i64));
+                        let wp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = getelementptr i64, i64* {}, i64 {}\n", wp, data, wi));
+                        let wv = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load i64, i64* {}\n", wv, wp));
+                        let sh = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = lshr i64 {}, {}\n", sh, wv, bi));
+                        let bit = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = and i64 {}, 1\n", bit, sh));
+                        let v = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = trunc i64 {} to i1\n", v, bit));
+                        return v;
+                    }
                     let data_p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i32 0\n",
@@ -18086,6 +18201,69 @@ fn emit_vec_bool_let_from_literal(
             s_ty, addr, i, v
         ));
     }
+}
+
+/// BUG-122: value-returning counterpart of
+/// `emit_vec_bool_let_from_literal`, for a `vec(true, false, …)`
+/// literal that appears as a sub-expression rather than a direct
+/// `let` RHS -- most commonly a `vec(bool)` nested as an ELEMENT of
+/// an outer `vec(...)` literal (`vec(vec(true, true), vec(false))`).
+/// The outer literal's own per-element construction (see the `name
+/// == "vec"` sub-expression dispatch above) had no `Type::Bool`
+/// special case at all and fell through to the generic byte-
+/// addressed per-element path -- allocating one BYTE per bool via a
+/// bitcast to `i1*` and storing that pointer directly into
+/// `%intent_vec_bool`'s data field, which every other accessor
+/// (`Index` read, `set_mut`, `clone`, …) expects to be a PACKED
+/// `i64*` word buffer. Silently wrong output (any read past the
+/// first word's worth of elements reinterprets unrelated byte data
+/// as packed bits), not a crash -- exactly BUG-109's original bug
+/// shape recurring for this different construction path. Same
+/// scratch-alloca + `set_mut` strategy as the `let`-bound version,
+/// just through a temporary (unnamed) alloca instead of a `ctx.
+/// locals`-registered one, so the final value can be `load`ed back
+/// out and returned as a plain SSA value for the caller to store.
+fn emit_vec_bool_literal_value(args: &[TypedExpr], ctx: &mut FnCtx, out: &mut String) -> String {
+    let n = args.len() as i64;
+    let word_count = if n == 0 { 1 } else { (n + 63) / 64 };
+    let bytes = word_count * 8;
+    let raw = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", raw, bytes));
+    let zeroed = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = call i8* @memset(i8* {}, i32 0, i64 {})\n",
+        zeroed, raw, bytes
+    ));
+    let buf = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, raw));
+
+    let cap = if n == 0 { 1 } else { n };
+    let s_ty = "%intent_vec_bool";
+    let s0 = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = insertvalue {} undef, i64* {}, 0\n",
+        s0, s_ty, buf
+    ));
+    let s1 = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = insertvalue {} {}, i64 {}, 1\n", s1, s_ty, s0, n));
+    let s2 = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = insertvalue {} {}, i64 {}, 2\n", s2, s_ty, s1, cap));
+
+    let scratch = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = alloca {}\n", scratch, s_ty));
+    out.push_str(&format!("  store {} {}, {}* {}\n", s_ty, s2, s_ty, scratch));
+
+    for (i, e) in args.iter().enumerate() {
+        let v = emit_expr(e, ctx, out);
+        out.push_str(&format!(
+            "  call void @intent_vec_bool__set_mut({}* {}, i64 {}, i1 {})\n",
+            s_ty, scratch, i, v
+        ));
+    }
+
+    let dest = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = load {}, {}* {}\n", dest, s_ty, s_ty, scratch));
+    dest
 }
 
 /// Lower `let <name>: Vec<T> = vec(a0, a1, …, aN);`.
@@ -28724,6 +28902,29 @@ fn emit_intent_hashmap_pair_llvm(
     // get / insert / remove return Option<V> — gated on
     // has_option_v (the program registered the enum).
     if has_option_v {
+        // BUG-121: `bool` V is stored as `i8` (`v_llvm` == "i8",
+        // no bit-packing for HashMap values -- unlike `Vec<bool>`,
+        // which BUG-109 covers separately), but the generic enum
+        // emitter declares `%Enum_Option__bool`'s payload field as
+        // `i1` (the true LLVM type for `Type::Bool` everywhere
+        // else). Loading a REAL `i8` register and `insertvalue`ing
+        // it straight into an `i1`-typed struct field is invalid
+        // IR (`lli` rejects it at verification, a hard compile-time
+        // crash) -- literal `0`/`1` placeholders happened not to
+        // trip this since untyped literal tokens coerce to whatever
+        // type context they're embedded in, but a named register
+        // load carries a real, fixed type. Bridge with an explicit
+        // `trunc i8 to i1` wherever a loaded bool value crosses into
+        // the Option-enum payload; literal `0` placeholders just get
+        // `i1 0` directly (no conversion instruction needed).
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, i64 %k) {{\n\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
@@ -28765,12 +28966,13 @@ fn emit_intent_hashmap_pair_llvm(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, i64 %k, {v} %v) {{\n\
@@ -28835,8 +29037,9 @@ fn emit_intent_hashmap_pair_llvm(
              \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %old_v = load {v}, {v}* %vcell_u\n\
              \x20 store {v} %v, {v}* %vcell_u\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 %ft_f = load i64, i64* %first_tomb_p_hm\n\
@@ -28865,7 +29068,7 @@ fn emit_intent_hashmap_pair_llvm(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, i64 %k) {{\n\
@@ -28917,15 +29120,20 @@ fn emit_intent_hashmap_pair_llvm(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, v = v_llvm, opt = opt_v,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     // clear() — always emitted.
@@ -29216,6 +29424,16 @@ fn emit_intent_hashmap_pair_llvm_f64k(
         s = s, v = v_llvm, vsz = v_size,
     ));
     if has_option_v {
+        // BUG-121: see the identical comment in
+        // `emit_intent_hashmap_pair_llvm` above.
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, double %k) {{\n\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
@@ -29257,12 +29475,13 @@ fn emit_intent_hashmap_pair_llvm_f64k(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, double %k, {v} %v) {{\n\
@@ -29327,8 +29546,9 @@ fn emit_intent_hashmap_pair_llvm_f64k(
              \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %old_v = load {v}, {v}* %vcell_u\n\
              \x20 store {v} %v, {v}* %vcell_u\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 %ft_f = load i64, i64* %first_tomb_p_hm\n\
@@ -29357,7 +29577,7 @@ fn emit_intent_hashmap_pair_llvm_f64k(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, double %k) {{\n\
@@ -29409,15 +29629,20 @@ fn emit_intent_hashmap_pair_llvm_f64k(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, v = v_llvm, opt = opt_v,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     out.push_str(&format!(
@@ -29746,6 +29971,16 @@ fn emit_intent_hashmap_pair_llvm_strk(
         s = s, v = v_llvm, vsz = v_size,
     ));
     if has_option_v {
+        // BUG-121: see the identical comment in
+        // `emit_intent_hashmap_pair_llvm` above.
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, i8* %k) {{\n\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
@@ -29788,12 +30023,13 @@ fn emit_intent_hashmap_pair_llvm_strk(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, i8* %k, {v} %v) {{\n\
@@ -29861,8 +30097,9 @@ fn emit_intent_hashmap_pair_llvm_strk(
              \x20 store {v} %v, {v}* %vcell_u\n\
              \x20 ; Duplicate key — caller still owns k; map keeps\n\
              \x20 ; its existing strdup'd copy. Nothing to free.\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 ; Clone the caller's key — affine system doesn't\n\
@@ -29901,7 +30138,7 @@ fn emit_intent_hashmap_pair_llvm_strk(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, i8* %k) {{\n\
@@ -29958,15 +30195,20 @@ fn emit_intent_hashmap_pair_llvm_strk(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, v = v_llvm, opt = opt_v,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     out.push_str(&format!(
@@ -30981,6 +31223,16 @@ fn emit_intent_hashmap_pair_llvm_vec_i64k(
         s = s, v = v_llvm, vsz = v_size,
     ));
     if has_option_v {
+        // BUG-121: see the identical comment in
+        // `emit_intent_hashmap_pair_llvm` above.
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, %intent_vec_i64 %k) {{\n\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
@@ -31022,12 +31274,13 @@ fn emit_intent_hashmap_pair_llvm_vec_i64k(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, %intent_vec_i64 %k, {v} %v) {{\n\
@@ -31093,8 +31346,9 @@ fn emit_intent_hashmap_pair_llvm_vec_i64k(
              \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %old_v = load {v}, {v}* %vcell_u\n\
              \x20 store {v} %v, {v}* %vcell_u\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 ; Deep-clone the caller's Vec data buffer.\n\
@@ -31142,7 +31396,7 @@ fn emit_intent_hashmap_pair_llvm_vec_i64k(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, %intent_vec_i64 %k) {{\n\
@@ -31205,15 +31459,20 @@ fn emit_intent_hashmap_pair_llvm_vec_i64k(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, v = v_llvm, opt = opt_v,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     out.push_str(&format!(
@@ -32158,6 +32417,16 @@ fn emit_intent_hashmap_pair_llvm_tuple_i64k(
         s = s, v = v_llvm, tup = tup, ksz = k_size, vsz = v_size,
     ));
     if has_option_v {
+        // BUG-121: see the identical comment in
+        // `emit_intent_hashmap_pair_llvm` above.
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, {tup} %k) {{\n\
              \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
@@ -32199,12 +32468,13 @@ fn emit_intent_hashmap_pair_llvm_tuple_i64k(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, {tup} %k, {v} %v) {{\n\
@@ -32269,8 +32539,9 @@ fn emit_intent_hashmap_pair_llvm_tuple_i64k(
              \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %old_v = load {v}, {v}* %vcell_u\n\
              \x20 store {v} %v, {v}* %vcell_u\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 %ft_f = load i64, i64* %first_tomb_p_hm\n\
@@ -32299,7 +32570,7 @@ fn emit_intent_hashmap_pair_llvm_tuple_i64k(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, {tup} %k) {{\n\
@@ -32351,15 +32622,20 @@ fn emit_intent_hashmap_pair_llvm_tuple_i64k(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, v = v_llvm, tup = tup, opt = opt_v,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     out.push_str(&format!(
@@ -32746,6 +33022,16 @@ fn emit_intent_hashmap_struct_pair_llvm(
         eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
     ));
     if has_option_v {
+        // BUG-121: see the identical comment in
+        // `emit_intent_hashmap_pair_llvm` above.
+        let is_bool_v = v_mangle == "bool";
+        let vv_conv = if is_bool_v { "  %vv_p = trunc i8 %vv to i1\n" } else { "" };
+        let vv_payload = if is_bool_v { "i1 %vv_p".to_string() } else { format!("{} %vv", v_llvm) };
+        let old_v_conv = if is_bool_v { "  %old_v_p = trunc i8 %old_v to i1\n" } else { "" };
+        let old_v_payload = if is_bool_v { "i1 %old_v_p".to_string() } else { format!("{} %old_v", v_llvm) };
+        let prev_v_conv = if is_bool_v { "  %prev_v_p = trunc i8 %prev_v to i1\n" } else { "" };
+        let prev_v_payload = if is_bool_v { "i1 %prev_v_p".to_string() } else { format!("{} %prev_v", v_llvm) };
+        let none_ty = if is_bool_v { "i1" } else { v_llvm };
         out.push_str(&format!(
             "define %{opt} @{s}_get(%{s}* %m, {k} %k) {{\n\
              {eq_k_slot_prep}\
@@ -32788,12 +33074,13 @@ fn emit_intent_hashmap_struct_pair_llvm(
              g_some:\n\
              \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %vv = load {v}, {v}* %vcell\n\
+             {vv_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {vv_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              g_none:\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_insert(%{s}* %m, {k} %k, {v} %v) {{\n\
@@ -32859,8 +33146,9 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
              \x20 %old_v = load {v}, {v}* %vcell_u\n\
              \x20 store {v} %v, {v}* %vcell_u\n\
+             {old_v_conv}\
              \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {old_v_payload}, 1\n\
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 %ft_f = load i64, i64* %first_tomb_p\n\
@@ -32889,7 +33177,7 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 %nl = add i64 %old_len, 1\n\
              \x20 store i64 %nl, i64* %lp\n\
              \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {none_ty} 0, 1\n\
              \x20 ret %{opt} %n2\n\
              }}\n\
              define %{opt} @{s}_remove(%{s}* %m, {k} %k) {{\n\
@@ -32942,17 +33230,22 @@ fn emit_intent_hashmap_struct_pair_llvm(
              \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
              \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
              \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             {prev_v_conv}\
              \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
-             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {prev_v_payload}, 1\n\
              \x20 ret %{opt} %r2_rm\n\
              hmr_none:\n\
              \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
-             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {none_ty} 0, 1\n\
              \x20 ret %{opt} %nn2_rm\n\
              }}\n",
             s = s, k = k_llvm, v = v_llvm, eq_fn = eq_fn, opt = opt_v,
             eq_k_slot_prep = eq_k_slot_prep, eq_kv_load = eq_kv_load, eq_call_args = eq_call_args,
             eq_kv_load_rm = eq_kv_load_rm, eq_call_args_rm = eq_call_args_rm,
+            vv_conv = vv_conv, vv_payload = vv_payload,
+            old_v_conv = old_v_conv, old_v_payload = old_v_payload,
+            prev_v_conv = prev_v_conv, prev_v_payload = prev_v_payload,
+            none_ty = none_ty,
         ));
     }
     // clear() always emitted
@@ -40107,7 +40400,7 @@ fn emit_vec_bool_helpers_llvm(out: &mut String) {
          \x20 %ok   = icmp ugt i64 %len, 0\n\
          \x20 br i1 %ok, label %do_pop, label %empty\n\
          empty:\n\
-         \x20 call void @abort()\n\
+         \x20 call void @exit(i32 3)\n\
          \x20 unreachable\n\
          do_pop:\n\
          \x20 %nl   = sub i64 %len, 1\n\
@@ -40400,7 +40693,11 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %is_empty_pp = icmp eq i64 %len_pv, 0\n");
         out.push_str("  br i1 %is_empty_pp, label %abort_pp, label %ok_pp\n");
         out.push_str("abort_pp:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- same misleading-`lli`-
+        // crash-report class BUG-106/113/115/117 fixed elsewhere;
+        // this Vec-mutator-builtin guard (and the other pop/
+        // swap_remove/insert sites in this file) were missed.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("ok_pp:\n");
         out.push_str("  %new_len_pp = sub i64 %len_pv, 1\n");
@@ -40455,7 +40752,9 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %sr_oob = icmp uge i64 %i, %sr_len\n");
         out.push_str("  br i1 %sr_oob, label %sr_abort, label %sr_ok\n");
         out.push_str("sr_abort:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- see the comment on
+        // `pop_mut`'s `abort_pp` block above.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("sr_ok:\n");
         out.push_str(&format!(
@@ -40519,7 +40818,9 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %ins_oob = icmp ugt i64 %i, %ins_len\n");
         out.push_str("  br i1 %ins_oob, label %ins_abort, label %ins_check_cap\n");
         out.push_str("ins_abort:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- see the comment on
+        // `pop_mut`'s `abort_pp` block above.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("ins_check_cap:\n");
         out.push_str("  %ins_new_len = add i64 %ins_len, 1\n");
@@ -47671,7 +47972,13 @@ mod tests {
             return;
         }
         // No `requires` to guard the divisor; the per-op checked
-        // guard inside Div should fire.
+        // guard inside Div should fire. BUG-120 (2026-08-06): this
+        // guard used to `call void @abort()` like BUG-113's
+        // `requires`-clause guard did before ITS fix -- same
+        // misleading `lli` crash banner, just missed by BUG-115's
+        // sweep (which fixed SSA-LLVM's checked-arithmetic guards
+        // but not tree-LLVM's own). Now `exit(3)`, so this is a
+        // clean exit, not a signal.
         let source = r#"
             fn id(x: i64) -> i64 { return x; }
             fn main() -> i64 {
@@ -47679,11 +47986,554 @@ mod tests {
             }
         "#;
         let exit = run_lli_full(source);
-        assert!(
-            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
-            "expected abort signal on div by zero, got {:?}",
-            exit
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3), not an abort signal (BUG-120)"
         );
+    }
+
+    #[test]
+    fn lli_aborts_on_signed_div_min_by_neg_one_overflow() {
+        if !lli_available() {
+            return;
+        }
+        // BUG-119: `i64::MIN / -1` overflows the representable
+        // range -- a distinct trap from "divisor is zero" above,
+        // which the pre-existing guard never covered. Before BUG-119
+        // this reached a raw `sdiv` and hit a genuine hardware
+        // SIGFPE (surfacing as `lli`'s "PLEASE submit a bug report"
+        // crash banner). BUG-119 added vani's own guard using the
+        // file's existing (buggy) `abort()` convention; BUG-120 then
+        // fixed that convention to `exit(3)`, so this is now a clean
+        // exit, not a signal.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return -9223372036854775808 / id(-1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on MIN / -1 overflow, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_aborts_on_signed_rem_min_by_neg_one_overflow() {
+        if !lli_available() {
+            return;
+        }
+        // Same as the Div case above, but for Rem (`i64::MIN % -1`
+        // overflows too -- the quotient would be `i64::MAX + 1`,
+        // which is what makes the remainder undefined as well).
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return -9223372036854775808 % id(-1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on MIN % -1 overflow, not an abort signal (BUG-120)"
+        );
+    }
+
+    // BUG-120 (2026-08-06): BUG-115's sweep fixed SSA-LLVM's checked-
+    // arithmetic guards (overflow/divisor/shift) and the tree-LLVM
+    // bounds-check helper, but missed tree-LLVM's OWN checked-
+    // arithmetic guards (Add/Sub/Mul overflow, Shl/Shr range) plus a
+    // handful of Vec-mutator-builtin guards (`pop`, `swap_remove`,
+    // `insert`) that are tree-only (SSA-denylisted) and so had no
+    // SSA-LLVM counterpart to catch the gap by comparison. All still
+    // used raw `abort()`, giving `lli`'s misleading crash banner for
+    // a clean, expected trap. The `sqrt` call in each source below is
+    // an unused dummy that forces the whole module onto the tree-LLVM
+    // path (module-wide SSA-eligibility gate) so these tests actually
+    // exercise the code this fix touched, not SSA-LLVM's (already-
+    // clean) equivalent.
+
+    #[test]
+    fn lli_exits_cleanly_on_signed_add_overflow_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return 9223372036854775807 + id(1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on signed add overflow (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_unsigned_sub_overflow_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        // Unsigned Sub is a structurally distinct emit path (an
+        // early `return result` inside the `fail`/`ok` branch, not
+        // the shared fall-through the other ops use) -- worth its
+        // own repro since BUG-120's fix touched that path separately.
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: u64) -> u64 { return x; }
+            fn main() -> i64 {
+              let r: u64 = id(0) - id(1);
+              return r as i64;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on unsigned sub overflow (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_shift_range_violation_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return 1 << id(64);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on out-of-range shift (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_pop_from_empty_vec() {
+        if !lli_available() {
+            return;
+        }
+        // `pop` is SSA-denylisted (no SSA-LLVM lowering), so this
+        // is tree-only regardless -- no dummy needed to force it.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(id(1));
+              let a: i64 = pop(mut ref xs);
+              let b: i64 = pop(mut ref xs);
+              return a + b;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on pop-from-empty-Vec, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_pop_from_empty_vec_bool() {
+        if !lli_available() {
+            return;
+        }
+        // `Vec<bool>`'s packed-bit storage has its own dedicated
+        // `pop_mut` codegen (`intent_vec_bool__pop_mut`), a separate
+        // site from the generic-element one above.
+        let source = r#"
+            fn id(x: bool) -> bool { return x; }
+            fn main() -> i64 {
+              let xs: Vec<bool> = vec(id(true));
+              let a: bool = pop(mut ref xs);
+              let b: bool = pop(mut ref xs);
+              return if a && b { 1 } else { 0 };
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on pop-from-empty-Vec<bool>, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_swap_remove_out_of_bounds() {
+        if !lli_available() {
+            return;
+        }
+        // `swap_remove` is SSA-denylisted -- tree-only regardless.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: i64 = swap_remove(mut ref xs, id(10) as u64);
+              return r;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on swap_remove out-of-bounds, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_insert_out_of_bounds() {
+        if !lli_available() {
+            return;
+        }
+        // `insert` is SSA-denylisted -- tree-only regardless.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let _ = insert(mut ref xs, id(99) as u64, 42);
+              return len(xs) as i64;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on insert out-of-bounds, not an abort signal (BUG-120)"
+        );
+    }
+
+    // BUG-121 (2026-08-06): `HashMap<K, bool>` stores its values as
+    // `i8` internally (no bit-packing for HashMap values, unlike
+    // `Vec<bool>` -- BUG-109's separate concern), but the generic
+    // enum emitter declares `%Enum_Option__bool`'s payload field as
+    // `i1` (the true LLVM type for `Type::Bool` everywhere else).
+    // `insertvalue`ing a REAL loaded `i8` register into that `i1`
+    // field is invalid LLVM IR -- a hard compile-time verification
+    // failure (`lli` refuses to even run it), not a runtime bug.
+    // `run_lli` panics on a non-zero-or-expected process failure, so
+    // simply reaching `assert_eq!` at all proves the IR was valid;
+    // the value itself confirms the `Option<bool>` payload round-
+    // trips correctly through storage and back. Covers all 6 key-
+    // type-generic HashMap codegen functions bool reaches.
+
+    #[test]
+    fn hashmap_bool_value_i64_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, bool> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, true);
+              let v: Option<bool> = hashmap_get(ref m, 1);
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_f64_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<f64, bool> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1.5, true);
+              let v: Option<bool> = hashmap_get(ref m, 1.5);
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_owned_str_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, bool> = hashmap_new();
+              let key: OwnedStr = "hello" + "";
+              let _ = hashmap_insert(mut ref m, key, true);
+              let key2: OwnedStr = "hello" + "";
+              let v: Option<bool> = hashmap_get(ref m, key2);
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_vec_i64_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<Vec<i64>, bool> = hashmap_new();
+              let key: Vec<i64> = vec(1, 2, 3);
+              let _ = hashmap_insert(mut ref m, key, true);
+              let key2: Vec<i64> = vec(1, 2, 3);
+              let v: Option<bool> = hashmap_get(ref m, key2);
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_tuple_i64_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<(i64, i64), bool> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, (1, 2), true);
+              let v: Option<bool> = hashmap_get(ref m, (1, 2));
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_struct_key_compiles_and_runs_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            interface Hash { fn hash(self: Point) -> i64; }
+            interface Eq { fn eq(self: Point, other: Point) -> bool; }
+            struct Point { x: i64, y: i64 }
+            implement Hash for Point {
+              fn hash(self: Point) -> i64 { return self.x * 31 + self.y; }
+            }
+            implement Eq for Point {
+              fn eq(self: Point, other: Point) -> bool {
+                return self.x == other.x && self.y == other.y;
+              }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Point, bool> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, Point { x: 1, y: 2 }, true);
+              let v: Option<bool> = hashmap_get(ref m, Point { x: 1, y: 2 });
+              return match v {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then -1,
+              };
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn hashmap_bool_value_insert_and_remove_option_round_trip_on_llvm() {
+        if !lli_available() {
+            return;
+        }
+        // Covers the OTHER two Option<bool>-materializing sites
+        // (insert's "previous value" and remove's "removed value"),
+        // not just get's -- both had the identical bug.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, bool> = hashmap_new();
+              let r0: Option<bool> = hashmap_insert(mut ref m, 1, true);
+              let was_empty: i64 = match r0 {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then 2,
+              };
+              let r1: Option<bool> = hashmap_insert(mut ref m, 1, false);
+              let prev_was_true: i64 = match r1 {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then 2,
+              };
+              let r2: Option<bool> = hashmap_remove(mut ref m, 1);
+              let removed_was_false: i64 = match r2 {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then 2,
+              };
+              let r3: Option<bool> = hashmap_get(ref m, 1);
+              let after_remove_is_none: i64 = match r3 {
+                Option.Some(b) then if b { 1 } else { 0 },
+                Option.None then 2,
+              };
+              return was_empty * 1000 + prev_was_true * 100 + removed_was_false * 10 + after_remove_is_none;
+            }
+        "#;
+        // 2102 mod 256 -- exit codes wrap to a byte.
+        assert_eq!(run_lli(source), 2102 % 256);
+    }
+
+    // BUG_PATTERN_AUDIT_TODO.md category E audit (2026-08-06): BUG-109's
+    // exact bug shape (`Vec<bool>` literal storage laid out byte-
+    // addressed instead of the packed-bit layout every OTHER
+    // `intent_vec_bool` accessor expects) doesn't recur for these four
+    // other `vec(true, false, …)`-literal-construction paths -- clean
+    // runtime pass on the tree-LLVM backend (where BUG-109 originally
+    // lived). Added per the audit's own "clean pass -> still add the
+    // permanent test" method; `HashMap<K, bool>` was the one candidate
+    // that DID find a real (differently-shaped) bug, fixed as BUG-121
+    // above.
+
+    #[test]
+    fn vec_bool_literal_returned_directly_without_let_reads_back_correctly() {
+        if !lli_available() {
+            return;
+        }
+        // Not a `let`-bound literal (the path `emit_vec_let_from_
+        // literal`'s name suggests it's specifically keyed off) --
+        // a function that directly `return`s the `vec(...)` literal.
+        let source = r#"
+            fn make() -> Vec<bool> {
+              return vec(true, true, true, true, true, true, true, true, true);
+            }
+            fn main() -> i64 {
+              let v: Vec<bool> = make();
+              if v[1] { return 1; } else { return 0; }
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn array_bool_literal_reads_back_correctly() {
+        if !lli_available() {
+            return;
+        }
+        // Fixed-size `[bool; N]`, not `Vec<bool>` -- same packed-
+        // vs-byte-addressed risk BUG-109 covers for Vec specifically.
+        let source = r#"
+            fn main() -> i64 {
+              let a: [bool; 9] = [true, true, true, true, true, true, true, true, true];
+              if a[1] { return 1; } else { return 0; }
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn struct_field_vec_bool_literal_reads_back_correctly() {
+        if !lli_available() {
+            return;
+        }
+        // A `Vec<bool>` struct field, literal-initialized inside the
+        // `StructLit` -- a different lowering path than a bare `let`.
+        // BUG-122: found this construction was actually already fine
+        // (StructLit field values route through the same `emit_expr`
+        // dispatch as any other `vec(...)` sub-expression) -- the
+        // REAL gap was on the READ side: `h.flags[i]`'s packed-bit
+        // Index-read special case only fired when the indexed array
+        // was a bare `Var(name)`; a `FieldAccess` base (`h.flags`)
+        // fell through to the generic byte-addressed path instead,
+        // silently misreading the packed data. Fixed by adding the
+        // identical packed-bit branch to the struct-field Index-read
+        // arm.
+        let source = r#"
+            struct Holder {
+              flags: Vec<bool>,
+            }
+            fn main() -> i64 {
+              let h: Holder = Holder {
+                flags: vec(true, true, true, true, true, true, true, true, true),
+              };
+              if h.flags[1] { return 1; } else { return 0; }
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn struct_field_vec_bool_write_via_set_then_read_back_correctly() {
+        if !lli_available() {
+            return;
+        }
+        // BUG-122 follow-up: the WRITE side for a struct-field
+        // `Vec<bool>` (`set(mut ref h.flags, i, v)` -- direct `h.
+        // flags[i] = v` isn't valid syntax, `IndexAssign` only
+        // supports indexing a bare local name) already correctly
+        // routes through `intent_vec_bool__set_mut`, so this is a
+        // "confirmed clean, add the permanent test" case rather than
+        // a second bug -- but worth covering explicitly since the
+        // read side had a real, separate gap right next to it.
+        let source = r#"
+            struct Holder {
+              flags: Vec<bool>,
+            }
+            fn main() -> i64 {
+              let h: Holder = Holder {
+                flags: vec(false, false, false, false, false, false, false, false, false),
+              };
+              let _ = set(mut ref h.flags, 1, true);
+              if h.flags[1] { return 1; } else { return 0; }
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
+    }
+
+    #[test]
+    fn nested_vec_vec_bool_literal_reads_back_correctly() {
+        if !lli_available() {
+            return;
+        }
+        // `Vec<Vec<bool>>` -- does the outer Vec's per-element
+        // construction correctly delegate to the packed inner
+        // constructor? BUG-122: no -- the "`vec(...)` as a nested
+        // sub-expression" codegen (used for each ELEMENT literal of
+        // an outer `vec(...)`) had no `Type::Bool` special case at
+        // all, unlike the direct `let x: Vec<bool> = vec(...)` path.
+        // The inner `vec(true, …)` literal built a byte-addressed
+        // `i1*` scratch buffer and stored that pointer straight into
+        // `%intent_vec_bool`'s data field, which every other
+        // accessor (this test's own `inner[1]` read, `set_mut`,
+        // `clone`) expects to be a packed `i64*` word buffer --
+        // BUG-109's exact bug shape recurring for this different
+        // construction path. Fixed by adding the identical packed-
+        // bit branch (a new value-returning `emit_vec_bool_literal_
+        // value` helper, mirroring the `let`-bound `emit_vec_bool_
+        // let_from_literal`) to that nested-sub-expression dispatch.
+        let source = r#"
+            fn main() -> i64 {
+              let outer: Vec<Vec<bool>> = vec(
+                vec(true, true, true, true, true, true, true, true, true),
+                vec(false, false),
+              );
+              let inner: Vec<bool> = clone_at(ref outer, 0);
+              if inner[1] { return 1; } else { return 0; }
+            }
+        "#;
+        assert_eq!(run_lli(source), 1);
     }
 
     /// Like `run_lli` but returns `Option<i32>`: `None` when the

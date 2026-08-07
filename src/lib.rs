@@ -12686,6 +12686,94 @@ fn main() -> i64 {
             .expect("Vec<Box<dyn Iface>> struct field must compile to LLVM (BUG-107)");
     }
 
+    // BUG_PATTERN_AUDIT_TODO.md category C audit (2026-08-06):
+    // BUG-107's exact bug shape (a recursive `Type::` walk helper
+    // missing an arm, causing a C forward-declaration/typedef
+    // ordering failure) doesn't recur for a struct field holding a
+    // `Vec<Box<Struct>>` of a CONCRETE struct (not `dyn Iface`) --
+    // clean pass on both backends. Added per the audit doc's own
+    // stated method ("clean pass -> still add the permanent test,
+    // it closes a real coverage gap").
+    #[test]
+    fn vec_box_concrete_struct_field_compiles_on_both_backends() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            struct Container {
+              name: OwnedStr,
+              points: Vec<Box<Point>>,
+            }
+            fn main() -> i64 {
+              let c: Container = Container {
+                name: "demo" + "",
+                points: vec(box(Point { x: 1, y: 2 }), box(Point { x: 3, y: 4 })),
+              };
+              print len(c.points) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<Box<Struct>> struct field must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<Box<Struct>> struct field must compile to LLVM");
+    }
+
+    // Same audit pass: a struct field of `Vec<(vec128<f64>, i64)>`
+    // (a Tuple wrapping a SIMD type, inside a Vec) -- same "wrapper
+    // type forwards the check but the outer container's own helper
+    // forgets to recurse" shape as BUG-107, also a clean pass.
+    #[test]
+    fn vec_of_tuple_wrapping_simd_type_field_compiles_on_both_backends() {
+        let source = r#"
+            struct Holder {
+              items: Vec<(vec128<f64>, i64)>,
+            }
+            fn main() -> i64 {
+              let v: vec128<f64> = simd_splat(1.0);
+              let h: Holder = Holder {
+                items: vec((v, 10)),
+              };
+              print len(h.items) as i64;
+              return 0;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("Vec<(vec128<f64>, i64)> struct field must compile to C");
+        compile_to_llvm(source)
+            .expect("Vec<(vec128<f64>, i64)> struct field must compile to LLVM");
+    }
+
+    // Same audit pass: confirms the struct-field-type whitelist
+    // (`checker.rs` ~line 1128) correctly rejects `Tuple<Box<dyn
+    // Iface>>` as a struct field -- explains why BUG-107's bug class
+    // can't recur for Tuple/HashMap/Option/Deque wrapping `Box<dyn
+    // Iface>` (they never reach the codegen the bug lived in).
+    #[test]
+    fn tuple_of_box_dyn_iface_rejected_as_struct_field() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+            }
+            struct Holder {
+              pair: (Box<dyn Drawable>, i64),
+            }
+            fn main() -> i64 {
+              let h: Holder = Holder {
+                pair: (box(Circle { r: 5 } as dyn Drawable), 42),
+              };
+              print h.pair.1;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("Tuple<Box<dyn Iface>> struct field must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("non-Copy type")),
+            "expected a non-Copy-field-type diagnostic, got: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`
@@ -30546,6 +30634,55 @@ fn main() -> i64 {
         );
     }
 
+    // BUG_PATTERN_AUDIT_TODO.md category G audit (2026-08-06): BUG-111's
+    // exact pattern ("a bare Operand::Const has no ValueId, so any SSA
+    // codegen helper that infers its type via a value_types lookup
+    // silently gets None and falls back to a wrong hardcoded default")
+    // recurred at a DIFFERENT call site -- `intent_print_item`'s
+    // argument-type dispatch, independently in BOTH SSA-C and SSA-LLVM
+    // (unrelated to BUG-111's own already-fixed Cast site). `print 5.5;`
+    // (a float literal passed directly, no intermediate `let` to give it
+    // a ValueId) defaulted `aty` to `Type::I64` on both backends: SSA-LLVM
+    // then picked the integer printf-format branch and tried to embed a
+    // float LLVM constant where an integer was expected -- `lli` rejected
+    // the IR outright ("floating point constant invalid for type").
+    // SSA-C's printf is looser at the C-source level, so it compiled fine
+    // but with the WRONG format specifier and a truncating `(long long)`
+    // cast -- `print 5.5;` silently printed `5`, not `5.5`. BUG-123.
+    #[test]
+    fn bare_float_literal_print_item_infers_correct_type_on_both_ssa_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              print 5.5;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errs: {:?}", errs);
+
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            !ll.contains("i64 5.5") && !ll.contains("i32 5.5"),
+            "must not embed a float constant where SSA-LLVM's integer print \
+             branch expects an integer (lli rejects this as invalid IR); got:\n{}",
+            ll.lines().take(80).collect::<Vec<_>>().join("\n")
+        );
+
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            !c.contains("(long long)(5.5)") && !c.contains("%lld"),
+            "SSA-C must not format a bare float literal print via the \
+             integer (%lld / truncating-cast) branch, got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("%g") || c.contains("(double)(5.5)"),
+            "expected the float printf branch (%g, (double) cast), got:\n{}",
+            c
+        );
+    }
+
     #[test]
     fn len_of_ref_owned_str_dereferences_through_borrow() {
         // Closure #262: `len(ref s)` for `s: OwnedStr`
@@ -41105,9 +41242,85 @@ função main() -> i64 {
         "#;
 
         let c = compile_to_c(source).expect("unsafe_div should compile");
+        // BUG-119: signed i64 Div now routes through the combined
+        // divide-by-zero + `MIN / -1`-overflow helper instead of the
+        // old divisor-only check (still used for unsigned/float).
         assert!(
-            c.contains("intent_check_i64_divisor"),
-            "expected divisor helper to remain when unprovable, got:\n{}",
+            c.contains("intent_checked_i64_div"),
+            "expected checked-div helper to remain when unprovable, got:\n{}",
+            c
+        );
+    }
+
+    // BUG-119: `MIN / -1` (and `MIN % -1`) overflows the
+    // representable range for a signed integer -- a genuine trap
+    // distinct from "divisor is zero", which the pre-existing
+    // divisor-only guard never covered (confirmed live against
+    // plain `main` before the fix: `vanic run` crashed with `lli`'s
+    // "PLEASE submit a bug report" banner -- a raw hardware SIGFPE,
+    // not vani's own clean trap). Fixed by routing signed Div/Rem
+    // through a combined helper that checks BOTH operands and
+    // performs the operation itself.
+    #[test]
+    fn checked_signed_div_and_rem_guard_against_min_by_neg_one_overflow() {
+        let source = r#"
+            fn unsafe_div(a: i64, b: i64) -> i64 { return a / b; }
+            fn unsafe_rem(a: i64, b: i64) -> i64 { return a % b; }
+            fn main() -> i64 {
+              let d: i64 = unsafe_div(10, 3);
+              let r: i64 = unsafe_rem(10, 3);
+              print d, r;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_checked_i64_div") && c.contains("intent_checked_i64_rem"),
+            "expected combined checked div/rem helpers, got:\n{}",
+            c
+        );
+        // The helper body must check both the zero case and the
+        // MIN/-1 overflow case, not just one.
+        let div_def_start = c
+            .find("intent_checked_i64_div(int64_t a, int64_t b)")
+            .expect("intent_checked_i64_div definition");
+        let div_def = &c[div_def_start..div_def_start + 400];
+        assert!(
+            div_def.contains("b == 0") && div_def.contains("INT64_MIN"),
+            "expected both the divisor-zero and MIN/-1 overflow checks in intent_checked_i64_div, got:\n{}",
+            div_def
+        );
+
+        // SSA-C emits the same two guards inline instead of via a
+        // named helper -- check both code paths, not just tree-C.
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            ssa_c.contains("== 0") && ssa_c.contains("INT64_MIN"),
+            "expected both guards in SSA-C output, got:\n{}",
+            ssa_c
+        );
+    }
+
+    #[test]
+    fn unsigned_div_still_uses_divisor_only_check_not_combined_helper() {
+        // Unsigned types have no negative divisor, so there's no
+        // `MIN / -1` case -- the plain divisor-only guard remains
+        // correct and shouldn't be replaced.
+        let source = r#"
+            fn unsafe_div(a: u64, b: u64) -> u64 { return a / b; }
+            fn main() -> i64 {
+              let d: u64 = unsafe_div(10, 3);
+              print d;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_check_u64_divisor") && !c.contains("intent_checked_u64_div"),
+            "expected unsigned div to keep the divisor-only check, got:\n{}",
             c
         );
     }
@@ -42009,6 +42222,56 @@ função main() -> i64 {
             !c.contains("fn_atoi("),
             "extern call must not use `fn_` prefix, got:\n{}",
             c
+        );
+    }
+
+    // BUG-118 — an `extern "C" fn` named after a C99 symbol whose
+    // standard signature uses `long long` (e.g. `atoll`) must not
+    // get our own `int64_t`-spelled prototype: on LP64 platforms
+    // `int64_t` is `long`, and `cc` treats `long` vs. `long long`
+    // as conflicting types for the same symbol even though both
+    // are 64-bit, rejecting the redeclaration outright. The fix
+    // trusts the declaration `<stdlib.h>` already provides instead
+    // of emitting a competing one.
+    #[test]
+    fn extern_c_atoll_does_not_conflict_with_libc_prototype() {
+        let source = r#"
+            extern "C" fn atoll(x: Str) -> i64;
+
+            fn main() -> i64 {
+              return atoll("42");
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        // Must NOT emit our own competing prototype declaration --
+        // `<stdlib.h>` already declares it with the correct
+        // (`long long`) type spelling. The call site (`atoll("42")`)
+        // legitimately contains the bare name, so check for the
+        // declarator's parameter spelling instead of the name alone.
+        assert!(
+            !c.contains("atoll(const char"),
+            "expected no competing prototype for `atoll` (trust <stdlib.h>), got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("atoll("),
+            "expected the call site to still call `atoll`, got:\n{}",
+            c
+        );
+
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            !ssa_c.contains("atoll(const char"),
+            "expected no competing prototype for `atoll` in SSA-C output, got:\n{}",
+            ssa_c
+        );
+        assert!(
+            ssa_c.contains("atoll("),
+            "expected the call site to still call `atoll` in SSA-C output, got:\n{}",
+            ssa_c
         );
     }
 
@@ -52290,6 +52553,132 @@ fn main() -> i64 { return 0; }
         );
         compile_to_llvm(source)
             .expect("two distinctly-named non-ASCII params must compile to LLVM");
+    }
+
+    // BUG_PATTERN_AUDIT_TODO.md category F audit (2026-08-06):
+    // BUG-105's `sanitize_ident` fix is shared by `function_name`
+    // (`fn_<sanitized>`) and `local_name` (`v_<sanitized>`) --
+    // confirms the SAME collision class is already fixed for two
+    // non-ASCII LOCAL variables (not just params), a different
+    // call site from BUG-105's original repro.
+    #[test]
+    fn two_non_ascii_locals_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let က: i64 = 3;
+              let ခ: i64 = 4;
+              let s: i64 = က + ခ;
+              assert s == 7;
+              print "sum", s;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("two distinct non-ASCII locals compile to C");
+        assert!(
+            !c.contains("int64_t v__ = 3"),
+            "sanitize_ident must not collapse distinct non-ASCII local names, got:\n{c}"
+        );
+        compile_to_llvm(source).expect("two distinct non-ASCII locals compile to LLVM");
+    }
+
+    // Same audit pass: struct FIELD names never route through
+    // `sanitize_ident` at all -- `emit_struct_bundle` emits `fname`
+    // (the raw source identifier) directly as the C struct member
+    // name, with no lossy collapsing step, so BUG-105's collision
+    // class can't recur here by construction. Two distinctly-named
+    // non-ASCII fields of equal length (the shape most likely to
+    // collide if there WERE a sanitizer) compile and run correctly
+    // on both backends.
+    #[test]
+    fn two_non_ascii_struct_fields_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            struct Dot {
+              က: i64,
+              ခ: i64,
+            }
+            fn main() -> i64 {
+              let p: Dot = Dot { က: 3, ခ: 4 };
+              let s: i64 = p.က + p.ခ;
+              assert s == 7;
+              print "sum", s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("two distinct non-ASCII struct fields compile to C");
+        compile_to_llvm(source).expect("two distinct non-ASCII struct fields compile to LLVM");
+    }
+
+    // Same audit pass: enum variant names never produce a C
+    // identifier at all -- `TypedExprKind::EnumVariant` carries a
+    // pre-resolved integer `tag`, and the C backend emits only that
+    // tag, never the variant's source name. No sanitizer, no
+    // collision surface, by construction.
+    #[test]
+    fn two_non_ascii_enum_variants_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            enum Akye { က, ခ, ဂ }
+            fn main() -> i64 {
+              let a: Akye = Akye.က;
+              let b: Akye = Akye.ခ;
+              let ra: i64 = match a {
+                Akye.က then 1,
+                Akye.ခ then 2,
+                Akye.ဂ then 3,
+              };
+              let rb: i64 = match b {
+                Akye.က then 1,
+                Akye.ခ then 2,
+                Akye.ဂ then 3,
+              };
+              assert ra == 1;
+              assert rb == 2;
+              print "sum", ra + rb;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("two distinct non-ASCII enum variants compile to C");
+        compile_to_llvm(source).expect("two distinct non-ASCII enum variants compile to LLVM");
+    }
+
+    // Same audit pass: NOT a collision bug, but a related finding --
+    // a non-ASCII struct NAME can be DECLARED but not actually
+    // REFERENCED as a type: `parse_type` doesn't accept a non-ASCII
+    // identifier token in type-annotation position at all (distinct
+    // from `sanitize_ident`'s C-backend mangling concern -- this is
+    // a parser-level gap, backend-independent, so both backends fail
+    // identically at the parse stage, not just one). Documented as a
+    // known limitation in `docs/BUG_PATTERN_AUDIT_TODO.md` category F
+    // rather than fixed here -- out of scope for a mangling-collision
+    // audit, and unclear whether non-ASCII type names are meant to be
+    // supported at all (no example in `examples/language/*/` uses one).
+    #[test]
+    fn non_ascii_struct_name_declares_but_cannot_be_used_as_a_type_annotation() {
+        let decl_only = r#"
+            struct ကက {
+              x: i64,
+            }
+            fn main() -> i64 {
+              return 0;
+            }
+        "#;
+        compile(decl_only).expect("declaring a non-ASCII-named struct parses fine");
+
+        let referenced = r#"
+            struct ကက {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: ကက = ကက { x: 3 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(referenced)
+            .expect_err("referencing a non-ASCII struct name as a type is currently rejected");
+        assert!(
+            errs.iter().any(|e| e.message.contains("expected type")),
+            "expected a parse-level 'expected type' diagnostic, got: {:?}",
+            errs
+        );
     }
 
     // BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up

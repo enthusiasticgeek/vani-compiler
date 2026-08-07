@@ -8472,3 +8472,395 @@ trap. Fixed by switching both to `exit(3)`. Updated the pre-existing
 old `abort()` IR text) + new `tests/run_end_to_end.rs` test
 `bounded_attribute_violation_exits_cleanly_instead_of_crashing_lli`. Full `cargo test
 --release --workspace` clean.
+
+## BUG-118 (2026-08-06) -- C backend's own `atoll` FFI example failed to compile via `cc`
+
+Found by the `vani-localfuzz-ollama` harness's nightly digest as a `backend-divergence`
+cluster (C backend fails, LLVM backend succeeds). Root-caused against the fuzzer's
+`repro.vani`, which turned out to be an (essentially) unmutated copy of the repo's own
+`examples/language/english/ffi.vani` -- i.e. this was already reproducible on plain
+`main`, not a fuzzer-only artifact:
+
+```
+$ vanic run examples/language/english/ffi.vani --backend=c
+cc failed while compiling ...c:149:16: error: conflicting types for 'atoll'; have
+'int64_t(const char *)' {aka 'long int(const char *)'}
+...
+/usr/include/stdlib.h:493:1: note: previous definition of 'atoll' with type
+'long long int(const char *)'
+```
+
+Root cause: both C backends (`backend_c.rs`'s `emit_prototype`/`emit_function` and
+`ssa_backend_c.rs`'s `emit_function_prototype`) spell `i64` as `int64_t` when emitting
+an `extern "C" fn`'s forward declaration. On this LP64 host `int64_t` is `long`, but
+the C standard mandates `atoll` (and `strtoll`/`strtoull`/`llabs`/`lldiv`) return/take
+`long long` -- same width, nominally different type, and `cc` treats redeclaring a
+already-visible libc symbol with a different nominal type as a hard conflict even
+though both backends' generated preamble already unconditionally `#include`s
+`<stdlib.h>` (which declares `atoll` correctly on its own).
+
+Fix: added `backend_c::is_known_libc_symbol`, a narrow allowlist covering exactly the
+five C99-mandated `long long` libc symbols (`atoll`, `strtoll`, `strtoull`, `llabs`,
+`lldiv`). When an `extern "C" fn`'s name matches, both backends now skip emitting
+their own competing prototype and trust the declaration `<stdlib.h>` already provides;
+call sites are unaffected (they already called by bare name). Deliberately did *not*
+widen this to "every stdlib/string/stdio symbol" -- e.g. `atoi`'s `int` return matches
+our `int32_t` mapping exactly, so suppressing its prototype too would have been an
+unnecessary behavior change (and broke the pre-existing
+`extern_c_fn_emits_bare_c_prototype_and_call` test, which asserts `atoi`'s prototype
+*is* emitted). New test `extern_c_atoll_does_not_conflict_with_libc_prototype`
+(`src/lib.rs`) covers both the tree-C and SSA-C backends. Full `cargo test --release`
+(2756 lib tests + 190 end-to-end subprocess tests) clean, zero regressions.
+
+## BUG-119 (2026-08-06) -- signed `MIN / -1` (and `MIN % -1`) had no runtime guard at all
+
+Picked up from `docs/BUG_PATTERN_AUDIT_TODO.md` category B's own suggested next repro
+("does `requires b != 0` correctly cover `a % b`'s *other* overflow case?"). The
+`requires`-based repro (`requires b != 0` on `fn safe_rem(a: i64, b: i64)`, called with
+`(i64::MIN, -1)`) crashed `vanic run` (default LLVM) with `lli`'s misleading "PLEASE
+submit a bug report" banner -- a genuine hardware SIGFPE, not a clean vani trap.
+Stripping the `requires` clause entirely still crashed the same way, proving this
+isn't a `requires`-elision gap at all (unlike BUG-116): **no backend had ANY runtime
+guard for this case, requires clause or not.** Both `--backend=c` and default LLVM hit
+it for both `/` and `%`; the C backend happened not to crash (gcc's own codegen
+sidesteps the hardware trap here) but LLVM's raw `sdiv`/`srem` reached actual hardware
+overflow.
+
+Root cause: all four backends' Div/Rem "checked" guard only ever validated the
+divisor (`b == 0`) -- `intent_check_i64_divisor` (tree-C), the inline `(r) == 0` check
+(SSA-C), and `@__intent_checked_divisor_i64` (SSA-LLVM) all take just the RHS operand,
+so none of them could ever see the `a == i64::MIN` half of the `MIN / -1` overflow
+condition; tree-LLVM's inline guard had the identical one-operand shape. Only signed
+types have this case at all (no negative divisor for unsigned).
+
+Fix: for signed integer Div/Rem specifically, replaced the divisor-only guard with a
+combined helper/inline-check that validates BOTH operands and performs the operation
+itself (same "return the checked result" shape the pre-existing Add/Sub/Mul overflow
+helpers already use) -- `intent_checked_{ty}_div`/`_rem` (tree-C, new preamble
+helpers), an added inline `(r) == -1 && (l) == {TY}_MIN` check after the existing
+zero-check (SSA-C), a second `icmp`/`br`/`abort()` guard block after the existing
+divisor-zero block (tree-LLVM, matching that function's existing raw-`abort()`
+convention), and `@__intent_checked_div_{ty}`/`@__intent_checked_rem_{ty}` -- new
+preamble helpers taking both operands, `exit(3)` on failure (matching SSA-LLVM's
+existing clean-trap convention) -- replacing `@__intent_checked_divisor_{ty}` for
+signed types only (unsigned Div/Rem keeps the old divisor-only helper unchanged, since
+it's still correct there). Updated three pre-existing tests whose assertions named the
+old divisor-only helper for a signed `i64` case (`divisor_check_remains_when_safety_is_
+not_provable` in `src/lib.rs`, `checked_binary_emits_runtime_guards_on_ssa_llvm` in
+`src/ssa_backend_llvm.rs`) to expect the new combined-helper name instead -- the
+elision-based tests (`smt_elides_divisor_check_when_requires_proves_nonzero` and the
+`safe_at` bounds+divisor test) needed no change, since `requires b > 0` already rules
+out `b == -1` and the elision stays sound. New tests: `checked_signed_div_and_rem_
+guard_against_min_by_neg_one_overflow` + `unsigned_div_still_uses_divisor_only_check_
+not_combined_helper` (`src/lib.rs`, covering tree-C and SSA-C), `lli_aborts_on_signed_
+div_min_by_neg_one_overflow` + `_rem_` variant (`src/backend_llvm.rs`, tree-LLVM via
+`lli`). Full `cargo test --release` (2762 lib tests + 190 end-to-end subprocess tests)
+clean, zero regressions.
+
+Note: message text still differs cosmetically between tree-C ("i64") and SSA-C
+("int64_t") for this new check, same as the pre-existing Add/Sub/Mul overflow
+messages -- a known, already-accepted inconsistency (`docs/BUG_PATTERN_AUDIT_TODO.md`
+category D), not something this fix changed or needs to fix.
+
+## BUG-120 (2026-08-06) -- tree-LLVM's checked-arithmetic + Vec-mutator guards still used raw `abort()`
+
+Found while building category D's ("trap exit-code/message consistency matrix") test
+matrix -- specifically while forcing the tree-LLVM path (via an unused `sqrt()` call,
+which the module-wide SSA-eligibility gate treats as disqualifying the whole program)
+to test BUG-119's new MIN/-1 guard on that path. A plain signed-add overflow crashed
+`lli` with its misleading "PLEASE submit a bug report" banner on the tree path even
+though the identical program on the (default) SSA path exits cleanly with `exit(3)`.
+
+Root cause: BUG-115's writeup is explicit that it fixed "the Vec bounds-check helper
+(both tree-LLVM and SSA-LLVM) and all three SSA-LLVM checked-arithmetic guards" --
+i.e. it never touched tree-LLVM's OWN checked-arithmetic guards (Add/Sub/Mul overflow,
+Div/Rem zero-check, Shl/Shr range) at all, only SSA-LLVM's. These guards are inlined
+directly per-call-site in `emit_binary` (not extracted into a named `alwaysinline`
+helper function like `@__intent_bounds_check` is), which is likely why BUG-115's grep-
+for-helper-functions sweep missed them. Separately, four Vec-mutator-builtin guards
+(`pop_mut` generic, `Vec<bool>`'s dedicated packed `pop_mut`, `swap_remove`, `insert`)
+had the same raw-`abort()` shape and no SSA-LLVM counterpart to catch the gap by
+comparison, since `pop`/`swap_remove`/`insert` are all SSA-denylisted (tree-only).
+My own BUG-119 fix earlier today added a new MIN/-1 guard to this same tree-LLVM
+checked-arithmetic block and matched its (buggy) local `abort()` convention at the
+time -- fixed here along with the rest.
+
+Fix: switched all 9 `call void @abort()` sites in `backend_llvm.rs`'s checked-
+arithmetic block (unsigned-Sub early-return, the shared Add/Mul/signed-Sub/Div/Rem
+`fail` block, the MIN/-1 overflow block, Shl/Shr range) and the four Vec-mutator sites
+to `call void @exit(i32 3)`, matching BUG-115's fix for the sibling helpers. Explicitly
+did NOT touch: `match`'s no-wildcard exhaustiveness-fallback `abort()` (provably
+unreachable given checker-enforced exhaustiveness -- a defensive compiler-bug catchall,
+not a user-triggerable trap) or `unsafe_alloc`/`unsafe_free`'s heap-canary-corruption
+`abort()`s (a different, deliberately-harder safety tier per `unsafe.md`, not one of
+category D's listed trap types). Updated 3 pre-existing tests whose assertions expected
+a signal (`lli_aborts_on_div_by_zero`, and my own `lli_aborts_on_signed_div_min_by_neg_
+one_overflow` / `_rem_` variant from BUG-119 earlier today) to expect `Some(3)` instead.
+New tests (`src/backend_llvm.rs`): `lli_exits_cleanly_on_signed_add_overflow_tree_path`,
+`_unsigned_sub_overflow_tree_path`, `_shift_range_violation_tree_path`, `_pop_from_
+empty_vec`, `_pop_from_empty_vec_bool`, `_swap_remove_out_of_bounds`, `_insert_out_of_
+bounds`. Full `cargo test --release` clean, zero regressions.
+
+Category D status: this closes the "does it trap at all + does it look the same"
+question for the Add/Sub/Mul/Div/Rem/Shl/Shr and Vec-mutator cells specifically (now:
+yes traps, exit(3) uniformly on LLVM, no signal-based crash-report divergence). The
+tree-C-vs-SSA-C *message text* wording difference noted in BUG-119's entry above
+remains open as a known, lower-severity, accepted inconsistency -- not addressed here.
+`requires`/`ensures` and `#[bounded(N)]` cells were already covered by BUG-113/116/117.
+Explicit `assert` was BUG-106's own template. Category D's matrix is now fully audited.
+
+## BUG-121 (2026-08-06) -- `HashMap<K, bool>` produced invalid LLVM IR (`Option<bool>` payload)
+
+Found while auditing category E's packed/special-layout candidates: a function that
+directly `return`s a `vec(true, false, …)` literal, an `Array<bool, N>` literal, a
+struct field of `Vec<bool>`, and a nested `Vec<Vec<bool>>` all round-tripped correctly
+on both backends (added as regression tests, since the audit doc's own method says a
+clean pass still closes a real coverage gap). `HashMap<K, bool>` was the one candidate
+that broke -- not with BUG-109's runtime-corruption shape, but a **hard compile-time
+LLVM IR verification failure**: `lli` rejected the module outright with
+`insertvalue operand and field disagree in type: 'i8' instead of 'i1'` for any program
+calling `hashmap_get`/`hashmap_insert`/`hashmap_remove` on a `HashMap<K, bool>`.
+
+Root cause: `HashMap<K, bool>`'s internal value storage uses `i8` per slot (no
+bit-packing for HashMap values -- a legitimate, different storage choice from
+`Vec<bool>`'s packed layout, unrelated to BUG-109). But the generic enum emitter
+declares `%Enum_Option__bool`'s payload field as `i1` (the true LLVM type for
+`Type::Bool` everywhere else `Option<bool>` is constructed). `hashmap_get`'s codegen
+loaded the real `i8`-typed value from storage and `insertvalue`d it straight into the
+`i1`-typed struct field -- invalid for a named SSA register (unlike a bare `0`/`1`
+literal token, which happened to work by accident: an untyped literal coerces to
+whatever type context it's embedded in, so `hashmap_insert`'s call site with a literal
+`true`/`false` argument never tripped this, masking the bug until a value was actually
+*read back* through `get`/`insert`'s-previous-value/`remove`).
+
+This root cause is replicated across **six** near-duplicate key-type-generic HashMap
+codegen functions in `backend_llvm.rs` (`emit_intent_hashmap_pair_llvm` [i64 K],
+`_f64k`, `_strk`, `_vec_i64k`, `_tuple_i64k`, `emit_intent_hashmap_struct_pair_llvm`),
+each with 3 affected sites (`_get`'s "some" branch, `_insert`'s "previous value"
+branch, `_remove`'s "removed value" branch) plus 3 matching "none"/placeholder sites
+that also needed their literal `0`'s type string corrected from `{v}` to `i1`. The two
+`_strk_strv`/`_i64k_strv` variants were NOT touched -- V is always `OwnedStr` there,
+bool never reachable.
+
+Fix: added a `trunc i8 to i1` conversion (via new Rust-level `is_bool_v`-gated
+`vv_conv`/`old_v_conv`/`prev_v_conv` template placeholders) immediately before each
+"value present" `insertvalue`, and swapped each "none" placeholder's literal-0 type
+from `{v}` to a new `none_ty` placeholder (`i1` for bool, else unchanged). Two of the
+six functions (`_strk`, `_vec_i64k`) had extra comment/free lines interrupting the
+otherwise-identical template text, which an initial bulk `replace_all` missed --
+fixed individually once the build's "unused formatting argument" errors pointed at
+them directly (a nice side benefit: the fix couldn't silently miss a site without
+Rust's own unused-arg lint catching it). New tests (`src/backend_llvm.rs`, all via
+`lli` subprocess execution -- `compile_to_llvm()` alone wouldn't have caught this,
+since it never asks `lli` to verify the module): `hashmap_bool_value_i64_key_
+compiles_and_runs_on_llvm` + five sibling tests (`f64_key`, `owned_str_key`,
+`vec_i64_key`, `tuple_i64_key`, `struct_key`) covering all six functions, plus
+`hashmap_bool_value_insert_and_remove_option_round_trip_on_llvm` covering the
+insert-previous-value and remove-removed-value sites specifically (not just get).
+Full `cargo test --release` clean, zero regressions.
+
+Category E status: `Array<bool, N>` literal and the direct-`return`-of-a-`vec(...)`-
+literal path audited clean (regression tests added). `HashMap<K, bool>` (BUG-121),
+nested `Vec<Vec<bool>>`, and a `Vec<bool>` struct-field READ all turned out to have
+real bugs -- see BUG-122 below (found immediately after this paragraph was first
+written, while adding the "clean pass" regression tests the audit method calls for;
+running the tests is what caught it, not just writing them).
+
+## BUG-122 (2026-08-06) -- two more `Vec<bool>` packed-vs-byte-addressed gaps on tree-LLVM
+
+Found running (not just writing) the "clean pass" regression tests for category E's
+`Vec<Vec<bool>>` and struct-field candidates: both looked fine when tested via `vanic
+run`'s default path (which picks SSA-LLVM for these simple cases), but broke when
+forced onto the tree-LLVM path (an unused `sqrt()` call disqualifies the whole module
+from SSA eligibility, the same trick BUG-120 used) -- silently wrong output, not a
+crash. Same root-cause class as BUG-109/121: something assumes byte-addressed `bool`
+storage where the rest of the codebase uses `Vec<bool>`'s packed-bit layout.
+
+**Bug 1 -- nested `Vec<Vec<bool>>` literal construction.** The "`vec(...)` as a nested
+sub-expression" codegen in `backend_llvm.rs` (used for each ELEMENT literal of an
+OUTER `vec(...)`, e.g. the inner `vec(true, …)` in `vec(vec(true, …), vec(false))`)
+had no `Type::Bool` special case at all, unlike the direct `let x: Vec<bool> =
+vec(...)` path (which already delegates to `emit_vec_bool_let_from_literal`). It fell
+through to the generic path: allocate one BYTE per element, bitcast to `i1*`, store
+each element as a separate byte -- then insert that `i1*` pointer straight into
+`%intent_vec_bool`'s data field, which every reader (`Index`, `set_mut`, `clone`, …)
+expects to be a packed `i64*` word buffer. Confirmed via direct IR inspection: the
+outer literal's construction stored an unpacked `i1*` scratch pointer where a packed
+`i64*` word pointer belonged.
+
+Fix: added `emit_vec_bool_literal_value`, a value-returning counterpart of
+`emit_vec_bool_let_from_literal` (same packed-word-buffer + `@intent_vec_bool__set_mut`
+strategy, through a temporary scratch alloca instead of a `ctx.locals`-registered one,
+so the final value can be `load`ed back out and returned as a plain SSA value). Wired
+in as an early dispatch at the top of the nested-`vec(...)`-sub-expression handler.
+
+**Bug 2 -- `Vec<bool>` struct-field READS.** The packed-bit `Index`-read special case
+only fires when the indexed array is a bare `Var(name)` (looked up via `ctx.locals`)
+-- `h.flags[i]`'s array is a `FieldAccess`, not a `Var`, so it fell through to a
+SEPARATE generic "struct-field Vec read" branch that had no bool special case either,
+misreading the packed `i64*` buffer as a byte-addressed `i1*` one (same wrong-type
+mismatch as Bug 1, just on the read side of a differently-constructed value). The
+WRITE side (`IndexAssign`) was already correct -- it only supports indexing a bare
+local name at all (`h.flags[i] = v` isn't valid syntax; the reachable write path is
+`set(mut ref h.flags, i, v)`), and that path's bool branch was already present and
+correct, confirmed with a new regression test.
+
+Fix: added the identical packed-bit read branch (word/bit `udiv`/`urem` math, bounds
+check, `lshr`/`and`/`trunc`) to the struct-field `Vec<bool>` `Index`-read arm, keyed
+off the field's own Vec-struct address instead of a `ctx.locals` alloca.
+
+New/updated tests (`src/backend_llvm.rs`, all via `lli` subprocess execution on the
+FORCED tree-LLVM path -- these are exactly the tests that would have silently passed
+if only checked via `vanic run`'s default SSA-eligible path): `nested_vec_vec_bool_
+literal_reads_back_correctly` and `struct_field_vec_bool_literal_reads_back_correctly`
+now correctly pass under `run_lli` (tree-LLVM), plus new `struct_field_vec_bool_write_
+via_set_then_read_back_correctly` covering the confirmed-clean write side. Full `cargo
+test --release` clean, zero regressions.
+
+Lesson for future audits: a "clean pass" test that only exercises the DEFAULT codegen
+path (SSA-eligible, in this compiler) can miss a real tree-LLVM-only bug entirely --
+worth deliberately forcing the non-default path (the `sqrt()`-dummy trick) for any
+audit test that's specifically about codegen-path parity, not just adding the test and
+trusting a pass.
+
+## BUG-123 (2026-08-06) -- `print`ing a bare float literal misformatted on both SSA backends
+
+Found auditing category G's own candidate list ("grep `operand_type(` call sites with
+an `.unwrap_or`/`.unwrap_or_else` fallback and check each for BUG-111's exact silent-
+wrong-default risk"). All 5 of the doc's own suggested repro shapes (int literal as an
+`f64` function argument, as one element of a `Vec<f64>` literal, on one side of a float
+comparison, as a struct field initializer, as the RHS of a compound-assignment -- the
+last isn't even valid syntax, this language has no `+=`/`-=`) turned out already
+correct. The actual gap was in a DIFFERENT `operand_type(...).unwrap_or(...)` call site
+neither BUG-111 nor the doc's list mentioned: `intent_print_item`'s argument-type
+dispatch, in BOTH `ssa_backend_c.rs` and `ssa_backend_llvm.rs` independently.
+
+Repro: `fn main() -> i64 { print 5.5; return 0; }` -- a float literal passed directly
+to `print`, no intermediate `let` to give it a `ValueId`. `vanic run` (default LLVM/SSA)
+failed outright: `lli: ... error: floating point constant invalid for type` (`call i32
+(i8*, ...) @printf(i8* %v_0.fmt, i64 5.5)` -- a float constant embedded where the
+integer print branch expected an `i64` argument). `vanic run --backend=c` compiled and
+ran, but silently printed `5` instead of `5.5` (`printf("%lld", (long long)(5.5))` --
+the wrong format specifier AND a truncating cast).
+
+Root cause: identical shape to BUG-111 -- `operand_type` returns `None` for a bare
+`Operand::Const` (no `ValueId` to look up in `value_types`), and both backends'
+`intent_print_item` handler independently defaulted the unresolved type to `Type::I64`
+via `.unwrap_or(Type::I64)`, rather than deriving it from the constant's own variant.
+For a bare integer literal this default happens to be correct (masking the bug for the
+common case), but for a bare FLOAT literal it silently mis-selects the wrong printf
+branch entirely.
+
+Fix: `ssa_backend_llvm.rs` already has `const_operand_natural_type` (added for
+BUG-111) -- reused directly, swapping the fallback to
+`.unwrap_or_else(|| const_operand_natural_type(arg))`. `ssa_backend_c.rs` had no
+equivalent helper; added the same three-variant match (`Const::Bool` -> `Bool`,
+`Const::Float` -> `F64`, `Const::Int` -> `I64`/`U64` per range) inline at the one call
+site. Swept both files for every other `Operand::Const(_) => None` site (3 more found,
+all already using `.ok_or_else(...)` -> a proper `EmitError` rather than a silent wrong
+default -- the safe pattern, not this bug's class, left unchanged). New test
+(`src/lib.rs`): `bare_float_literal_print_item_infers_correct_type_on_both_ssa_backends`,
+asserting the emitted SSA-LLVM IR never embeds a float constant on the integer branch
+and the emitted SSA-C never takes the `%lld`/truncating-cast branch for this repro.
+Full `cargo test --release` clean, zero regressions.
+
+Category G status: the one real gap (`intent_print_item`) is now fixed on both
+backends; the doc's own 5 suggested repro shapes were all already correct (regression
+tests not added for those specifically, since they're negative results without a
+distinguishing assertion beyond "compiles and runs" -- already covered by the existing
+end-to-end test corpus's general float-literal-coercion coverage). Category G is now
+fully audited.
+
+## BUG-124 (2026-08-06) -- `vanic build --target=arm-*-linux-gnueabi*` misclassified as bare-metal
+
+Found auditing category H's own 6-cell (bare_metal / cross / host-POSIX x C / LLVM)
+link-flag-parity matrix. `is_bare_metal_triple` (`src/main.rs`) used substring checks
+(`"none"` / `"eabi"` / `"-elf"`) as a proxy for "this is a freestanding microcontroller
+target" -- but `"eabi"` also appears in a large family of REAL Linux userspace target
+triples that use the EABI calling convention (soft/hard float) while having a full OS
+and libc: `arm-unknown-linux-gnueabi`, `arm-unknown-linux-gnueabihf`,
+`armv7-unknown-linux-gnueabihf`, ... (the Debian armel/armhf family -- Raspberry Pi OS
+32-bit is exactly this). The existing unit test (`bare_metal_triple_detection`) never
+covered this triple family at all, only `aarch64-unknown-linux-gnu`/`x86_64-unknown-
+linux-musl` as "not bare metal" examples.
+
+Verified against a REAL cross-toolchain (installed `arm-linux-gnueabi-gcc` +
+`libc6-dev-armel-cross` for this investigation specifically, since the misclassification
+otherwise silently "worked" in the sense of producing SOME broken output rather than a
+loud, obviously-wrong error): `vanic build --target=arm-unknown-linux-gnueabi` on a
+program calling `exp()` failed with `undefined reference to 'exp'`/`'erf'`/`'fmod'` --
+BUG-112's exact class, since the misclassified triple took the bare-metal link branch
+(which adds no `-lm` at all, on the theory that a freestanding target has no libc to
+link against).
+
+Fix: `is_bare_metal_triple` now checks for a real OS component (`"linux"`, `"darwin"`,
+`"windows"`, `"freebsd"`, `"android"`) FIRST -- any triple naming an actual kernel/OS is
+never bare-metal, regardless of its ABI suffix -- before falling through to the
+existing freestanding-heuristic substrings. New unit tests in `src/main.rs` extend
+`bare_metal_triple_detection` with the `gnueabi`/`gnueabihf` family (confirmed NOT
+bare-metal) plus a genuinely-bare-metal EABI triple (confirmed the fix didn't weaken
+detection there). New end-to-end test in `tests/run_end_to_end.rs`,
+`vanic_build_cross_compiles_math_and_sort_program_for_real_arm_linux_target`, gated on
+`arm-linux-gnueabi-gcc` being on `PATH` (skips gracefully otherwise, same pattern as
+the `lli_available()`-gated LLVM tests -- this repo's own CI doesn't install this
+specific cross-toolchain, only `aarch64-linux-gnu-gcc` for a separate lib-only QEMU
+job) -- a real subprocess `vanic build --target=arm-unknown-linux-gnueabi`, checking
+the link succeeds and the output is a genuine 32-bit ARM ELF binary.
+
+## BUG-125 (2026-08-06) -- `sort`/`sort_by` failed to link on any non-x86 cross target
+
+Found investigating BUG-124 on the same real ARM cross-toolchain: even after fixing the
+bare-metal misclassification, a program calling `sort`/`sort_by` still failed --
+`src/sort_runtime.c` (embedded into `vanic` via `include_str!`, unconditionally linked
+into every LLVM-backend binary) starts with `#pragma GCC target("avx512f,avx512bw,
+avx512dq,avx512vl,avx2,bmi2,popcnt")` and `#include <immintrin.h>` with NO architecture
+guard at all. On `arm-linux-gnueabi-gcc` this failed to compile outright (`unknown
+target attribute 'avx512f'`, `immintrin.h: No such file or directory`) -- `vanic build`
+degraded this to a non-fatal WARNING and still produced a linked binary, but with
+`intent_vec_i64__sort`/`intent_vec_double__sort` never defined, so any program actually
+CALLING `sort`/`sort_by` failed at the FINAL link step with `undefined reference to
+'intent_vec_i64__sort'`.
+
+Root cause: the AVX-512 block-partition scan (`_block_part`, inside the `DEFINE_SORT`
+macro, instantiated once for `int64_t` and once for `double`) uses `_mm512_cmpge_epi64_
+mask`/`_mm512_cmplt_epi64_mask` to build a 64-bit "which of these BLOCK elements
+qualify" bitmask, x86-only by construction.
+
+Fix: gated the `#pragma GCC target`/`<immintrin.h>` behind `#if defined(__x86_64__) ||
+defined(__i386__)` (setting a `VANI_SORT_HAVE_AVX512` flag), and extracted the two
+mask-computation shapes (`>= pivot` / `< pivot`) into `VANI_SORT_MASK_GE`/
+`VANI_SORT_MASK_LT` macros with two implementations: the existing AVX-512 one
+(untouched, byte-for-byte identical logic, just relocated) on x86, and a portable
+scalar loop (`for (bi = 0; bi < BLOCK; bi++) if (ptr[bi] >= pivot) mask |= 1 << bi;`,
+using T's own native comparison operators) everywhere else -- same output shape, just
+without the vectorized fast path. Verified the scalar fallback's correctness directly
+(without needing `qemu-user`, which also isn't installed on this dev machine): patched
+a copy of `sort_runtime.c` to force the non-x86 branch, compiled it standalone on this
+native x86_64 host, and ran 2000 randomized `int64_t` + 500 randomized `double` sort
+trials against `qsort`/insertion-sort references -- all matched exactly. The real cross
+build (`arm-unknown-linux-gnueabi`, both math AND sort in one program) now compiles and
+links cleanly with no warning, verified by the same new BUG-124 end-to-end test
+(asserts the "sort runtime compilation failed" warning text is absent).
+
+Aside (not fixed, out of scope): `#pragma GCC target("avx512f,...")` forces AVX-512
+codegen for ANY x86 build regardless of the actual host CPU's capability (no runtime
+CPUID dispatch) -- this dev machine's own CPU (Haswell) doesn't support AVX-512 and a
+standalone test harness compiled with an explicit conflicting `-march=native` crashed
+with an illegal instruction. The REAL `vanic build`/`vanic run` pipeline (which doesn't
+pass `-march=native`) was unaffected -- confirmed executing a native (non-cross) build
+of the same math+sort program on this exact machine, which ran correctly -- so this is
+either already handled by the specific flags `vanic` passes, or a narrower, pre-existing
+limitation unrelated to this session's fix; not chased further since it's orthogonal to
+both this bug and the link-flag-parity theme of category H.
+
+Full `cargo test --release` clean, zero regressions.
+
+Category H status: the 6-cell matrix's bare-metal cell was fundamentally
+misclassifying real Linux ARM targets (BUG-124, more severe than a single missing
+flag), which also unmasked BUG-125 (an architecture-portability gap unrelated to link
+flags specifically, found investigating the same real cross target). The audit's own
+suggested `-lpthread` check was tested directly (a `Mutex`/task-using example
+cross-compiled and linked cleanly without `-lpthread` on the same real toolchain --
+modern glibc folds pthread symbols into libc itself, matching the existing `-lm`
+helper's own comment about this) and found to be correct as-is, not a bug. Category H
+is now fully audited.

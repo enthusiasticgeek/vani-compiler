@@ -13216,15 +13216,37 @@ pub(crate) fn c_element_deep_clone(slot: &str, ty: &Type) -> String {
     }
 }
 
+/// Standard C library symbols whose signature the C standard
+/// *mandates* use `long long` (or `unsigned long long`), even on
+/// platforms like this one where `int64_t`/`uint64_t` are spelled
+/// `long`/`unsigned long`. An `extern "C" fn` whose name matches
+/// one of these must NOT get its own competing prototype: our
+/// generic `i64 -> int64_t` mapping produces a nominally different
+/// (though same-width) C type than the header's own declaration --
+/// e.g. glibc's `<stdlib.h>` declares `atoll` returning `long long`
+/// while we'd emit `int64_t` (`long` here) -- and `cc` rejects that
+/// as a conflicting redeclaration. Trust the header's prototype
+/// instead. Deliberately narrow (vs. every stdlib/string/stdio
+/// symbol): everything outside this C99-mandated `long long`
+/// family already matches our mapping exactly (e.g. `atoi`'s `int`
+/// return matches `int32_t`), so leaving our own prototype in
+/// place for those keeps existing behavior/tests unchanged --
+/// BUG-118.
+pub(crate) fn is_known_libc_symbol(name: &str) -> bool {
+    matches!(name, "atoll" | "strtoll" | "strtoull" | "llabs" | "lldiv")
+}
+
 fn emit_prototype(function: &TypedFunction, out: &mut String) {
     if function.is_extern {
-        out.push_str("extern ");
-        out.push_str(&c_type_name(&function.return_type));
-        out.push(' ');
-        out.push_str(&function.name);
-        out.push('(');
-        emit_params(function, out);
-        out.push_str(");\n");
+        if !is_known_libc_symbol(&function.name) {
+            out.push_str("extern ");
+            out.push_str(&c_type_name(&function.return_type));
+            out.push(' ');
+            out.push_str(&function.name);
+            out.push('(');
+            emit_params(function, out);
+            out.push_str(");\n");
+        }
         return;
     }
     if function.no_mangle {
@@ -13262,13 +13284,15 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
     // prefix, no `static` storage class) and returns. The
     // linker provides the body.
     if function.is_extern {
-        out.push_str("extern ");
-        out.push_str(&c_type_name(&function.return_type));
-        out.push(' ');
-        out.push_str(&function.name);
-        out.push('(');
-        emit_params(function, out);
-        out.push_str(");\n");
+        if !is_known_libc_symbol(&function.name) {
+            out.push_str("extern ");
+            out.push_str(&c_type_name(&function.return_type));
+            out.push(' ');
+            out.push_str(&function.name);
+            out.push('(');
+            emit_params(function, out);
+            out.push_str(");\n");
+        }
         return;
     }
     // Determine the emitted symbol name: bare for no_mangle, prefixed otherwise.
@@ -21285,6 +21309,19 @@ fn emit_binary(
         return format!("{}({}, {})", helper, emit_expr(left), emit_expr(right));
     }
 
+    // BUG-119: `MIN / -1` (and `MIN % -1`) overflows the representable
+    // range for a signed integer type -- a genuine trap distinct from
+    // "divisor is zero", which the plain `divisor_helper` path below
+    // only ever checked. Unsigned types have no such case (no negative
+    // divisor), so only signed integer Div/Rem route through the
+    // combined helper, which validates BOTH operands and performs the
+    // operation itself (same "return the checked result" shape as the
+    // Add/Sub/Mul helper just above).
+    if checked && matches!(op, BinaryOp::Div | BinaryOp::Rem) && left.ty.is_signed_integer() {
+        let helper = div_rem_overflow_helper(op, &left.ty);
+        return format!("{}({}, {})", helper, emit_expr(left), emit_expr(right));
+    }
+
     let right_expr = match op {
         BinaryOp::Div | BinaryOp::Rem if checked => {
             format!("{}({})", divisor_helper(&right.ty), emit_expr(right))
@@ -22091,6 +22128,17 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         ("u64", "uint64_t", false),
     ];
     let overflow_ops: &[&str] = &["add", "sub", "mul"];
+    // BUG-119: combined divide-by-zero + `MIN / -1`-overflow helpers
+    // for signed integer Div/Rem (see `div_rem_overflow_helper`).
+    // Unsigned/float Div/Rem still route through `divisor_kinds`
+    // above -- only signed types have a `MIN / -1` overflow case.
+    let div_rem_kinds: &[(&str, &str, &str)] = &[
+        ("i8", "int8_t", "INT8_MIN"),
+        ("i16", "int16_t", "INT16_MIN"),
+        ("i32", "int32_t", "INT32_MIN"),
+        ("i64", "int64_t", "INT64_MIN"),
+    ];
+    let div_rem_ops: &[&str] = &["div", "rem"];
     let used_divisors: Vec<&(&str, &str, &str)> = divisor_kinds
         .iter()
         .filter(|(ty, _, _)| body.contains(&format!("intent_check_{}_divisor(", ty)))
@@ -22104,8 +22152,18 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         .flat_map(|k| overflow_ops.iter().map(move |op| (k, *op)))
         .filter(|(k, op)| body.contains(&format!("intent_check_{}_{op}(", k.0)))
         .collect();
+    let used_div_rem: Vec<(&(&str, &str, &str), &str)> = div_rem_kinds
+        .iter()
+        .flat_map(|k| div_rem_ops.iter().map(move |op| (k, *op)))
+        .filter(|(k, op)| body.contains(&format!("intent_checked_{}_{op}(", k.0)))
+        .collect();
 
-    if !needs_bounds && used_divisors.is_empty() && used_shifts.is_empty() && used_overflows.is_empty() {
+    if !needs_bounds
+        && used_divisors.is_empty()
+        && used_shifts.is_empty()
+        && used_overflows.is_empty()
+        && used_div_rem.is_empty()
+    {
         return;
     }
 
@@ -22182,7 +22240,60 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
             bl = builtin,
         ));
     }
+
+    // BUG-119: combined divide-by-zero + `MIN / -1`-overflow helpers
+    // for signed integer Div/Rem. `MIN / -1` (and `MIN % -1`)
+    // overflows the representable range -- a distinct trap from
+    // "divisor is zero" that the old divisor-only check (still used
+    // for unsigned/float below) never covered, so a raw `sdiv`/
+    // `srem` reached the hardware and SIGFPE'd instead of hitting
+    // vani's own clean abort message.
+    for ((ty, c_ty, min_macro), op) in &used_div_rem {
+        let c_op = if *op == "div" { "/" } else { "%" };
+        out.push_str(&format!(
+            "static INTENT_UNUSED inline {c} intent_checked_{t}_{op}({c} a, {c} b) {{\n\
+    if (__builtin_expect(b == 0, 0)) {{\n\
+        fprintf(stderr, \"division by zero\\n\");\n\
+        abort();\n\
+    }}\n\
+    if (__builtin_expect(b == -1 && a == {min}, 0)) {{\n\
+        fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        abort();\n\
+    }}\n\
+    return a {c_op} b;\n\
+}}\n",
+            c = c_ty,
+            t = ty,
+            op = op,
+            min = min_macro,
+            c_op = c_op,
+        ));
+    }
     out.push('\n');
+}
+
+/// BUG-119: combined divide-by-zero + `MIN / -1` overflow helper for
+/// signed integer Div/Rem. Only signed types need this (unsigned
+/// division/remainder can't overflow this way); `divisor_helper`
+/// below still covers unsigned + float, whose Div/Rem `checked` path
+/// is unaffected.
+fn div_rem_overflow_helper(op: BinaryOp, ty: &Type) -> String {
+    let ty_name = match ty {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        other => unreachable!(
+            "div_rem_overflow_helper called with non-signed-integer type {:?}",
+            other
+        ),
+    };
+    let op_name = match op {
+        BinaryOp::Div => "div",
+        BinaryOp::Rem => "rem",
+        other => unreachable!("div_rem_overflow_helper called with non-div/rem op {:?}", other),
+    };
+    format!("intent_checked_{ty_name}_{op_name}")
 }
 
 fn divisor_helper(ty: &Type) -> &'static str {

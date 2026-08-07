@@ -103,10 +103,23 @@ A **target triple** is a string in the form:
 | `riscv64-unknown-linux-gnu` | RISC-V 64-bit | Linux userspace |
 | `aarch64-unknown-linux-gnu` | AArch64 | Linux userspace |
 | `x86_64-unknown-linux-musl` | x86-64 | Linux with musl libc |
+| `arm-unknown-linux-gnueabihf` | ARMv6/7 hard-float | Linux userspace (Debian armhf, Raspberry Pi OS 32-bit) |
 
-Triples containing `none`, `eabi`, or ending in `-elf` are
-**bare-metal** -- vāṇी automatically treats them differently from
-Linux cross-targets.
+vāṇी tells bare-metal apart from a real Linux cross-target by
+checking for an actual OS component (`linux`, `darwin`,
+`windows`, ...) FIRST -- only when the triple names no real OS
+does it fall back to the `none` / `eabi` / `-elf` substrings as
+a freestanding-target signal. That ordering matters: the last
+row above (`arm-unknown-linux-gnueabihf`) contains `eabi` too
+(as part of its ABI suffix, `gnueabihf`), but it's a real Linux
+userspace target with a full libc -- treating it as bare-metal
+purely because of that substring was a real bug (BUG-124,
+2026-08-06) that made `vanic build --target=arm-unknown-linux-
+gnueabi*` fail to link ANY program at all (`undefined reference
+to 'exp'`, since the bare-metal path skips `-lm`). If you're on
+an older build and hit that error for a `*-linux-gnueabi*`
+target specifically, upgrading is the fix, not adding `-lm`
+by hand.
 
 ---
 

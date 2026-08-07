@@ -177,7 +177,25 @@ SSA fast path silently drops a runtime guard the tree path has."
   check anywhere, and does it exist on SSA?), `HashMap`/`HashSet` key
   lookup failure modes, `Option`/`Result` unwrap-without-check
   builtins if any exist, `Channel` send-on-closed, `Mutex`
-  double-lock/poisoning.
+  double-lock/poisoning. **AUDITED, no gap found** (2026-08-06):
+  enum-tag validity can't be violated -- there is no `i64 as Enum`
+  cast anywhere in `checker.rs` (only the reverse, `Enum as i64`),
+  and `raw_load`'s pointee is restricted to `i64` only in v1, so
+  there's no way to construct an invalid tag bit-pattern and feed it
+  to `match` in the first place; exhaustiveness is genuinely sound.
+  `hashmap_get`/`btreemap_get` already return `Option<T>` (no
+  unwrap-without-check builtin exists at all -- grepped, none
+  found), so key lookup has no panic path to guard. `Channel` has no
+  `channel_close` builtin (grepped, none found) and is a blocking
+  single-slot rendezvous (send sets value+ready flag, recv
+  spin-waits), so "send-on-closed" isn't a reachable state. Mutex
+  double-lock detection (`compute_locks_params`,
+  `extract_locked_mutex_name`) is a checker-level static analysis
+  shared identically by both backends (not an SSA-vs-tree split) and
+  is already explicitly documented as intentionally non-transitive
+  ("today's check catches the direct case cleanly... future
+  enhancement") -- a known, acknowledged limitation, not a silent
+  gap in the BUG-108/110/119 sense.
 - `#[bounded(N)]` recursion-depth guard (`backend_c.rs` line ~13317,
   seen while reading around the `requires` codegen above) -- is this
   emitted on the SSA path at all, or only tree? Same audit as A/above,
@@ -198,7 +216,14 @@ SSA fast path silently drops a runtime guard the tree path has."
   partially covers an op's safety (e.g. `requires b != 0` but the
   op is `a % b` where `a` could still be `i64::MIN` and `b` could
   still be `-1`, the other overflow case for signed division/rem)?
-  Worth one repro targeting exactly that gap.
+  Worth one repro targeting exactly that gap. **RESOLVED as BUG-119**
+  (2026-08-06) -- turned out bigger than the elision-soundness
+  question posed: the repro crashed identically with the `requires`
+  clause removed entirely, proving no backend had ANY runtime guard
+  for `MIN / -1`/`MIN % -1` at all (not an elision gap -- the
+  divisor-only check literally couldn't see the numerator). All four
+  backends fixed to validate both operands for signed Div/Rem. See
+  `docs/TODO_CURRENT.md`'s BUG-119 entry.
 
 ## C. Recursive type-walk helper exhaustiveness audit (🟡)
 
@@ -218,11 +243,25 @@ since they're structurally different from the common Vec/Array/Struct
 cases). Concrete test cases to try once candidates are found:
 - `Vec<Box<Struct>>` (not `dyn Iface`) as a struct field -- does
   BUG-107's exact ordering bug recur for a concrete boxed struct?
+  **AUDITED, no bug** (2026-08-06): compiles and runs correctly on
+  both backends.
 - `Tuple<Box<dyn Iface>>`, `HashMap<K, Box<dyn Iface>>`,
   `Option<Box<dyn Iface>>`, `Deque<Box<dyn Iface>>` as struct fields.
+  **AUDITED, not reachable** (2026-08-06): all four are rejected
+  before codegen by `checker.rs`'s struct-field-type whitelist
+  (~line 1128 -- "v1 supports Copy types, OwnedStr, Vec<T>, [T; N]
+  of Copy elements, Task, Atomic<T>, Mutex<T>, Channel<T, N>,
+  Box<T>, and enum types as struct fields"), which deliberately does
+  NOT include bare Tuple/HashMap/Option/Deque as field types at all
+  when they carry non-Copy content -- so BUG-107's recursive-walk
+  ordering bug class can't recur here; these never reach the
+  C-forward-declaration codegen the bug lives in. A real gap, if
+  any, would be "should the whitelist accept these" (a feature
+  question), not a codegen-ordering bug.
 - `Vec<Tuple<vec128<f64>, i64>>` as a struct field (Tuple-wrapping a
   SIMD type -- same "wrapper type forwards the check but the outer
-  container's own helper forgets to recurse" shape).
+  container's own helper forgets to recurse" shape). **AUDITED, no
+  bug** (2026-08-06): compiles and runs correctly on both backends.
 
 ## D. Trap exit-code / message consistency matrix (🟡)
 
@@ -247,6 +286,23 @@ unfixable (e.g. `lli`'s own crash-report noise is accepted/
 documented per BUG-108's own writeup -- don't re-litigate that one,
 just confirm no NEW divergences exist elsewhere).
 
+**RESOLVED as BUG-120** (2026-08-06) -- building this exact matrix (forcing the
+tree-LLVM path via a `sqrt()` dummy to test each cell) immediately found a real,
+NEW crash-report divergence: signed add overflow on tree-LLVM crashed `lli` with
+the "PLEASE submit a bug report" banner while the identical program on SSA-LLVM
+exited cleanly with `exit(3)` -- BUG-115's sweep fixed SSA-LLVM's checked-
+arithmetic guards and the tree-LLVM bounds-check helper, but missed tree-LLVM's
+OWN checked-arithmetic guards (Add/Sub/Mul/Div/Rem/Shl/Shr) entirely, plus four
+Vec-mutator-builtin guards (`pop`, `swap_remove`, `insert`) that are tree-only
+(SSA-denylisted, so had no SSA-LLVM sibling to catch the gap by comparison). All
+9 sites fixed to `exit(3)`. Confirmed no further NEW divergences beyond this in
+the matrix: `requires`/`#[bounded(N)]`/bounds/`assert` were already covered by
+BUG-106/113/115/116/117; the tree-C-vs-SSA-C message-text wording difference
+(`i64` vs `int64_t`) noted in BUG-119 remains, but is message-text-only (lower
+severity, matches this section's own stated bar for "intentionally unfixable,
+just document"). See `docs/TODO_CURRENT.md`'s BUG-120 entry for the full
+writeup.
+
 ## E. Packed/special-layout element type audit (🟡)
 
 BUG-109 (`Vec<bool>` literals: packed-bit storage vs a byte-addressed
@@ -258,17 +314,35 @@ but the SAME bug shape (one construction path uses a different layout
 assumption than the read/write paths) is worth checking for every
 OTHER path that constructs a `Vec<bool>`, not just `let`-literal:
 - `Array<bool, N>` literal (fixed-size, not `Vec`) -- same packed-vs-
-  unpacked risk?
+  unpacked risk? **AUDITED, no bug** (2026-08-06) -- clean on tree-LLVM.
 - A struct field of type `Vec<bool>`, literal-initialized inside the
   `StructLit` (different lowering path than a bare `let`).
+  **RESOLVED as BUG-122** (2026-08-06) -- construction was actually
+  fine; the READ side (`h.flags[i]`, a `FieldAccess`-based index) was
+  the real gap, since the packed-bit `Index` special case only fired
+  for a bare `Var(name)` base. Fixed; write side (`set(mut ref h.
+  flags, i, v)`) confirmed already correct.
 - `Vec<Vec<bool>>` (nested) -- does the outer Vec's per-element
   construction correctly delegate to the packed inner constructor?
+  **RESOLVED as BUG-122** (2026-08-06) -- no, the nested-`vec(...)`-
+  sub-expression codegen had no bool special case at all. Fixed with
+  a new value-returning `emit_vec_bool_literal_value` helper.
 - A function that directly `return`s a `vec(true, false, ...)`
   literal (no intermediate `let` at all) -- does that skip
   `emit_vec_bool_let_from_literal` entirely (its name suggests it's
-  keyed off `let` specifically)?
+  keyed off `let` specifically)? **AUDITED, no bug** (2026-08-06) --
+  clean on tree-LLVM (routes through the same fixed sub-expression
+  path as the `Vec<Vec<bool>>` case above).
 - `HashMap<K, bool>` / `HashSet<bool>`-adjacent value storage, if any
   path constructs those from a literal collection of bools.
+  **RESOLVED as BUG-121** (2026-08-06) -- a different bug shape (hard
+  compile-time invalid-IR crash, not silent corruption): HashMap
+  values store `bool` as `i8` (no bit-packing there at all, unrelated
+  to Vec<bool>'s packing), but `Option<bool>`'s enum payload field is
+  `i1` -- `insertvalue`ing a loaded `i8` register into it is invalid
+  IR. Fixed across all 6 key-type-generic HashMap codegen functions.
+  See `docs/TODO_CURRENT.md`'s BUG-121 and BUG-122 entries for full
+  writeups. Category E is now fully audited.
 
 ## F. Non-ASCII identifier collision, extended scope (🟢)
 
@@ -280,15 +354,46 @@ identical collision class in:
   sanitized-length inside the same struct (C struct member names,
   not `v_`-prefixed locals -- likely a DIFFERENT code path than the
   one BUG-105 fixed, worth checking it uses the same fixed sanitizer).
-- Two enum variant names, same shape.
+  **AUDITED, no bug** (2026-08-06): struct field names never route
+  through `sanitize_ident` at all -- `emit_struct_bundle` emits the
+  raw source identifier directly as the C member name, no lossy
+  collapsing step, so there's no collision surface by construction.
+  Confirmed with a regression test (two equal-length Burmese field
+  names, both backends).
+- Two enum variant names, same shape. **AUDITED, no bug** (2026-08-06):
+  enum variants carry a pre-resolved integer `tag`; the C backend
+  never emits a variant-name-derived C identifier at all. No
+  sanitizer, no collision surface. Confirmed with a regression test.
 - Two local variables (not params) with different non-ASCII names in
   the same function scope -- `local_name` is shared with
   `function_name` per BUG-105's writeup, so this is likely already
   fixed, but wasn't the ORIGINAL repro -- worth a dedicated
-  regression test since it's a different call site.
+  regression test since it's a different call site. **AUDITED,
+  already fixed** (2026-08-06) -- confirmed clean with a dedicated
+  regression test at this call site.
 - A non-ASCII TYPE name (struct/enum name itself, not a variable)
   colliding with another type name -- typedefs, not variables ,so a
-  different sanitizer consumer again.
+  different sanitizer consumer again. **AUDITED, different finding**
+  (2026-08-06): not a collision bug -- `struct_c_name`/`enum_c_name`
+  also use the raw name (no sanitizer, no collision risk), but a
+  non-ASCII struct/enum name can be DECLARED and never actually
+  REFERENCED: `parse_type` doesn't accept a non-ASCII identifier
+  token in type-annotation position at all (a parser-level gap,
+  backend-independent -- both backends fail identically at parse
+  time, not a C-vs-LLVM divergence). No example in `examples/
+  language/*/` uses a non-ASCII type name, so unclear whether this
+  is a deliberate v1 restriction or an oversight -- documented with a
+  regression test (`non_ascii_struct_name_declares_but_cannot_be_
+  used_as_a_type_annotation`, `src/lib.rs`) rather than fixed, since
+  it's out of scope for a mangling-collision audit and the intended
+  behavior isn't established either way.
+
+Category F is now fully audited -- no new collision bugs found (BUG-105's fix
+already covers every case where the C backend derives an identifier from a
+non-ASCII source name via `sanitize_ident`; every OTHER identifier-emission
+site turned out to use the raw name directly, with no collision surface at
+all). One adjacent parser-level finding (non-ASCII type names) documented but
+not fixed, pending a decision on intended behavior.
 
 ## G. Const-operand type-tracking gaps in SSA lowering (🟢)
 
@@ -303,16 +408,34 @@ each one for the same "silently wrong default when given a bare
 constant" risk. Concrete repro shapes to try, beyond `let x: f64 =
 <int literal>;` (already fixed):
 - An int literal passed directly as an `f64`/`f32` function
-  ARGUMENT (not through a `let`).
+  ARGUMENT (not through a `let`). **AUDITED, no bug** (2026-08-06).
 - An int literal as one element of a `Vec<f64>`/`Array<f64,N>`
   literal (`vec(1.0, 2, 3.0)` -- mixed literal forms in one
-  container).
+  container). **AUDITED, no bug** (2026-08-06).
 - An int literal on one side of a float comparison inside an `if`
   (`if x > 0 { ... }` where `x: f64` and `0` is the bare int
   literal) -- does comparison codegen hit the same `operand_type`
-  path as Cast?
+  path as Cast? **AUDITED, no bug** (2026-08-06).
 - An int literal as a struct field initializer for an `f64` field.
+  **AUDITED, no bug** (2026-08-06).
 - An int literal as the RHS of a float `+=`/`-=` compound-assignment.
+  **N/A** -- this language has no compound-assignment operators at
+  all (`x += 5;` is a parse error), so this repro shape doesn't apply.
+
+**RESOLVED as BUG-123** (2026-08-06): none of the 5 shapes above found a bug,
+but the same `operand_type(...).unwrap_or(...)` anti-pattern turned up at a
+call site the list above didn't mention -- `intent_print_item`'s argument-
+type dispatch, independently in BOTH `ssa_backend_c.rs` and
+`ssa_backend_llvm.rs`. `print 5.5;` (bare float literal, no `let`) crashed
+`lli` outright on SSA-LLVM (invalid IR: a float constant embedded on the
+integer print branch) and silently printed `5` instead of `5.5` on SSA-C (the
+wrong format specifier + truncating cast). Fixed both by deriving the
+constant's own type from its `Const` variant instead of defaulting to `I64`.
+Swept both files for every other `Operand::Const(_) => None` site -- 3 more
+found, all already using the safe `.ok_or_else(...)` pattern (a real
+`EmitError`, not a silent wrong default), left unchanged. See
+`docs/TODO_CURRENT.md`'s BUG-123 entry for the full writeup. Category G is
+now fully audited.
 
 ## H. Link-flag parity across build-target x backend matrix (🟢)
 
@@ -324,20 +447,41 @@ never been exhaustively diffed for flag parity. Concrete checks:
 - For each of the 6 cells, list every linker flag the OTHER 5 cells
   use that this cell doesn't, and confirm each omission is
   intentional (e.g. `bare_metal` correctly omitting libc/libm) rather
-  than a copy-paste gap.
+  than a copy-paste gap. **RESOLVED as BUG-124** (2026-08-06) -- found
+  something worse than a missing flag: `is_bare_metal_triple`
+  misclassified an entire family of REAL Linux targets
+  (`arm-unknown-linux-gnueabi`/`gnueabihf`, the Debian armel/armhf
+  family) as bare-metal, because "eabi" appears in their ABI suffix.
+  `vanic build --target=arm-unknown-linux-gnueabi` failed to link ANY
+  program (`undefined reference to 'exp'`) on a real cross-toolchain.
+  Fixed by checking for a real OS component first.
 - Specifically check `-lpthread`/threading-runtime flags across all
   6 cells for a program that uses `task`/`Mutex`/`Channel` --
   BUG-112's own writeup only checked `-lm`; the exact same
   three-branch code structure could have the identical gap for
   `-lpthread` in a branch nobody's tested a threading program against
-  yet.
+  yet. **AUDITED, no bug** (2026-08-06) -- tested directly against the
+  same real ARM cross-toolchain (a `Mutex`-using example): links
+  cleanly without `-lpthread` on the `is_cross` branch. Modern glibc
+  folds pthread symbols into libc itself, matching the existing
+  `-lm` helper's own comment about this same fact -- the omission is
+  correct, not a gap.
 - Run an actual `vanic build` (not just `vanic run`) for a
   math-using AND a threading-using program on every reachable
   cell (host-POSIX x both backends is easy; cross/bare_metal need
   the appropriate `--target=`), not just JIT/interpret it -- BUG-112
   was invisible to `vanic run` entirely (`lli` auto-resolves libm),
   so `vanic build`-specific coverage is the only way to catch this
-  class.
+  class. **Done** (2026-08-06) -- installed a real `arm-linux-
+  gnueabi-gcc` + `libc6-dev-armel-cross` sysroot specifically to run
+  actual cross-builds rather than reason about flags in the abstract;
+  this is exactly what surfaced BUG-124, and BUG-124's fix in turn
+  unmasked a SECOND, unrelated bug (BUG-125: `sort_runtime.c`'s
+  AVX-512 code had no non-x86 fallback at all, so any program calling
+  `sort`/`sort_by` failed to link on this same real cross target even
+  after BUG-124's fix). Both fixed; see `docs/TODO_CURRENT.md`'s
+  BUG-124 and BUG-125 entries for the full writeups. Category H is
+  now fully audited -- the last category in this pass.
 
 ---
 

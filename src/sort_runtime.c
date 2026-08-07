@@ -37,11 +37,32 @@
  */
 
 #pragma GCC optimize("O3,unroll-loops,prefetch-loop-arrays")
+
+/* BUG-125: the AVX-512 block-partition scan below is x86-only (the
+ * `#pragma GCC target`, `<immintrin.h>`, and `_mm512_*` intrinsics
+ * simply don't exist on other architectures). This file is compiled
+ * unconditionally into every LLVM-backend binary, including
+ * cross-compiled ones (`vanic build --target=...`) -- on a non-x86
+ * target (confirmed on `arm-unknown-linux-gnueabi`) the AVX-512
+ * pragma/intrinsics failed to compile at all (`unknown target
+ * attribute 'avx512f'`, `immintrin.h: No such file or directory`),
+ * degrading to a non-fatal WARNING that still built a native binary
+ * -- but with `intent_vec_i64__sort`/`intent_vec_double__sort`
+ * missing entirely, so any program actually CALLING `sort`/`sort_by`
+ * failed to LINK (`undefined reference to 'intent_vec_i64__sort'`).
+ * Gate the x86-only bits behind an arch check and provide a portable
+ * scalar equivalent for everyone else -- same algorithm, same output,
+ * just without the vectorized compare/pack fast path. */
+#if defined(__x86_64__) || defined(__i386__)
+#define VANI_SORT_HAVE_AVX512 1
 #pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")
+#include <immintrin.h>
+#else
+#define VANI_SORT_HAVE_AVX512 0
+#endif
 
 #include <stdint.h>
 #include <stddef.h>
-#include <immintrin.h>
 
 typedef struct { int64_t *data; int64_t len; int64_t cap; } VecI64;
 typedef struct { double  *data; int64_t len; int64_t cap; } VecF64;
@@ -49,6 +70,54 @@ typedef struct { double  *data; int64_t len; int64_t cap; } VecF64;
 #define ISORT    24
 #define BLOCK    64
 #define NINTHER  128
+
+/* BUG-125: the two mask-computation shapes used inside `_block_part`
+ * below ("which of these BLOCK elements starting at `ptr` are
+ * >= / < `pivot`, as a 64-bit bitmask") -- AVX-512 on x86, a portable
+ * scalar loop everywhere else. Note the AVX-512 form compares raw
+ * bit patterns via `_mm512_cmpge/cmplt_epi64_mask` for BOTH the
+ * int64_t and double instantiations (never using an FP compare
+ * intrinsic even for `sd_block_part`) -- pre-existing x86-path
+ * behavior, left exactly as it was; the scalar fallback below uses
+ * T's own native `>=`/`<` operators, which is what every OTHER
+ * (non-block-partition) comparison in this file already does. */
+#if VANI_SORT_HAVE_AVX512
+#define VANI_SORT_MASK_GE(out_mask, ptr, pivot)                            \
+    do {                                                                   \
+        __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));          \
+        out_mask = 0;                                                      \
+        for (int bi = 0; bi < BLOCK; bi += 8) {                            \
+            __m512i vals = _mm512_loadu_si512((const __m512i *)((ptr) + bi)); \
+            __mmask8 k = _mm512_cmpge_epi64_mask(vals, vpivot_v);          \
+            out_mask |= (uint64_t)(unsigned)k << bi;                       \
+        }                                                                  \
+    } while (0)
+#define VANI_SORT_MASK_LT(out_mask, ptr, pivot)                            \
+    do {                                                                   \
+        __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));          \
+        out_mask = 0;                                                      \
+        for (int bi = 0; bi < BLOCK; bi += 8) {                            \
+            __m512i vals = _mm512_loadu_si512((const __m512i *)((ptr) + bi)); \
+            __mmask8 k = _mm512_cmplt_epi64_mask(vals, vpivot_v);          \
+            out_mask |= (uint64_t)(unsigned)k << bi;                       \
+        }                                                                  \
+    } while (0)
+#else
+#define VANI_SORT_MASK_GE(out_mask, ptr, pivot)                            \
+    do {                                                                   \
+        out_mask = 0;                                                      \
+        for (int bi = 0; bi < BLOCK; bi++) {                               \
+            if ((ptr)[bi] >= (pivot)) out_mask |= (uint64_t)1 << bi;       \
+        }                                                                  \
+    } while (0)
+#define VANI_SORT_MASK_LT(out_mask, ptr, pivot)                            \
+    do {                                                                   \
+        out_mask = 0;                                                      \
+        for (int bi = 0; bi < BLOCK; bi++) {                               \
+            if ((ptr)[bi] < (pivot)) out_mask |= (uint64_t)1 << bi;        \
+        }                                                                  \
+    } while (0)
+#endif
 
 /* ================================================================
  * Generic helpers emitted twice: once for i64, once for double.
@@ -130,18 +199,14 @@ T* prefix##_block_part(T *lo, T *hi, T pivot) {                           \
         __builtin_prefetch(l + 2*BLOCK, 0, 1);                            \
         __builtin_prefetch(r - 2*BLOCK, 0, 1);                            \
         if (!lc) {                                                          \
-            /* AVX-512: compare 8 i64 at a time, build 64-bit bitmask,   \
-             * then walk bits to pack qualifying indices.  Replaces a     \
-             * 64-iteration scalar packing loop with 8 vector compares    \
-             * + ~32 bit-walk iterations (50% qualifying for random data). */ \
-            __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));     \
-            uint64_t mask_l = 0;                                           \
-            for (int bi = 0; bi < BLOCK; bi += 8) {                       \
-                __m512i vals = _mm512_loadu_si512(                         \
-                    (const __m512i *)(l + bi));                            \
-                __mmask8 k = _mm512_cmpge_epi64_mask(vals, vpivot_v);     \
-                mask_l |= (uint64_t)(unsigned)k << bi;                    \
-            }                                                               \
+            /* AVX-512 (x86) / scalar (everywhere else, BUG-125):        \
+             * compare BLOCK elements against pivot, build a 64-bit       \
+             * bitmask, then walk set bits to pack qualifying indices.    \
+             * On x86 this replaces a 64-iteration scalar packing loop    \
+             * with 8 vector compares + ~32 bit-walk iterations (50%      \
+             * qualifying for random data). */                            \
+            uint64_t mask_l;                                               \
+            VANI_SORT_MASK_GE(mask_l, l, pivot);                           \
             lc = 0;                                                        \
             uint64_t m = mask_l;                                           \
             while (m) {                                                    \
@@ -152,14 +217,8 @@ T* prefix##_block_part(T *lo, T *hi, T pivot) {                           \
         }                                                                   \
         if (!rc) {                                                          \
             T *rb = r - BLOCK + 1;                                         \
-            __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));     \
-            uint64_t mask_r = 0;                                           \
-            for (int bi = 0; bi < BLOCK; bi += 8) {                       \
-                __m512i vals = _mm512_loadu_si512(                         \
-                    (const __m512i *)(rb + bi));                           \
-                __mmask8 k = _mm512_cmplt_epi64_mask(vals, vpivot_v);     \
-                mask_r |= (uint64_t)(unsigned)k << bi;                    \
-            }                                                               \
+            uint64_t mask_r;                                               \
+            VANI_SORT_MASK_LT(mask_r, rb, pivot);                          \
             rc = 0;                                                        \
             uint64_t m = mask_r;                                           \
             while (m) {                                                    \
