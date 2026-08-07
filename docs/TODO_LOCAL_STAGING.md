@@ -2587,7 +2587,14 @@ The bug affects the LLVM backend, which was not executed during the test.
 Repro: `tools/localfuzz/findings/20260806-213628-backend-divergence-4b9c65a80d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-213628-backend-divergence-4b9c65a80d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-126 on main (2026-08-07). Not shadowing-specific:
+root cause was `backend_llvm.rs`'s `Reassign` codegen assuming every
+reassignable binding has a real alloca address to `store` into, which
+is false for `ref T` bindings (they hold the raw pointer VALUE in
+`ctx.locals`, per the Let arm's own carve-out) -- corrupted the first
+8 bytes of whatever the ref pointed at. Fixed by giving `Reassign` the
+same ref carve-out the `Let` arm already had (rebind `ctx.locals` to
+the new value, no `store`).
 
 ---
 
@@ -2660,7 +2667,13 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-040921-backend-divergence-08a08388e1/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-040921-backend-divergence-08a08388e1/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-126 on main (2026-08-07). Not shadowing-specific:
+root cause was `backend_c.rs`'s `Reassign` codegen missing a
+`Type::Array` arm, falling through to a generic `name = expr;` --
+invalid C for array types (arrays aren't assignable via `=`). Fixed
+by writing into the existing storage instead (per-element store for
+an `ArrayLit` RHS, `memcpy` otherwise), mirroring the `Let` arm's
+array handling minus the declaration.
 
 ---
 
