@@ -2711,3 +2711,24 @@ Repro: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/r
 Fix attempt: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-055819-run-crash-f3e497e23f
+
+Repro: `tools/localfuzz/findings/20260807-055819-run-crash-f3e497e23f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-055819-run-crash-f3e497e23f/fix_attempt.md`
+
+### STAGING ENTRY: vani-compiler-localfuzz/examples/language/malayalam/async_cancel_auto.vani
+
+**WHAT WAS RUN:**
+The provided VANI code snippet was compiled using the `vanic` compiler with both LLVM and C backends, and then executed to reproduce a crash or hang.
+
+**EXACT REPRO SOURCE:**
+The repro source is the given VANI file: `/home/virgo/source/vani-compiler-localfuzz/examples/language/malayalam/async_cancel_auto.vani`.
+
+**OBSERVED SYMptom:**
+A crash or hang occurred. The specific symptoms were not described in the provided text, but they are evident from the `raw_result_data` which shows that both LLVM and C runs timed out.
+
+** WHICH BACKENDS IT AFFECTS:**
+This bug affects both the LLVM backend and the C backend of the vani compiler.
