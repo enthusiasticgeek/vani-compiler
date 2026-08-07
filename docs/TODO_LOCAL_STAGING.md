@@ -2833,3 +2833,12 @@ To reproduce this issue:
 Expected behavior: The program should compile successfully with no errors.
 Observed symptom: The program crashes with an integer overflow error in the `add` function, indicating that the backend diverged from the expected output.
 Backend(s) affected: Rustc and LLVM.
+
+---
+
+### Candidate: 20260807-113848-backend-divergence-6efcedf723
+
+Repro: `tools/localfuzz/findings/20260807-113848-backend-divergence-6efcedf723/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-113848-backend-divergence-6efcedf723/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
