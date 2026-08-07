@@ -2661,3 +2661,44 @@ Repro: `tools/localfuzz/findings/20260807-040921-backend-divergence-08a08388e1/r
 Fix attempt: `tools/localfuzz/findings/20260807-040921-backend-divergence-08a08388e1/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-042648-run-crash-b8572331c3
+
+Repro: `tools/localfuzz/findings/20260807-042648-run-crash-b8572331c3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-042648-run-crash-b8572331c3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The staging log indicates a run-crash with the given vani compiler-generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/tamil/async_cancel_auto.vani`. The generated code attempts to call `await` multiple times in a row, which can lead to issues related to concurrency and error handling. Specifically, the `await` function should not be called more than once without waiting for the previous one to complete.
+
+**Mutant/generated source:**
+```vani
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/tamil/async_cancel_auto.vani --backend=c  # C
+
+நோக்கம் "Tamil async/await smoke";
+
+async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  திருப்பு v;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் a: i64 = await(delay(5, 42));
+  கொள் a: i64 = await(delay(9223372036854775807, 42));
+  கொள் b: i64 = await(delay(10, 7));
+
+  உறுதி a == 42;
+  உறுதி b == 7;
+  எழுது "delays:", a, b;
+  திருப்பு 0;
+}
+```
+
+**Finding kind:** run-crash
+**
