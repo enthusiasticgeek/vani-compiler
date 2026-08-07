@@ -3215,3 +3215,16 @@ This bug affects both the LLVM and C backends of the vani compiler.
 ---
 
 **Note:** This staging entry is preliminary and requires human review to determine the root cause.
+
+---
+
+### Candidate: 20260807-221140-backend-divergence-0d05995ac7
+
+Repro: `tools/localfuzz/findings/20260807-221140-backend-divergence-0d05995ac7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-221140-backend-divergence-0d05995ac7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The generated source (`main.vani`) has introduced a bug in the handling of multi-call chain reads back to the same source. Specifically, the compiler is performing lifetime elision incorrectly when chaining `shared` calls with an auto-deref, leading to an overflow error during multiplication operations. This issue affects the 'llvm' backend but does not affect the 'rc' (return code) in the 'c' (compiler) run.
+
+To resolve this, the developer should investigate the compiler's logic for lifetime elision and ensure that it correctly infers lifetimes for multi-call chains involving auto-deref. Additionally, the test case should be expanded to cover more scenarios where multiple `shared` calls are chained together with auto-deref usage.
