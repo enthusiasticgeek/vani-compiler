@@ -11782,7 +11782,11 @@ fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_bac
 
     for (backend_args, expect_code) in [
         (vec!["run", &example], 3),
-        (vec!["run", &example, "--backend=c"], 1),
+        // 134 = 128 + SIGABRT (6): the C-backend overflow trap still
+        // raises a raw `abort()`, and BUG-130 (2026-08-07) fixed
+        // `vanic run` to report the shell convention for a signal-
+        // killed child instead of masking it as a bare `1`.
+        (vec!["run", &example, "--backend=c"], 134),
     ] {
         let mut cmd_args = vec!["10", binary];
         cmd_args.extend(backend_args.iter().copied());
@@ -11851,6 +11855,45 @@ fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("precondition violated in 'f'"),
         "expected a clean precondition-violated message on stderr, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// BUG-130 (2026-08-07): `vanic run`'s own process wrapper used
+// `status.code().unwrap_or(1)` at every call site, which silently
+// converts a signal-killed child into a generic exit code `1` --
+// indistinguishable from a program that legitimately called
+// `exit(1)`, and losing which signal it actually was. The
+// `#[bounded(N)]` recursion-depth guard on the C backend still
+// raises a real `SIGABRT` (unlike the `requires`-clause guard BUG-129
+// just fixed to a clean `exit(3)`), making it a reliable, currently-
+// real way to produce a signal-killed child for this test. Expects
+// the shell convention `128 + signal` (134 = 128 + SIGABRT's 6),
+// matching what a directly-executed binary's own shell would show.
+#[test]
+fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug130-signal-exit-code",
+        r#"
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output.status.code(),
+        Some(134),
+        "BUG-130 regression: a SIGABRT-killed child was reported as a bare exit \
+         code instead of 128+signal (134 = 128 + SIGABRT); status {:?}, stderr: {}",
+        output.status,
         String::from_utf8_lossy(&output.stderr)
     );
 }

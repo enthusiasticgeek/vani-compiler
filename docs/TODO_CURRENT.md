@@ -9114,3 +9114,50 @@ SIGNAL behavior, not just stderr text) and a fast compile-only test in `src/lib.
 (`bug129_tree_c_requires_guard_uses_exit3_not_raw_assert`).
 
 Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).
+
+## BUG-130 (2026-08-07) -- `vanic run` masked a signal-killed child as a bare exit code 1
+
+Found picking up item C2 from `docs/UNRESOLVED_GAPS_TODO.md`. `src/main.rs` used
+`status.code().unwrap_or(1)` at every point where it forwards a compiled program's own
+exit status as `vanic run`/`vanic build`'s own process exit code (5 call sites: the C
+backend's direct-`cc`-then-run path, the LLVM backend's `lli` path, an internal helper
+returning `(i32, stdout, stderr)`, and the two QEMU cross-compile run paths).
+`std::process::ExitStatus::code()` returns `None` specifically when the child was
+killed BY A SIGNAL rather than exiting normally (on Unix -- Windows processes killed
+by an unhandled exception still report a code via `.code()`, so this doesn't arise
+there) -- so any program that hit a raw `abort()` (e.g. the `#[bounded(N)]`
+recursion-depth guard's C-backend codegen, which still calls `abort()` directly rather
+than `exit(3)`) was reported by `vanic run` as exit code `1`, indistinguishable from a
+program that legitimately called `exit(1)`, with no indication a signal was involved
+at all. Confirmed directly: `vanic emit --backend=c` + manual `cc` + direct execution
+of a `#[bounded(3)]` violation shows the shell's `Aborted (core dumped)` and exit
+`134`; the identical program via `vanic run --backend=c` reported a bare `1`.
+
+Fix: added a `child_exit_code` helper in `main.rs` that falls back to the shell
+convention (`128 + signal`, via `std::os::unix::process::ExitStatusExt::signal()`
+behind `#[cfg(unix)]`) instead of a bare `1` whenever `status.code()` returns `None`,
+and switched all 5 call sites to use it. A signal-killed child now reports `134` (128
++ `SIGABRT`'s 6) instead of `1`, matching what a directly-executed binary's own shell
+shows.
+
+This is a broad, mechanical change to `vanic run`'s own exit-code reporting, so it
+surfaced one piece of expected fallout in the existing test suite (not a new bug):
+BUG-127's own regression test asserted the C-backend overflow trap (which ALSO still
+raises a raw `abort()`, same as the `#[bounded(N)]` guard) reports exit `1` -- that was
+only ever true because of THIS bug; updated the assertion to the now-correct `134`.
+
+Added `signal_killed_child_reports_128_plus_signal_not_a_bare_1` to
+`tests/run_end_to_end.rs` (real subprocess run against a `#[bounded(3)]` violation on
+the C backend, asserting exit `134`, since the bug is specifically about signal
+behavior that a compile-only check can't observe).
+
+Aside (not fixed, out of scope): the `#[bounded(N)]` guard's own raw `abort()` on the C
+backend is itself a smaller instance of the same "should this be a clean `exit(3)`
+instead of a raw signal" question BUG-113/116/120/129 already fixed for several other
+runtime-guard call sites -- flagged here for a future pass, not chased in this one
+since `vanic run` now reports it accurately either way (134 either from a genuine
+`SIGABRT` or, if fixed later, from `ExitCode::from(3)`; either is now correctly
+distinguishable from the OTHER).
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed;
+this includes updating BUG-127's own test expectation as described above).

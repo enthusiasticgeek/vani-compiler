@@ -3313,6 +3313,31 @@ fn compile_path_or_report(
         })
 }
 
+/// BUG-130: `ExitStatus::code()` returns `None` when the child was
+/// killed BY A SIGNAL rather than exiting normally (Unix only --
+/// Windows processes killed by an unhandled exception still report
+/// a code via `.code()`, so `None` doesn't arise there in practice).
+/// Every call site here used to fall back to a bare `1` in that
+/// case via `.unwrap_or(1)`, which is indistinguishable from a
+/// program that legitimately called `exit(1)` -- e.g. a compiled
+/// C-backend binary that raises `SIGABRT` (signal 6) was reported by
+/// `vanic run` as exit `1`, not the shell-familiar `134` (128 +
+/// signal) a directly-executed binary shows, with no indication a
+/// signal was involved at all. Report the shell convention instead.
+fn child_exit_code(status: &std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return 128 + signal;
+        }
+    }
+    1
+}
+
 fn run_program(
     path: &Path,
     link_args: &[String],
@@ -3439,7 +3464,7 @@ fn run_program(
     let status = run_result
         .map_err(|error| format!("failed to run '{}': {}", bin_path.display(), error))?;
 
-    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    Ok(ExitCode::from(child_exit_code(&status) as u8))
 }
 
 /// LLVM equivalent of `run_program`. Emits `.ll`, runs it through
@@ -3507,7 +3532,7 @@ fn run_program_llvm(
     let _ = fs::remove_file(&ll_path);
     let status = run_result
         .map_err(|error| format!("failed to invoke {}: {}", lli, error))?;
-    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    Ok(ExitCode::from(child_exit_code(&status) as u8))
 }
 
 /// Probe known libgomp.so paths and add `-load=<path>` flags to
@@ -3823,7 +3848,7 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
     let out = output_result
         .map_err(|error| format!("failed to invoke {}: {}", lli, error))?;
     Ok((
-        out.status.code().unwrap_or(1),
+        child_exit_code(&out.status),
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     ))
@@ -4419,7 +4444,7 @@ fn run_program_llvm_target(
                 .status()
                 .map_err(|e| format!("failed to invoke {}: {}", qemu, e))?;
             let _ = fs::remove_file(&elf_path);
-            Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+            Ok(ExitCode::from(child_exit_code(&status) as u8))
         }
         None => {
             eprintln!(
@@ -4490,7 +4515,7 @@ fn run_bare_metal_qemu_system(
             )
         })?;
     let _ = fs::remove_file(&elf_path);
-    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    Ok(ExitCode::from(child_exit_code(&status) as u8))
 }
 
 fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {

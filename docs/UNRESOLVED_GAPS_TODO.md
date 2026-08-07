@@ -7,11 +7,12 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-130** (re-check before committing -- see
+Next free `BUG-N`: **BUG-131** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
-(item A1), BUG-127 (item A2), BUG-128 (item A3), and BUG-129 (item
-C1) were all fixed 2026-08-07 -- section A is fully closed out; C2-C5
+(item A1), BUG-127 (item A2), BUG-128 (item A3), BUG-129 (item C1),
+and BUG-130 (item C2) were all fixed 2026-08-07 -- section A is fully
+closed out; C3-C5
 remain open in section C.
 
 Method for picking one up: reproduce the minimal repro given (or the
@@ -282,8 +283,8 @@ Recorded so a future pass doesn't re-investigate these from scratch.
 
 All five of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
 (the auto-memory system) with fuller context; summarized here so
-they're not scattered across two places when picking work. C1 is now
-fixed (2026-08-07); C2-C5 remain open.
+they're not scattered across two places when picking work. C1 and C2
+are now fixed (2026-08-07); C3-C5 remain open.
 
 ### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path -- **FIXED as BUG-129 (2026-08-07)**
 
@@ -319,7 +320,14 @@ revisited.
 
 Memory: `project_vani_requires_ref_vec_param_c_backend_gap_2026_08_07.md`
 
-### C2. `vanic run`'s exit-code reporting masks a signal-killed child as exit 1
+### C2. `vanic run`'s exit-code reporting masks a signal-killed child as exit 1 -- **FIXED as BUG-130 (2026-08-07)**
+
+Fixed exactly as suggested below: added a `child_exit_code` helper in `main.rs`
+reporting `128 + signal` (via `ExitStatusExt::signal()` on Unix) instead of a bare `1`
+whenever `status.code()` is `None`, applied at all 5 call sites. A `#[bounded(N)]`
+violation on the C backend (which still raises a raw `abort()`) now correctly reports
+`134` instead of `1`. Full writeup: see `## BUG-130` in `docs/TODO_CURRENT.md`.
+Original notes kept below for traceability.
 
 `src/main.rs` uses `status.code().unwrap_or(1)` (multiple call
 sites) to convert a child process's exit status into `vanic`'s own
