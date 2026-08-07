@@ -2612,7 +2612,16 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260806-231108-run-crash-7564fbed6b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-231108-run-crash-7564fbed6b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-127 on main (2026-08-07). checker.rs deliberately
+keeps facts about a reassigned variable alive across a loop body (for
+a separate loop-invariant-preservation check); the overflow-elision
+pass used that same stale fact set and "proved" a checked add safe
+using a fact only true on the loop's FIRST iteration, eliding the
+runtime guard. LLVM then silently wrapped on the second iteration and
+looped forever instead of trapping. Fixed by skipping Add/Sub/Mul/
+Div/Rem/Shl/Shr elision entirely whenever inside a loop (Index/bounds
+elision is unaffected -- for-loop induction-variable facts are
+genuinely fresh per iteration, unlike this case).
 
 ---
 
