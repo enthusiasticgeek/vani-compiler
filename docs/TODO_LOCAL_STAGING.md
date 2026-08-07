@@ -2970,3 +2970,44 @@ Repro: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/r
 Fix attempt: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-152744-run-crash-a79d18ac24
+
+Repro: `tools/localfuzz/findings/20260807-152744-run-crash-a79d18ac24/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-152744-run-crash-a79d18ac24/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Running the mutant code with LLVM backend resulted in a crash (status: rc = null, stdout = "", stderr = "", timed_out = true). Running the same code with C backend also resulted in a crash (status: rc = null, stdout = "", stderr = "", timed_out = true).
+
+The exact repro source is:
+```vani
+// vani-lang: maithili
+//
+// build & run:
+//   vanic run examples/language/maithili/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/maithili/async_cancel_auto.vani --backend=c  # C
+//
+// Maithili smoke of the async/await dialect lift.
+
+उद्देश्य "Maithili async/await smoke";
+
+async कार्य delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  लौटाओ v;
+}
+
+कार्य main() -> i64 {
+  माना a: i64 = await(delay(5, 42));
+  माना b: i64 = await(delay(9223372036854775807, 7));
+
+  सुनिश्चित a == 42;
+  सुनिश्चित b == 7;
+  लिखो "delays:", a, b;
+  लौटाओ 0;
+}
+```
+
+The observed symptom is a crash, which occurred with both the LLVM and C backends.
