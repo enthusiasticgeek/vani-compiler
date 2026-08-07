@@ -2702,3 +2702,12 @@ async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
 
 **Finding kind:** run-crash
 **
+
+---
+
+### Candidate: 20260807-054930-backend-divergence-3f72ac5ca3
+
+Repro: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
