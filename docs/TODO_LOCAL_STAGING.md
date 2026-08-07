@@ -2804,3 +2804,12 @@ fn classify(m: Mode, n: i64) -> i64 {
   return match m {
     Mode.Normal then n,
     Mode.Eager then n * 922337203685477580
+
+---
+
+### Candidate: 20260807-110057-backend-divergence-3a5b98954b
+
+Repro: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
