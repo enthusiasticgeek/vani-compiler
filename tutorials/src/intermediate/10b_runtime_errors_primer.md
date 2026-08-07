@@ -242,14 +242,12 @@ actually touched, and only on the paths those fixes covered:
    for what was actually an ordinary, expected language-level
    trap.
 2. **C backend (`--backend=c`)**: `assert` and `requires`
-   USUALLY also exit cleanly with code `3` (verified for a
-   scalar `requires` clause) -- but not always: a `requires`
-   clause on a function taking a `ref Vec<T>` parameter,
-   tested directly, hit a different, older code path and
-   raised a real `SIGABRT` via a raw glibc `assert()` macro
-   instead. See Row 5's caveat below for that exact case --
-   if you hit a runtime-error message that doesn't match this
-   section, that mismatch itself is informative.
+   ALWAYS exit cleanly with code `3` -- verified both for a
+   scalar `requires` clause and for a `requires` clause on a
+   function taking a `ref Vec<T>` parameter. (The `ref Vec<T>`
+   case used to hit a different, older code path and raise a
+   real `SIGABRT` via a raw glibc `assert()` macro instead;
+   fixed 2026-08-07 -- see Row 5 below.)
    Bounds / overflow / divide-by-zero / shift are DIFFERENT --
    the C backend still calls a raw libc `abort()` for these
    (never converted to `exit(3)`; the BUG-106-class fixes were
@@ -259,18 +257,19 @@ actually touched, and only on the paths those fixes covered:
    directly-executed `vanic build`-and-run binary shows this as
    the shell's familiar `Aborted` message and exit code `134`
    (128 + `SIGABRT`'s signal number 6). Going through `vanic run
-   --backend=c` specifically, the reported exit code is `1`
-   instead of `134` -- `vanic`'s own process wrapper can't
-   represent "child was killed by a signal" as a plain exit
-   code, and falls back to a generic `1` in that case
-   (`status.code().unwrap_or(1)` in `src/main.rs`), which loses
-   the original signal information. All three numbers (`3` on
-   LLVM, `134` direct-execution on C, `1` via `vanic run
-   --backend=c`) can show up for the SAME source-level trap
-   depending entirely on backend and invocation method --
-   check the STDERR MESSAGE TEXT (present on the C backend,
-   absent on LLVM), not just the exit code, if you need to
-   detect which check actually fired.
+   --backend=c`, the reported exit code now also reads `134` --
+   earlier builds reported a masked, generic `1` instead,
+   because `vanic`'s own process wrapper couldn't represent
+   "child was killed by a signal" as a plain exit code and fell
+   back to `status.code().unwrap_or(1)`, losing the signal
+   information; fixed 2026-08-07 (`src/main.rs`'s
+   `child_exit_code` helper now reports `128 + signal` instead).
+   Both numbers that remain (`3` on LLVM, `134` on C whether run
+   directly or via `vanic run --backend=c`) can show up for the
+   SAME source-level trap depending on which check fired and
+   which backend compiled it -- check the STDERR MESSAGE TEXT
+   (present on the C backend, absent on LLVM), not just the
+   exit code, if you need to detect which check actually fired.
 3. The process terminates immediately in every case above. No
    destructors run. No `finally` blocks. No cleanup beyond what
    the OS does on process exit.
@@ -490,16 +489,20 @@ actually emitted today:
 2. **Deterministic.** Same input produces the same message.
    Reproducible in a test harness.
 
-**Caveat**: the exact message and exit code can still differ
-by CODE PATH, not just by backend -- a `requires` clause on a
-function taking a `ref Vec<T>` parameter, tested directly,
-printed a raw glibc `assert()`-macro-style message on the C
-backend instead of the `"assertion failed: ..."` wording above,
-and exited via a real `SIGABRT` rather than a clean `exit(3)`.
-If your own program's runtime-error output doesn't match this
-section, that's more informative than the message text itself
--- it means you've found a specific case worth checking against
-a current build.
+**Historical caveat (fixed 2026-08-07)**: a `requires` clause
+on a function taking a `ref Vec<T>` parameter used to differ by
+CODE PATH, not just by backend -- it printed a raw glibc
+`assert()`-macro-style message on the C backend instead of the
+`"assertion failed: ..."` wording above, and exited via a real
+`SIGABRT` rather than a clean `exit(3)`. The actual trigger was
+broader than the `ref Vec<T>` case that first surfaced it: any
+module that fell back to tree-walking C codegen for ANY reason
+hit the same raw-`assert()` path for every `requires` clause in
+that module, not just ones on `ref Vec<T>` params. Both codegen
+paths now share the same `exit(3)` + message mechanism. If your
+own program's runtime-error output still doesn't match this
+section on a current build, that's worth reporting -- it may be
+a genuinely new gap.
 
 ### Catching an abort with a signal handler (services)
 
