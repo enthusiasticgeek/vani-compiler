@@ -163,59 +163,92 @@ code alone**. If one segfaults, the cause is in linked C
 
 The structural guarantees above leave a small, well-named
 set of *logic-class* checks the compiler emits at runtime
-when SMT can't discharge them statically. When one fails,
-the program terminates via one of two clean, deterministic,
-named paths -- NOT undefined behavior. `assert` failures call
-`exit(3)` directly; every other row below calls libc's
-`abort()`. (`assert` used to also call `abort()`, but that let
-`vanic run`'s LLVM JIT occasionally misreport a failed assert
-as an apparent native crash -- see the note after the table.)
+when SMT can't discharge them statically. When one fires, the
+program terminates -- but exactly HOW depends on the check
+and the backend, confirmed directly against a current build
+(2026-08-06) rather than assumed:
 
-### What can abort (or exit)
+### What can abort (or exit) -- verified message text
 
-| Trigger | Source-level operation | What it prints |
+| Trigger | Source-level operation | What it actually prints |
 |---|---|---|
-| `assert(p)` fires with `p == false` | Any `assert ...;` | `"assertion failed: <expr> at <file>:<line>"`, then `exit(3)` (not `abort()`) |
-| `prove(p)` fires (strict assert) | Any `prove ...;` | `"prove failed: <expr> at <file>:<line>"` |
-| `requires` fails at function entry | Any function call where SMT couldn't prove the pre-condition | `"precondition failed: <expr> on call to <fn>"` |
-| `ensures` fails at function return | Any function return where SMT couldn't prove the post-condition | `"postcondition failed: <expr> in <fn>"` |
-| `invariant` fails on loop entry / exit | A `for` / `while` loop | `"invariant failed at <kind>: <expr>"` |
-| Index out-of-bounds (SMT-unprovable site) | `xs[i]` / `arr[i]` | `"index out of bounds: i=<n>, len=<n>"` |
-| Integer overflow (SMT-unprovable site) | `a + b`, `a * b`, etc. on signed integers | `"integer overflow: <op> at <file>:<line>"` |
-| Divide / modulo by zero | `a / b` / `a % b` when SMT can't prove `b != 0` | `"divide by zero at <file>:<line>"` |
-| Shift past width | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift overflow at <file>:<line>"` |
+| `assert(p)` fires, no message | Any bare `assert ...;` | `"assertion failed: "` (no expression text, no file/line -- yes, just that, trailing space and all) |
+| `assert(p)` fires, with message | `assert ..., "msg";` | `"assertion failed: msg"` |
+| `requires` fails at function entry | Any function call where SMT couldn't prove the pre-condition | `"assertion failed: precondition violated in '<fn>'"` (no expression text; note the SAME `"assertion failed: "` prefix as plain `assert`, not a distinct `"precondition failed: ..."` wording) |
+| Index out-of-bounds (SMT-unprovable site), **C backend only** | `xs[i]` / `arr[i]` | `"index out of bounds"` (no operands -- not `i=<n>, len=<n>`) |
+| Integer overflow (SMT-unprovable site), **C backend only** | `a + b`, `a * b`, etc. on signed integers | `"integer overflow in <c-type> <op>"`, e.g. `"integer overflow in int64_t add"` (no file/line; the C-type spelling and exact wording differ slightly between the tree-C and SSA-C code paths, see the aside below) |
+| Divide / modulo by zero, **C backend only** | `a / b` / `a % b` when SMT can't prove `b != 0` | `"division by zero"` (no file/line) |
+| Shift past width, **C backend only** | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift amount out of range"` (no file/line) |
+| Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | **nothing** -- no stdout, no stderr, just a clean process exit. Confirmed directly (empty captures on both streams). |
+| `ensures` / `invariant` | post-condition / loop invariant | **not enforced at runtime on ANY backend, at all**, as of this writing -- see the aside below. |
+| `prove(p)` | Any `prove ...;` | Not a runtime check at all -- `prove` MUST be discharged by SMT at COMPILE time or the build fails outright; there is no runtime path to reach. |
 
-That's it. Every other operation either succeeds, returns a
-`Result<T, E>` / `Option<T>` for the caller to handle, or is
-structurally prevented (Row 1).
+That's it for the checks that exist. Every other operation
+either succeeds, returns a `Result<T, E>` / `Option<T>` for
+the caller to handle, or is structurally prevented (Row 1).
 
-### What `abort` does, exactly
+**Aside -- `ensures`/`invariant` have no runtime backstop.**
+Unlike every other row, `ensures` and `invariant` clauses are
+purely a compile-time SMT concept: if the solver can prove the
+clause, the build succeeds silently; if the solver returns a
+definite counterexample (UNSAT), the build fails outright with
+a diagnostic pointing at the clause -- there is no third,
+"couldn't decide, so check it at runtime instead" path for
+these two specifically (contrast with `requires`, which DOES
+fall back to a runtime guard when SMT can't decide). This is a
+known, open gap, not a regression -- implementing real runtime
+enforcement for `ensures`/`invariant` is future work.
 
-When one of the conditions above fires:
+### What actually happens when one fires
 
-1. The compiler-emitted check prints the diagnostic to
-   stderr.
-2. The runtime calls `exit(3)` directly, on both backends --
-   deliberately skipping a signal-based `abort()`/`SIGABRT`
-   path so `vanic run`'s LLVM JIT can't misreport the failure
-   as an apparent native crash. This is uniform across every
-   row above (`assert`, `requires`, bounds, overflow,
-   divide-by-zero, shift, `#[bounded(N)]`) as of 2026-08-05
-   (BUG-106/113/115/116/117) -- earlier builds had several of
-   these still calling a raw `abort()`, which made `lli` print
-   a misleading `PLEASE submit a bug report to
-   https://github.com/llvm/llvm-project/issues/` stack dump
-   for what was actually a completely ordinary, expected
-   language-level trap. If you're on an older build and still
-   see that output, it's the same harmless (if noisy) symptom
-   this section used to describe -- your check's own diagnostic
-   line in stderr, above the dump, is the real cause; upgrading
-   is the actual fix.
-3. The process terminates immediately. No destructors run.
-   No `finally` blocks. No cleanup beyond what the OS does
-   on process exit.
-4. The exit code is always `3`, on both backends, for every
-   row above.
+The exit-code story is NOT "always 3 on both backends" -- that
+was true only for the checks BUG-106/113/115/116/117/120
+actually touched, and only on the paths those fixes covered:
+
+1. **LLVM backend (`vanic run`'s default)**: `assert` and
+   `requires` print their message, then the process exits
+   cleanly with code `3`. Bounds / overflow / divide-by-zero /
+   shift ALSO exit cleanly with code `3` -- as of BUG-120
+   (2026-08-06) -- but print nothing at all; earlier builds hit
+   a genuine hardware trap here (raw `sdiv`/bounds-unchecked
+   memory access) that `lli` reported as a misleading
+   `PLEASE submit a bug report to
+   https://github.com/llvm/llvm-project/issues/` crash banner
+   for what was actually an ordinary, expected language-level
+   trap.
+2. **C backend (`--backend=c`)**: `assert` and `requires`
+   USUALLY also exit cleanly with code `3` (verified for a
+   scalar `requires` clause) -- but not always: a `requires`
+   clause on a function taking a `ref Vec<T>` parameter,
+   tested directly, hit a different, older code path and
+   raised a real `SIGABRT` via a raw glibc `assert()` macro
+   instead. See Row 5's caveat below for that exact case --
+   if you hit a runtime-error message that doesn't match this
+   section, that mismatch itself is informative.
+   Bounds / overflow / divide-by-zero / shift are DIFFERENT --
+   the C backend still calls a raw libc `abort()` for these
+   (never converted to `exit(3)`; the BUG-106-class fixes were
+   scoped to the LLVM backend specifically, since the misleading-
+   crash-banner problem they fixed is an `lli`-JIT artifact that
+   the C backend's plain `SIGABRT` termination never had). A
+   directly-executed `vanic build`-and-run binary shows this as
+   the shell's familiar `Aborted` message and exit code `134`
+   (128 + `SIGABRT`'s signal number 6). Going through `vanic run
+   --backend=c` specifically, the reported exit code is `1`
+   instead of `134` -- `vanic`'s own process wrapper can't
+   represent "child was killed by a signal" as a plain exit
+   code, and falls back to a generic `1` in that case
+   (`status.code().unwrap_or(1)` in `src/main.rs`), which loses
+   the original signal information. All three numbers (`3` on
+   LLVM, `134` direct-execution on C, `1` via `vanic run
+   --backend=c`) can show up for the SAME source-level trap
+   depending entirely on backend and invocation method --
+   check the STDERR MESSAGE TEXT (present on the C backend,
+   absent on LLVM), not just the exit code, if you need to
+   detect which check actually fired.
+3. The process terminates immediately in every case above. No
+   destructors run. No `finally` blocks. No cleanup beyond what
+   the OS does on process exit.
 
 This is **graceful in the diagnostic sense** -- a named,
 deterministic event with a printable cause -- but **terminal
@@ -409,29 +442,39 @@ per build.
 
 ## Row 5: what graceful abort looks like at runtime
 
-When you DO hit a `requires` / unprovable bounds check in
-production, what the user sees (a failed `assert` looks the
-same on stdout/stderr, but exits with code `3` instead of
-`134` -- see the note in "Row 2" above):
+When you DO hit a `requires` violation in production, on the
+default (LLVM) backend (verified directly against a current build):
 
 ```
 $ ./my_program
-... normal output ...
-precondition failed: len(xs) >= 3 on call to sum_first_three
-  at src/processing.vani:42
+starting
+assertion failed: precondition violated in 'sum_first_three'
 $ echo $?
-134
+3
 ```
 
-Three properties:
+Two properties, adjusted from earlier claims to match what's
+actually emitted today:
 
-1. **Named.** The specific assertion / pre-condition is
-   printed. Not just "segmentation fault" -- the exact
-   contract that was violated.
-2. **Located.** The source file and line. No address-only
-   trace; no need for symbol resolution.
-3. **Deterministic.** Same input produces the same abort
-   message. Reproducible in a test harness.
+1. **Named, but not located.** The violated function's name IS
+   printed (`'sum_first_three'` above) -- but NOT the specific
+   clause expression, and NOT a source file/line. If you need
+   to know exactly which `requires` clause failed, the
+   function name plus reading its declaration is currently
+   your only lead.
+2. **Deterministic.** Same input produces the same message.
+   Reproducible in a test harness.
+
+**Caveat**: the exact message and exit code can still differ
+by CODE PATH, not just by backend -- a `requires` clause on a
+function taking a `ref Vec<T>` parameter, tested directly,
+printed a raw glibc `assert()`-macro-style message on the C
+backend instead of the `"assertion failed: ..."` wording above,
+and exited via a real `SIGABRT` rather than a clean `exit(3)`.
+If your own program's runtime-error output doesn't match this
+section, that's more informative than the message text itself
+-- it means you've found a specific case worth checking against
+a current build.
 
 ### Catching an abort with a signal handler (services)
 
@@ -616,12 +659,18 @@ named contract."
   hosted vāṇी. Affine ownership + bounds checks + no raw
   pointers + scope-escape analysis remove the surface.
 - **Logic-class crashes** are **compile-time when SMT can
-  prove**; otherwise a clean, named termination at the
-  operation with a diagnostic (`abort()` for everything
-  except `assert`, which uses `exit(3)` -- see "Row 2"
-  above). The surface is small and named: assert / prove /
-  requires / ensures / invariant / index OOB / overflow /
-  div-by-zero / shift past width.
+  prove**; otherwise a runtime termination at the operation --
+  clean and diagnosed on the LLVM backend for `assert`/
+  `requires`, silent (`exit(3)`, no message) for bounds/
+  overflow/div-by-zero/shift; on the C backend, `assert`/
+  `requires` also exit(3) with a message, but bounds/overflow/
+  div-by-zero/shift still raise a raw `SIGABRT` -- see "Row 2"
+  above for the verified details and the exact numbers each
+  path produces. `ensures`/`invariant` have NO runtime
+  enforcement on either backend today (compile-time-or-nothing).
+  The surface is small and named: assert / prove / requires /
+  ensures / invariant / index OOB / overflow / div-by-zero /
+  shift past width.
 - **Recoverable failures** are always values -- `Result<T, E>`
   / `Option<T>` propagated via `?` / `try`. No exceptions,
   no unwinding, no "uncaught exception" surprise.
