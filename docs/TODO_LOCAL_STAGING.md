@@ -2949,3 +2949,12 @@ The compilation process was successful, but the execution took longer than expec
 - **Compiler and Runtime Updates**: Consider updating the compiler and runtime components to resolve any known bugs or improvements.
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-134643-backend-divergence-6f2e1fa134
+
+Repro: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
