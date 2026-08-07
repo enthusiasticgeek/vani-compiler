@@ -286,6 +286,23 @@ unfixable (e.g. `lli`'s own crash-report noise is accepted/
 documented per BUG-108's own writeup -- don't re-litigate that one,
 just confirm no NEW divergences exist elsewhere).
 
+**RESOLVED as BUG-120** (2026-08-06) -- building this exact matrix (forcing the
+tree-LLVM path via a `sqrt()` dummy to test each cell) immediately found a real,
+NEW crash-report divergence: signed add overflow on tree-LLVM crashed `lli` with
+the "PLEASE submit a bug report" banner while the identical program on SSA-LLVM
+exited cleanly with `exit(3)` -- BUG-115's sweep fixed SSA-LLVM's checked-
+arithmetic guards and the tree-LLVM bounds-check helper, but missed tree-LLVM's
+OWN checked-arithmetic guards (Add/Sub/Mul/Div/Rem/Shl/Shr) entirely, plus four
+Vec-mutator-builtin guards (`pop`, `swap_remove`, `insert`) that are tree-only
+(SSA-denylisted, so had no SSA-LLVM sibling to catch the gap by comparison). All
+9 sites fixed to `exit(3)`. Confirmed no further NEW divergences beyond this in
+the matrix: `requires`/`#[bounded(N)]`/bounds/`assert` were already covered by
+BUG-106/113/115/116/117; the tree-C-vs-SSA-C message-text wording difference
+(`i64` vs `int64_t`) noted in BUG-119 remains, but is message-text-only (lower
+severity, matches this section's own stated bar for "intentionally unfixable,
+just document"). See `docs/TODO_CURRENT.md`'s BUG-120 entry for the full
+writeup.
+
 ## E. Packed/special-layout element type audit (🟡)
 
 BUG-109 (`Vec<bool>` literals: packed-bit storage vs a byte-addressed

@@ -8561,3 +8561,50 @@ Note: message text still differs cosmetically between tree-C ("i64") and SSA-C
 ("int64_t") for this new check, same as the pre-existing Add/Sub/Mul overflow
 messages -- a known, already-accepted inconsistency (`docs/BUG_PATTERN_AUDIT_TODO.md`
 category D), not something this fix changed or needs to fix.
+
+## BUG-120 (2026-08-06) -- tree-LLVM's checked-arithmetic + Vec-mutator guards still used raw `abort()`
+
+Found while building category D's ("trap exit-code/message consistency matrix") test
+matrix -- specifically while forcing the tree-LLVM path (via an unused `sqrt()` call,
+which the module-wide SSA-eligibility gate treats as disqualifying the whole program)
+to test BUG-119's new MIN/-1 guard on that path. A plain signed-add overflow crashed
+`lli` with its misleading "PLEASE submit a bug report" banner on the tree path even
+though the identical program on the (default) SSA path exits cleanly with `exit(3)`.
+
+Root cause: BUG-115's writeup is explicit that it fixed "the Vec bounds-check helper
+(both tree-LLVM and SSA-LLVM) and all three SSA-LLVM checked-arithmetic guards" --
+i.e. it never touched tree-LLVM's OWN checked-arithmetic guards (Add/Sub/Mul overflow,
+Div/Rem zero-check, Shl/Shr range) at all, only SSA-LLVM's. These guards are inlined
+directly per-call-site in `emit_binary` (not extracted into a named `alwaysinline`
+helper function like `@__intent_bounds_check` is), which is likely why BUG-115's grep-
+for-helper-functions sweep missed them. Separately, four Vec-mutator-builtin guards
+(`pop_mut` generic, `Vec<bool>`'s dedicated packed `pop_mut`, `swap_remove`, `insert`)
+had the same raw-`abort()` shape and no SSA-LLVM counterpart to catch the gap by
+comparison, since `pop`/`swap_remove`/`insert` are all SSA-denylisted (tree-only).
+My own BUG-119 fix earlier today added a new MIN/-1 guard to this same tree-LLVM
+checked-arithmetic block and matched its (buggy) local `abort()` convention at the
+time -- fixed here along with the rest.
+
+Fix: switched all 9 `call void @abort()` sites in `backend_llvm.rs`'s checked-
+arithmetic block (unsigned-Sub early-return, the shared Add/Mul/signed-Sub/Div/Rem
+`fail` block, the MIN/-1 overflow block, Shl/Shr range) and the four Vec-mutator sites
+to `call void @exit(i32 3)`, matching BUG-115's fix for the sibling helpers. Explicitly
+did NOT touch: `match`'s no-wildcard exhaustiveness-fallback `abort()` (provably
+unreachable given checker-enforced exhaustiveness -- a defensive compiler-bug catchall,
+not a user-triggerable trap) or `unsafe_alloc`/`unsafe_free`'s heap-canary-corruption
+`abort()`s (a different, deliberately-harder safety tier per `unsafe.md`, not one of
+category D's listed trap types). Updated 3 pre-existing tests whose assertions expected
+a signal (`lli_aborts_on_div_by_zero`, and my own `lli_aborts_on_signed_div_min_by_neg_
+one_overflow` / `_rem_` variant from BUG-119 earlier today) to expect `Some(3)` instead.
+New tests (`src/backend_llvm.rs`): `lli_exits_cleanly_on_signed_add_overflow_tree_path`,
+`_unsigned_sub_overflow_tree_path`, `_shift_range_violation_tree_path`, `_pop_from_
+empty_vec`, `_pop_from_empty_vec_bool`, `_swap_remove_out_of_bounds`, `_insert_out_of_
+bounds`. Full `cargo test --release` clean, zero regressions.
+
+Category D status: this closes the "does it trap at all + does it look the same"
+question for the Add/Sub/Mul/Div/Rem/Shl/Shr and Vec-mutator cells specifically (now:
+yes traps, exit(3) uniformly on LLVM, no signal-based crash-report divergence). The
+tree-C-vs-SSA-C *message text* wording difference noted in BUG-119's entry above
+remains open as a known, lower-severity, accepted inconsistency -- not addressed here.
+`requires`/`ensures` and `#[bounded(N)]` cells were already covered by BUG-113/116/117.
+Explicit `assert` was BUG-106's own template. Category D's matrix is now fully audited.

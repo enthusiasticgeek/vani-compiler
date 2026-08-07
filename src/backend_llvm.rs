@@ -5414,7 +5414,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                     let after = ctx.fresh_label("after_sub");
                                     out.push_str(&format!("  br label %{}\n", after));
                                     out.push_str(&format!("{}:\n", fail));
-                                    out.push_str("  call void @abort()\n");
+                                    // BUG-120: `exit(3)`, not raw `abort()` --
+                                    // same misleading-`lli`-crash-report class
+                                    // BUG-106/113/115/117 already fixed for
+                                    // every OTHER trap type; this checked-
+                                    // arithmetic block was the one BUG-115's
+                                    // sweep missed (it explicitly fixed
+                                    // SSA-LLVM's checked-arithmetic guards but
+                                    // not tree-LLVM's own).
+                                    out.push_str("  call void @exit(i32 3)\n");
                                     out.push_str("  unreachable\n");
                                     out.push_str(&format!("{}:\n", after));
                                     ctx.current_block = after;
@@ -5450,7 +5458,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             }
                         }
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         ctx.current_block = ok;
@@ -5472,7 +5482,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             nz, ok, fail
                         ));
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // LLVM phi-block-tracking fix: subsequent
@@ -5520,7 +5532,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 would_overflow, ovf_fail, ovf_ok
                             ));
                             out.push_str(&format!("{}:\n", ovf_fail));
-                            out.push_str("  call void @abort()\n");
+                            // BUG-120: exit(3), not abort() -- see the
+                            // comment on the unsigned-Sub `fail` block above.
+                            out.push_str("  call void @exit(i32 3)\n");
                             out.push_str("  unreachable\n");
                             out.push_str(&format!("{}:\n", ovf_ok));
                             ctx.current_block = ovf_ok;
@@ -5561,7 +5575,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             in_range, ok, fail
                         ));
                         out.push_str(&format!("{}:\n", fail));
-                        out.push_str("  call void @abort()\n");
+                        // BUG-120: exit(3), not abort() -- see the comment
+                        // on the unsigned-Sub `fail` block above.
+                        out.push_str("  call void @exit(i32 3)\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // Same phi-block-tracking fix as the
@@ -40147,7 +40163,7 @@ fn emit_vec_bool_helpers_llvm(out: &mut String) {
          \x20 %ok   = icmp ugt i64 %len, 0\n\
          \x20 br i1 %ok, label %do_pop, label %empty\n\
          empty:\n\
-         \x20 call void @abort()\n\
+         \x20 call void @exit(i32 3)\n\
          \x20 unreachable\n\
          do_pop:\n\
          \x20 %nl   = sub i64 %len, 1\n\
@@ -40440,7 +40456,11 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %is_empty_pp = icmp eq i64 %len_pv, 0\n");
         out.push_str("  br i1 %is_empty_pp, label %abort_pp, label %ok_pp\n");
         out.push_str("abort_pp:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- same misleading-`lli`-
+        // crash-report class BUG-106/113/115/117 fixed elsewhere;
+        // this Vec-mutator-builtin guard (and the other pop/
+        // swap_remove/insert sites in this file) were missed.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("ok_pp:\n");
         out.push_str("  %new_len_pp = sub i64 %len_pv, 1\n");
@@ -40495,7 +40515,9 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %sr_oob = icmp uge i64 %i, %sr_len\n");
         out.push_str("  br i1 %sr_oob, label %sr_abort, label %sr_ok\n");
         out.push_str("sr_abort:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- see the comment on
+        // `pop_mut`'s `abort_pp` block above.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("sr_ok:\n");
         out.push_str(&format!(
@@ -40559,7 +40581,9 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %ins_oob = icmp ugt i64 %i, %ins_len\n");
         out.push_str("  br i1 %ins_oob, label %ins_abort, label %ins_check_cap\n");
         out.push_str("ins_abort:\n");
-        out.push_str("  call void @abort()\n");
+        // BUG-120: exit(3), not abort() -- see the comment on
+        // `pop_mut`'s `abort_pp` block above.
+        out.push_str("  call void @exit(i32 3)\n");
         out.push_str("  unreachable\n");
         out.push_str("ins_check_cap:\n");
         out.push_str("  %ins_new_len = add i64 %ins_len, 1\n");
@@ -47711,7 +47735,13 @@ mod tests {
             return;
         }
         // No `requires` to guard the divisor; the per-op checked
-        // guard inside Div should fire.
+        // guard inside Div should fire. BUG-120 (2026-08-06): this
+        // guard used to `call void @abort()` like BUG-113's
+        // `requires`-clause guard did before ITS fix -- same
+        // misleading `lli` crash banner, just missed by BUG-115's
+        // sweep (which fixed SSA-LLVM's checked-arithmetic guards
+        // but not tree-LLVM's own). Now `exit(3)`, so this is a
+        // clean exit, not a signal.
         let source = r#"
             fn id(x: i64) -> i64 { return x; }
             fn main() -> i64 {
@@ -47719,10 +47749,10 @@ mod tests {
             }
         "#;
         let exit = run_lli_full(source);
-        assert!(
-            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
-            "expected abort signal on div by zero, got {:?}",
-            exit
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3), not an abort signal (BUG-120)"
         );
     }
 
@@ -47733,11 +47763,13 @@ mod tests {
         }
         // BUG-119: `i64::MIN / -1` overflows the representable
         // range -- a distinct trap from "divisor is zero" above,
-        // which the pre-existing guard never covered. Before the
-        // fix this reached a raw `sdiv` and hit a genuine hardware
+        // which the pre-existing guard never covered. Before BUG-119
+        // this reached a raw `sdiv` and hit a genuine hardware
         // SIGFPE (surfacing as `lli`'s "PLEASE submit a bug report"
-        // crash banner); now it hits vani's own `abort()` guard,
-        // same clean-signal shape as the div-by-zero case.
+        // crash banner). BUG-119 added vani's own guard using the
+        // file's existing (buggy) `abort()` convention; BUG-120 then
+        // fixed that convention to `exit(3)`, so this is now a clean
+        // exit, not a signal.
         let source = r#"
             fn id(x: i64) -> i64 { return x; }
             fn main() -> i64 {
@@ -47745,10 +47777,10 @@ mod tests {
             }
         "#;
         let exit = run_lli_full(source);
-        assert!(
-            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
-            "expected abort signal on MIN / -1 overflow, got {:?}",
-            exit
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on MIN / -1 overflow, not an abort signal (BUG-120)"
         );
     }
 
@@ -47767,10 +47799,182 @@ mod tests {
             }
         "#;
         let exit = run_lli_full(source);
-        assert!(
-            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
-            "expected abort signal on MIN % -1 overflow, got {:?}",
-            exit
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on MIN % -1 overflow, not an abort signal (BUG-120)"
+        );
+    }
+
+    // BUG-120 (2026-08-06): BUG-115's sweep fixed SSA-LLVM's checked-
+    // arithmetic guards (overflow/divisor/shift) and the tree-LLVM
+    // bounds-check helper, but missed tree-LLVM's OWN checked-
+    // arithmetic guards (Add/Sub/Mul overflow, Shl/Shr range) plus a
+    // handful of Vec-mutator-builtin guards (`pop`, `swap_remove`,
+    // `insert`) that are tree-only (SSA-denylisted) and so had no
+    // SSA-LLVM counterpart to catch the gap by comparison. All still
+    // used raw `abort()`, giving `lli`'s misleading crash banner for
+    // a clean, expected trap. The `sqrt` call in each source below is
+    // an unused dummy that forces the whole module onto the tree-LLVM
+    // path (module-wide SSA-eligibility gate) so these tests actually
+    // exercise the code this fix touched, not SSA-LLVM's (already-
+    // clean) equivalent.
+
+    #[test]
+    fn lli_exits_cleanly_on_signed_add_overflow_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return 9223372036854775807 + id(1);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on signed add overflow (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_unsigned_sub_overflow_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        // Unsigned Sub is a structurally distinct emit path (an
+        // early `return result` inside the `fail`/`ok` branch, not
+        // the shared fall-through the other ops use) -- worth its
+        // own repro since BUG-120's fix touched that path separately.
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: u64) -> u64 { return x; }
+            fn main() -> i64 {
+              let r: u64 = id(0) - id(1);
+              return r as i64;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on unsigned sub overflow (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_shift_range_violation_tree_path() {
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn dummy_forces_tree() -> f64 { return sqrt(2.0); }
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              return 1 << id(64);
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on out-of-range shift (tree path), not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_pop_from_empty_vec() {
+        if !lli_available() {
+            return;
+        }
+        // `pop` is SSA-denylisted (no SSA-LLVM lowering), so this
+        // is tree-only regardless -- no dummy needed to force it.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(id(1));
+              let a: i64 = pop(mut ref xs);
+              let b: i64 = pop(mut ref xs);
+              return a + b;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on pop-from-empty-Vec, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_pop_from_empty_vec_bool() {
+        if !lli_available() {
+            return;
+        }
+        // `Vec<bool>`'s packed-bit storage has its own dedicated
+        // `pop_mut` codegen (`intent_vec_bool__pop_mut`), a separate
+        // site from the generic-element one above.
+        let source = r#"
+            fn id(x: bool) -> bool { return x; }
+            fn main() -> i64 {
+              let xs: Vec<bool> = vec(id(true));
+              let a: bool = pop(mut ref xs);
+              let b: bool = pop(mut ref xs);
+              return if a && b { 1 } else { 0 };
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on pop-from-empty-Vec<bool>, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_swap_remove_out_of_bounds() {
+        if !lli_available() {
+            return;
+        }
+        // `swap_remove` is SSA-denylisted -- tree-only regardless.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: i64 = swap_remove(mut ref xs, id(10) as u64);
+              return r;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on swap_remove out-of-bounds, not an abort signal (BUG-120)"
+        );
+    }
+
+    #[test]
+    fn lli_exits_cleanly_on_insert_out_of_bounds() {
+        if !lli_available() {
+            return;
+        }
+        // `insert` is SSA-denylisted -- tree-only regardless.
+        let source = r#"
+            fn id(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let _ = insert(mut ref xs, id(99) as u64, 42);
+              return len(xs) as i64;
+            }
+        "#;
+        let exit = run_lli_full(source);
+        assert_eq!(
+            exit,
+            Some(3),
+            "expected clean exit(3) on insert out-of-bounds, not an abort signal (BUG-120)"
         );
     }
 
