@@ -3123,3 +3123,34 @@ Repro: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-191810-run-crash-01517aa646
+
+Repro: `tools/localfuzz/findings/20260807-191810-run-crash-01517aa646/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-191810-run-crash-01517aa646/fix_attempt.md`
+
+**Staging Entry:**
+
+---
+
+### **Status:** needs human/frontier root-cause review.
+
+#### **Run Information:**
+- **Program Name:** `examples/language/english/tcp_echo_epoll.vani`
+- **Arguments:** `-a` (vanic argument for backend)
+- **Backend:** C (as specified in the comment)
+
+#### **Input Corpus:**
+- **File Path:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/tcp_echo_epoll.vani`
+
+#### **Observed Symptom:**
+The program crashed, causing a segmentation fault or unexpected termination.
+
+#### **Backend Affected:**
+This bug affects both the LLVM and C backends of the vani compiler.
+
+---
+
+**Note:** This staging entry is preliminary and requires human review to determine the root cause.
