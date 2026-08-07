@@ -3039,7 +3039,18 @@ Bug report for vani-compiler:
 }
 ```
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-136 on main (2026-08-07). Re-verified: both backends actually
+agree on the underlying trap (an out-of-bounds index of `-1` into a length-5 Vec --
+a bug in this fuzzed *test program* itself, not a compiler wrong-answer). The
+"divergence" was purely diagnostic -- the C backend's bounds-check trap still uses a
+raw `abort()` (deliberately, per the BUG-106-class scoping decision), and `abort()`
+does not flush stdio, so the 5 `print` lines already buffered before the trap fired
+were silently discarded on C while LLVM's `exit(3)` (BUG-120) preserved them. Fixed
+by adding `fflush(stdout);` immediately before `abort()` at all 4 of the compiler's
+documented "Row 2" trap categories (bounds/overflow/divide-by-zero/shift) on both C
+codegen paths. Re-running this exact repro now shows the same buffered `print`
+output on both backends. See `docs/TODO_CURRENT.md`'s BUG-136 entry on
+vani-compiler for the full writeup.
 
 ---
 
@@ -3095,7 +3106,23 @@ Fix attempt: `tools/localfuzz/findings/20260807-164627-backend-divergence-27af17
   "kind": "backend-divergence",
   "c": {
     "rc": 0,
-    "stdout": "0\n9223372036854775807\n9223372036854775807\n922337
+    "stdout": "0\n9223372036854775807\n9223372036854775807\n922337...(truncated in original finding write)
+  }
+}
+```
+
+STATUS: FIXED -- BUG-127 on main (2026-08-07), already fixed before this candidate
+was staged (harness was fuzzing a build slightly behind the tip that day -- run
+`tools/localfuzz/refresh.sh` if this keeps happening). This was a genuine
+silent-wrong-answer
+divergence: `while`-loop-carried checked-arithmetic elision used a stale pre-loop
+fact for `ع * 9223372036854775807` inside a `مستقر`/invariant-guarded loop --
+exactly BUG-127's shape (loop-carried overflow elision reusing a fact past its
+validity). Re-verified against a fresh build: both backends now correctly TRAP the
+overflow (LLVM exit 3, C exit 134 "integer overflow in int64_t mul") instead of
+computing divergent garbage values (the original finding's C output was a repeated
+saturating-looking `9223372036854775807`, LLVM's showed genuinely wrapped
+negative/partial values -- both wrong, in different ways). No further action needed.
 
 ---
 
@@ -3104,7 +3131,12 @@ Fix attempt: `tools/localfuzz/findings/20260807-164627-backend-divergence-27af17
 Repro: `tools/localfuzz/findings/20260807-170539-run-crash-4114e5b49a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-170539-run-crash-4114e5b49a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-07). Base:
+`examples/language/kannada/async_cancel_auto.vani`. The mutation changed
+`await(delay(5, 42))` to `await(delay(9223372036854775807, 42))`, i.e.
+`sleep_ms(9223372036854775807)` -- a real, multi-million-year sleep by design, not a
+compiler hang. The timeout is the expected, correct behavior for this mutated
+program. No compiler change needed.
 
 ---
 
@@ -3113,7 +3145,18 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-171043-run-crash-3ebdb63967/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-171043-run-crash-3ebdb63967/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: LIKELY NOT A COMPILER BUG (reviewed 2026-08-07). Base:
+`examples/language/english/tcp_echo.vani`. The mutation duplicated `let cfd: i64 =
+tcp_connect_local(port);` inside `client_task`, opening a second, unused client
+connection alongside the real one (the duplicate `let` shadows the first `cfd`, so
+only the SECOND connection ever sends data or gets closed -- the first sits open and
+silent). The server calls `tcp_accept()` exactly once and v1.6's `recv` is
+blocking-only (per the example's own doc comment: "recv blocks (no O_NONBLOCK +
+epoll yet)"). If `accept()` happens to hand back the leaked, silent connection
+instead of the real one, `recv()` blocks forever waiting for data nothing will ever
+send. Reads as a race/logic bug introduced by the mutation into the *test program*
+itself, not the compiler. Not chased further; flag for re-review if the same shape
+recurs on an unmutated example.
 
 ---
 
@@ -3122,7 +3165,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-175822-run-crash-a0b9cfcb2b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-07). Same class as
+20260807-170539-run-crash-4114e5b49a above. Base:
+`examples/language/german/async_cancel_auto.vani`. The mutation changed
+`await(delay(5, 42))` to `await(delay(9223372036854775807, 42))`, i.e.
+`sleep_ms(9223372036854775807)` -- a real, multi-million-year sleep by design, not a
+compiler hang. No compiler change needed.
 
 ---
 
