@@ -2531,7 +2531,19 @@ class as 20260806-162420-run-crash-3b08e2a115 above.
 Repro: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-193817-run-crash-2767ef4c1c/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-128 on main (2026-08-07). This is the shipped
+examples/language/english/echo_p24_try_keyword.vani example with its
+`let n = io_recv_async(...)` / `return ...(n)` pair swapped (the
+shipped example itself is correct). The v3.1 state-machine transform
+splits an async fn body into per-suspend-point segments and
+unconditionally promotes crossing locals to Task struct fields BEFORE
+checker.rs ever runs its reachability / use-before-declare checks --
+both were defeated by the transform itself (dead code lands in its
+own reachable `if state_tag==N` branch; the promoted local becomes an
+always-valid `t.n` field access). Fixed by adding a narrow,
+syntax-only reachability check inside try_v31_transform that runs on
+the flat body BEFORE the segment split, where "dead code after a
+return" is still syntactically detectable.
 
 ---
 
