@@ -42937,6 +42937,36 @@ função main() -> i64 {
             "expected depth counter + cleanup attribute + abort emit, got:\n{}",
             c
         );
+        // Follow-up cleanup after BUG-129/BUG-130 (2026-08-07): the
+        // guard used to call raw `abort()` here (flagged as "not
+        // fixed, out of scope" in BUG-130's own writeup) -- now uses
+        // the same `exit(3)` shape as every other runtime guard on
+        // this backend. Check both tree-C (via compile_to_c above)
+        // and SSA-C (below) -- each has its own separate copy of
+        // this guard.
+        let depth_guard_line = c
+            .lines()
+            .find(|l| l.contains("recursion bound exceeded"))
+            .expect("recursion bound exceeded line");
+        assert!(
+            depth_guard_line.contains("exit(3)") && !depth_guard_line.contains("abort()"),
+            "expected tree-C's bounded(N) guard to use exit(3), not abort(), got:\n{}",
+            depth_guard_line
+        );
+
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        let ssa_depth_guard_line = ssa_c
+            .lines()
+            .find(|l| l.contains("recursion bound exceeded"))
+            .expect("recursion bound exceeded line in SSA-C output");
+        assert!(
+            ssa_depth_guard_line.contains("exit(3)") && !ssa_depth_guard_line.contains("abort()"),
+            "expected SSA-C's bounded(N) guard to use exit(3), not abort(), got:\n{}",
+            ssa_depth_guard_line
+        );
     }
 
     // Closure #289 + tree-LLVM follow-up: bounded fn emit

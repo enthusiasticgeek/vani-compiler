@@ -372,7 +372,7 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
         .unwrap();
         writeln!(
             out,
-            "  if (++{} > {}) {{ fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})]); aborting\\n\"); abort(); }}",
+            "  if (++{} > {}) {{ fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})])\\n\"); exit(3); }}",
             counter_name, bound, f.name, bound
         ).unwrap();
     }

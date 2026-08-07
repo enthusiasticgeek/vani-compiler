@@ -11863,25 +11863,28 @@ fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
 // `status.code().unwrap_or(1)` at every call site, which silently
 // converts a signal-killed child into a generic exit code `1` --
 // indistinguishable from a program that legitimately called
-// `exit(1)`, and losing which signal it actually was. The
-// `#[bounded(N)]` recursion-depth guard on the C backend still
-// raises a real `SIGABRT` (unlike the `requires`-clause guard BUG-129
-// just fixed to a clean `exit(3)`), making it a reliable, currently-
-// real way to produce a signal-killed child for this test. Expects
-// the shell convention `128 + signal` (134 = 128 + SIGABRT's 6),
-// matching what a directly-executed binary's own shell would show.
+// `exit(1)`, and losing which signal it actually was. Integer
+// overflow on the C backend still raises a real `SIGABRT`
+// (deliberately out of scope for the BUG-106-class `exit(3)`
+// conversions, which were scoped to the LLVM backend's misleading-
+// `lli`-crash-report problem -- see the "What actually happens"
+// section of `tutorials/src/intermediate/10b_runtime_errors_primer.md`),
+// making it a reliable way to produce a signal-killed child for this
+// test. (The `#[bounded(N)]` guard used to serve this same role, but
+// itself moved to a clean `exit(3)` on both C codegen paths as a
+// follow-up cleanup after BUG-130 -- see the "Aside (not fixed, out
+// of scope)" note this test's own history carries in
+// `docs/TODO_CURRENT.md`'s BUG-130 entry.) Expects the shell
+// convention `128 + signal` (134 = 128 + SIGABRT's 6), matching what
+// a directly-executed binary's own shell would show.
 #[test]
 fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let src = write_tmp_vani(
         "bug130-signal-exit-code",
         r#"
-#[bounded(3)]
-fn deep(n: i64) -> i64 {
-  if n <= 0 { return 0; }
-  return deep(n - 1) + 1;
-}
-fn main() -> i64 { return deep(10); }
+fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+fn main() -> i64 { return add_it(9223372036854775807, 1); }
 "#,
     );
     let output = Command::new(binary)
@@ -12262,5 +12265,67 @@ fn opaque(mode: i64) -> i64 {
                 }
             }
         }
+    }
+}
+
+// Follow-up cleanup after BUG-130 (2026-08-07): BUG-117 already fixed the
+// `#[bounded(N)]` recursion-depth guard's raw `abort()` on both LLVM codegen
+// paths, but its C-backend counterpart (tree-C and SSA-C, each with its own
+// separate copy of the guard) was explicitly flagged as "not fixed, out of
+// scope" in BUG-130's own writeup. Both C codegen paths now use the same
+// `exit(3)` + message shape as every other C-backend runtime guard
+// (`assert`/`requires`/`ensures`/`invariant`). Verified on both codegen
+// paths: `#[no_mangle]` anywhere in the module forces the whole module onto
+// tree-C (see `ssa_path_supports` in `src/main.rs`); without it, this
+// program is small enough to take the default SSA-C path.
+#[test]
+fn bounded_attribute_violation_exits_cleanly_on_c_backend_ssa_and_tree_paths() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for (stem, source) in [
+        (
+            "bug130-followup-bounded-c-ssa",
+            r#"
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#
+            .to_string(),
+        ),
+        (
+            "bug130-followup-bounded-c-tree",
+            r#"
+#[no_mangle]
+fn keep_alive() -> i64 { return 0; }
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#
+            .to_string(),
+        ),
+    ] {
+        let src = write_tmp_vani(stem, &source);
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap(), "--backend=c"])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "expected a clean exit(3) for a #[bounded(N)] violation on the C \
+             backend ({stem}), not a raw SIGABRT; status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("recursion bound exceeded"),
+            "expected the recursion-bound message on stderr ({stem}), got: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

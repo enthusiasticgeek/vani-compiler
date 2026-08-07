@@ -9448,3 +9448,56 @@ code shared by every loop in every test program in the suite.
 This closes out `docs/UNRESOLVED_GAPS_TODO.md`'s item C3 entirely, and with it every
 single item in that document -- the doc's full original scope (3 new bugs + 5
 previously-known gaps, 8 items total) is now completely closed.
+
+## BUG-135 (2026-08-07) -- `#[bounded(N)]`'s C-backend recursion guard still raised a raw SIGABRT, not `exit(3)`
+
+Follow-up cleanup flagged as an explicit "Aside (not fixed, out of scope)" in BUG-130's
+own writeup above: the `#[bounded(N)]` recursion-depth guard's C-backend codegen
+(`backend_c.rs`'s tree-C path AND `ssa_backend_c.rs`'s separate copy of the same guard)
+still called `fprintf(stderr, "...")` followed by a raw `abort()`, unlike every other
+runtime guard on this backend (`assert`/`requires`/`ensures`/`invariant`, and the
+LLVM-backend version of this SAME guard, already converted to `exit(3)` by BUG-117).
+The LLVM-backend fix was scoped there specifically because raw `abort()` made `lli`
+print a misleading "PLEASE submit a bug report" internal-crash banner for an ordinary,
+expected trap -- a problem the C backend's own `SIGABRT` termination never had, which
+is why this C-backend instance was deliberately left out of BUG-117's scope at the
+time. Picked up now on its own merits: a clean, message-bearing `exit(3)` is still
+strictly better than an unlabeled `SIGABRT` even without the `lli`-specific motivation,
+and it removes one more asymmetry between the two backends' abort surfaces.
+
+Fixed both C codegen paths identically: `backend_c.rs`'s bounded-fn entry sequence
+(~line 13340) and `ssa_backend_c.rs`'s (~line 375) both now emit `fprintf(stderr,
+"recursion bound exceeded in '<fn>' (#[bounded(<N>)])\n"); exit(3);` instead of the
+`abort()` call (dropped the now-inaccurate "; aborting" trailer from the message text
+too). `stdlib.h` was already included on both paths (needed for the pre-existing
+`abort()` call), so no new include was required.
+
+Verified directly against a current build on both C codegen paths: a plain program
+with a `#[bounded(3)]` violation takes the default SSA-C path and now exits `3` (was
+`134`); adding an unrelated `#[no_mangle] fn` to force the whole module onto tree-C
+(per `ssa_path_supports` in `main.rs`) reproduces the same `exit(3)` there too.
+
+This fix has a real fallout: `tests/run_end_to_end.rs`'s
+`signal_killed_child_reports_128_plus_signal_not_a_bare_1` (BUG-130's own regression
+test) relied on this exact guard's raw `SIGABRT` as its only reliable way to produce a
+signal-killed child on the C backend -- it would have silently started asserting a
+now-wrong exit code once this landed. Switched its repro to an integer-overflow trap
+instead (`add_it(i64::MAX, 1)`), which still raises a raw `abort()` on the C backend
+(bounds/overflow/divide-by-zero/shift remain deliberately out of scope for the
+BUG-106-class `exit(3)` conversions) and is now the more honest choice regardless,
+since it no longer depends on a guard that keeps getting fixed out from under it.
+
+Extended `bounded_attribute_emits_depth_counter_on_c_backend` (`src/lib.rs`) to assert
+`exit(3)` (not `abort()`) on both tree-C (via `compile_to_c`) and SSA-C (via
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit`, mirroring the pattern
+already used by the nearby MIN/-1 overflow-guard test). Added
+`bounded_attribute_violation_exits_cleanly_on_c_backend_ssa_and_tree_paths` to
+`tests/run_end_to_end.rs` (real subprocess runs against both codegen paths, asserting
+exit `3` and the recursion-bound message on stderr).
+
+Full `cargo test --release` clean (2800 lib tests + all integration suites, 0 failed).
+
+Not a `docs/UNRESOLVED_GAPS_TODO.md` item (that document's scope is fully closed as of
+BUG-134 above) -- found by re-reading BUG-130's own "not fixed, out of scope" aside
+when asked to pick the next item to work on, since no open item remained in any of the
+tracked TODO docs.

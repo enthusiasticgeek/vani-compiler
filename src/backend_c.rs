@@ -13338,8 +13338,8 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
         ));
         out.push_str(&format!(
             "  if (++{} > {}) {{ \
-              fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})]); aborting\\n\"); \
-              abort(); \
+              fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})])\\n\"); \
+              exit(3); \
             }}\n",
             counter_name, bound, function.name, bound
         ));
