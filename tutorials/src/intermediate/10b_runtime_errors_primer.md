@@ -180,24 +180,36 @@ and the backend, confirmed directly against a current build
 | Divide / modulo by zero, **C backend only** | `a / b` / `a % b` when SMT can't prove `b != 0` | `"division by zero"` (no file/line) |
 | Shift past width, **C backend only** | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift amount out of range"` (no file/line) |
 | Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | **nothing** -- no stdout, no stderr, just a clean process exit. Confirmed directly (empty captures on both streams). |
-| `ensures` / `invariant` | post-condition / loop invariant | **not enforced at runtime on ANY backend, at all**, as of this writing -- see the aside below. |
+| `ensures` fails at a return site (SMT-unprovable clause) | Any `return EXPR;` where SMT couldn't prove the post-condition | `"assertion failed: postcondition violated in '<fn>'"` (as of 2026-08-07; matches `requires`'s wording pattern) |
+| `invariant` | loop invariant | **not enforced at runtime on ANY backend, at all**, as of this writing -- see the aside below. |
 | `prove(p)` | Any `prove ...;` | Not a runtime check at all -- `prove` MUST be discharged by SMT at COMPILE time or the build fails outright; there is no runtime path to reach. |
 
 That's it for the checks that exist. Every other operation
 either succeeds, returns a `Result<T, E>` / `Option<T>` for
 the caller to handle, or is structurally prevented (Row 1).
 
-**Aside -- `ensures`/`invariant` have no runtime backstop.**
-Unlike every other row, `ensures` and `invariant` clauses are
-purely a compile-time SMT concept: if the solver can prove the
-clause, the build succeeds silently; if the solver returns a
-definite counterexample (UNSAT), the build fails outright with
-a diagnostic pointing at the clause -- there is no third,
-"couldn't decide, so check it at runtime instead" path for
-these two specifically (contrast with `requires`, which DOES
-fall back to a runtime guard when SMT can't decide). This is a
-known, open gap, not a regression -- implementing real runtime
-enforcement for `ensures`/`invariant` is future work.
+**Aside -- `ensures` now has a runtime backstop; `invariant` still doesn't (yet).**
+Both clauses used to be a purely compile-time SMT concept: if the
+solver could prove the clause, the build succeeded silently; if
+the solver returned anything short of a full proof (a definite
+counterexample OR just "couldn't decide"), the build failed
+outright -- there was no third, "couldn't decide, so check it at
+runtime instead" path for either of them (contrast with
+`requires`, which has always fallen back to a runtime guard when
+SMT can't decide). As of 2026-08-07, `ensures` was changed to
+mirror `requires`'s model exactly: a solver-confirmed violation
+(a genuine counterexample) still fails the build -- that's a real
+bug in the function, worth catching at the cheapest point -- but
+an UNDECIDABLE clause (SMT returns "unknown," or the clause uses
+a construct outside the v1 SMT encoder, or no `z3` binary is even
+installed) now compiles clean and gets a real runtime guard at
+the `return` site instead, using the same `exit(3)` + message
+mechanism as every other row in this table. `invariant` has not
+been converted yet -- it still has the compile-time-only behavior
+described above, and is tracked as a follow-up (loop invariants
+need two guard sites per loop, entry + per-iteration preservation,
+plus more care around `break`/`continue` and per-iteration
+performance, so it's a separate, larger piece of work).
 
 ### What actually happens when one fires
 
@@ -666,11 +678,13 @@ named contract."
   `requires` also exit(3) with a message, but bounds/overflow/
   div-by-zero/shift still raise a raw `SIGABRT` -- see "Row 2"
   above for the verified details and the exact numbers each
-  path produces. `ensures`/`invariant` have NO runtime
-  enforcement on either backend today (compile-time-or-nothing).
-  The surface is small and named: assert / prove / requires /
-  ensures / invariant / index OOB / overflow / div-by-zero /
-  shift past width.
+  path produces. `ensures` now falls back to a runtime guard on
+  an undecidable clause, same as `requires` (2026-08-07);
+  `invariant` still has NO runtime enforcement on either backend
+  today (compile-time-or-nothing) -- a tracked follow-up, not
+  done yet. The surface is small and named: assert / prove /
+  requires / ensures / invariant / index OOB / overflow /
+  div-by-zero / shift past width.
 - **Recoverable failures** are always values -- `Result<T, E>`
   / `Option<T>` propagated via `?` / `try`. No exceptions,
   no unwinding, no "uncaught exception" surprise.

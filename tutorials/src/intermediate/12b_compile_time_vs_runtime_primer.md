@@ -190,12 +190,19 @@ the discharge-confidence spectrum.
 
 ### `requires` / `ensures` / `invariant` (at the failing site)
 
-If SMT can't discharge a `requires` at a call site, the
-compiler emits a runtime check at the call site. If SMT
-can't discharge an `ensures` at a return, the compiler
-emits a runtime check at the return. Same for `invariant`
-at loop entry / body / exit. The unproven case stays in
-the artifact as a guard; the proven case is elided.
+If SMT can't discharge a `requires`, the compiler emits a
+runtime check at the callee's function entry (every call
+into the function is guarded, not just the specific call
+site the compiler couldn't verify). As of 2026-08-07,
+`ensures` works the same way: if SMT can't discharge it at
+a `return`, the compiler emits a runtime check right there
+instead of failing the build. `invariant` does NOT do this
+yet -- an undischarged `invariant` still fails the build
+outright (compile-time-or-nothing); giving it the same
+runtime-guard treatment at loop entry / iteration-end is
+tracked as a follow-up, not implemented. For `requires` and
+`ensures`, the unproven case stays in the artifact as a
+guard; the proven case is elided either way.
 
 ## The trade
 
@@ -292,8 +299,10 @@ happen.
   escape, parallel-for race-freedom, SMT discharge of
   contracts.
 - **Runtime**: bounds checks, overflow / div-by-zero
-  guards, undischarged assert / prove / requires /
-  ensures / invariant.
+  guards, undischarged assert / requires / ensures. (An
+  undischarged `invariant` still fails the BUILD, not the
+  run -- unlike `requires`/`ensures`, it has no runtime
+  fallback yet.)
 - The compiler **prefers compile-time** and **falls back
   to runtime** when SMT can't prove the operation safe.
 - Strengthen `requires` / `ensures` to lift checks to

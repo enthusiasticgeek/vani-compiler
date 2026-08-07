@@ -11829,13 +11829,22 @@ mod tests {
     }
 
     #[test]
-    fn ensures_on_vec_of_struct_element_field_is_rejected_not_silently_accepted() {
+    fn ensures_on_vec_of_struct_element_field_gets_a_runtime_guard_not_a_hard_error() {
         // Sweep item: `requires`/`ensures` referencing a `Vec<Struct>`
         // parameter's element field (`pts[0].x` -- FieldAccess over an
         // Index, not a bare Var) still isn't modeled by the SMT array
-        // theory (which only covers scalar Vec/Array elements). Confirm
-        // this now surfaces as a clear compile error instead of being
-        // silently treated as proven.
+        // theory (which only covers scalar Vec/Array elements), so this
+        // clause is `SkippedUnsupported` -- undecidable, not disproven.
+        //
+        // BUG-133 (2026-08-07): this used to be a hard compile error
+        // (test previously named `..._is_rejected_not_silently_
+        // accepted`). It's neither "rejected" nor "silently accepted"
+        // anymore -- `ensures` now mirrors `requires`'s existing model:
+        // an undecidable clause compiles clean and gets a real runtime
+        // guard at the return site instead of blocking the build. The
+        // clause in THIS example is actually true (`_return == pts[0].x`
+        // trivially holds since the body IS `return pts[0].x;`), so the
+        // guard should never actually fire at runtime.
         if !z3_available() {
             return;
         }
@@ -11852,12 +11861,11 @@ mod tests {
               return first_x(pts);
             }
         "#;
-        let errors = compile(source)
-            .expect_err("Vec<Struct> element field access in ensures is unencodable");
+        let c = compile_to_c(source)
+            .expect("BUG-133: an undecidable ensures clause must compile, not hard-fail");
         assert!(
-            errors.iter().any(|e| e.message.contains("cannot verify 'ensures' clause")),
-            "expected an explicit unverifiable-ensures diagnostic (not silent success), got: {:?}",
-            errors
+            c.contains("postcondition violated in 'first_x'"),
+            "expected a runtime guard with the postcondition-violated message, got: {c}"
         );
     }
 
@@ -52921,6 +52929,84 @@ fn main() -> i64 { return 0; }
             errs.iter().any(|e| e.message.contains("expected type")),
             "expected a parse-level 'expected type' diagnostic, got: {:?}",
             errs
+        );
+    }
+
+    // BUG-133 (2026-08-07): `ensures` now mirrors `requires`'s existing
+    // model -- an SMT-UNDECIDABLE clause (Unknown / SkippedUnsupported /
+    // Unavailable) no longer hard-fails the build; it compiles clean
+    // and gets a real runtime guard at the return site instead. A
+    // confirmed `Disproven` violation still hard-fails the build,
+    // unchanged. See `verify_ensures_at_return`'s own doc comment in
+    // checker.rs for the full design rationale (Option A from the C3
+    // design-sketch discussion, confirmed with the user before
+    // implementing).
+    #[test]
+    fn bug133_proven_ensures_still_elides_with_zero_runtime_check() {
+        let source = r#"
+            fn my_abs(n: i64) -> i64
+              requires n > -9223372036854775807;
+              ensures _return >= 0;
+            {
+              if n < 0 { return 0 - n; }
+              return n;
+            }
+            fn main() -> i64 { return my_abs(0 - 5); }
+        "#;
+        let c = compile_to_c(source).expect("provable ensures clause must still compile");
+        assert!(
+            !c.contains("postcondition"),
+            "BUG-133 regression: a provable ensures clause emitted a runtime \
+             guard instead of being elided at compile time, got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug133_disproven_ensures_still_hard_fails_the_build() {
+        let source = r#"
+            fn broken(n: i64) -> i64
+              ensures _return >= 0;
+            {
+              return 0 - n - n;
+            }
+            fn main() -> i64 { return broken(5); }
+        "#;
+        let errs = compile(source)
+            .expect_err("a confirmed ensures violation must still be a compile error");
+        assert!(
+            errs.iter().any(|e| e.message.contains("ensures clause does not hold")),
+            "expected the unchanged Disproven diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bug133_undecidable_ensures_compiles_and_gets_a_runtime_guard() {
+        // `opaque` has no `ensures` clause of its own, so SMT has no
+        // fact to reason about `wrapper`'s postcondition from --
+        // `SkippedUnsupported`, previously a hard build error.
+        let source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode {
+                0 then 5,
+                _ then 0 - 5
+              };
+            }
+            fn wrapper(mode: i64) -> i64
+              ensures _return >= 0;
+            {
+              return opaque(mode);
+            }
+            fn main() -> i64 { return wrapper(0); }
+        "#;
+        let c = compile_to_c(source)
+            .expect("BUG-133 regression: an undecidable ensures clause must compile, not hard-fail");
+        let ll = compile_to_llvm(source)
+            .expect("BUG-133 regression: an undecidable ensures clause must compile, not hard-fail");
+        assert!(
+            c.contains("postcondition violated in 'wrapper'") && ll.contains("postcondition violated in 'wrapper'"),
+            "expected a runtime guard with the postcondition-violated message on \
+             both backends, got C:\n{c}\nLLVM:\n{ll}"
         );
     }
 

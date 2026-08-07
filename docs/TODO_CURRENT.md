@@ -9287,3 +9287,85 @@ two more: `cyrillic_struct_name_requires_uppercase_start_matching_ascii_conventi
 guard pinning the unchanged ASCII behavior).
 
 Full `cargo test --release` clean (2795 lib tests + all integration suites, 0 failed).
+
+## BUG-133 (2026-08-07) -- `ensures` gained real runtime enforcement, closing the asymmetry with `requires`
+
+Found picking up item C3 from `docs/UNRESOLVED_GAPS_TODO.md` -- the one item explicitly
+flagged as "a bigger feature, not a quick fix," and correctly so: this is a genuine
+feature addition, not a one-function bug fix. Before touching code, sketched three
+design options for the user (mirror `requires` exactly / add runtime as pure defense-
+in-depth on top of the existing compile-time gate / an opt-in strictness flag) with a
+recommendation; the user picked the recommended option (mirror `requires`) and the
+recommended sequencing (`ensures` first, `invariant` as a separate follow-up).
+
+**The asymmetry**: `requires` already has two independent mechanisms -- a compile-time
+call-site proof attempt (a PROVEN violation is a hard build error; anything else
+silently compiles) and an UNCONDITIONAL runtime guard at the callee's function entry
+(BUG-116/129's `exit(3)` + message, always emitted regardless of call-site
+provability). `ensures` had only the first half: `verify_ensures_at_return` treated
+`Verdict::Proven` as silent and treated `Disproven` (a confirmed counterexample),
+`Unknown` (SMT genuinely can't decide), `SkippedUnsupported` (the clause uses a
+construct outside the v1 SMT encoder -- not a reason the CODE can't run, just that
+static proof can't attempt it), and `Unavailable` (no `z3` binary at all) as
+IDENTICAL hard build failures. That's the gap: `requires` never blocks a build over
+mere undecidability; `ensures` always did.
+
+**Fix**: `Disproven` still hard-fails the build, unchanged (a confirmed counterexample
+is worth catching at the cheapest possible point, regardless of clause kind). Every
+other non-`Proven` outcome (`Unknown`/`SkippedUnsupported`/`Unavailable`) now compiles
+clean and synthesizes a `TypedStmt::Assert` injected right before the `return`
+instead of pushing a diagnostic -- reusing the exact same `intent_assert_fail`/
+`exit(3)` mechanism `assert`/`prove`/`requires` already use, so **no new backend
+codegen was needed on any of the 4 codegen paths** (tree-C, tree-LLVM, SSA-C,
+SSA-LLVM); `TypedStmt::Assert` was already correct everywhere from BUG-106/113.
+Message convention mirrors `requires` exactly: `"postcondition violated in '<fn>'"`,
+or `"... (ensures #<n>)"` per clause for a multi-`ensures` function.
+
+Two real implementation bugs found and fixed while getting this working (documented
+here since they're the kind of mistake worth remembering the shape of):
+1. The runtime guard's `_return` substitution used to reference the RAW return
+   expression (`return_expr`, same as the compile-time proof uses), which would have
+   silently DOUBLE-EVALUATED a side-effecting return expression (e.g.
+   `return log_and_compute();` -- the log/compute side effect would fire once for the
+   synthesized runtime check and again for the actual return). Fixed by moving the
+   `verify_ensures_at_return` call to AFTER the return value is already materialized
+   into its `__intent_ret_<span>` temp (`check_one_stmt`'s existing use-once-store
+   pattern, there specifically to avoid a different use-after-free issue with drops)
+   and substituting `_return` with a reference to THAT temp instead -- the compile-
+   time SMT proof still reasons about the raw expression symbolically (SMT never
+   executes anything, so that's fine), only the runtime path changed. Verified via a
+   dedicated test (`push`ing to a counter Vec through an ensures-guarded function,
+   confirming exactly 1 push, not 2, on both backends).
+2. `check_expr` (needed to type-check the synthesized runtime assertion) resolves
+   `Var` nodes against the checker's `Env`, but the return temp is a compiler-internal
+   name that's never inserted into `Env` (only real user `let`s/params are) --
+   referencing it crashed with "unknown variable". Fixed by registering the temp into
+   `Env` with `no_drop: true` (critical: the SAME `Env` also drives a separate
+   drop-emission pass a few lines later in `check_one_stmt`, and without `no_drop`,
+   that pass would emit a spurious `Drop` for the temp -- freeing a non-Copy return
+   value like `Vec`/`OwnedStr` before it's actually returned to the caller). Safe to
+   insert unconditionally with no cleanup: the parser/lexer reject any identifier
+   starting with `__intent`, so no user code can ever collide with it, and each
+   return site's temp name is span-unique, so no other return site's insertion can
+   collide either.
+
+Updated the tutorials that documented the old "ensures/invariant have zero runtime
+enforcement, full stop" behavior (`intermediate/10b_runtime_errors_primer.md`'s Row 2
+table + aside, `intermediate/12b_compile_time_vs_runtime_primer.md`'s "at the failing
+site" section + summary) to describe the new split accurately: `ensures` now has
+runtime enforcement matching `requires`; `invariant` does not yet (tracked as the
+BUG-134 follow-up). Also updated one existing test whose NAME described the old
+behavior (`ensures_on_vec_of_struct_element_field_is_rejected_not_silently_accepted`
+-> `..._gets_a_runtime_guard_not_a_hard_error`) -- this was the one piece of "expected
+fallout" the full test suite surfaced, exactly the class of program BUG-133 was built
+to stop rejecting.
+
+Added 3 fast compile-only tests in `src/lib.rs` (proven-still-elides,
+disproven-still-hard-fails, undecidable-now-compiles-with-a-guard) and 2 end-to-end
+tests in `tests/run_end_to_end.rs` (real subprocess runs on both backends: the guard
+stays silent when satisfied and traps with `exit(3)` + the right message when
+actually violated; the side-effect-not-duplicated property specifically).
+
+Full `cargo test --release` clean (2797 lib tests + all integration suites, 0 failed;
+includes updating the one pre-existing test whose name described the now-superseded
+behavior, as described above).

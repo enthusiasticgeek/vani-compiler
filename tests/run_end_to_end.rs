@@ -11949,3 +11949,145 @@ fn sort_large_block_partition_example_produces_correct_output_on_both_backends()
         );
     }
 }
+
+// BUG-133 (2026-08-07): `ensures` now mirrors `requires`'s existing
+// model -- an SMT-undecidable postcondition (here, `opaque` has no
+// `ensures` of its own, so SMT has nothing to reason `wrapper`'s
+// postcondition from) no longer hard-fails the build; it compiles and
+// gets a real runtime guard at the return site instead, using the
+// existing `intent_assert_fail`/`exit(3)` mechanism. Real subprocess
+// runs (not compile_to_c/compile_to_llvm string checks) because the
+// whole point is verifying actual RUNTIME behavior: the guard must
+// stay silent when satisfied and trap with the right exit code and
+// message when actually violated.
+#[test]
+fn undecidable_ensures_runtime_guard_traps_only_when_actually_violated() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let satisfied = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode {
+    0 then 5,
+    _ then 0 - 5
+  };
+}
+fn wrapper(mode: i64) -> i64
+  ensures _return >= 0;
+{
+  return opaque(mode);
+}
+fn main() -> i64 {
+  print wrapper(0);
+  return 0;
+}
+"#;
+    let violated = satisfied.replace("wrapper(0)", "wrapper(1)");
+
+    for (source, expect_status, expect_stdout_contains) in [
+        (satisfied, None, Some("5")),
+        (violated.as_str(), Some(3), None),
+    ] {
+        let src = write_tmp_vani("bug133-ensures-runtime", source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            if let Some(code) = expect_status {
+                assert_eq!(
+                    output.status.code(),
+                    Some(code),
+                    "BUG-133 regression: {:?} expected exit {code} (postcondition \
+                     violated), got status {:?}, stderr: {}",
+                    backend_args,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("postcondition violated in 'wrapper'"),
+                    "expected the postcondition-violated message on stderr, got: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "BUG-133 regression: {:?} should run cleanly when the ensures \
+                     clause is actually satisfied, got status {:?}, stderr: {}",
+                    backend_args,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            if let Some(expected) = expect_stdout_contains {
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains(expected),
+                    "expected stdout to contain {:?} for {:?}, got: {}",
+                    expected,
+                    backend_args,
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+    }
+}
+
+// BUG-133, continued: the runtime guard reads back the already-
+// materialized return temp (`__intent_ret_<span>`), not the raw
+// return expression a second time -- a side-effecting return (here,
+// a `push` the ensures-guarded function calls indirectly through
+// `side_effecting`) must fire exactly once, not twice.
+#[test]
+fn undecidable_ensures_runtime_guard_does_not_double_evaluate_return_expr() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let source = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode {
+    0 then 5,
+    _ then 0 - 5
+  };
+}
+fn side_effecting(counter: mut ref Vec<i64>, mode: i64) -> i64 {
+  let n: i64 = push(counter, 1) as i64;
+  let _ = n;
+  return opaque(mode);
+}
+fn wrapper(counter: mut ref Vec<i64>, mode: i64) -> i64
+  ensures _return >= 0;
+{
+  return side_effecting(counter, mode);
+}
+fn main() -> i64 {
+  let calls: Vec<i64> = vec();
+  let _ = wrapper(mut ref calls, 0);
+  print len(ref calls) as i64;
+  return 0;
+}
+"#;
+    let src = write_tmp_vani("bug133-ensures-no-double-eval", source);
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?} failed: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1",
+            "BUG-133 regression: {:?} -- the ensures runtime guard double-evaluated \
+             the return expression (push ran more than once), got: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

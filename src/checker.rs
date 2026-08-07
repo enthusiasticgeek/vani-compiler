@@ -12933,9 +12933,6 @@ fn check_one_stmt(
             diagnose_partial_then_whole_move(expr, &checked, env, diagnostics);
             consume_if_moved_var(expr, &checked, env);
 
-            // Verify each ensures clause holds for this return expression.
-            verify_ensures_at_return(function, expr, smt_facts, env, signatures, diagnostics);
-
             // Materialize the return expression into a fresh temp
             // *before* emitting drops. Otherwise a return like
             // `return xs[1]` (where xs: Vec<i64> falls out of scope)
@@ -12962,6 +12959,25 @@ fn check_one_stmt(
                 ty: temp_ty.clone(),
                 expr: ret_expr,
             });
+
+            // BUG-133: verify each ensures clause holds for this return
+            // expression -- AFTER the temp above exists, so an
+            // undecidable clause's runtime guard reads back the
+            // already-materialized value instead of re-evaluating
+            // (and potentially double-executing a side-effecting)
+            // `expr` a second time. See `verify_ensures_at_return`'s
+            // own doc comment for the full Unknown/Disproven split.
+            verify_ensures_at_return(
+                function,
+                expr,
+                &temp_name,
+                !loops.is_empty(),
+                smt_facts,
+                env,
+                signatures,
+                diagnostics,
+                body,
+            );
 
             let drop_names: Vec<(String, Type, Vec<String>)> = env
                 .all_bindings()
@@ -35654,21 +35670,84 @@ fn is_smt_arithmetic_shape(expr: &Expr) -> bool {
     }
 }
 
+/// BUG-133: `ensures` now mirrors `requires`'s existing two-mechanism
+/// model instead of hard-failing the build on anything short of a
+/// full compile-time proof. `requires` never blocked a build over an
+/// UNDECIDABLE clause -- an unprovable (but not disproven) call site
+/// silently compiles, backstopped by an unconditional runtime guard
+/// at the callee's function entry (BUG-116/129). `ensures`/`invariant`
+/// had no such backstop: `Verdict::Unknown` (SMT genuinely can't
+/// decide), `SkippedUnsupported` (the clause uses a construct outside
+/// the v1 SMT encoder -- not a reason the CODE can't run, just that
+/// static proof can't attempt it), and `Unavailable` (no `z3` binary
+/// at all) were ALL hard compile errors, identical to a confirmed
+/// `Disproven` violation. That's the asymmetry this closes: a
+/// `Disproven` verdict (SMT found an actual counterexample -- a
+/// confirmed bug in the function) still hard-fails the build, exactly
+/// as before; every other non-`Proven` outcome now compiles clean and
+/// gets a real runtime guard at the return site instead, using the
+/// exact same `TypedStmt::Assert` + `intent_assert_fail`/`exit(3)`
+/// mechanism `assert`/`prove` already use everywhere -- no new
+/// backend work needed on any of the 4 codegen paths, since `Assert`
+/// is already correctly supported on all of them.
+///
+/// `return_temp_name` -- NOT `return_expr` -- is what the runtime
+/// guard's `_return` substitutes to. The compile-time PROOF still
+/// reasons about `return_expr` symbolically (SMT never executes
+/// anything, so re-using the raw expression there is fine); the
+/// RUNTIME check would double-evaluate a side-effecting return
+/// expression (e.g. `return log_and_compute();`) if it referenced
+/// `return_expr` directly, so it reads back the already-materialized
+/// `__intent_ret_<span>` temp the caller stores the return value into
+/// before this function is called (see `check_one_stmt`'s
+/// `Stmt::Return` arm -- this function is now invoked AFTER that
+/// temp exists, not before).
 fn verify_ensures_at_return(
     function: &Function,
     return_expr: &Expr,
+    return_temp_name: &str,
+    inside_loop: bool,
     smt_facts: &[Expr],
-    env: &Env,
+    env: &mut Env,
     signatures: &HashMap<String, Signature>,
     diagnostics: &mut Vec<Diagnostic>,
+    body: &mut Vec<TypedStmt>,
 ) {
     if function.ensures.is_empty() || crate::smt::verifier_disabled() {
         return;
     }
+    // BUG-133: `check_expr` resolves `Var` nodes against `env`, but
+    // `return_temp_name` (`__intent_ret_<span>`) is a compiler-
+    // internal temp the caller already `body.push`ed a `Let` for --
+    // it was never inserted into `env` (only real user `let`s /
+    // params are). Register it here so the runtime-guard substitution
+    // below can actually resolve it. Safe to insert unconditionally
+    // and never remove: the parser/lexer reject any identifier
+    // starting with `__intent`, so no user code can ever collide with
+    // it, and each return site's temp name is span-unique, so no
+    // other return site's insertion can collide with THIS one either.
+    env.insert_current(
+        return_temp_name.to_string(),
+        VarInfo {
+            ty: function.return_type.clone(),
+            constant: None,
+            moved: None,
+            decl_span: return_expr.span,
+            vec_literal_elements: None,
+            array_version: 0,
+            guarded_mutex: None,
+            no_drop: true,
+            is_const: false,
+            struct_literal_fields: None,
+            moved_fields: std::collections::BTreeMap::new(),
+            ref_aliases: Vec::new(),
+        },
+    );
     let mut subs: HashMap<String, Expr> = HashMap::new();
     subs.insert(RETURN_NAME.to_string(), return_expr.clone());
 
-    for ens in &function.ensures {
+    let clause_count = function.ensures.len();
+    for (i, ens) in function.ensures.iter().enumerate() {
         let substituted = substitute_expr(ens, &subs);
         use crate::smt::Verdict;
         match prove_with_calls(&substituted, smt_facts, env, signatures) {
@@ -35694,36 +35773,40 @@ fn verify_ensures_at_return(
                         ),
                 );
             }
-            Verdict::Unknown => diagnostics.push(
-                Diagnostic::new(
+            Verdict::Unknown | Verdict::SkippedUnsupported(_) | Verdict::Unavailable => {
+                let mut runtime_subs: HashMap<String, Expr> = HashMap::new();
+                runtime_subs.insert(
+                    RETURN_NAME.to_string(),
+                    Expr {
+                        kind: ExprKind::Var(return_temp_name.to_string()),
+                        span: ens.span,
+                    },
+                );
+                let runtime_expr = substitute_expr(ens, &runtime_subs);
+                let checked = check_expr(&runtime_expr, env, signatures, diagnostics);
+                require_type(
+                    checked.ty(),
+                    &Type::Bool,
                     ens.span,
+                    "ensures clause",
+                    diagnostics,
+                );
+                let mut e = checked.expr;
+                try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures, inside_loop);
+                let message = if clause_count > 1 {
                     format!(
-                        "cannot verify 'ensures' clause: SMT returned 'unknown' (function '{}')",
-                        function.name
-                    ),
-                )
-                .with_related(return_expr.span, "return is here")
-                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
-            ),
-            Verdict::SkippedUnsupported(reason) => diagnostics.push(
-                Diagnostic::new(
-                    ens.span,
-                    format!(
-                        "cannot verify 'ensures' clause: {} (uses features outside the SMT v1 encoder, function '{}')",
-                        reason, function.name
-                    ),
-                )
-                .with_related(return_expr.span, "return is here")
-                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
-            ),
-            Verdict::Unavailable => diagnostics.push(
-                Diagnostic::new(
-                    ens.span,
-                    "cannot verify 'ensures' clause: no SMT solver available (install z3)",
-                )
-                .with_related(return_expr.span, "return is here")
-                .with_elaboration(crate::diagnostic_elaborations::proof_failed()),
-            ),
+                        "postcondition violated in '{}' (ensures #{})",
+                        function.name,
+                        i + 1
+                    )
+                } else {
+                    format!("postcondition violated in '{}'", function.name)
+                };
+                body.push(TypedStmt::Assert {
+                    expr: e,
+                    message: Some(message),
+                });
+            }
         }
     }
 }
