@@ -3011,3 +3011,32 @@ async कार्य delay(ms: i64, v: i64) -> i64 {
 ```
 
 The observed symptom is a crash, which occurred with both the LLVM and C backends.
+
+---
+
+### Candidate: 20260807-162020-backend-divergence-50543ec6b8
+
+Repro: `tools/localfuzz/findings/20260807-162020-backend-divergence-50543ec6b8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-162020-backend-divergence-50543ec6b8/fix_attempt.md`
+
+Bug report for vani-compiler:
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "index out of bounds: -1, len 5\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "astar dijkstra-like 0->4: 7\nastar admissible 0->4: 7\nastar self-distance: 0\nastar size mismatch: -1\ntopo_sort count: 5\ntopo[ -1 ] = ",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
+STATUS: needs human/frontier root-cause review.
