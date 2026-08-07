@@ -7,10 +7,10 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-127** (re-check before committing -- see
+Next free `BUG-N`: **BUG-128** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
-(item A1 below) was fixed 2026-08-07.
+(item A1) and BUG-127 (item A2) were both fixed 2026-08-07.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -26,7 +26,7 @@ run the full `cargo test --release` suite, then log it here as
 These three were found chasing `tools/localfuzz`'s unmatched-cluster
 digest from 2026-08-07 down to root cause, then reduced to minimal,
 mutation-free repros to confirm they're real (not fuzzer artifacts).
-A1 is now fixed as BUG-126; A2 and A3 don't have a `BUG-N` yet.
+A1 is fixed as BUG-126, A2 is fixed as BUG-127; A3 doesn't have a `BUG-N` yet.
 
 ### A1. `let`-shadowing corrupts codegen -- different failure per type, per backend -- **FIXED as BUG-126 (2026-08-07)**
 
@@ -129,7 +129,16 @@ minimal repros above strip the mutation noise):
 - `tools/localfuzz/findings/20260807-040921-backend-divergence-08a08388e1/`
   (array case, from `examples/language/malayalam/for_loops.vani`)
 
-### A2. Checked-arithmetic elision may be unsound inside a loop (LLVM hangs, doesn't trap)
+### A2. Checked-arithmetic elision may be unsound inside a loop (LLVM hangs, doesn't trap) -- **FIXED as BUG-127 (2026-08-07)**
+
+The hypothesis below was directionally right (an elision-soundness bug) but named the
+wrong file -- it's `checker.rs`, not `ssa_pass.rs`, and the mechanism is specific: two
+existing call sites deliberately keep facts about a reassigned variable alive across a
+loop body (for a separate loop-invariant-preservation check), and the overflow-elision
+pass used that same not-yet-invalidated fact set, "proving" the guard safe using a fact
+(`n == 0`) that was only true on the FIRST iteration. Full writeup, fix, and regression
+tests: see `## BUG-127` in `docs/TODO_CURRENT.md`. Original hypothesis and repro kept
+below for traceability.
 
 ```vani
 fn main() -> i64 {
@@ -151,7 +160,7 @@ fn main() -> i64 {
 computation, a genuine infinite loop). `vanic run --backend=c`:
 correctly traps with an overflow diagnostic and exit code 1.
 
-Hypothesis: `n + i64::MIN` inside the loop should hit the SAME
+Hypothesis (UNCONFIRMED -- see actual root cause above): `n + i64::MIN` inside the loop should hit the SAME
 checked-add overflow guard BUG-119/120 already verified works
 correctly for a non-looping repro -- so something about being
 inside a LOOP specifically causes the SMT/elision pass
@@ -172,13 +181,12 @@ variable."* This repro IS exactly that shape (non-monotonic:
 monotonically increasing despite the `n < 100` loop guard looking
 like it should terminate).
 
-**Suggested investigation starting point**: dump the LLVM IR for
-this repro (`vanic emit`) and check whether the `add` inside the
-loop is the raw `add` opcode or the checked `@llvm.sadd.with.overflow`
-intrinsic call -- that tells you immediately whether this is an
-elision-soundness bug (checked flag wrongly false) or something else
-entirely (e.g. the guard fires but its own `exit`/`abort` is
-unreachable due to a different loop-structuring bug).
+**Suggested investigation starting point** (this DID confirm the elision-soundness
+diagnosis): dump the LLVM IR for this repro (`vanic emit`) and check whether the `add`
+inside the loop is the raw `add` opcode or the checked `@llvm.sadd.with.overflow`
+intrinsic call -- that tells you immediately whether this is an elision-soundness bug
+(checked flag wrongly false) or something else entirely (e.g. the guard fires but its
+own `exit`/`abort` is unreachable due to a different loop-structuring bug).
 
 **Original localfuzz finding**: `tools/localfuzz/findings/
 20260806-231108-run-crash-7564fbed6b/` (from

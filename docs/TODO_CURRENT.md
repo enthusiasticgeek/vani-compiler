@@ -8930,3 +8930,69 @@ round-trip.
 
 Full `cargo test --release` clean (2789 lib tests + all integration suites, 0 failed),
 including the 3 new tests above.
+
+## BUG-127 (2026-08-07) -- loop-carried checked-arithmetic elision used a stale pre-loop fact, LLVM hung instead of trapping on overflow
+
+Found picking up item A2 from `docs/UNRESOLVED_GAPS_TODO.md` -- an EXPLICITLY
+PREDICTED-BUT-NEVER-TESTED risk named by `docs/BUG_PATTERN_AUDIT_TODO.md` category B:
+"could `ssa_pass.rs` ever flip `checked` from `true` to `false` on a Binary instruction
+incorrectly? ... elision reasoning across a loop with a non-monotonic induction
+variable." The prediction named the wrong file (turned out to be `checker.rs`, not
+`ssa_pass.rs`) but the mechanism was exactly right.
+
+Repro: `while n < 100 { if n == 5 { break; } n = n + -9223372036854775808; }` (n starts
+at 0) -- on LLVM, `vanic run` HUNG FOREVER (confirmed via `timeout 5`, killed every
+time); on C, correctly traps with `"integer overflow in int64_t add"` and exit 1.
+
+Root cause: `checker.rs`'s overflow-elision pass (inside the badly-named
+`try_elide_bounds_in_typed_expr`, which does BOTH Index-bounds elision AND
+Add/Sub/Mul/Div/Rem/Shl/Shr elision) runs on the RHS of the loop's `n = n + ...;`
+Reassign using whatever `smt_facts` are live at that point. Two existing call sites
+(`if loops.is_empty() { drop_facts_mentioning(smt_facts, name); }`, both in
+`check_one_stmt`) DELIBERATELY skip invalidating facts about a reassigned variable
+when inside a loop -- by design, so a separate loop-invariant-preservation check can
+still see the loop's ENTRY facts. But the elision pass runs on that SAME
+not-yet-invalidated fact set: on the very first pass through the loop body, `n == 0`
+(from the `let n: i64 = 0;` before the loop) was still live, and the "monotone result"
+overflow-proof goal (`(b<=0 || a+b>=a) && (b>=0 || a+b<=a)`, evaluated over the SMT
+wrapping-arithmetic model) DOES hold for `a=0, b=i64::MIN` (`0 + i64::MIN` wraps to
+`i64::MIN`, which is `<= 0` -- no overflow). SMT proved the goal, `checked` flipped to
+`false`, and the runtime guard was elided -- for a proof that's only valid on the FIRST
+iteration. The checker doesn't do general loop-invariant inference, so it can't tell
+that `n == 0` stops being true after the first iteration. On the SECOND iteration `n`
+is actually `i64::MIN`, and `i64::MIN + i64::MIN` wraps (mod 2^64) to exactly `0` --
+producing a genuine 2-cycle oscillation between `0` and `i64::MIN` that never equals 5
+and never reaches 100, hence the infinite loop instead of a trap.
+
+Confirmed directly by comparing LLVM IR before/after: `vanic emit --backend=llvm` on
+the repro showed `%v_6 = add i64 %v_1, %v_5` (a bare, unchecked `add`) inside the loop's
+body block, vs. the checked-add helper (`call i64 @__intent_checked_add_i64(...)`) that
+the exact same source pattern produces OUTSIDE a loop, or for a genuinely
+SMT-unprovable value (a plain function parameter).
+
+Fix: added an `inside_loop: bool` parameter to `try_elide_bounds_in_typed_expr`
+(threaded through its ~19 call sites, `!loops.is_empty()` at the 10 external
+`check_one_stmt` sites, forwarded unchanged through its 9 internal recursive calls),
+and skip the Div/Rem/Shl/Shr/Add/Sub/Mul-checked-elision arms entirely whenever
+`inside_loop` is true -- deliberately conservative (loses some legitimate
+would-have-elided optimization opportunities inside loops) rather than attempting
+precise loop-invariant tracking, matching this codebase's established "sound over
+clever" bias for this class of bug (see the SSA `Unreachable`-terminator memory, or
+BUG-116's runtime-guard-fallback philosophy). The Index (array-bounds) elision arm in
+the SAME function is intentionally left untouched by this guard: a `for i from 0 to
+len(xs)` loop's own induction-variable facts (`i >= 0 && i < len(xs)`) are freshly and
+soundly re-derived every iteration by construction (a different, already-correct
+mechanism -- confirmed the existing `smt_elides_vec_bounds_in_for_loop_body` test still
+passes unchanged). Verified none of the 8 existing `smt_elides_*` overflow/bounds/
+divisor/shift elision tests are themselves inside a loop, so none regressed.
+
+Added `examples/language/english/loop_carried_overflow_not_elided.vani` plus an
+end-to-end test (`loop_carried_overflow_not_elided_example_traps_instead_of_hanging_
+on_both_backends` in `tests/run_end_to_end.rs`, wrapped in the real `timeout` command
+so a regression fails in 10s instead of hanging the suite/CI forever, matching the
+BUG-109/echo_pool precedent) and a fast compile-only test in `src/lib.rs`
+(`bug127_loop_carried_overflow_check_is_not_elided`, asserts `llvm.sadd.with.overflow`
+survives in the tree-LLVM emission for the loop repro).
+
+Full `cargo test --release` clean (2790 lib tests + all integration suites, 0 failed),
+including the 3 new tests above.

@@ -1076,6 +1076,46 @@ mod tests {
     }
 
     #[test]
+    fn bug127_loop_carried_overflow_check_is_not_elided() {
+        // BUG-127: a fact like `n == 0` (true only the FIRST time
+        // control reaches a statement) deliberately survives a
+        // same-scope reassignment inside a loop body (kept alive for
+        // a separate loop-invariant-preservation check), which let
+        // the overflow-elision pass "prove" `n + i64::MIN` safe using
+        // a fact that doesn't hold on later iterations, and silently
+        // drop the runtime guard -- see the `if inside_loop { return;
+        // }` guard added to try_elide_bounds_in_typed_expr's Binary
+        // arm. The checked-add helper call must survive in the
+        // emitted LLVM for this loop body.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 100 {
+                if n == 5 {
+                  break;
+                }
+                n = n + -9223372036854775808;
+              }
+              assert n == 5;
+              return 0;
+            }
+        "#;
+
+        // `compile_to_llvm` always exercises the tree-LLVM backend
+        // (unconditionally, unlike `vanic run`'s SSA-eligibility
+        // dispatch), which inlines its own overflow check via
+        // `llvm.sadd.with.overflow` rather than calling a shared
+        // `__intent_checked_add_*` helper (that helper name is
+        // SSA-backend-specific -- see ssa_backend_llvm.rs).
+        let llvm = compile_to_llvm(source).expect("loop should compile");
+        assert!(
+            llvm.contains("llvm.sadd.with.overflow"),
+            "BUG-127 regression: the loop-carried overflow check was \
+             elided again using a stale pre-loop fact, got: {llvm}"
+        );
+    }
+
+    #[test]
     fn let_shadowing_drops_old_vec() {
         let source = r#"
             fn main() -> i64 {

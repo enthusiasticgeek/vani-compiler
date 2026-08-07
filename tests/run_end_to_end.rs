@@ -11754,3 +11754,57 @@ fn reassign_array_and_ref_example_produces_correct_output_on_both_backends() {
         );
     }
 }
+
+// BUG-127 (2026-08-07): the checker's overflow-elision pass
+// deliberately keeps SMT facts about a reassigned variable alive
+// across a loop body (for a separate loop-invariant-preservation
+// check), which made a fact true only on the FIRST time control
+// reaches a statement (e.g. `n == 0`, from before the loop) look
+// like it still held on every later iteration too. The elision
+// pass "proved" `n + i64::MIN` never overflows using that stale
+// fact and elided the runtime guard; the LLVM backend then wrapped
+// silently on the second iteration and looped forever instead of
+// trapping -- turning an intended 5-iteration loop into a real
+// infinite one. Wrapped in the real `timeout` command: if this
+// regresses, the test fails (killed, exit 124) after 10s instead of
+// hanging the whole suite forever, same pattern as the BUG-109 /
+// echo_pool regression tests above. This is a real subprocess run
+// because the bug is a runtime hang, not a compile-time/string-level
+// difference a `compile_to_llvm` check could catch on its own.
+#[test]
+fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/loop_carried_overflow_not_elided.vani",
+        manifest_dir
+    );
+
+    for (backend_args, expect_code) in [
+        (vec!["run", &example], 3),
+        (vec!["run", &example, "--backend=c"], 1),
+    ] {
+        let mut cmd_args = vec!["10", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert_eq!(
+            output.status.code(),
+            Some(expect_code),
+            "{:?}: status {:?} (124 = timeout/hang -- BUG-127 regression: the \
+             loop-carried overflow check was wrongly elided again), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stdout)
+                .contains("unreachable: overflow should have trapped"),
+            "{:?}: the overflow trap did not fire before the print -- BUG-127 \
+             regression",
+            backend_args
+        );
+    }
+}

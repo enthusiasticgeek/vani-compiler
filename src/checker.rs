@@ -12466,7 +12466,7 @@ fn check_one_stmt(
                 }
                 let drop_old = !old.ty.is_copy() && old.moved.is_none();
                 let mut expr = checked.expr;
-                try_elide_bounds_in_typed_expr(&mut expr, smt_facts, env, signatures);
+                try_elide_bounds_in_typed_expr(&mut expr, smt_facts, env, signatures, !loops.is_empty());
                 body.push(TypedStmt::Reassign {
                     name: name.clone(),
                     ty: var_ty.clone(),
@@ -12476,7 +12476,7 @@ fn check_one_stmt(
             } else {
                 // Fresh declaration or shadowing an outer-scope binding.
                 let mut expr = checked.expr;
-                try_elide_bounds_in_typed_expr(&mut expr, smt_facts, env, signatures);
+                try_elide_bounds_in_typed_expr(&mut expr, smt_facts, env, signatures, !loops.is_empty());
                 body.push(TypedStmt::Let {
                     name: name.clone(),
                     ty: var_ty.clone(),
@@ -12830,7 +12830,7 @@ fn check_one_stmt(
             let drop_old = !existing.ty.is_copy() && existing.moved.is_none();
             let mut rhs = coerced.expr;
             inject_branch_drops(&mut rhs);  // closure #179
-            try_elide_bounds_in_typed_expr(&mut rhs, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(&mut rhs, smt_facts, env, signatures, !loops.is_empty());
             body.push(TypedStmt::Reassign {
                 name: name.clone(),
                 ty: existing.ty.clone(),
@@ -12950,7 +12950,7 @@ fn check_one_stmt(
             // identifiers starting with `__intent`).
             let mut ret_expr = checked.expr;
             inject_branch_drops(&mut ret_expr);  // closure #181
-            try_elide_bounds_in_typed_expr(&mut ret_expr, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(&mut ret_expr, smt_facts, env, signatures, !loops.is_empty());
             // Per-return unique suffix so multiple return sites in the
             // same function don't try to alloca the same SSA name.
             // Using the return's source span keeps it deterministic
@@ -13048,7 +13048,7 @@ fn check_one_stmt(
                 diagnostics,
             );
             let mut e = checked.expr;
-            try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures, !loops.is_empty());
             body.push(TypedStmt::Assert {
                 expr: e,
                 message: message.clone(),
@@ -13078,7 +13078,7 @@ fn check_one_stmt(
                 }
             }
             let mut e = checked.expr;
-            try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures, !loops.is_empty());
             body.push(TypedStmt::Prove { expr: e });
             false
         }
@@ -13121,7 +13121,7 @@ fn check_one_stmt(
                                 ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                             }
                             let mut t = checked.expr;
-                            try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures);
+                            try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures, !loops.is_empty());
                             typed_items.push(TypedPrintItem::Expr(t));
                         }
                     }
@@ -13169,7 +13169,7 @@ fn check_one_stmt(
                             ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         }
                         let mut t = checked.expr;
-                        try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures);
+                        try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures, !loops.is_empty());
                         typed_items.push(TypedPrintItem::Expr(t));
                     }
                 }
@@ -13745,8 +13745,8 @@ fn check_one_stmt(
             let mut idx_expr = index_checked.expr;
             let mut val_expr = value_coerced.expr;
             inject_branch_drops(&mut val_expr);  // closure #179
-            try_elide_bounds_in_typed_expr(&mut idx_expr, smt_facts, env, signatures);
-            try_elide_bounds_in_typed_expr(&mut val_expr, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(&mut idx_expr, smt_facts, env, signatures, !loops.is_empty());
+            try_elide_bounds_in_typed_expr(&mut val_expr, smt_facts, env, signatures, !loops.is_empty());
 
             // Try to discharge the IndexAssign's own bounds guard
             // (separate from any Index nodes inside the rhs/lhs).
@@ -38196,6 +38196,7 @@ fn try_elide_bounds_in_typed_expr(
     smt_facts: &[Expr],
     env: &Env,
     signatures: &HashMap<String, Signature>,
+    inside_loop: bool,
 ) {
     use crate::smt::Verdict;
     // Skip elision under INTENTC_NO_VERIFY â€” leaving every runtime
@@ -38206,8 +38207,8 @@ fn try_elide_bounds_in_typed_expr(
     }
     match &mut expr.kind {
         TypedExprKind::Index { array, index, checked } => {
-            try_elide_bounds_in_typed_expr(array, smt_facts, env, signatures);
-            try_elide_bounds_in_typed_expr(index, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(array, smt_facts, env, signatures, inside_loop);
+            try_elide_bounds_in_typed_expr(index, smt_facts, env, signatures, inside_loop);
             if !*checked {
                 return;
             }
@@ -38278,12 +38279,38 @@ fn try_elide_bounds_in_typed_expr(
             }
         }
         TypedExprKind::Unary { expr, .. } => {
-            try_elide_bounds_in_typed_expr(expr, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(expr, smt_facts, env, signatures, inside_loop);
         }
         TypedExprKind::Binary { op, left, right, checked } => {
-            try_elide_bounds_in_typed_expr(left, smt_facts, env, signatures);
-            try_elide_bounds_in_typed_expr(right, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(left, smt_facts, env, signatures, inside_loop);
+            try_elide_bounds_in_typed_expr(right, smt_facts, env, signatures, inside_loop);
             if !*checked {
+                return;
+            }
+            // BUG-127: `smt_facts` deliberately survives a same-scope
+            // reassignment inside a loop body (see the two
+            // `if loops.is_empty() { drop_facts_mentioning(...) }`
+            // call sites) so the loop-invariant-preservation check
+            // can still see entry facts. That's correct for THAT
+            // check, but unsound for arithmetic elision here: a fact
+            // like `n == 0` from before the loop (or from an earlier
+            // statement this same iteration) only describes the
+            // FIRST time control reaches this point, not every
+            // iteration -- there's no general loop-invariant
+            // inference to confirm the fact still holds on later
+            // iterations of a variable the loop itself mutates.
+            // Concretely: `while n < 100 { ... n = n + i64::MIN; }`
+            // "proved" `n + i64::MIN` never overflows using the
+            // stale `n == 0` fact (0 + i64::MIN doesn't overflow),
+            // elided the runtime guard, then actually overflowed on
+            // the second iteration (i64::MIN + i64::MIN wraps to 0)
+            // -- silent wraparound that turned an intended 5-iteration
+            // loop into an infinite one instead of trapping. Bounds
+            // (Index) elision above is unaffected: a `for` loop's own
+            // induction-variable facts are freshly and soundly
+            // re-derived every iteration by construction, unlike the
+            // possibly-stale facts used here.
+            if inside_loop {
                 return;
             }
             match op {
@@ -38502,18 +38529,18 @@ fn try_elide_bounds_in_typed_expr(
         }
         TypedExprKind::Call { args, .. } => {
             for a in args {
-                try_elide_bounds_in_typed_expr(a, smt_facts, env, signatures);
+                try_elide_bounds_in_typed_expr(a, smt_facts, env, signatures, inside_loop);
             }
         }
         TypedExprKind::Cast { expr, .. } => {
-            try_elide_bounds_in_typed_expr(expr, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(expr, smt_facts, env, signatures, inside_loop);
         }
         TypedExprKind::Len { array, .. } => {
-            try_elide_bounds_in_typed_expr(array, smt_facts, env, signatures);
+            try_elide_bounds_in_typed_expr(array, smt_facts, env, signatures, inside_loop);
         }
         TypedExprKind::ArrayLit { elements } => {
             for e in elements {
-                try_elide_bounds_in_typed_expr(e, smt_facts, env, signatures);
+                try_elide_bounds_in_typed_expr(e, smt_facts, env, signatures, inside_loop);
             }
         }
         _ => {}
