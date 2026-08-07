@@ -7,13 +7,15 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-132** (re-check before committing -- see
+Next free `BUG-N`: **BUG-133** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
 (item A1), BUG-127 (item A2), BUG-128 (item A3), BUG-129 (item C1),
-BUG-130 (item C2), and BUG-131 (item C5) were all fixed 2026-08-07 --
-section A is fully closed out; only C3 and C4 remain open in section
-C.
+BUG-130 (item C2), BUG-131 (item C5), and BUG-132 (item C4) were all
+fixed 2026-08-07 -- section A is fully closed out; only C3 remains
+open in section C (`ensures`/`invariant` runtime enforcement -- a
+real feature addition, not a quick fix, likely needs its own scoping
+discussion before starting).
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -284,7 +286,7 @@ Recorded so a future pass doesn't re-investigate these from scratch.
 All five of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
 (the auto-memory system) with fuller context; summarized here so
 they're not scattered across two places when picking work. C1, C2,
-and C5 are now fixed (2026-08-07); only C3 and C4 remain open.
+C4, and C5 are now fixed (2026-08-07); only C3 remains open.
 
 ### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path -- **FIXED as BUG-129 (2026-08-07)**
 
@@ -366,7 +368,19 @@ need to intercept every `return` site for `ensures`, substituting
 the return value into the clause; `invariant` similarly at every
 loop iteration boundary) -- not a quick fix, hence still open.
 
-### C4. Non-ASCII struct/enum type names can be declared but never referenced as a type
+### C4. Non-ASCII struct/enum type names can be declared but never referenced as a type -- **FIXED as BUG-132 (2026-08-07)**
+
+Confirmed with the user this was a real gap worth fixing, not a deliberate v1
+restriction, and confirmed the fix direction (Unicode-aware case check: preserve the
+PascalCase convention for cased scripts, accept any letter from scripts with no case
+distinction) before implementing -- three separate design options were on the table
+(see the fix's own writeup for the other two, rejected). Root cause was broader than
+just `parse_type`: two OTHER "does this look like a type name" call sites in
+`parser.rs` (module-qualified paths, and the `Name { field: val }` struct-literal
+lookahead) had the identical `is_ascii_uppercase()` gate, so even fixing `parse_type`
+alone wouldn't have let a Myanmar-named struct actually be CONSTRUCTED, only type-
+annotated. Full writeup, fix, and regression tests: see `## BUG-132` in
+`docs/TODO_CURRENT.md`. Original notes kept below for traceability.
 
 Found auditing category F (non-ASCII identifier collisions,
 2026-08-06). `struct ကက { x: i64 }` parses and type-checks fine as a
@@ -380,9 +394,9 @@ function/variable/field names), so it's genuinely unclear whether
 this is a deliberate v1 restriction or an oversight -- worth a
 product decision before "fixing" it either way.
 
-Regression test already exists pinning the CURRENT (rejecting)
-behavior: `non_ascii_struct_name_declares_but_cannot_be_used_as_a_
-type_annotation` in `src/lib.rs`.
+Regression test (UPDATED post-fix, previously pinned the rejecting
+behavior under this same name): `non_ascii_struct_name_can_be_
+declared_and_used_as_a_type_annotation` in `src/lib.rs`.
 
 ### C5. `sort_runtime.c`'s AVX-512 codegen ignores actual host CPU capability -- **FIXED as BUG-131 (2026-08-07)**
 

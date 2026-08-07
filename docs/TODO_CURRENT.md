@@ -9243,3 +9243,47 @@ cross-compile path (a non-x86 target never enters any of this file's `VANI_SORT_
 AVX512` branch at all) is unaffected.
 
 Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).
+
+## BUG-132 (2026-08-07) -- non-ASCII type names could be declared but never referenced, for scripts with no case distinction
+
+Found picking up item C4 from `docs/UNRESOLVED_GAPS_TODO.md` -- flagged there as "more a
+product decision than a bug." Confirmed the fix direction with the user before
+implementing (Unicode-aware case check, preserving the ASCII PascalCase convention for
+cased scripts and extending it correctly to case-less ones) rather than guessing.
+
+A struct/enum declared with a non-ASCII name (`struct ကက { x: i64 }`, Myanmar script)
+parsed fine as a DECLARATION -- `parse_struct_decl`/`parse_enum_decl` impose no case
+restriction on the name at all, matching every other identifier in the language. But
+three separate "does this identifier look like a type name" call sites in `parser.rs`
+(the plain type-position path, the module-qualified `a::b::Type` path, and the
+`Name { field: val }` struct-literal lookahead in expression position) all gated on
+`c.is_ascii_uppercase()` -- meaning the struct could never actually be REFERENCED
+anywhere: not as a type annotation, not to construct a value of it. Myanmar (like
+Devanagari, CJK, Arabic, Thai, and many other scripts) has no upper/lowercase
+distinction at all, so no identifier in that script could ever satisfy an
+ASCII-uppercase-start check, regardless of case-like conventions the script might have
+for other purposes.
+
+Fixed with a single shared `is_type_name_start(c: char) -> bool` helper in `parser.rs`:
+`c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())`. For cased scripts
+(ASCII, Cyrillic, Greek, etc.) this preserves the existing convention exactly --
+`c.is_uppercase()` is Unicode-aware, so `Точка` (Cyrillic, uppercase-start) now works
+as a type name while `точка` (lowercase-start) is still correctly rejected, matching
+ASCII `Point`/`point`. For case-less scripts, `is_lowercase()` is false for every
+character (there's no lowercase form to compare against), so `is_alphabetic() &&
+!is_lowercase()` accepts any letter -- exactly the "case doesn't apply here, don't
+gate on it" behavior needed. Applied at all three call sites so declaring AND
+referencing a non-ASCII-named type (both as a type annotation and to construct a
+struct literal) work consistently, not just one.
+
+Updated the existing pinning test (previously named `non_ascii_struct_name_declares_
+but_cannot_be_used_as_a_type_annotation`, asserting the OLD rejecting behavior) to
+`non_ascii_struct_name_can_be_declared_and_used_as_a_type_annotation`, now asserting
+the Myanmar struct actually compiles and the type is really emitted (checks for
+`Struct_ကက` verbatim in the C/LLVM output -- non-ASCII names aren't mangled). Added
+two more: `cyrillic_struct_name_requires_uppercase_start_matching_ascii_convention`
+(confirms the cased-script distinction survives the fix in both directions) and
+`ascii_lowercase_struct_name_still_rejected_as_a_type_annotation` (a pure regression
+guard pinning the unchanged ASCII behavior).
+
+Full `cargo test --release` clean (2795 lib tests + all integration suites, 0 failed).

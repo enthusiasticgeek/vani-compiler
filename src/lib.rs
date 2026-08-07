@@ -52831,40 +52831,92 @@ fn main() -> i64 { return 0; }
         compile_to_llvm(source).expect("two distinct non-ASCII enum variants compile to LLVM");
     }
 
-    // Same audit pass: NOT a collision bug, but a related finding --
-    // a non-ASCII struct NAME can be DECLARED but not actually
-    // REFERENCED as a type: `parse_type` doesn't accept a non-ASCII
-    // identifier token in type-annotation position at all (distinct
-    // from `sanitize_ident`'s C-backend mangling concern -- this is
-    // a parser-level gap, backend-independent, so both backends fail
-    // identically at the parse stage, not just one). Documented as a
-    // known limitation in `docs/BUG_PATTERN_AUDIT_TODO.md` category F
-    // rather than fixed here -- out of scope for a mangling-collision
-    // audit, and unclear whether non-ASCII type names are meant to be
-    // supported at all (no example in `examples/language/*/` uses one).
+    // BUG-132 (2026-08-07): same audit pass originally found a related
+    // gap here -- a non-ASCII struct NAME could be DECLARED but not
+    // actually REFERENCED as a type: `parse_type` (and two other
+    // "does this identifier look struct-shaped" call sites --
+    // module-qualified paths, and the `Name { field: val }` struct-
+    // literal lookahead in expression position) only accepted
+    // `c.is_ascii_uppercase()` as a valid type-name start. Scripts
+    // with NO upper/lowercase distinction at all (Myanmar, Devanagari,
+    // CJK, Arabic, Thai, ...) can never satisfy that, so a struct
+    // declared with e.g. a Myanmar name parsed fine but could never
+    // be referenced anywhere -- a parser-level gap, backend-
+    // independent (both backends failed identically at the parse
+    // stage). Confirmed with the user this was worth fixing (not a
+    // deliberate v1 restriction) and that a Unicode-aware check was
+    // the right direction (preserves the PascalCase convention for
+    // cased scripts, e.g. Cyrillic `Точка` vs `точка`, while accepting
+    // any letter from case-less scripts). Fixed via a shared
+    // `is_type_name_start(c)` helper (`c.is_uppercase() ||
+    // (c.is_alphabetic() && !c.is_lowercase())`) applied at all three
+    // call sites in `parser.rs`.
     #[test]
-    fn non_ascii_struct_name_declares_but_cannot_be_used_as_a_type_annotation() {
-        let decl_only = r#"
+    fn non_ascii_struct_name_can_be_declared_and_used_as_a_type_annotation() {
+        // Myanmar script has no case distinction at all -- any
+        // letter must be accepted as a type-name start.
+        let source = r#"
             struct ကက {
               x: i64,
             }
             fn main() -> i64 {
-              return 0;
-            }
-        "#;
-        compile(decl_only).expect("declaring a non-ASCII-named struct parses fine");
-
-        let referenced = r#"
-            struct ကက {
-              x: i64,
-            }
-            fn main() -> i64 {
-              let a: ကက = ကက { x: 3 };
+              let a: ကက = ကက { x: 42 };
               return a.x;
             }
         "#;
-        let errs = compile(referenced)
-            .expect_err("referencing a non-ASCII struct name as a type is currently rejected");
+        let c = compile_to_c(source).expect("Myanmar-named struct type must compile to C");
+        let ll = compile_to_llvm(source).expect("Myanmar-named struct type must compile to LLVM");
+        assert!(c.contains("Struct_") || ll.contains("%Struct_"), "expected the struct to actually be emitted, got C:\n{c}\nLLVM:\n{ll}");
+    }
+
+    #[test]
+    fn cyrillic_struct_name_requires_uppercase_start_matching_ascii_convention() {
+        // Cyrillic IS a cased script -- the PascalCase-signals-a-type
+        // convention must still apply there, same as ASCII.
+        let upper = r#"
+            struct Точка {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: Точка = Точка { x: 7 };
+              return a.x;
+            }
+        "#;
+        compile(upper).expect("uppercase-start Cyrillic struct name must be usable as a type");
+
+        let lower = r#"
+            struct точка {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: точка = точка { x: 7 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(lower)
+            .expect_err("lowercase-start Cyrillic struct name must still be rejected as a type, matching the ASCII convention");
+        assert!(
+            errs.iter().any(|e| e.message.contains("expected type")),
+            "expected a parse-level 'expected type' diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn ascii_lowercase_struct_name_still_rejected_as_a_type_annotation() {
+        // Regression guard: the ASCII PascalCase convention must be
+        // completely unchanged by the Unicode-aware BUG-132 fix.
+        let source = r#"
+            struct point {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: point = point { x: 7 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("lowercase ASCII struct name must still be rejected as a type");
         assert!(
             errs.iter().any(|e| e.message.contains("expected type")),
             "expected a parse-level 'expected type' diagnostic, got: {:?}",

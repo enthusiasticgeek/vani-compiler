@@ -2683,7 +2683,7 @@ impl Parser {
                 let starts_uppercase = last_segment
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 if !starts_uppercase {
                     return Err(Diagnostic::new(
@@ -2697,7 +2697,7 @@ impl Parser {
             if name
                 .chars()
                 .next()
-                .map(|c| c.is_ascii_uppercase())
+                .map(is_type_name_start)
                 .unwrap_or(false)
             {
                 let n = name.clone();
@@ -5762,12 +5762,12 @@ impl Parser {
                 let last_upper = last_segment
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 let first_upper = name
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 let starts_uppercase = last_upper || first_upper;
                 let starts_with_lbrace = matches!(self.current().kind, TokenKind::LBrace);
@@ -6146,6 +6146,27 @@ fn ident_text(token: Token) -> String {
         TokenKind::Ident(name) => name,
         _ => unreachable!("expected identifier"),
     }
+}
+
+/// BUG-132: whether `c` can start a type name -- used to recognize a
+/// bare identifier as a struct/enum reference in type position, and
+/// to disambiguate a `Name { field: val }` struct literal from other
+/// uses of an identifier followed by `{` in expression position.
+/// Struct/enum DECLARATIONS never enforced this (any identifier
+/// works there); this is purely the "looks like a type" convention
+/// used to recognize a REFERENCE to one.
+///
+/// ASCII identifiers keep the existing PascalCase convention
+/// (`c.is_uppercase()` also covers cased non-Latin scripts, e.g.
+/// Cyrillic `Точка`). Scripts with no upper/lowercase distinction at
+/// all (Myanmar, Devanagari, CJK, Arabic, Thai, ...) have no way to
+/// "start uppercase" -- `c.is_lowercase()` is false for them too,
+/// same as `is_uppercase()`, so `is_alphabetic() && !is_lowercase()`
+/// correctly accepts any letter from those scripts without ALSO
+/// accepting genuinely-lowercase Latin/Cyrillic/etc. letters (which
+/// stay rejected, preserving the convention everywhere it applies).
+fn is_type_name_start(c: char) -> bool {
+    c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())
 }
 
 /// Arc 8 step 8f -- synthesize the AST for `await(expr)`:
