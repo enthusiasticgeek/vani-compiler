@@ -2813,3 +2813,23 @@ Repro: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/r
 Fix attempt: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-112326-backend-divergence-8e728c2666
+
+Repro: `tools/localfuzz/findings/20260807-112326-backend-divergence-8e728c2666/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-112326-backend-divergence-8e728c2666/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This is a bug report for the vani-compiler project's local staging log, detailing a backend-divergence issue related to a specific mutant generated from the provided code. The mutant causes an integer overflow in the `add` function when executed by both the `rustc` and `llvm` backends.
+
+To reproduce this issue:
+1. Download the base corpus file: `/home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_closure_chain.vani`
+2. Generate a mutant using the vani-compiler's local staging log, specifying the backend as either `rustc` or `llvm`.
+3. Execute the generated mutant on both `rustc` and `llvm`.
+
+Expected behavior: The program should compile successfully with no errors.
+Observed symptom: The program crashes with an integer overflow error in the `add` function, indicating that the backend diverged from the expected output.
+Backend(s) affected: Rustc and LLVM.
