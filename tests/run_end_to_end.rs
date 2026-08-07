@@ -11897,3 +11897,55 @@ fn main() -> i64 { return deep(10); }
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// BUG-131 (2026-08-07): `sort`/`sort_by`'s block-partition scan (only
+// entered for >= 128 elements) used AVX-512 intrinsics unconditionally
+// on any x86_64 host with no runtime CPU-capability check -- SIGILL on
+// any x86_64 CPU predating AVX-512 (confirmed on this dev machine's
+// own Haswell CPU). Fixing that crash surfaced a second, pre-existing
+// bug: `double`'s mask compare reused `int64_t`'s raw-bit-pattern
+// comparison, which does NOT preserve IEEE-754 ordering for negative
+// doubles -- invisible before this fix since the crash always fired
+// first on a non-AVX-512 host. Both fixed in `sort_runtime.c`: real
+// runtime CPUID dispatch via `__builtin_cpu_supports("avx512f")`, and
+// a genuinely-floating-point AVX-512/scalar compare for `double`
+// instead of reusing `int64_t`'s bit-pattern path. Real subprocess run
+// (not a string check) because `sort_runtime.c` is a separate C file
+// compiled by a real `cc` invocation at `vanic run` time, entirely
+// outside anything `compile_to_c`/`compile_to_llvm` touch.
+#[test]
+fn sort_large_block_partition_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/sort_large_block_partition.vani",
+        manifest_dir
+    );
+    let expected = "i64 sorted ok, min: -997663\n\
+                     i64 sorted ok, max: 998334\n\
+                     f64 sorted ok, min: -997.663\n\
+                     f64 sorted ok, max: 998.334\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-131 regression: {:?} failed with status {:?} (132/133/etc = still \
+             SIGILL-crashing on AVX-512), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-131 regression: sort produced wrong output for {:?} -- likely the \
+             double raw-bit-pattern comparison bug again",
+            backend_args
+        );
+    }
+}

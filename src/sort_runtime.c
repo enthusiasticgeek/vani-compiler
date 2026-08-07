@@ -23,13 +23,21 @@
  *
  * Block partition scan (hot path):
  *   The comparison phase (l[i] >= pivot for 64 elements) is separated from
- *   the packing phase so GCC can auto-vectorise comparisons with AVX-512
- *   (8 x i64 per 512-bit register → 8 vector ops vs 64 scalar).  The packing
- *   phase remains scalar (dependent store on lc), but operates on 8-bit
- *   booleans rather than 64-bit values.
+ *   the packing phase so the compare step can use AVX-512 intrinsics
+ *   (8 x i64 per 512-bit register → 8 vector ops vs 64 scalar) on hosts that
+ *   have it.  The packing phase remains scalar (dependent store on lc), but
+ *   operates on 8-bit booleans rather than 64-bit values.
  *
  * Compiler hints applied:
- *   - #pragma GCC target: avx512f/vl/bw/dq (Ice Lake), avx2, bmi2, popcnt
+ *   - BUG-131 (2026-08-07): the compare step's AVX-512 intrinsics live in
+ *     their own `__attribute__((target("avx512f,avx512bw,avx512dq,
+ *     avx512vl")))`-decorated functions, dispatched at RUNTIME via
+ *     `__builtin_cpu_supports("avx512f")` against a portable
+ *     `target("arch=x86-64")` scalar sibling -- NOT a file-wide `#pragma
+ *     GCC target`, which used to let the auto-vectorizer emit AVX-512
+ *     ANYWHERE in this file (confirmed: it crashed inside `si_recurse`,
+ *     not the block-partition code) on any x86_64 host that doesn't
+ *     actually have it.
  *   - __attribute__((always_inline)) on block_part and hoare to prevent
  *     call overhead inside the hot recursive loop
  *   - __builtin_clzll for ilog2 (single BSR instruction)
@@ -39,23 +47,43 @@
 #pragma GCC optimize("O3,unroll-loops,prefetch-loop-arrays")
 
 /* BUG-125: the AVX-512 block-partition scan below is x86-only (the
- * `#pragma GCC target`, `<immintrin.h>`, and `_mm512_*` intrinsics
- * simply don't exist on other architectures). This file is compiled
- * unconditionally into every LLVM-backend binary, including
- * cross-compiled ones (`vanic build --target=...`) -- on a non-x86
- * target (confirmed on `arm-unknown-linux-gnueabi`) the AVX-512
- * pragma/intrinsics failed to compile at all (`unknown target
- * attribute 'avx512f'`, `immintrin.h: No such file or directory`),
+ * `<immintrin.h>` header and `_mm512_*` intrinsics simply don't exist
+ * on other architectures). This file is compiled unconditionally into
+ * every LLVM-backend binary, including cross-compiled ones (`vanic
+ * build --target=...`) -- on a non-x86 target (confirmed on
+ * `arm-unknown-linux-gnueabi`) the AVX-512 intrinsics failed to
+ * compile at all (`immintrin.h: No such file or directory`),
  * degrading to a non-fatal WARNING that still built a native binary
  * -- but with `intent_vec_i64__sort`/`intent_vec_double__sort`
  * missing entirely, so any program actually CALLING `sort`/`sort_by`
  * failed to LINK (`undefined reference to 'intent_vec_i64__sort'`).
  * Gate the x86-only bits behind an arch check and provide a portable
  * scalar equivalent for everyone else -- same algorithm, same output,
- * just without the vectorized compare/pack fast path. */
+ * just without the vectorized compare/pack fast path.
+ *
+ * BUG-131: this used to ALSO carry `#pragma GCC target("avx512f,...")`
+ * here, applied file-wide -- meaning GCC's auto-vectorizer was free to
+ * use AVX-512 instructions ANYWHERE in this file it judged profitable
+ * (`si_recurse`'s pivot-selection loop, `si_heapsort`, etc.), not just
+ * inside the two functions that actually intend to use AVX-512
+ * intrinsics. Confirmed by the crash site: a 200-element shuffled sort
+ * (large enough to enter `_block_part`, whose OWN AVX-512 use is now
+ * correctly runtime-gated -- see `vani_sort_mask_*_avx512` below) hit
+ * `SIGILL` inside `si_recurse` on this dev machine's own Haswell CPU
+ * (no AVX-512 support), NOT inside the block-partition code at all.
+ * `<immintrin.h>` doesn't need the pragma to be included or used --
+ * each intrinsic function is individually declared with its own
+ * `target("...")` attribute in the header, so a caller with a MATCHING
+ * `__attribute__((target(...)))` can call it without any file-wide
+ * pragma forcing every OTHER function in the file onto the same
+ * assumption. Dropped the pragma entirely; the two explicitly-marked
+ * AVX-512 functions below opt in on their own, and everything else in
+ * the file now compiles under whatever `-march=`/`-mtune=` the actual
+ * `cc` invocation passes (`-march=native` for a host build -- see
+ * `main.rs`), which GCC won't use to emit AVX-512 on a CPU that
+ * doesn't have it. */
 #if defined(__x86_64__) || defined(__i386__)
 #define VANI_SORT_HAVE_AVX512 1
-#pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")
 #include <immintrin.h>
 #else
 #define VANI_SORT_HAVE_AVX512 0
@@ -71,37 +99,181 @@ typedef struct { double  *data; int64_t len; int64_t cap; } VecF64;
 #define BLOCK    64
 #define NINTHER  128
 
-/* BUG-125: the two mask-computation shapes used inside `_block_part`
- * below ("which of these BLOCK elements starting at `ptr` are
- * >= / < `pivot`, as a 64-bit bitmask") -- AVX-512 on x86, a portable
- * scalar loop everywhere else. Note the AVX-512 form compares raw
- * bit patterns via `_mm512_cmpge/cmplt_epi64_mask` for BOTH the
- * int64_t and double instantiations (never using an FP compare
- * intrinsic even for `sd_block_part`) -- pre-existing x86-path
- * behavior, left exactly as it was; the scalar fallback below uses
- * T's own native `>=`/`<` operators, which is what every OTHER
- * (non-block-partition) comparison in this file already does. */
+/* The two mask-computation shapes used inside `_block_part` below
+ * ("which of these BLOCK elements starting at `ptr` are >= / <
+ * `pivot`, as a 64-bit bitmask") -- AVX-512 on x86 (runtime-gated,
+ * see BUG-131 below), a portable scalar loop everywhere else. `T`
+ * needs genuinely different comparison semantics per instantiation
+ * (see BUG-131's `_f64` note), so this dispatches on `pivot`'s type
+ * via C11 `_Generic` rather than being one macro shared verbatim
+ * across both `DEFINE_SORT` instantiations. */
 #if VANI_SORT_HAVE_AVX512
+/* BUG-131 (2026-08-07), part 1 -- runtime CPU-capability dispatch.
+ * A file-wide `#pragma GCC target(avx512...)` used to guarantee only
+ * that the COMPILER could target AVX-512 -- it said nothing about
+ * whether the CPU actually running the resulting binary has it, AND
+ * (worse) let GCC's auto-vectorizer emit AVX-512 ANYWHERE in this
+ * file it judged profitable, not just in the two functions that
+ * intend to use it. Every x86_64 build unconditionally used AVX-512
+ * with no runtime check, so `sort`/`sort_by` raised SIGILL on any
+ * x86_64 host predating AVX-512 (confirmed on this dev machine's own
+ * Haswell CPU, no `avx512*` flags in `/proc/cpuinfo`) -- and the
+ * crash site wasn't even confined to the block-partition code: a
+ * large enough sort hit SIGILL inside `si_recurse`'s own pivot-
+ * selection loop, auto-vectorized by GCC under the ambient pragma.
+ *
+ * Fixed with real runtime CPUID dispatch, and the pragma dropped
+ * entirely (see the file-top comment): the actual vector compare
+ * lives in `vani_sort_mask_*_avx512`, each explicitly decorated with
+ * `__attribute__((target(...)))` so GCC compiles THAT function with
+ * AVX-512 enabled regardless of command-line flags -- nothing else in
+ * the file gets that treatment anymore. A sibling `vani_sort_mask_*
+ * _scalar` is decorated with `__attribute__((target("arch=x86-64")))`
+ * to guarantee no AVX-512/AVX2/BMI2 auto-vectorization creeps in
+ * there either (confirmed by disassembly, not just documentation).
+ * `vani_sort_mask_ge`/`_lt` pick between the two via `__builtin_cpu_
+ * supports("avx512f")` (a cheap read of a CPUID probe GCC's runtime
+ * caches on first use, not a fresh CPUID instruction every call).
+ * `target_clones` (GCC's usual IFUNC-based multiversioning attribute)
+ * was tried first and rejected: it silently NO-OPs (a `-Wattributes`
+ * warning, "ignoring attribute 'target_clones' because it conflicts
+ * with attribute 'target'") when combined with an enclosing `#pragma
+ * GCC target` -- confirmed empirically, back when this file still had
+ * one file-wide, since getting that interaction wrong would have
+ * silently reintroduced the exact crash this fix exists to prevent.
+ * `_block_part` itself stays `always_inline` (unchanged) -- only the
+ * mask computation, the one part that's actually CPU-feature-
+ * dependent, goes through a real (non-inlined) function call, so the
+ * dispatch resolves per-block at runtime instead of being baked into
+ * the inlined caller at compile time.
+ *
+ * BUG-131, part 2 -- found chasing part 1: `int64_t`'s mask functions
+ * correctly compare raw bit patterns (that IS int64_t's native
+ * ordering -- no transform needed), but `double`'s ORIGINALLY did the
+ * exact same raw-int64-bit-pattern compare (`_mm512_cmpge_epi64_mask`
+ * on the double's bits reinterpreted as int64_t, a BUG-125-era
+ * decision explicitly called out as deliberate: "never using an FP
+ * compare intrinsic even for sd_block_part"). That's wrong: IEEE-754
+ * negative doubles do NOT preserve their true ordering when compared
+ * as raw signed int64_t -- e.g. -1000.0's bits (-4571364728013586432)
+ * compare GREATER than -0.001's bits (-4661117527937406468) as raw
+ * int64_t, backwards from -1000.0 < -0.001. This was invisible before
+ * this session: any x86_64 host without AVX-512 crashed (part 1's
+ * bug) before ever producing output, and the crash always fired
+ * before a large-enough (>=128-element) `Vec<f64>` sort could return
+ * a wrong answer. Fixing part 1's crash surfaced this for the first
+ * time -- a 300-element shuffled negative-and-positive `Vec<f64>`
+ * sort silently returned out-of-order output. Fixed by giving
+ * `double` its own genuinely-floating-point mask functions
+ * (`_mm512_cmp_pd_mask`/native `>=`/`<`) instead of routing through
+ * int64_t's bit-pattern path -- `int64_t`'s own functions are
+ * unaffected and unchanged. */
+__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))
+static uint64_t vani_sort_mask_ge_i64_avx512(const int64_t *ptr, int64_t pivot) {
+    __m512i vpivot_v = _mm512_set1_epi64((long long)pivot);
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi += 8) {
+        __m512i vals = _mm512_loadu_si512((const __m512i *)(ptr + bi));
+        __mmask8 k = _mm512_cmpge_epi64_mask(vals, vpivot_v);
+        out_mask |= (uint64_t)(unsigned)k << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))
+static uint64_t vani_sort_mask_lt_i64_avx512(const int64_t *ptr, int64_t pivot) {
+    __m512i vpivot_v = _mm512_set1_epi64((long long)pivot);
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi += 8) {
+        __m512i vals = _mm512_loadu_si512((const __m512i *)(ptr + bi));
+        __mmask8 k = _mm512_cmplt_epi64_mask(vals, vpivot_v);
+        out_mask |= (uint64_t)(unsigned)k << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("arch=x86-64")))
+static uint64_t vani_sort_mask_ge_i64_scalar(const int64_t *ptr, int64_t pivot) {
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi++) {
+        if (ptr[bi] >= pivot) out_mask |= (uint64_t)1 << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("arch=x86-64")))
+static uint64_t vani_sort_mask_lt_i64_scalar(const int64_t *ptr, int64_t pivot) {
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi++) {
+        if (ptr[bi] < pivot) out_mask |= (uint64_t)1 << bi;
+    }
+    return out_mask;
+}
+static inline uint64_t vani_sort_mask_ge_i64(const int64_t *ptr, int64_t pivot) {
+    return __builtin_cpu_supports("avx512f")
+        ? vani_sort_mask_ge_i64_avx512(ptr, pivot)
+        : vani_sort_mask_ge_i64_scalar(ptr, pivot);
+}
+static inline uint64_t vani_sort_mask_lt_i64(const int64_t *ptr, int64_t pivot) {
+    return __builtin_cpu_supports("avx512f")
+        ? vani_sort_mask_lt_i64_avx512(ptr, pivot)
+        : vani_sort_mask_lt_i64_scalar(ptr, pivot);
+}
+
+__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))
+static uint64_t vani_sort_mask_ge_f64_avx512(const double *ptr, double pivot) {
+    __m512d vpivot_v = _mm512_set1_pd(pivot);
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi += 8) {
+        __m512d vals = _mm512_loadu_pd(ptr + bi);
+        __mmask8 k = _mm512_cmp_pd_mask(vals, vpivot_v, _CMP_GE_OQ);
+        out_mask |= (uint64_t)(unsigned)k << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))
+static uint64_t vani_sort_mask_lt_f64_avx512(const double *ptr, double pivot) {
+    __m512d vpivot_v = _mm512_set1_pd(pivot);
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi += 8) {
+        __m512d vals = _mm512_loadu_pd(ptr + bi);
+        __mmask8 k = _mm512_cmp_pd_mask(vals, vpivot_v, _CMP_LT_OQ);
+        out_mask |= (uint64_t)(unsigned)k << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("arch=x86-64")))
+static uint64_t vani_sort_mask_ge_f64_scalar(const double *ptr, double pivot) {
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi++) {
+        if (ptr[bi] >= pivot) out_mask |= (uint64_t)1 << bi;
+    }
+    return out_mask;
+}
+__attribute__((target("arch=x86-64")))
+static uint64_t vani_sort_mask_lt_f64_scalar(const double *ptr, double pivot) {
+    uint64_t out_mask = 0;
+    for (int bi = 0; bi < BLOCK; bi++) {
+        if (ptr[bi] < pivot) out_mask |= (uint64_t)1 << bi;
+    }
+    return out_mask;
+}
+static inline uint64_t vani_sort_mask_ge_f64(const double *ptr, double pivot) {
+    return __builtin_cpu_supports("avx512f")
+        ? vani_sort_mask_ge_f64_avx512(ptr, pivot)
+        : vani_sort_mask_ge_f64_scalar(ptr, pivot);
+}
+static inline uint64_t vani_sort_mask_lt_f64(const double *ptr, double pivot) {
+    return __builtin_cpu_supports("avx512f")
+        ? vani_sort_mask_lt_f64_avx512(ptr, pivot)
+        : vani_sort_mask_lt_f64_scalar(ptr, pivot);
+}
+
 #define VANI_SORT_MASK_GE(out_mask, ptr, pivot)                            \
-    do {                                                                   \
-        __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));          \
-        out_mask = 0;                                                      \
-        for (int bi = 0; bi < BLOCK; bi += 8) {                            \
-            __m512i vals = _mm512_loadu_si512((const __m512i *)((ptr) + bi)); \
-            __mmask8 k = _mm512_cmpge_epi64_mask(vals, vpivot_v);          \
-            out_mask |= (uint64_t)(unsigned)k << bi;                       \
-        }                                                                  \
-    } while (0)
+    ((out_mask) = _Generic((pivot),                                        \
+        double: vani_sort_mask_ge_f64((const double *)(ptr), (double)(pivot)), \
+        default: vani_sort_mask_ge_i64((const int64_t *)(ptr), (int64_t)(pivot))))
 #define VANI_SORT_MASK_LT(out_mask, ptr, pivot)                            \
-    do {                                                                   \
-        __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));          \
-        out_mask = 0;                                                      \
-        for (int bi = 0; bi < BLOCK; bi += 8) {                            \
-            __m512i vals = _mm512_loadu_si512((const __m512i *)((ptr) + bi)); \
-            __mmask8 k = _mm512_cmplt_epi64_mask(vals, vpivot_v);          \
-            out_mask |= (uint64_t)(unsigned)k << bi;                       \
-        }                                                                  \
-    } while (0)
+    ((out_mask) = _Generic((pivot),                                        \
+        double: vani_sort_mask_lt_f64((const double *)(ptr), (double)(pivot)), \
+        default: vani_sort_mask_lt_i64((const int64_t *)(ptr), (int64_t)(pivot))))
 #else
 #define VANI_SORT_MASK_GE(out_mask, ptr, pivot)                            \
     do {                                                                   \

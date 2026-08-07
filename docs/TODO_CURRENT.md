@@ -9161,3 +9161,85 @@ distinguishable from the OTHER).
 
 Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed;
 this includes updating BUG-127's own test expectation as described above).
+
+## BUG-131 (2026-08-07) -- sort's AVX-512 path had no CPU-capability check, and hid a second bug once fixed
+
+Found picking up item C5 from `docs/UNRESOLVED_GAPS_TODO.md` -- the "biggest remaining
+undertaking" flagged there, and it lived up to that billing: fixing it surfaced a
+SEPARATE, more severe pre-existing correctness bug (part 2 below), confirmed with the
+user before proceeding to fix both in the same pass rather than just the originally-
+scoped crash.
+
+**Part 1 -- the crash.** `sort_runtime.c` (linked into every LLVM-backend binary) had
+`#pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")` applied
+FILE-WIDE, unconditionally, on any x86_64 build. This meant two things: (a) the hand-
+written `_mm512_*` intrinsics in `_block_part`'s mask computation always compiled in
+and always ran, with no runtime check for whether the CPU executing the binary
+actually has AVX-512; (b) GCC's auto-vectorizer was free to emit AVX-512 ANYWHERE ELSE
+in the file it judged profitable, not just in the two functions that intentionally use
+it. Confirmed both empirically: a 200-element shuffled `Vec<i64>` sort (large enough
+to enter `_block_part`, which only fires for >= 128 elements) crashed with `SIGILL` on
+this dev machine's own Haswell CPU (no AVX-512) -- but the crash site was
+`si_recurse`'s own pivot-selection loop, NOT the block-partition mask code, confirming
+(b) as a real, separate risk from (a).
+
+Fixed with genuine runtime CPUID dispatch instead of a compile-time-only guarantee.
+The vector compare moved into `vani_sort_mask_*_i64_avx512`/`_f64_avx512`, each
+decorated with `__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))` so GCC
+compiles THOSE specific functions with AVX-512 enabled regardless of command-line
+flags. A `_scalar` sibling for each is decorated with `__attribute__((target(
+"arch=x86-64")))`, which -- verified by disassembly, not just documentation -- both
+overrides the (now-removed) file-wide pragma AND prevents GCC from auto-vectorizing
+that function with AVX-512/AVX2/BMI2 the way the ambient pragma used to allow. A thin
+dispatcher picks between the two via `__builtin_cpu_supports("avx512f")` (a cheap read
+of a CPUID probe GCC's runtime caches on first use). `target_clones` (GCC's usual
+IFUNC-based multiversioning attribute) was tried first and rejected: it silently
+NO-OPs (`-Wattributes`: "ignoring attribute 'target_clones' because it conflicts with
+attribute 'target'") when combined with an enclosing `#pragma GCC target` -- confirmed
+empirically before trusting it, since getting that specific interaction wrong would
+have silently reintroduced the exact crash this fix exists to prevent. Dropping the
+file-wide pragma entirely (not just adding the dispatch functions) was necessary to
+also close (b) -- confirmed via disassembly that `si_recurse` and both `_scalar`
+functions now contain zero `zmm`/AVX-512-mask-register instructions, while both
+`_avx512` functions correctly do.
+
+**Part 2 -- found while verifying part 1's fix.** Testing the fix with a large enough
+array to actually exercise `_block_part` (the earlier BUG-125-era investigation used
+arrays too small to ever reach it, which is why this went unnoticed for two sessions)
+surfaced a second bug: a 300-element shuffled `Vec<f64>` with negative values sorted
+into the WRONG order (not a crash). Root cause: the mask macros compared `double`
+values via `_mm512_cmpge_epi64_mask`/`_mm512_cmplt_epi64_mask` -- a SIGNED INT64
+comparison of the double's raw bit pattern, reusing `int64_t`'s own comparison path.
+That's correct for `int64_t` (its bit pattern IS its native ordering) but wrong for
+`double`: IEEE-754 negative doubles do NOT preserve their true ordering under raw
+signed-int64 comparison -- e.g. `-1000.0`'s bits (`-4571364728013586432`) compare
+GREATER than `-0.001`'s bits (`-4661117527937406468`) as raw `int64_t`, backwards from
+`-1000.0 < -0.001`. This was a BUG-125-era decision, explicitly noted as deliberate at
+the time ("never using an FP compare intrinsic even for `sd_block_part`") -- but never
+actually verified against real negative-double data, because on THIS exact class of
+machine (x86_64, no AVX-512), the crash from part 1 always fired first, before a
+large-enough sort could ever run to completion and expose the wrong ordering. Fixing
+part 1 made this observable for the first time.
+
+Fixed by giving `double` its own genuinely-floating-point mask functions
+(`vani_sort_mask_*_f64_avx512` using `_mm512_cmp_pd_mask` with `_CMP_GE_OQ`/
+`_CMP_LT_OQ`, `vani_sort_mask_*_f64_scalar` using native `>=`/`<`) instead of routing
+through `int64_t`'s bit-pattern path -- `int64_t`'s own comparison functions are
+unchanged. The shared `VANI_SORT_MASK_GE`/`LT` macros now dispatch on `pivot`'s type
+via C11 `_Generic` (resolved entirely at compile time, since each `DEFINE_SORT(T,
+prefix)` instantiation has a concretely-typed `pivot`) instead of blindly treating
+everything as `int64_t` bits.
+
+Added `examples/language/english/sort_large_block_partition.vani` (a 300-element
+xorshift64-generated `Vec<i64>`/`Vec<f64>` pair, deterministic but not a giant literal
+list, verified via in-source ordering checks) plus an end-to-end test
+(`sort_large_block_partition_example_produces_correct_output_on_both_backends` in
+`tests/run_end_to_end.rs`, a real subprocess run since `sort_runtime.c` is compiled by
+a genuine `cc` invocation at `vanic run` time, entirely outside anything
+`compile_to_c`/`compile_to_llvm` touch). Verified via direct disassembly (not just the
+test suite) that the AVX-512 functions correctly emit `zmm` instructions and the
+scalar/dispatcher functions correctly don't. Also re-verified the BUG-125 ARM
+cross-compile path (a non-x86 target never enters any of this file's `VANI_SORT_HAVE_
+AVX512` branch at all) is unaffected.
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).

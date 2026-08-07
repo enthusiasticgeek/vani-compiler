@@ -7,13 +7,13 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-131** (re-check before committing -- see
+Next free `BUG-N`: **BUG-132** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
 (item A1), BUG-127 (item A2), BUG-128 (item A3), BUG-129 (item C1),
-and BUG-130 (item C2) were all fixed 2026-08-07 -- section A is fully
-closed out; C3-C5
-remain open in section C.
+BUG-130 (item C2), and BUG-131 (item C5) were all fixed 2026-08-07 --
+section A is fully closed out; only C3 and C4 remain open in section
+C.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -283,8 +283,8 @@ Recorded so a future pass doesn't re-investigate these from scratch.
 
 All five of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
 (the auto-memory system) with fuller context; summarized here so
-they're not scattered across two places when picking work. C1 and C2
-are now fixed (2026-08-07); C3-C5 remain open.
+they're not scattered across two places when picking work. C1, C2,
+and C5 are now fixed (2026-08-07); only C3 and C4 remain open.
 
 ### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path -- **FIXED as BUG-129 (2026-08-07)**
 
@@ -384,7 +384,20 @@ Regression test already exists pinning the CURRENT (rejecting)
 behavior: `non_ascii_struct_name_declares_but_cannot_be_used_as_a_
 type_annotation` in `src/lib.rs`.
 
-### C5. `sort_runtime.c`'s AVX-512 codegen ignores actual host CPU capability
+### C5. `sort_runtime.c`'s AVX-512 codegen ignores actual host CPU capability -- **FIXED as BUG-131 (2026-08-07)**
+
+The earlier "not observed to crash" note below was simply because the investigation
+never sorted an array large enough (>= 128 elements) to actually enter `_block_part`
+-- fixing this confirmed the crash directly: a 200-element shuffle hit `SIGILL`, and
+not even in the block-partition code (the file-wide `#pragma GCC target` let GCC
+auto-vectorize `si_recurse` itself with AVX-512 too). Fixing the crash surfaced a
+SECOND, more severe pre-existing bug: `double`'s mask compare reused `int64_t`'s raw
+bit-pattern comparison, which doesn't preserve true ordering for negative doubles --
+also invisible until the crash was fixed, since the crash always fired first on a
+non-AVX-512 host. Both fixed via real runtime CPUID dispatch (`__builtin_cpu_supports(
+"avx512f")`) plus a genuinely-floating-point compare path for `double`. Full writeup:
+see `## BUG-131` in `docs/TODO_CURRENT.md`. Original notes kept below for
+traceability.
 
 Found as an aside while fixing BUG-125 (non-x86 cross-compilation).
 `#pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")`
