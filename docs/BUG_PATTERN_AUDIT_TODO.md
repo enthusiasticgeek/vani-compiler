@@ -354,15 +354,46 @@ identical collision class in:
   sanitized-length inside the same struct (C struct member names,
   not `v_`-prefixed locals -- likely a DIFFERENT code path than the
   one BUG-105 fixed, worth checking it uses the same fixed sanitizer).
-- Two enum variant names, same shape.
+  **AUDITED, no bug** (2026-08-06): struct field names never route
+  through `sanitize_ident` at all -- `emit_struct_bundle` emits the
+  raw source identifier directly as the C member name, no lossy
+  collapsing step, so there's no collision surface by construction.
+  Confirmed with a regression test (two equal-length Burmese field
+  names, both backends).
+- Two enum variant names, same shape. **AUDITED, no bug** (2026-08-06):
+  enum variants carry a pre-resolved integer `tag`; the C backend
+  never emits a variant-name-derived C identifier at all. No
+  sanitizer, no collision surface. Confirmed with a regression test.
 - Two local variables (not params) with different non-ASCII names in
   the same function scope -- `local_name` is shared with
   `function_name` per BUG-105's writeup, so this is likely already
   fixed, but wasn't the ORIGINAL repro -- worth a dedicated
-  regression test since it's a different call site.
+  regression test since it's a different call site. **AUDITED,
+  already fixed** (2026-08-06) -- confirmed clean with a dedicated
+  regression test at this call site.
 - A non-ASCII TYPE name (struct/enum name itself, not a variable)
   colliding with another type name -- typedefs, not variables ,so a
-  different sanitizer consumer again.
+  different sanitizer consumer again. **AUDITED, different finding**
+  (2026-08-06): not a collision bug -- `struct_c_name`/`enum_c_name`
+  also use the raw name (no sanitizer, no collision risk), but a
+  non-ASCII struct/enum name can be DECLARED and never actually
+  REFERENCED: `parse_type` doesn't accept a non-ASCII identifier
+  token in type-annotation position at all (a parser-level gap,
+  backend-independent -- both backends fail identically at parse
+  time, not a C-vs-LLVM divergence). No example in `examples/
+  language/*/` uses a non-ASCII type name, so unclear whether this
+  is a deliberate v1 restriction or an oversight -- documented with a
+  regression test (`non_ascii_struct_name_declares_but_cannot_be_
+  used_as_a_type_annotation`, `src/lib.rs`) rather than fixed, since
+  it's out of scope for a mangling-collision audit and the intended
+  behavior isn't established either way.
+
+Category F is now fully audited -- no new collision bugs found (BUG-105's fix
+already covers every case where the C backend derives an identifier from a
+non-ASCII source name via `sanitize_ident`; every OTHER identifier-emission
+site turned out to use the raw name directly, with no collision surface at
+all). One adjacent parser-level finding (non-ASCII type names) documented but
+not fixed, pending a decision on intended behavior.
 
 ## G. Const-operand type-tracking gaps in SSA lowering (🟢)
 

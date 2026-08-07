@@ -52506,6 +52506,132 @@ fn main() -> i64 { return 0; }
             .expect("two distinctly-named non-ASCII params must compile to LLVM");
     }
 
+    // BUG_PATTERN_AUDIT_TODO.md category F audit (2026-08-06):
+    // BUG-105's `sanitize_ident` fix is shared by `function_name`
+    // (`fn_<sanitized>`) and `local_name` (`v_<sanitized>`) --
+    // confirms the SAME collision class is already fixed for two
+    // non-ASCII LOCAL variables (not just params), a different
+    // call site from BUG-105's original repro.
+    #[test]
+    fn two_non_ascii_locals_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            fn main() -> i64 {
+              let က: i64 = 3;
+              let ခ: i64 = 4;
+              let s: i64 = က + ခ;
+              assert s == 7;
+              print "sum", s;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("two distinct non-ASCII locals compile to C");
+        assert!(
+            !c.contains("int64_t v__ = 3"),
+            "sanitize_ident must not collapse distinct non-ASCII local names, got:\n{c}"
+        );
+        compile_to_llvm(source).expect("two distinct non-ASCII locals compile to LLVM");
+    }
+
+    // Same audit pass: struct FIELD names never route through
+    // `sanitize_ident` at all -- `emit_struct_bundle` emits `fname`
+    // (the raw source identifier) directly as the C struct member
+    // name, with no lossy collapsing step, so BUG-105's collision
+    // class can't recur here by construction. Two distinctly-named
+    // non-ASCII fields of equal length (the shape most likely to
+    // collide if there WERE a sanitizer) compile and run correctly
+    // on both backends.
+    #[test]
+    fn two_non_ascii_struct_fields_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            struct Dot {
+              က: i64,
+              ခ: i64,
+            }
+            fn main() -> i64 {
+              let p: Dot = Dot { က: 3, ခ: 4 };
+              let s: i64 = p.က + p.ခ;
+              assert s == 7;
+              print "sum", s;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("two distinct non-ASCII struct fields compile to C");
+        compile_to_llvm(source).expect("two distinct non-ASCII struct fields compile to LLVM");
+    }
+
+    // Same audit pass: enum variant names never produce a C
+    // identifier at all -- `TypedExprKind::EnumVariant` carries a
+    // pre-resolved integer `tag`, and the C backend emits only that
+    // tag, never the variant's source name. No sanitizer, no
+    // collision surface, by construction.
+    #[test]
+    fn two_non_ascii_enum_variants_of_equal_length_compile_and_run_correctly() {
+        let source = r#"
+            enum Akye { က, ခ, ဂ }
+            fn main() -> i64 {
+              let a: Akye = Akye.က;
+              let b: Akye = Akye.ခ;
+              let ra: i64 = match a {
+                Akye.က then 1,
+                Akye.ခ then 2,
+                Akye.ဂ then 3,
+              };
+              let rb: i64 = match b {
+                Akye.က then 1,
+                Akye.ခ then 2,
+                Akye.ဂ then 3,
+              };
+              assert ra == 1;
+              assert rb == 2;
+              print "sum", ra + rb;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("two distinct non-ASCII enum variants compile to C");
+        compile_to_llvm(source).expect("two distinct non-ASCII enum variants compile to LLVM");
+    }
+
+    // Same audit pass: NOT a collision bug, but a related finding --
+    // a non-ASCII struct NAME can be DECLARED but not actually
+    // REFERENCED as a type: `parse_type` doesn't accept a non-ASCII
+    // identifier token in type-annotation position at all (distinct
+    // from `sanitize_ident`'s C-backend mangling concern -- this is
+    // a parser-level gap, backend-independent, so both backends fail
+    // identically at the parse stage, not just one). Documented as a
+    // known limitation in `docs/BUG_PATTERN_AUDIT_TODO.md` category F
+    // rather than fixed here -- out of scope for a mangling-collision
+    // audit, and unclear whether non-ASCII type names are meant to be
+    // supported at all (no example in `examples/language/*/` uses one).
+    #[test]
+    fn non_ascii_struct_name_declares_but_cannot_be_used_as_a_type_annotation() {
+        let decl_only = r#"
+            struct ကက {
+              x: i64,
+            }
+            fn main() -> i64 {
+              return 0;
+            }
+        "#;
+        compile(decl_only).expect("declaring a non-ASCII-named struct parses fine");
+
+        let referenced = r#"
+            struct ကက {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: ကက = ကက { x: 3 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(referenced)
+            .expect_err("referencing a non-ASCII struct name as a type is currently rejected");
+        assert!(
+            errs.iter().any(|e| e.message.contains("expected type")),
+            "expected a parse-level 'expected type' diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up
     // investigation, findings 20260804-135616-backend-divergence-
     // d515a0fcc9 and a hand-written bare-assert probe). A failed
