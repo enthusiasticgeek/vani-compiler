@@ -8608,3 +8608,117 @@ tree-C-vs-SSA-C *message text* wording difference noted in BUG-119's entry above
 remains open as a known, lower-severity, accepted inconsistency -- not addressed here.
 `requires`/`ensures` and `#[bounded(N)]` cells were already covered by BUG-113/116/117.
 Explicit `assert` was BUG-106's own template. Category D's matrix is now fully audited.
+
+## BUG-121 (2026-08-06) -- `HashMap<K, bool>` produced invalid LLVM IR (`Option<bool>` payload)
+
+Found while auditing category E's packed/special-layout candidates: a function that
+directly `return`s a `vec(true, false, …)` literal, an `Array<bool, N>` literal, a
+struct field of `Vec<bool>`, and a nested `Vec<Vec<bool>>` all round-tripped correctly
+on both backends (added as regression tests, since the audit doc's own method says a
+clean pass still closes a real coverage gap). `HashMap<K, bool>` was the one candidate
+that broke -- not with BUG-109's runtime-corruption shape, but a **hard compile-time
+LLVM IR verification failure**: `lli` rejected the module outright with
+`insertvalue operand and field disagree in type: 'i8' instead of 'i1'` for any program
+calling `hashmap_get`/`hashmap_insert`/`hashmap_remove` on a `HashMap<K, bool>`.
+
+Root cause: `HashMap<K, bool>`'s internal value storage uses `i8` per slot (no
+bit-packing for HashMap values -- a legitimate, different storage choice from
+`Vec<bool>`'s packed layout, unrelated to BUG-109). But the generic enum emitter
+declares `%Enum_Option__bool`'s payload field as `i1` (the true LLVM type for
+`Type::Bool` everywhere else `Option<bool>` is constructed). `hashmap_get`'s codegen
+loaded the real `i8`-typed value from storage and `insertvalue`d it straight into the
+`i1`-typed struct field -- invalid for a named SSA register (unlike a bare `0`/`1`
+literal token, which happened to work by accident: an untyped literal coerces to
+whatever type context it's embedded in, so `hashmap_insert`'s call site with a literal
+`true`/`false` argument never tripped this, masking the bug until a value was actually
+*read back* through `get`/`insert`'s-previous-value/`remove`).
+
+This root cause is replicated across **six** near-duplicate key-type-generic HashMap
+codegen functions in `backend_llvm.rs` (`emit_intent_hashmap_pair_llvm` [i64 K],
+`_f64k`, `_strk`, `_vec_i64k`, `_tuple_i64k`, `emit_intent_hashmap_struct_pair_llvm`),
+each with 3 affected sites (`_get`'s "some" branch, `_insert`'s "previous value"
+branch, `_remove`'s "removed value" branch) plus 3 matching "none"/placeholder sites
+that also needed their literal `0`'s type string corrected from `{v}` to `i1`. The two
+`_strk_strv`/`_i64k_strv` variants were NOT touched -- V is always `OwnedStr` there,
+bool never reachable.
+
+Fix: added a `trunc i8 to i1` conversion (via new Rust-level `is_bool_v`-gated
+`vv_conv`/`old_v_conv`/`prev_v_conv` template placeholders) immediately before each
+"value present" `insertvalue`, and swapped each "none" placeholder's literal-0 type
+from `{v}` to a new `none_ty` placeholder (`i1` for bool, else unchanged). Two of the
+six functions (`_strk`, `_vec_i64k`) had extra comment/free lines interrupting the
+otherwise-identical template text, which an initial bulk `replace_all` missed --
+fixed individually once the build's "unused formatting argument" errors pointed at
+them directly (a nice side benefit: the fix couldn't silently miss a site without
+Rust's own unused-arg lint catching it). New tests (`src/backend_llvm.rs`, all via
+`lli` subprocess execution -- `compile_to_llvm()` alone wouldn't have caught this,
+since it never asks `lli` to verify the module): `hashmap_bool_value_i64_key_
+compiles_and_runs_on_llvm` + five sibling tests (`f64_key`, `owned_str_key`,
+`vec_i64_key`, `tuple_i64_key`, `struct_key`) covering all six functions, plus
+`hashmap_bool_value_insert_and_remove_option_round_trip_on_llvm` covering the
+insert-previous-value and remove-removed-value sites specifically (not just get).
+Full `cargo test --release` clean, zero regressions.
+
+Category E status: `Array<bool, N>` literal and the direct-`return`-of-a-`vec(...)`-
+literal path audited clean (regression tests added). `HashMap<K, bool>` (BUG-121),
+nested `Vec<Vec<bool>>`, and a `Vec<bool>` struct-field READ all turned out to have
+real bugs -- see BUG-122 below (found immediately after this paragraph was first
+written, while adding the "clean pass" regression tests the audit method calls for;
+running the tests is what caught it, not just writing them).
+
+## BUG-122 (2026-08-06) -- two more `Vec<bool>` packed-vs-byte-addressed gaps on tree-LLVM
+
+Found running (not just writing) the "clean pass" regression tests for category E's
+`Vec<Vec<bool>>` and struct-field candidates: both looked fine when tested via `vanic
+run`'s default path (which picks SSA-LLVM for these simple cases), but broke when
+forced onto the tree-LLVM path (an unused `sqrt()` call disqualifies the whole module
+from SSA eligibility, the same trick BUG-120 used) -- silently wrong output, not a
+crash. Same root-cause class as BUG-109/121: something assumes byte-addressed `bool`
+storage where the rest of the codebase uses `Vec<bool>`'s packed-bit layout.
+
+**Bug 1 -- nested `Vec<Vec<bool>>` literal construction.** The "`vec(...)` as a nested
+sub-expression" codegen in `backend_llvm.rs` (used for each ELEMENT literal of an
+OUTER `vec(...)`, e.g. the inner `vec(true, …)` in `vec(vec(true, …), vec(false))`)
+had no `Type::Bool` special case at all, unlike the direct `let x: Vec<bool> =
+vec(...)` path (which already delegates to `emit_vec_bool_let_from_literal`). It fell
+through to the generic path: allocate one BYTE per element, bitcast to `i1*`, store
+each element as a separate byte -- then insert that `i1*` pointer straight into
+`%intent_vec_bool`'s data field, which every reader (`Index`, `set_mut`, `clone`, …)
+expects to be a packed `i64*` word buffer. Confirmed via direct IR inspection: the
+outer literal's construction stored an unpacked `i1*` scratch pointer where a packed
+`i64*` word pointer belonged.
+
+Fix: added `emit_vec_bool_literal_value`, a value-returning counterpart of
+`emit_vec_bool_let_from_literal` (same packed-word-buffer + `@intent_vec_bool__set_mut`
+strategy, through a temporary scratch alloca instead of a `ctx.locals`-registered one,
+so the final value can be `load`ed back out and returned as a plain SSA value). Wired
+in as an early dispatch at the top of the nested-`vec(...)`-sub-expression handler.
+
+**Bug 2 -- `Vec<bool>` struct-field READS.** The packed-bit `Index`-read special case
+only fires when the indexed array is a bare `Var(name)` (looked up via `ctx.locals`)
+-- `h.flags[i]`'s array is a `FieldAccess`, not a `Var`, so it fell through to a
+SEPARATE generic "struct-field Vec read" branch that had no bool special case either,
+misreading the packed `i64*` buffer as a byte-addressed `i1*` one (same wrong-type
+mismatch as Bug 1, just on the read side of a differently-constructed value). The
+WRITE side (`IndexAssign`) was already correct -- it only supports indexing a bare
+local name at all (`h.flags[i] = v` isn't valid syntax; the reachable write path is
+`set(mut ref h.flags, i, v)`), and that path's bool branch was already present and
+correct, confirmed with a new regression test.
+
+Fix: added the identical packed-bit read branch (word/bit `udiv`/`urem` math, bounds
+check, `lshr`/`and`/`trunc`) to the struct-field `Vec<bool>` `Index`-read arm, keyed
+off the field's own Vec-struct address instead of a `ctx.locals` alloca.
+
+New/updated tests (`src/backend_llvm.rs`, all via `lli` subprocess execution on the
+FORCED tree-LLVM path -- these are exactly the tests that would have silently passed
+if only checked via `vanic run`'s default SSA-eligible path): `nested_vec_vec_bool_
+literal_reads_back_correctly` and `struct_field_vec_bool_literal_reads_back_correctly`
+now correctly pass under `run_lli` (tree-LLVM), plus new `struct_field_vec_bool_write_
+via_set_then_read_back_correctly` covering the confirmed-clean write side. Full `cargo
+test --release` clean, zero regressions.
+
+Lesson for future audits: a "clean pass" test that only exercises the DEFAULT codegen
+path (SSA-eligible, in this compiler) can miss a real tree-LLVM-only bug entirely --
+worth deliberately forcing the non-default path (the `sqrt()`-dummy trick) for any
+audit test that's specifically about codegen-path parity, not just adding the test and
+trusting a pass.

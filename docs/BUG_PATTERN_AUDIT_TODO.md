@@ -314,17 +314,35 @@ but the SAME bug shape (one construction path uses a different layout
 assumption than the read/write paths) is worth checking for every
 OTHER path that constructs a `Vec<bool>`, not just `let`-literal:
 - `Array<bool, N>` literal (fixed-size, not `Vec`) -- same packed-vs-
-  unpacked risk?
+  unpacked risk? **AUDITED, no bug** (2026-08-06) -- clean on tree-LLVM.
 - A struct field of type `Vec<bool>`, literal-initialized inside the
   `StructLit` (different lowering path than a bare `let`).
+  **RESOLVED as BUG-122** (2026-08-06) -- construction was actually
+  fine; the READ side (`h.flags[i]`, a `FieldAccess`-based index) was
+  the real gap, since the packed-bit `Index` special case only fired
+  for a bare `Var(name)` base. Fixed; write side (`set(mut ref h.
+  flags, i, v)`) confirmed already correct.
 - `Vec<Vec<bool>>` (nested) -- does the outer Vec's per-element
   construction correctly delegate to the packed inner constructor?
+  **RESOLVED as BUG-122** (2026-08-06) -- no, the nested-`vec(...)`-
+  sub-expression codegen had no bool special case at all. Fixed with
+  a new value-returning `emit_vec_bool_literal_value` helper.
 - A function that directly `return`s a `vec(true, false, ...)`
   literal (no intermediate `let` at all) -- does that skip
   `emit_vec_bool_let_from_literal` entirely (its name suggests it's
-  keyed off `let` specifically)?
+  keyed off `let` specifically)? **AUDITED, no bug** (2026-08-06) --
+  clean on tree-LLVM (routes through the same fixed sub-expression
+  path as the `Vec<Vec<bool>>` case above).
 - `HashMap<K, bool>` / `HashSet<bool>`-adjacent value storage, if any
   path constructs those from a literal collection of bools.
+  **RESOLVED as BUG-121** (2026-08-06) -- a different bug shape (hard
+  compile-time invalid-IR crash, not silent corruption): HashMap
+  values store `bool` as `i8` (no bit-packing there at all, unrelated
+  to Vec<bool>'s packing), but `Option<bool>`'s enum payload field is
+  `i1` -- `insertvalue`ing a loaded `i8` register into it is invalid
+  IR. Fixed across all 6 key-type-generic HashMap codegen functions.
+  See `docs/TODO_CURRENT.md`'s BUG-121 and BUG-122 entries for full
+  writeups. Category E is now fully audited.
 
 ## F. Non-ASCII identifier collision, extended scope (🟢)
 
