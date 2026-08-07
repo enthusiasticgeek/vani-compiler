@@ -2910,3 +2910,42 @@ Repro: `tools/localfuzz/findings/20260807-131911-run-crash-b384bceb19/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260807-131911-run-crash-b384bceb19/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-132451-run-crash-9622ecd97d
+
+Repro: `tools/localfuzz/findings/20260807-132451-run-crash-9622ecd97d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-132451-run-crash-9622ecd97d/fix_attempt.md`
+
+### Staging Entry for vani-compiler Local Staging Log
+
+#### Run Parameters
+- **Vanic Version**: `latest`
+- **Backend**: LLVM
+- **Mutant/Generated Source**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/sinhala/control_flow.vani`
+
+#### Command Execution
+```sh
+vanic run examples/language/sinhala/control_flow.vani
+```
+
+#### Raw Output and Error Messages
+- **Stdout**:
+  ```text
+  🌟 vanyan: example language/vanilla/control_flow.vani executed successfully.
+  ```
+- **Stderr**:
+  ```text
+  ✖️ vanic: Command timed out after 60 seconds.
+  ```
+
+#### Findings and Diagnosis
+The compilation process was successful, but the execution took longer than expected. This may indicate a performance issue or an error in the generated code. The backend used (LLVM) also did not complete the execution within the timeout period, indicating a potential bug in either the compiler or the LLVM runtime.
+
+#### Next Steps
+- **Manual Debugging**: Review the generated LLVM IR to identify any issues that might be causing the long execution time.
+- **Code Review**: Have a peer review the generated code to ensure it is free of errors and follows best practices for the vani language.
+- **Compiler and Runtime Updates**: Consider updating the compiler and runtime components to resolve any known bugs or improvements.
+
+**STATUS: needs human/frontier root-cause review.
