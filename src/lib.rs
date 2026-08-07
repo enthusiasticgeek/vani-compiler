@@ -26110,6 +26110,53 @@ fn main() -> i64 {
         assert!(ll.contains("Task__fetch") && ll.contains("__poll_fetch"));
     }
 
+    /// BUG-128: same body as `v31_phase24_try_in_async_fn_accepted`
+    /// above, but with the `return` and the `let n = io_recv_async
+    /// (...)` swapped -- `n` is used before it's declared. In a
+    /// plain (non-async) function this is correctly rejected with
+    /// both "unknown variable 'n'" and "unreachable statement after
+    /// a control-flow exit". Before the fix, the v3.1 state-machine
+    /// transform split this flat body into per-suspend-point `if
+    /// state_tag==N` segments -- the dead `let` landed in its own,
+    /// syntactically reachable branch -- and unconditionally
+    /// promoted `n` to a Task struct field regardless of
+    /// reachability, so `t.n` was always a valid field access. Both
+    /// checks were defeated; `vanic check` reported `ok` and the
+    /// full program hung on both backends reading the promoted-but-
+    /// never-initialized field (this exact swap is what a localfuzz
+    /// mutation produced from the shipped
+    /// echo_p24_try_keyword.vani example).
+    #[test]
+    fn bug128_async_fn_use_before_declare_across_suspend_point_is_rejected() {
+        let source = r#"
+            enum FetchResult { Ok(i64), Err(i64) }
+
+            fn maybe_size(mode: i64) -> FetchResult {
+              return match mode {
+                0 then FetchResult.Ok(64),
+                _ then FetchResult.Err(0 - 1)
+              };
+            }
+
+            async fn fetch(fd: i64, mode: i64) -> FetchResult {
+              let size: i64 = try maybe_size(mode);
+              return FetchResult.Ok(n);
+              let n: i64 = io_recv_async(fd, size);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "BUG-128 regression: use-before-declare across a suspend point in an \
+             async fn body must be rejected, not silently accepted"
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("unreachable statement")
+                || e.message.contains("unknown variable")),
+            "expected an unreachable-statement or unknown-variable diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.4 — try with i64 return type uses
     /// legacy ABI (early-return emits plain `return __try_X`,
     /// not `__t.__result = ... return 0;`).

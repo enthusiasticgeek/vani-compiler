@@ -8996,3 +8996,68 @@ survives in the tree-LLVM emission for the loop repro).
 
 Full `cargo test --release` clean (2790 lib tests + all integration suites, 0 failed),
 including the 3 new tests above.
+
+## BUG-128 (2026-08-07) -- async fn's v3.1 state-machine transform hid a use-before-declare bug from both normal checks
+
+Found picking up item A3 from `docs/UNRESOLVED_GAPS_TODO.md`. A plain (non-async)
+function correctly rejects using a variable before its `let` declaration -- two
+diagnostics fire: `"unknown variable 'n'"` and `"unreachable statement after a
+control-flow exit"` (confirmed directly: `fn main() -> i64 { return n; let n: i64 =
+5; }`). The identical shape inside an `async fn` whose body contains an `io_*_async`
+call -- `return FetchResult.Ok(n); let n: i64 = io_recv_async(fd, size);` -- was
+silently ACCEPTED (`vanic check` reported `ok`), and the full program hung on both
+backends when actually run.
+
+Root cause: `async fn` bodies with an `io_*_async` call go through the v3.1
+state-machine transform in `parser.rs`'s `try_v31_transform` -- BEFORE `checker.rs`
+ever sees the function. The transform splits the flat body into per-suspend-point
+segments, wrapped as `while true { if state_tag==0 {...} if state_tag==1 {...} ...
+}`, and promotes any local that crosses a suspend point into a field on a synthesized
+`Task__<fn>` struct. Both of checker.rs's normal protections are defeated by this
+BEFORE it gets to run on the ACTUAL bug:
+- **Reachability**: the dead `let n = io_recv_async(...);` statement, originally
+  "after an unconditional return in the same list," lands in its OWN `if
+  state_tag==N` block after the split -- a syntactically distinct, genuinely
+  reachable branch from the checker's point of view, not "after" anything anymore.
+- **Use-before-declare**: `n` gets unconditionally promoted to a Task struct field
+  (the promotion pass doesn't do reachability analysis -- it just collects every
+  local that's read inside a segment other than the one that declares it), so every
+  reference to `n` gets rewritten to `t.n`, a struct field access that's ALWAYS
+  syntactically valid. There's no bare `Var("n")` left for "unknown variable" to
+  ever fire on.
+
+Confirmed via a real diff: the localfuzz finding that surfaced this
+(`20260806-193817-run-crash-2767ef4c1c`) is the shipped
+`examples/language/english/echo_p24_try_keyword.vani` example with exactly the
+`let`/`return` pair swapped -- the shipped example itself is correct and unaffected.
+
+Fix: added a narrow, syntax-only reachability check (`v31_reject_dead_code` +
+`v31_stmt_terminates` in `parser.rs`) that runs on the flat, try-desugared async body
+INSIDE `try_v31_transform`, right after `desugar_try_in_v31_body` and BEFORE the
+ANF-lift + segment-splitting collector run -- i.e. on the body shape where "dead code
+after a return, in the same list" is still syntactically true, before the transform
+erases that fact. Deliberately mirrors only `checker.rs`'s reachability check (`Stmt`
+kind shapes only, no scope/type info needed) rather than also re-implementing
+use-before-declare detection in the parser -- the reachability half alone is
+sufficient to catch and reject this bug pattern, since any use-before-declare shape
+here necessarily has the "declare" half sitting in genuinely dead code. On rejection,
+`try_v31_transform` returns its existing `Err(diag)` path, which the caller already
+falls back from to the v1 synchronous async desugar -- that fallback re-runs the
+FULL normal checker.rs pass on the (still correctly-ordered-in-source) body too, so
+the rejected program actually surfaces BOTH the new reachability diagnostic and the
+normal checker's own diagnostics (a bit more verbose than a single clean error, but
+matches this codebase's existing behavior for every other v3.1-transform rejection
+path, which already falls back the same way).
+
+Verified the fix doesn't regress the legitimate case: `echo_p24_try_keyword.vani`
+(correct ordering) still compiles and runs correctly on both backends, and all 79
+existing `v31`-prefixed unit tests plus the `llvm_backend_run_produces_same_output_as_c`
+end-to-end sweep (which runs dozens of async examples including this one) pass
+unchanged.
+
+Added `bug128_async_fn_use_before_declare_across_suspend_point_is_rejected` to
+`src/lib.rs`, right next to the existing `v31_phase24_try_in_async_fn_accepted` test
+it mirrors (same body, `let`/`return` swapped) -- asserts `compile()` now rejects with
+either diagnostic.
+
+Full `cargo test --release` clean (2792 lib tests + all integration suites, 0 failed).

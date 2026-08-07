@@ -7,10 +7,11 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-128** (re-check before committing -- see
+Next free `BUG-N`: **BUG-129** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
 automated process lands fixes to this repo's `main` too). BUG-126
-(item A1) and BUG-127 (item A2) were both fixed 2026-08-07.
+(item A1), BUG-127 (item A2), and BUG-128 (item A3) were all fixed
+2026-08-07 -- section A is now fully closed out.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -26,7 +27,8 @@ run the full `cargo test --release` suite, then log it here as
 These three were found chasing `tools/localfuzz`'s unmatched-cluster
 digest from 2026-08-07 down to root cause, then reduced to minimal,
 mutation-free repros to confirm they're real (not fuzzer artifacts).
-A1 is fixed as BUG-126, A2 is fixed as BUG-127; A3 doesn't have a `BUG-N` yet.
+A1 is fixed as BUG-126, A2 is fixed as BUG-127, A3 is fixed as BUG-128 --
+section A is fully closed out.
 
 ### A1. `let`-shadowing corrupts codegen -- different failure per type, per backend -- **FIXED as BUG-126 (2026-08-07)**
 
@@ -193,7 +195,16 @@ own `exit`/`abort` is unreachable due to a different loop-structuring bug).
 `examples/language/khmer/early_exit.vani`, fuzzer-mutated: the
 loop's `n = n + 1;` increment became `n = n + -9223372036854775808;`).
 
-### A3. Checker accepts use-before-declaration inside an `async fn`'s `try`-desugared early-return body
+### A3. Checker accepts use-before-declaration inside an `async fn`'s `try`-desugared early-return body -- **FIXED as BUG-128 (2026-08-07)**
+
+Root cause: the v3.1 state-machine transform (`try_v31_transform` in `parser.rs`)
+splits the body into per-suspend-point `if state_tag==N` segments and unconditionally
+promotes crossing locals to Task struct fields, BEFORE `checker.rs` ever sees the
+function -- both the reachability check (dead code now lands in its own reachable
+branch) and the use-before-declare check (the name becomes an always-valid `t.n`
+field access) are defeated by the transform itself, not by any single missing check.
+Full writeup, fix, and regression test: see `## BUG-128` in `docs/TODO_CURRENT.md`.
+Original repro and investigation notes kept below for traceability.
 
 ```vani
 enum FetchResult { Ok(i64), Err(i64) }
