@@ -3096,3 +3096,12 @@ Fix attempt: `tools/localfuzz/findings/20260807-164627-backend-divergence-27af17
   "c": {
     "rc": 0,
     "stdout": "0\n9223372036854775807\n9223372036854775807\n922337
+
+---
+
+### Candidate: 20260807-170539-run-crash-4114e5b49a
+
+Repro: `tools/localfuzz/findings/20260807-170539-run-crash-4114e5b49a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-170539-run-crash-4114e5b49a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
