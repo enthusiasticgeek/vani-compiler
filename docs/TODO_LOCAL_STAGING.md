@@ -2759,3 +2759,48 @@ Repro: `tools/localfuzz/findings/20260807-092755-backend-divergence-e393d00e1f/r
 Fix attempt: `tools/localfuzz/findings/20260807-092755-backend-divergence-e393d00e1f/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-095359-backend-divergence-4fb4822470
+
+Repro: `tools/localfuzz/findings/20260807-095359-backend-divergence-4fb4822470/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-095359-backend-divergence-4fb4822470/fix_attempt.md`
+
+**STAGING ENTRY**
+
+The `vanic run` command with the specified parameters crashed during execution of the `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/llvm_match_arm_div.vani` test case. The exact reproduction source is provided below:
+
+```vani
+// LLVM-backend regression test — enum-match arm containing a
+// safety-checked divide.
+//
+// Before the fix, the LLVM backend's div-by-zero check
+// introduced a `div_ok<N>` basic block but didn't update
+// `ctx.current_block` to point at it. When a surrounding match
+// expression then tried to build its phi at match_merge, it
+// recorded the `match_arm_<N>` label (the arm's OPENING block)
+// as the predecessor — but the sdiv was emitted in `div_ok<N>`,
+// so the value came from a DIFFERENT block. LLVM's module
+// verifier rejected the IR with "Bad module".
+//
+// The fix in src/backend_llvm.rs (Binary div/rem + shl/shr
+// safety checks) is one extra `ctx.current_block = ok;` after
+// emitting the ok-block label so subsequent instructions are
+// tagged with the right basic block.
+//
+// This example exercises the path on both backends to confirm
+// byte-identical output.
+//
+// build & run:
+//   vanic run examples/language/english/llvm_match_arm_div.vani                # LLVM
+//   vanic run examples/language/english/llvm_match_arm_div.vani --backend=c    # C
+
+intent "LLVM div-in-match-arm phi-block tracking regression check";
+
+enum Mode { Normal, Eager, Lazy }
+
+fn classify(m: Mode, n: i64) -> i64 {
+  return match m {
+    Mode.Normal then n,
+    Mode.Eager then n * 922337203685477580
