@@ -8852,6 +8852,10 @@ of the same math+sort program on this exact machine, which ran correctly -- so t
 either already handled by the specific flags `vanic` passes, or a narrower, pre-existing
 limitation unrelated to this session's fix; not chased further since it's orthogonal to
 both this bug and the link-flag-parity theme of category H.
+**Update 2026-08-07**: this WAS a real, narrower bug after all -- fixed as BUG-131
+below (the file-wide pragma also let GCC auto-vectorize unrelated non-sort code with
+AVX-512 instructions, SIGILL on any pre-AVX-512 x86 host; `vanic`'s own default build
+flags didn't shield against it the way this aside speculated).
 
 Full `cargo test --release` clean, zero regressions.
 
