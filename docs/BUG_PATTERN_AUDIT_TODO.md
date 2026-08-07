@@ -408,16 +408,34 @@ each one for the same "silently wrong default when given a bare
 constant" risk. Concrete repro shapes to try, beyond `let x: f64 =
 <int literal>;` (already fixed):
 - An int literal passed directly as an `f64`/`f32` function
-  ARGUMENT (not through a `let`).
+  ARGUMENT (not through a `let`). **AUDITED, no bug** (2026-08-06).
 - An int literal as one element of a `Vec<f64>`/`Array<f64,N>`
   literal (`vec(1.0, 2, 3.0)` -- mixed literal forms in one
-  container).
+  container). **AUDITED, no bug** (2026-08-06).
 - An int literal on one side of a float comparison inside an `if`
   (`if x > 0 { ... }` where `x: f64` and `0` is the bare int
   literal) -- does comparison codegen hit the same `operand_type`
-  path as Cast?
+  path as Cast? **AUDITED, no bug** (2026-08-06).
 - An int literal as a struct field initializer for an `f64` field.
+  **AUDITED, no bug** (2026-08-06).
 - An int literal as the RHS of a float `+=`/`-=` compound-assignment.
+  **N/A** -- this language has no compound-assignment operators at
+  all (`x += 5;` is a parse error), so this repro shape doesn't apply.
+
+**RESOLVED as BUG-123** (2026-08-06): none of the 5 shapes above found a bug,
+but the same `operand_type(...).unwrap_or(...)` anti-pattern turned up at a
+call site the list above didn't mention -- `intent_print_item`'s argument-
+type dispatch, independently in BOTH `ssa_backend_c.rs` and
+`ssa_backend_llvm.rs`. `print 5.5;` (bare float literal, no `let`) crashed
+`lli` outright on SSA-LLVM (invalid IR: a float constant embedded on the
+integer print branch) and silently printed `5` instead of `5.5` on SSA-C (the
+wrong format specifier + truncating cast). Fixed both by deriving the
+constant's own type from its `Const` variant instead of defaulting to `I64`.
+Swept both files for every other `Operand::Const(_) => None` site -- 3 more
+found, all already using the safe `.ok_or_else(...)` pattern (a real
+`EmitError`, not a silent wrong default), left unchanged. See
+`docs/TODO_CURRENT.md`'s BUG-123 entry for the full writeup. Category G is
+now fully audited.
 
 ## H. Link-flag parity across build-target x backend matrix (🟢)
 

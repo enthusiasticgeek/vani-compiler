@@ -8722,3 +8722,51 @@ path (SSA-eligible, in this compiler) can miss a real tree-LLVM-only bug entirel
 worth deliberately forcing the non-default path (the `sqrt()`-dummy trick) for any
 audit test that's specifically about codegen-path parity, not just adding the test and
 trusting a pass.
+
+## BUG-123 (2026-08-06) -- `print`ing a bare float literal misformatted on both SSA backends
+
+Found auditing category G's own candidate list ("grep `operand_type(` call sites with
+an `.unwrap_or`/`.unwrap_or_else` fallback and check each for BUG-111's exact silent-
+wrong-default risk"). All 5 of the doc's own suggested repro shapes (int literal as an
+`f64` function argument, as one element of a `Vec<f64>` literal, on one side of a float
+comparison, as a struct field initializer, as the RHS of a compound-assignment -- the
+last isn't even valid syntax, this language has no `+=`/`-=`) turned out already
+correct. The actual gap was in a DIFFERENT `operand_type(...).unwrap_or(...)` call site
+neither BUG-111 nor the doc's list mentioned: `intent_print_item`'s argument-type
+dispatch, in BOTH `ssa_backend_c.rs` and `ssa_backend_llvm.rs` independently.
+
+Repro: `fn main() -> i64 { print 5.5; return 0; }` -- a float literal passed directly
+to `print`, no intermediate `let` to give it a `ValueId`. `vanic run` (default LLVM/SSA)
+failed outright: `lli: ... error: floating point constant invalid for type` (`call i32
+(i8*, ...) @printf(i8* %v_0.fmt, i64 5.5)` -- a float constant embedded where the
+integer print branch expected an `i64` argument). `vanic run --backend=c` compiled and
+ran, but silently printed `5` instead of `5.5` (`printf("%lld", (long long)(5.5))` --
+the wrong format specifier AND a truncating cast).
+
+Root cause: identical shape to BUG-111 -- `operand_type` returns `None` for a bare
+`Operand::Const` (no `ValueId` to look up in `value_types`), and both backends'
+`intent_print_item` handler independently defaulted the unresolved type to `Type::I64`
+via `.unwrap_or(Type::I64)`, rather than deriving it from the constant's own variant.
+For a bare integer literal this default happens to be correct (masking the bug for the
+common case), but for a bare FLOAT literal it silently mis-selects the wrong printf
+branch entirely.
+
+Fix: `ssa_backend_llvm.rs` already has `const_operand_natural_type` (added for
+BUG-111) -- reused directly, swapping the fallback to
+`.unwrap_or_else(|| const_operand_natural_type(arg))`. `ssa_backend_c.rs` had no
+equivalent helper; added the same three-variant match (`Const::Bool` -> `Bool`,
+`Const::Float` -> `F64`, `Const::Int` -> `I64`/`U64` per range) inline at the one call
+site. Swept both files for every other `Operand::Const(_) => None` site (3 more found,
+all already using `.ok_or_else(...)` -> a proper `EmitError` rather than a silent wrong
+default -- the safe pattern, not this bug's class, left unchanged). New test
+(`src/lib.rs`): `bare_float_literal_print_item_infers_correct_type_on_both_ssa_backends`,
+asserting the emitted SSA-LLVM IR never embeds a float constant on the integer branch
+and the emitted SSA-C never takes the `%lld`/truncating-cast branch for this repro.
+Full `cargo test --release` clean, zero regressions.
+
+Category G status: the one real gap (`intent_print_item`) is now fixed on both
+backends; the doc's own 5 suggested repro shapes were all already correct (regression
+tests not added for those specifically, since they're negative results without a
+distinguishing assertion beyond "compiles and runs" -- already covered by the existing
+end-to-end test corpus's general float-literal-coercion coverage). Category G is now
+fully audited.

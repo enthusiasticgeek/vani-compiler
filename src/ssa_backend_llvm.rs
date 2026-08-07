@@ -3374,7 +3374,20 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "intent_print_item expects one argument".to_string(),
                 })?;
-                let aty = operand_type(arg, value_types).unwrap_or(Type::I64);
+                // BUG-123: same class as BUG-111 -- a bare
+                // `Operand::Const` has no `ValueId`, so `operand_type`
+                // always returns `None` for it; the old fallback
+                // blindly assumed `I64` regardless of the constant's
+                // real type. For `print 5.5;` (a float literal
+                // passed directly, no intermediate `let`) this made
+                // the printf-format dispatch below pick the integer
+                // branch, embedding a float LLVM constant where an
+                // integer was expected -- `lli` rejected the IR
+                // outright ("floating point constant invalid for
+                // type"). Fall back to the constant's own true type
+                // instead of guessing, same fix BUG-111 used for Cast.
+                let aty = operand_type(arg, value_types)
+                    .unwrap_or_else(|| const_operand_natural_type(arg));
                 let (fmt_text, conv_ty, arg_expr) = match &aty {
                     Type::Bool => {
                         // Render bool as "true" / "false" via

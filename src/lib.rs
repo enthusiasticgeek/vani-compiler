@@ -30634,6 +30634,55 @@ fn main() -> i64 {
         );
     }
 
+    // BUG_PATTERN_AUDIT_TODO.md category G audit (2026-08-06): BUG-111's
+    // exact pattern ("a bare Operand::Const has no ValueId, so any SSA
+    // codegen helper that infers its type via a value_types lookup
+    // silently gets None and falls back to a wrong hardcoded default")
+    // recurred at a DIFFERENT call site -- `intent_print_item`'s
+    // argument-type dispatch, independently in BOTH SSA-C and SSA-LLVM
+    // (unrelated to BUG-111's own already-fixed Cast site). `print 5.5;`
+    // (a float literal passed directly, no intermediate `let` to give it
+    // a ValueId) defaulted `aty` to `Type::I64` on both backends: SSA-LLVM
+    // then picked the integer printf-format branch and tried to embed a
+    // float LLVM constant where an integer was expected -- `lli` rejected
+    // the IR outright ("floating point constant invalid for type").
+    // SSA-C's printf is looser at the C-source level, so it compiled fine
+    // but with the WRONG format specifier and a truncating `(long long)`
+    // cast -- `print 5.5;` silently printed `5`, not `5.5`. BUG-123.
+    #[test]
+    fn bare_float_literal_print_item_infers_correct_type_on_both_ssa_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              print 5.5;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errs: {:?}", errs);
+
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            !ll.contains("i64 5.5") && !ll.contains("i32 5.5"),
+            "must not embed a float constant where SSA-LLVM's integer print \
+             branch expects an integer (lli rejects this as invalid IR); got:\n{}",
+            ll.lines().take(80).collect::<Vec<_>>().join("\n")
+        );
+
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            !c.contains("(long long)(5.5)") && !c.contains("%lld"),
+            "SSA-C must not format a bare float literal print via the \
+             integer (%lld / truncating-cast) branch, got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("%g") || c.contains("(double)(5.5)"),
+            "expected the float printf branch (%g, (double) cast), got:\n{}",
+            c
+        );
+    }
+
     #[test]
     fn len_of_ref_owned_str_dereferences_through_borrow() {
         // Closure #262: `len(ref s)` for `s: OwnedStr`

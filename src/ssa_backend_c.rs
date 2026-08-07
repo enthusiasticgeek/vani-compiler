@@ -1753,9 +1753,25 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "intent_print_item expects 1 argument".to_string(),
                 })?;
+                // BUG-123: same class as BUG-111 -- a bare
+                // `Operand::Const` has no `ValueId`, so it's never
+                // in `value_types`. The old fallback blindly assumed
+                // `I64` regardless of the constant's real type,
+                // which for `print 5.5;` (a float literal passed
+                // directly, no intermediate `let`) misformatted the
+                // print entirely: `%lld` with a truncating
+                // `(long long)` cast, silently printing `5` instead
+                // of `5.5`. Derive the constant's own true type from
+                // its variant instead of guessing.
                 let aty = match arg {
                     Operand::Value(v) => value_types.get(v).cloned(),
-                    Operand::Const(_) => None,
+                    Operand::Const(Const::Bool(_)) => Some(Type::Bool),
+                    Operand::Const(Const::Float(_)) => Some(Type::F64),
+                    Operand::Const(Const::Int(v)) => Some(if *v <= i64::MAX as i128 && *v >= i64::MIN as i128 {
+                        Type::I64
+                    } else {
+                        Type::U64
+                    }),
                 }
                 .unwrap_or(Type::I64);
                 // Bool prints as the human-readable
