@@ -3181,6 +3181,19 @@ Fix attempt: `tools/localfuzz/findings/20260807-191810-run-crash-01517aa646/fix_
 
 **Staging Entry:**
 
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-07). Base:
+`examples/language/english/tcp_echo_epoll.vani`. The mutation DELETED line 99,
+`handled = handled + 1;`, from the "data received, echoed" branch of the main
+reactor loop (`while handled < 3 { ... }`). The EOF branch a few lines below still
+increments `handled`, but the 3 scripted clients (`client_driver`) all send real
+data ("alpha"/"bravo"/"charlie") before closing, so only the deleted branch would
+ever have fired -- `handled` now never advances past 0, and the loop waits forever
+for a 4th client that never connects. Both backends hang identically because the
+*test program's* own termination condition was removed by the mutation, not because
+of any compiler defect. Same class as 20260807-171043-run-crash-3ebdb63967 above
+(a mutation breaking a networked example's own control flow). No compiler change
+needed.
+
 ---
 
 ### **Status:** needs human/frontier root-cause review.
