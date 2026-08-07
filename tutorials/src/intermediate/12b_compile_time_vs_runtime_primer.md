@@ -196,13 +196,18 @@ into the function is guarded, not just the specific call
 site the compiler couldn't verify). As of 2026-08-07,
 `ensures` works the same way: if SMT can't discharge it at
 a `return`, the compiler emits a runtime check right there
-instead of failing the build. `invariant` does NOT do this
-yet -- an undischarged `invariant` still fails the build
-outright (compile-time-or-nothing); giving it the same
-runtime-guard treatment at loop entry / iteration-end is
-tracked as a follow-up, not implemented. For `requires` and
-`ensures`, the unproven case stays in the artifact as a
-guard; the proven case is elided either way.
+instead of failing the build. `invariant` was converted the
+same day: an undischarged loop invariant now gets TWO guard
+sites instead of `ensures`'s one -- once at loop entry
+(checked on the body's first pass only) and once for
+"preservation" (checked at the natural end of every
+iteration, and before any `continue` that would otherwise
+jump past that check unnoticed). For all three, a genuinely
+DISPROVEN clause (SMT finds a real counterexample) still
+fails the build outright -- only the "SMT couldn't decide
+either way" case falls back to a runtime guard. The unproven
+case stays in the artifact as a guard; the proven case is
+elided either way.
 
 ## The trade
 
@@ -299,10 +304,10 @@ happen.
   escape, parallel-for race-freedom, SMT discharge of
   contracts.
 - **Runtime**: bounds checks, overflow / div-by-zero
-  guards, undischarged assert / requires / ensures. (An
-  undischarged `invariant` still fails the BUILD, not the
-  run -- unlike `requires`/`ensures`, it has no runtime
-  fallback yet.)
+  guards, undischarged assert / requires / ensures /
+  invariant. A genuinely DISPROVEN contract (a real SMT
+  counterexample) still fails the build for all of these --
+  only "SMT couldn't decide" falls back to a runtime guard.
 - The compiler **prefers compile-time** and **falls back
   to runtime** when SMT can't prove the operation safe.
 - Strengthen `requires` / `ensures` to lift checks to

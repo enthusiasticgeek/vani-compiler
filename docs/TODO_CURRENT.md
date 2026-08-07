@@ -9369,3 +9369,82 @@ actually violated; the side-effect-not-duplicated property specifically).
 Full `cargo test --release` clean (2797 lib tests + all integration suites, 0 failed;
 includes updating the one pre-existing test whose name described the now-superseded
 behavior, as described above).
+
+## BUG-134 (2026-08-07) -- `invariant` gained real runtime enforcement (BUG-133's follow-up)
+
+Second and final half of item C3, closing it out entirely: `invariant` now gets the
+same treatment BUG-133 gave `ensures` -- a `Disproven` verdict (a confirmed SMT
+counterexample) still hard-fails the build; `Unknown`/`SkippedUnsupported`/
+`Unavailable` now compile clean with a runtime guard instead. `verify_loop_invariants`
+and `verify_loop_invariants_with_havoc` (the shared core both delegate to) now take
+`env: &mut Env` and return `Vec<TypedStmt>` -- the caller decides where to place them,
+since (unlike `ensures`'s single return-site guard) a loop needs the runtime check in
+TWO different places with different placement constraints.
+
+**Entry check.** Can't simply be inserted as a plain statement right before the loop
+the way it might seem: a `for` loop's own induction variable isn't a real variable
+outside the loop's own braces in the generated code, so an entry-check assert
+referencing it can't live in the OUTER statement list. Solved uniformly for both
+`while` and `for` with a synthesized "once" flag: `let mut __intent_inv_entry_<span>:
+bool = true;` declared before the loop, consumed by `if __intent_inv_entry_<span> {
+...entry-check asserts...; __intent_inv_entry_<span> = false; }` prepended as the
+FIRST statement of the loop's own body -- fires exactly once, on the first pass
+through the body, using the body's own naturally-scoped variables (including a
+for-loop's induction variable), without re-evaluating the loop's own condition/bounds
+expressions a second time (which would risk double-evaluating a side-effecting one,
+the same class of bug BUG-133 fixed for `ensures`'s `_return`).
+
+**Preservation check.** Appending the guard at the textual end of the loop body is
+NOT sufficient on its own -- found as a REAL bug while verifying this, not a
+theoretical concern: `continue` jumps straight to the loop's condition re-check,
+silently skipping any code appended after it in the same block, so an iteration that
+hits `continue` before reaching the appended check would never actually run it.
+Confirmed directly: a loop whose invariant was violated exactly on the iteration that
+hit `continue` ran to completion instead of trapping. Fixed with a new
+`inject_before_matching_continues` helper (mirroring the file's existing
+`inject_shallow_free_before_returns`, which solves the analogous problem for
+`return`/heap frees) that recursively walks the loop body and inserts the
+preservation-check statements before every `TypedStmt::Continue` that targets THIS
+loop -- an unlabeled `continue` in the loop's own direct scope, or a labeled
+`continue 'this_loop's_label` from anywhere, including inside a nested loop (whose
+OWN unlabeled `continue` is correctly left alone, since that targets the inner loop,
+not this one). `break` is deliberately NOT instrumented -- breaking exits the loop
+entirely, so there's no next iteration left for the invariant to be preserved for.
+
+Verified all of this directly, not just via the test suite: disassembled/inspected
+emitted C for a `while` and a `for` loop with an undecidable invariant, confirming the
+once-flag wraps only the entry check and the preservation check appears both at the
+natural loop-body end and before a `continue`; ran 8 distinct scenarios by hand across
+both backends (proven elides / disproven still hard-fails / undecidable-satisfied runs
+clean / undecidable-violated-at-entry traps / undecidable-violated-at-preservation
+traps, for both `while` and `for`) before writing a single test; then specifically
+constructed and confirmed the `continue`-bypass bug, fixed it, and re-verified; then
+confirmed `break` is correctly NOT checked, an unlabeled `continue` in a nested loop
+does NOT cross into the outer loop's check, and a LABELED `continue 'outer` from a
+nested loop DOES correctly trigger the outer loop's check.
+
+Updated both tutorials BUG-133 had already touched (since they explicitly described
+`invariant` as "still not done yet" at the time) to reflect the complete picture:
+`intermediate/10b_runtime_errors_primer.md`'s Row 2 table + aside now documents both
+new message shapes (`"...does not hold at loop entry..."` / `"...is not preserved by
+the loop body..."`, with the `for`-loop wording variants) and the once-flag +
+continue-injection design; `intermediate/12b_compile_time_vs_runtime_primer.md`'s "at
+the failing site" section and summary now describe all three contract kinds
+uniformly.
+
+Added 3 fast compile-only tests in `src/lib.rs` (proven elides for both loop kinds,
+disproven still hard-fails, undecidable compiles with both guard sites present +
+once-flag variable visible in the C output) and 2 end-to-end tests in
+`tests/run_end_to_end.rs` (real subprocess runs, both backends: entry/preservation
+guards fire only when actually violated across 3 programs; and a 4-program sweep
+specifically for the `continue`/`break`/nested-loop/labeled-continue interaction,
+including the exact `continue`-bypass shape that was caught as a real bug during
+development).
+
+Full `cargo test --release` clean (2800 lib tests + all integration suites, 0 failed)
+-- notably zero regressions despite this touching the `While`/`For` statement-checking
+code shared by every loop in every test program in the suite.
+
+This closes out `docs/UNRESOLVED_GAPS_TODO.md`'s item C3 entirely, and with it every
+single item in that document -- the doc's full original scope (3 new bugs + 5
+previously-known gaps, 8 items total) is now completely closed.

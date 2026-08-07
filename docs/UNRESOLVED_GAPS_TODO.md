@@ -7,16 +7,17 @@ then-current unmatched findings) that were **found but deliberately
 not fixed**, so the next session (or a human) can pick them up
 without re-discovering them from scratch.
 
-Next free `BUG-N`: **BUG-134** (re-check before committing -- see
+Next free `BUG-N`: **BUG-135** (re-check before committing -- see
 `feedback_vani_concurrent_localfuzz_process` memory, another
-automated process lands fixes to this repo's `main` too). BUG-126
-(item A1), BUG-127 (item A2), BUG-128 (item A3), BUG-129 (item C1),
-BUG-130 (item C2), BUG-131 (item C5), BUG-132 (item C4), and BUG-133
-(item C3's `ensures` half) were all fixed 2026-08-07 -- section A is
-fully closed out; only C3's `invariant` half remains open --
-`ensures`'s own runtime-enforcement half is done, `invariant` needs
-its own follow-up pass (two guard sites per loop instead of one,
-break/continue handling, per-iteration performance).
+automated process lands fixes to this repo's `main` too).
+
+**Every item in this document is now fixed** (BUG-126 through
+BUG-134, all 2026-08-07): section A (items A1-A3) and section C
+(items C1-C5, with C3 split across BUG-133 `ensures` + BUG-134
+`invariant`) are both fully closed out. This document's original
+scope is exhausted -- a future pass looking for next work should
+start a new hunt (matching a new theme, a fresh localfuzz digest, or
+user-directed work) rather than expecting more open items here.
 
 Method for picking one up: reproduce the minimal repro given (or the
 raw localfuzz finding for the ones that don't have one yet), root-
@@ -286,9 +287,9 @@ Recorded so a future pass doesn't re-investigate these from scratch.
 
 All five of these are already recorded in `~/.claude/projects/-home-virgo/memory/`
 (the auto-memory system) with fuller context; summarized here so
-they're not scattered across two places when picking work. C1, C2,
-C4, and C5 are fully fixed (2026-08-07); C3 is half-fixed (`ensures`
-done as BUG-133, `invariant` still open).
+they're not scattered across two places when picking work. All five
+are now fully fixed (2026-08-07), C3 in two parts (`ensures` as
+BUG-133, `invariant` as BUG-134).
 
 ### C1. `requires` on a `ref Vec<T>` parameter hits an older C-backend code path -- **FIXED as BUG-129 (2026-08-07)**
 
@@ -352,37 +353,42 @@ would report `128 + signal` (the shell convention) instead of a bare
 
 Memory: `reference_vani_vanic_run_exit_code_masking_2026_08_07.md`
 
-### C3. `ensures`/`invariant` have zero runtime enforcement on any backend -- **`ensures` half FIXED as BUG-133 (2026-08-07); `invariant` half still open**
+### C3. `ensures`/`invariant` have zero runtime enforcement on any backend -- **FULLY FIXED, `ensures` as BUG-133 + `invariant` as BUG-134 (both 2026-08-07)**
 
 Confirmed with the user first (design options sketched, one picked -- see
 `## BUG-133` in `docs/TODO_CURRENT.md` for the full writeup) rather than guessing at
-the right model. `ensures` now mirrors `requires` exactly: a confirmed counterexample
-(`Disproven`) still hard-fails the build, but an undecidable clause (`Unknown`/
-`SkippedUnsupported`/`Unavailable`) now compiles clean and gets a real runtime guard
-at the `return` site instead of blocking the build -- reusing the existing
-`TypedStmt::Assert`/`intent_assert_fail`/`exit(3)` mechanism, so no new backend
-codegen was needed on any of the 4 codegen paths.
+the right model. Both clauses now mirror `requires` exactly: a confirmed
+counterexample (`Disproven`) still hard-fails the build, but an undecidable clause
+(`Unknown`/`SkippedUnsupported`/`Unavailable`) now compiles clean and gets a real
+runtime guard instead of blocking the build -- reusing the existing `TypedStmt::
+Assert`/`intent_assert_fail`/`exit(3)` mechanism, so no new backend codegen was
+needed on any of the 4 codegen paths for either clause kind.
 
-`invariant` has NOT been converted yet -- it still has the original compile-time-only
-behavior described below. Next candidate for a `BUG-134`-style follow-up if picked up
-again: two guard sites per loop (entry + end-of-body preservation, mirroring the two
-`failure_phrase` call sites `verify_loop_invariants`/`verify_loop_invariants_with_
-havoc` already have for the compile-time version), correct `break`/`continue`
-handling (preservation only needs checking at the normal loop-back point, not on
-`break`), and -- unlike `requires`/`ensures`, which are call-count-scaled -- real
-attention to per-ITERATION overhead for a hot loop with an undecidable invariant,
-since that cost is scaled by iteration count instead.
+`ensures` (BUG-133) needed one guard site (the `return`, substituting `_return` to
+the already-materialized return temp to avoid double-evaluating a side-effecting
+return expression). `invariant` (BUG-134, the follow-up predicted here) needed the
+two guard sites this note originally anticipated (entry + end-of-body preservation)
+PLUS one thing this note did NOT anticipate: a bare end-of-body append for the
+preservation check is silently skipped by any iteration that hits `continue` before
+reaching it (`continue` jumps straight to the loop's condition re-check) -- confirmed
+as a genuinely real bug while building the fix, not a hypothetical, and fixed by
+recursively injecting the check before every `continue` that targets the loop
+(labeled or not, correctly distinguishing an outer loop's own label from an inner
+loop's unlabeled `continue`). `break` correctly needs no check (no next iteration to
+preserve the invariant for). The per-ITERATION overhead concern this note flagged
+was addressed the same way `ensures`/`requires` already handle their own
+call-count-scaled cost: `Proven` clauses are elided entirely, zero runtime cost;
+only genuinely undecidable ones pay for a guard.
 
-Original notes (still accurate for `invariant`, now describing only half the
-original claim for `ensures`): known since the 2026-08-05 bug-pattern-audit session
-(category A). Unlike `requires` (which falls back to a real runtime guard when SMT
-can't discharge it), `ensures` and `invariant` clauses were purely compile-time -- if
-SMT can prove the clause, silent success; if SMT returns anything short of a full
-proof, the BUILD fails outright; there was no third "runtime guard" path for either.
-`tutorials/src/intermediate/10b_runtime_errors_primer.md` and `12b_compile_time_vs_
-runtime_primer.md` were corrected (2026-08-07, both passes) to state this precisely
-for each clause instead of treating `ensures`/`invariant` as one undifferentiated
-gap.
+Original notes (both clauses now fully fixed; kept for traceability): known since
+the 2026-08-05 bug-pattern-audit session (category A). Unlike `requires` (which
+falls back to a real runtime guard when SMT can't discharge it), `ensures` and
+`invariant` clauses were purely compile-time -- if SMT can prove the clause, silent
+success; if SMT returns anything short of a full proof, the BUILD failed outright;
+there was no third "runtime guard" path for either. `tutorials/src/intermediate/
+10b_runtime_errors_primer.md` and `12b_compile_time_vs_runtime_primer.md` were
+corrected (2026-08-07, across both BUG-133 and BUG-134) to state the final,
+consistent-across-all-three-contract-kinds picture.
 
 ### C4. Non-ASCII struct/enum type names can be declared but never referenced as a type -- **FIXED as BUG-132 (2026-08-07)**
 

@@ -53010,6 +53010,122 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-134 (2026-08-07): `invariant` follow-up to BUG-133 -- the
+    // same "undecidable no longer hard-fails the build" model, applied
+    // to loop invariants. Two guard sites per loop (entry + end-of-
+    // body preservation) instead of one, wrapped in a once-flag `if`
+    // for entry (a `for` loop's own induction variable isn't in scope
+    // OUTSIDE the loop in the generated code, so the entry check can't
+    // live there the way `ensures`'s single return-site guard could)
+    // and injected before every matching `continue` for preservation
+    // (a bare end-of-body append would otherwise be silently skipped
+    // whenever an iteration `continue`s past it -- confirmed as a
+    // REAL bug while building this, not just a hypothetical). See
+    // `verify_loop_invariants_with_havoc`'s own doc comment in
+    // checker.rs for the full design.
+    #[test]
+    fn bug134_proven_while_and_for_invariant_still_elides_with_zero_runtime_check() {
+        let while_source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 5
+              invariant n >= 0;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let for_source = r#"
+            fn main() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 5
+              invariant i >= 0;
+              { sum = sum + i; }
+              return sum;
+            }
+        "#;
+        for source in [while_source, for_source] {
+            let c = compile_to_c(source).expect("provable invariant must still compile");
+            assert!(
+                !c.contains("loop invariant"),
+                "BUG-134 regression: a provable invariant emitted a runtime guard \
+                 instead of being elided at compile time, got: {c}"
+            );
+        }
+    }
+
+    #[test]
+    fn bug134_disproven_invariant_still_hard_fails_the_build() {
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 5
+              invariant n >= 10;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("a confirmed invariant violation must still be a compile error");
+        assert!(
+            errs.iter().any(|e| e.message.contains("loop invariant does not hold at loop entry")),
+            "expected the unchanged Disproven diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bug134_undecidable_while_and_for_invariant_compiles_and_gets_runtime_guards() {
+        // `opaque` has no `ensures`, so referencing it directly inside
+        // the `invariant` clause is unencodable (`SkippedUnsupported`)
+        // -- previously a hard build error for BOTH the entry and
+        // preservation checks.
+        let while_source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode { 0 then 5, _ then 0 - 5 };
+            }
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 3
+              invariant opaque(n) >= 0 - 100;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let for_source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode { 0 then 5, _ then 0 - 5 };
+            }
+            fn main() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 3
+              invariant opaque(i) >= 0 - 100;
+              { sum = sum + i; }
+              return sum;
+            }
+        "#;
+        for (source, entry_msg) in [
+            (while_source, "does not hold at loop entry"),
+            (for_source, "does not hold at the for-loop's first iteration"),
+        ] {
+            let c = compile_to_c(source)
+                .expect("BUG-134 regression: an undecidable invariant must compile, not hard-fail");
+            let ll = compile_to_llvm(source)
+                .expect("BUG-134 regression: an undecidable invariant must compile, not hard-fail");
+            assert!(
+                c.contains(entry_msg) && ll.contains(entry_msg),
+                "expected the entry-check runtime guard on both backends, got C:\n{c}\nLLVM:\n{ll}"
+            );
+            assert!(
+                c.contains("is not preserved by") && ll.contains("is not preserved by"),
+                "expected the preservation-check runtime guard on both backends, got C:\n{c}\nLLVM:\n{ll}"
+            );
+            assert!(
+                c.contains("__intent_inv_entry_"),
+                "expected the once-flag entry-guard variable in the C output, got: {c}"
+            );
+        }
+    }
+
     // BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up
     // investigation, findings 20260804-135616-backend-divergence-
     // d515a0fcc9 and a hand-written bare-assert probe). A failed

@@ -11384,6 +11384,83 @@ fn inject_shallow_free_before_returns(
     out
 }
 
+/// BUG-134: recursively walks `stmts` (a loop's own body) and inserts
+/// a clone of every statement in `checks` before each `TypedStmt::
+/// Continue` that targets THIS loop -- an unlabeled `continue` inside
+/// this loop's own direct scope, or a labeled `continue 'my_label`
+/// from anywhere (including inside a nested loop, which an unlabeled
+/// `continue` there would NOT target). Without this, a preservation-
+/// check runtime guard appended only at the natural end of the loop
+/// body (see `verify_loop_invariants_with_havoc`'s doc comment) would
+/// be silently skipped on any iteration that hits `continue` before
+/// reaching that point -- `continue` jumps straight to the loop's
+/// condition re-check, the same class of gap `inject_shallow_free_
+/// before_returns` above already solves for `return`/heap frees.
+/// `in_nested_loop` starts `false` for the top-level call on this
+/// loop's own body and flips to `true` when recursing into a NESTED
+/// loop's body, so an unlabeled `continue` found there is correctly
+/// left alone (it belongs to the inner loop) while a labeled one
+/// matching `my_label` still gets instrumented regardless of depth.
+fn inject_before_matching_continues(
+    stmts: Vec<TypedStmt>,
+    checks: &[TypedStmt],
+    my_label: Option<&str>,
+    in_nested_loop: bool,
+) -> Vec<TypedStmt> {
+    if checks.is_empty() {
+        return stmts;
+    }
+    let mut out = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        match s {
+            TypedStmt::Continue { label } => {
+                let targets_this_loop = match &label {
+                    None => !in_nested_loop,
+                    Some(l) => my_label == Some(l.as_str()),
+                };
+                if targets_this_loop {
+                    out.extend(checks.iter().cloned());
+                }
+                out.push(TypedStmt::Continue { label });
+            }
+            TypedStmt::If { cond, then_body, else_body } => {
+                out.push(TypedStmt::If {
+                    cond,
+                    then_body: inject_before_matching_continues(then_body, checks, my_label, in_nested_loop),
+                    else_body: inject_before_matching_continues(else_body, checks, my_label, in_nested_loop),
+                });
+            }
+            TypedStmt::While { label, cond, body } => {
+                out.push(TypedStmt::While {
+                    label,
+                    cond,
+                    body: inject_before_matching_continues(body, checks, my_label, true),
+                });
+            }
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
+                out.push(TypedStmt::For {
+                    label, var, ty, start, end, parallel, reductions,
+                    body: inject_before_matching_continues(body, checks, my_label, true),
+                });
+            }
+            TypedStmt::ForIter { label, var, element_ty, collection, collection_ty, consumes, body } => {
+                out.push(TypedStmt::ForIter {
+                    label, var, element_ty, collection, collection_ty, consumes,
+                    body: inject_before_matching_continues(body, checks, my_label, true),
+                });
+            }
+            TypedStmt::UnsafeBlock { reason, body } => {
+                out.push(TypedStmt::UnsafeBlock {
+                    reason,
+                    body: inject_before_matching_continues(body, checks, my_label, in_nested_loop),
+                });
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 fn check_stmt_list(
     stmts: &[Stmt],
     env: &mut Env,
@@ -13408,21 +13485,35 @@ fn check_one_stmt(
             // Type-check each invariant (Bool, vars resolve in current env).
             // Inline call args in the invariant must also satisfy the
             // callee's requires â€” same compile-time check as for any
-            // expression-level call site.
-            for inv in invariants {
-                verify_call_args_in_expr(inv, smt_facts, env, signatures, diagnostics);
-                let checked = check_expr(inv, env, signatures, diagnostics);
-                require_type(
-                    checked.ty(),
-                    &Type::Bool,
-                    inv.span,
-                    "loop invariant",
-                    diagnostics,
-                );
+            // expression-level call site. Uses a CLONED env so this
+            // pure syntax/type round-trip can't interact with the
+            // REAL env's move/constant tracking before the entry-check
+            // verification below (which may itself call `check_expr`
+            // again on the real env when synthesizing a BUG-134
+            // runtime guard).
+            {
+                let mut typecheck_env = env.clone();
+                for inv in invariants {
+                    verify_call_args_in_expr(inv, smt_facts, &typecheck_env, signatures, diagnostics);
+                    let checked = check_expr(inv, &mut typecheck_env, signatures, diagnostics);
+                    require_type(
+                        checked.ty(),
+                        &Type::Bool,
+                        inv.span,
+                        "loop invariant",
+                        diagnostics,
+                    );
+                }
             }
 
             // Verify each invariant holds on entry, using pre-loop facts.
-            verify_loop_invariants(
+            // BUG-134: an undecidable clause no longer hard-fails the
+            // build -- it returns a runtime-guard TypedStmt instead,
+            // wrapped below in a once-flag `if` so it fires exactly
+            // once, on the loop body's first pass, using the body's
+            // own naturally-scoped variables (see the function's own
+            // doc comment for why this avoids re-evaluating `cond`).
+            let entry_runtime_checks = verify_loop_invariants(
                 invariants,
                 smt_facts,
                 env,
@@ -13430,7 +13521,50 @@ fn check_one_stmt(
                 "does not hold at loop entry",
                 None,
                 diagnostics,
+                &function.name,
             );
+
+            // BUG-134: an entry-check that needs a runtime guard fires
+            // exactly once, via a `let mut <flag> = true;` declared
+            // here (in the OUTER scope, matching where its actual
+            // `TypedStmt::Let` lands -- BEFORE the while loop's own
+            // braces) and consumed by an `if <flag> { ...; <flag> =
+            // false; }` prepended to the loop body below. Safe to
+            // register/insert unconditionally: `__intent`-prefixed
+            // names are lexer-reserved (no user code can collide) and
+            // this loop statement's own span makes the name unique
+            // against sibling/nested loops.
+            let entry_flag_name = format!("__intent_inv_entry_{}", span.start);
+            if !entry_runtime_checks.is_empty() {
+                body.push(TypedStmt::Let {
+                    name: entry_flag_name.clone(),
+                    ty: Type::Bool,
+                    expr: TypedExpr {
+                        kind: TypedExprKind::Bool(true),
+                        ty: Type::Bool,
+                        constant: Some(TypedConst::Bool(true)),
+                        span: *span,
+                        binding_decl_span: None,
+                    },
+                });
+                env.insert_current(
+                    entry_flag_name.clone(),
+                    VarInfo {
+                        ty: Type::Bool,
+                        constant: None,
+                        moved: None,
+                        decl_span: *span,
+                        vec_literal_elements: None,
+                        array_version: 0,
+                        guarded_mutex: None,
+                        no_drop: false,
+                        is_const: false,
+                        struct_literal_fields: None,
+                        moved_fields: std::collections::BTreeMap::new(),
+                        ref_aliases: Vec::new(),
+                    },
+                );
+            }
 
             let pre_env = env.clone();
             let pre_facts = smt_facts.clone();
@@ -13460,6 +13594,40 @@ fn check_one_stmt(
                 &mut inner_stmts,
                 diagnostics,
             );
+            // BUG-134: prepend the once-flag entry-check guard as the
+            // FIRST statement of the loop body (after check_stmt_list
+            // already built `inner_stmts`, so this doesn't interfere
+            // with ITS own reachability bookkeeping -- the synthetic
+            // `if` always falls through, an empty `else_body`).
+            if !entry_runtime_checks.is_empty() {
+                let mut then_body = entry_runtime_checks.clone();
+                then_body.push(TypedStmt::Reassign {
+                    name: entry_flag_name.clone(),
+                    ty: Type::Bool,
+                    expr: TypedExpr {
+                        kind: TypedExprKind::Bool(false),
+                        ty: Type::Bool,
+                        constant: Some(TypedConst::Bool(false)),
+                        span: *span,
+                        binding_decl_span: None,
+                    },
+                    drop_old: false,
+                });
+                inner_stmts.insert(
+                    0,
+                    TypedStmt::If {
+                        cond: TypedExpr {
+                            kind: TypedExprKind::Var(entry_flag_name.clone()),
+                            ty: Type::Bool,
+                            constant: None,
+                            span: *span,
+                            binding_decl_span: Some(*span),
+                        },
+                        then_body,
+                        else_body: Vec::new(),
+                    },
+                );
+            }
             // Use the popped frame's label â€” a nested `break outer/middle` may
             // have assigned a synthetic label to this frame while it was on the stack.
             let popped_while = loops.pop().unwrap();
@@ -13488,7 +13656,12 @@ fn check_one_stmt(
                     .filter(|f| !summary.subs.keys().any(|reassigned| is_bug33_scalar_let_fact_for(f, reassigned)))
                     .cloned()
                     .collect();
-                verify_loop_invariants_with_havoc(
+                // BUG-134: append any undecidable preservation clause's
+                // runtime guard to the END of the loop body -- no
+                // once-flag needed here (unlike the entry check), this
+                // naturally runs exactly once per iteration, right
+                // before falling back to re-evaluate the condition.
+                let preservation_runtime_checks = verify_loop_invariants_with_havoc(
                     invariants,
                     &scrubbed_facts,
                     env,
@@ -13497,7 +13670,22 @@ fn check_one_stmt(
                     Some(&summary.subs),
                     &summary.havoc_vars,
                     diagnostics,
+                    &function.name,
                 );
+                // BUG-134: also inject before every `continue` that
+                // targets THIS loop -- a bare fall-through append at
+                // the end would otherwise be silently skipped on any
+                // iteration that continues past it (`popped_while.label`
+                // reflects a synthetic label a nested `break outer`
+                // may have assigned while this frame was on the stack,
+                // so use it instead of the original `label` binding).
+                inner_stmts = inject_before_matching_continues(
+                    inner_stmts,
+                    &preservation_runtime_checks,
+                    popped_while.label.as_deref(),
+                    false,
+                );
+                inner_stmts.extend(preservation_runtime_checks);
             }
 
             // If the body didn't terminate via return/break/continue, emit
@@ -14182,17 +14370,22 @@ fn check_one_stmt(
                 },
             );
 
-            // Type-check invariants with loop var in scope.
-            for inv in invariants {
-                verify_call_args_in_expr(inv, smt_facts, env, signatures, diagnostics);
-                let checked = check_expr(inv, env, signatures, diagnostics);
-                require_type(
-                    checked.ty(),
-                    &Type::Bool,
-                    inv.span,
-                    "for-loop invariant",
-                    diagnostics,
-                );
+            // Type-check invariants with loop var in scope. Uses a
+            // CLONED env for the same reason as the `while`-loop call
+            // site above (see its comment).
+            {
+                let mut typecheck_env = env.clone();
+                for inv in invariants {
+                    verify_call_args_in_expr(inv, smt_facts, &typecheck_env, signatures, diagnostics);
+                    let checked = check_expr(inv, &mut typecheck_env, signatures, diagnostics);
+                    require_type(
+                        checked.ty(),
+                        &Type::Bool,
+                        inv.span,
+                        "for-loop invariant",
+                        diagnostics,
+                    );
+                }
             }
 
             // For the entry check, the loop var equals `start`. Build a
@@ -14212,7 +14405,15 @@ fn check_one_stmt(
                 });
                 f
             };
-            verify_loop_invariants(
+            // BUG-134: see the `while`-loop call site's comment for
+            // the full design. `var` is already in scope here (pushed
+            // above), which is exactly the state the runtime entry
+            // check needs -- but the synthesized assert still can't
+            // live in the OUTER `body` (a for-loop's induction
+            // variable isn't a real variable outside the loop's own
+            // braces in the generated code), so it goes through the
+            // same once-flag wrapper as `while`.
+            let entry_runtime_checks = verify_loop_invariants(
                 invariants,
                 &entry_facts,
                 env,
@@ -14220,7 +14421,22 @@ fn check_one_stmt(
                 "does not hold at the for-loop's first iteration",
                 None,
                 diagnostics,
+                &function.name,
             );
+            let entry_flag_name = format!("__intent_inv_entry_{}", span.start);
+            if !entry_runtime_checks.is_empty() {
+                body.push(TypedStmt::Let {
+                    name: entry_flag_name.clone(),
+                    ty: Type::Bool,
+                    expr: TypedExpr {
+                        kind: TypedExprKind::Bool(true),
+                        ty: Type::Bool,
+                        constant: Some(TypedConst::Bool(true)),
+                        span: *span,
+                        binding_decl_span: None,
+                    },
+                });
+            }
 
             // Inside the body, the invariants, `var >= start`, and
             // `var < end` all hold for the current iteration.
@@ -14265,6 +14481,37 @@ fn check_one_stmt(
                 &mut inner_stmts,
                 diagnostics,
             );
+            // BUG-134: prepend the once-flag entry-check guard -- see
+            // the `while`-loop call site's matching comment.
+            if !entry_runtime_checks.is_empty() {
+                let mut then_body = entry_runtime_checks.clone();
+                then_body.push(TypedStmt::Reassign {
+                    name: entry_flag_name.clone(),
+                    ty: Type::Bool,
+                    expr: TypedExpr {
+                        kind: TypedExprKind::Bool(false),
+                        ty: Type::Bool,
+                        constant: Some(TypedConst::Bool(false)),
+                        span: *span,
+                        binding_decl_span: None,
+                    },
+                    drop_old: false,
+                });
+                inner_stmts.insert(
+                    0,
+                    TypedStmt::If {
+                        cond: TypedExpr {
+                            kind: TypedExprKind::Var(entry_flag_name.clone()),
+                            ty: Type::Bool,
+                            constant: None,
+                            span: *span,
+                            binding_decl_span: Some(*span),
+                        },
+                        then_body,
+                        else_body: Vec::new(),
+                    },
+                );
+            }
             let popped_for = loops.pop().unwrap();
 
             // Preservation: substitute each user-visible reassignment in the
@@ -14299,7 +14546,9 @@ fn check_one_stmt(
                     .filter(|f| !summary.subs.keys().any(|reassigned| is_bug33_scalar_let_fact_for(f, reassigned)))
                     .cloned()
                     .collect();
-                verify_loop_invariants_with_havoc(
+                // BUG-134: append any undecidable preservation clause's
+                // runtime guard to the END of the loop body.
+                let preservation_runtime_checks = verify_loop_invariants_with_havoc(
                     invariants,
                     &scrubbed_facts,
                     env,
@@ -14308,7 +14557,18 @@ fn check_one_stmt(
                     Some(&summary.subs),
                     &summary.havoc_vars,
                     diagnostics,
+                    &function.name,
                 );
+                // BUG-134: see the `while`-loop call site's matching
+                // comment -- also inject before every `continue` that
+                // targets THIS loop.
+                inner_stmts = inject_before_matching_continues(
+                    inner_stmts,
+                    &preservation_runtime_checks,
+                    popped_for.label.as_deref(),
+                    false,
+                );
+                inner_stmts.extend(preservation_runtime_checks);
             }
 
             if !body_terminated {
@@ -37269,15 +37529,41 @@ fn walk_for_reassigns(
     }
 }
 
+/// BUG-134: `invariant` now mirrors `requires`/`ensures`'s (BUG-116/
+/// 129/133) model instead of hard-failing the build on anything short
+/// of a full compile-time proof. `Disproven` (a confirmed
+/// counterexample) still hard-fails the build, unchanged. Every other
+/// non-`Proven` outcome (`Unknown`/`SkippedUnsupported`/`Unavailable`)
+/// now compiles clean and returns a synthesized `TypedStmt::Assert`
+/// for the CALLER to place -- reusing the existing `intent_assert_
+/// fail`/`exit(3)` mechanism, no new backend codegen needed.
+///
+/// Unlike `ensures` (which needs `_return` substituted to the
+/// materialized return temp to avoid double-evaluating a side-
+/// effecting return expression), `invariant` clauses reference
+/// ordinary in-scope variables directly -- no substitution needed for
+/// the RUNTIME check (the `substitutions` param here is ONLY for the
+/// compile-time SMT proof's symbolic "what if the body ran once"
+/// reasoning; the runtime check instead runs as real code, at a point
+/// where those variables' REAL post-body values are already live, so
+/// it just reads them directly). The caller decides WHERE to place
+/// the returned asserts: `check_one_stmt`'s While/For arms wrap the
+/// entry-check ones in a `once`-flag `if` block prepended to the loop
+/// body (so they fire exactly once, using the loop's own naturally-
+/// scoped variables, rather than needing an outer-scope check before
+/// a `for` loop's own induction variable even exists there) and
+/// append the preservation-check ones, unconditionally, at the end of
+/// the loop body.
 fn verify_loop_invariants(
     invariants: &[Expr],
     smt_facts: &[Expr],
-    env: &Env,
+    env: &mut Env,
     signatures: &HashMap<String, Signature>,
     failure_phrase: &str,
     substitutions: Option<&HashMap<String, Expr>>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+    function_name: &str,
+) -> Vec<TypedStmt> {
     verify_loop_invariants_with_havoc(
         invariants,
         smt_facts,
@@ -37287,7 +37573,8 @@ fn verify_loop_invariants(
         substitutions,
         &[],
         diagnostics,
-    );
+        function_name,
+    )
 }
 
 /// Same as `verify_loop_invariants` but also threads a list of
@@ -37298,15 +37585,17 @@ fn verify_loop_invariants(
 fn verify_loop_invariants_with_havoc(
     invariants: &[Expr],
     smt_facts: &[Expr],
-    env: &Env,
+    env: &mut Env,
     signatures: &HashMap<String, Signature>,
     failure_phrase: &str,
     substitutions: Option<&HashMap<String, Expr>>,
     havoc_vars: &[(String, Type)],
     diagnostics: &mut Vec<Diagnostic>,
-) {
+    function_name: &str,
+) -> Vec<TypedStmt> {
+    let mut runtime_checks = Vec::new();
     if invariants.is_empty() || crate::smt::verifier_disabled() {
-        return;
+        return runtime_checks;
     }
     use crate::smt::Verdict;
     for inv in invariants {
@@ -37335,48 +37624,28 @@ fn verify_loop_invariants_with_havoc(
                     ),
                 );
             }
-            Verdict::Unknown => diagnostics.push(
-                Diagnostic::new(
+            Verdict::Unknown | Verdict::SkippedUnsupported(_) | Verdict::Unavailable => {
+                let checked = check_expr(inv, env, signatures, diagnostics);
+                require_type(
+                    checked.ty(),
+                    &Type::Bool,
                     inv.span,
-                    format!(
-                        "cannot verify loop invariant: SMT returned 'unknown' ({})",
-                        failure_phrase
-                    ),
-                )
-                .with_elaboration(
-                    crate::diagnostic_elaborations::proof_failed(),
-                ),
-            ),
-            Verdict::SkippedUnsupported(reason) => {
-                let hint = if reason.starts_with("function call") {
-                    " â€” add an 'ensures' clause to the callee"
-                } else {
-                    ""
-                };
-                diagnostics.push(
-                    Diagnostic::new(
-                        inv.span,
-                        format!(
-                            "cannot verify loop invariant: {} (uses features outside the SMT v1 encoder{})",
-                            reason, hint
-                        ),
-                    )
-                    .with_elaboration(
-                        crate::diagnostic_elaborations::proof_failed(),
-                    ),
+                    "loop invariant",
+                    diagnostics,
                 );
+                let mut e = checked.expr;
+                try_elide_bounds_in_typed_expr(&mut e, smt_facts, env, signatures, true);
+                runtime_checks.push(TypedStmt::Assert {
+                    expr: e,
+                    message: Some(format!(
+                        "loop invariant {} in '{}'",
+                        failure_phrase, function_name
+                    )),
+                });
             }
-            Verdict::Unavailable => diagnostics.push(
-                Diagnostic::new(
-                    inv.span,
-                    "cannot verify loop invariant: no SMT solver available (install z3)",
-                )
-                .with_elaboration(
-                    crate::diagnostic_elaborations::proof_failed(),
-                ),
-            ),
         }
     }
+    runtime_checks
 }
 
 /// Append Vec-builtin length facts to `smt_facts` after a `let r = <call>`

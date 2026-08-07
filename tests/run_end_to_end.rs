@@ -12091,3 +12091,176 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-134 (2026-08-07): `invariant`'s runtime-guard follow-up to
+// BUG-133. Verifies the entry-check and preservation-check guards
+// actually fire (exit 3 + message) only when genuinely violated, and
+// stay silent when satisfied, on both backends -- real subprocess
+// runs since the point is observing actual runtime behavior.
+#[test]
+fn undecidable_invariant_runtime_guards_trap_only_when_actually_violated() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let opaque_fn = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode { 0 then 5, _ then 0 - 5 };
+}
+"#;
+    // Entry check satisfied throughout -> runs to completion.
+    let entry_ok = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 0 - 100;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+    // Entry check violated on the very first iteration.
+    let entry_violated = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 1000;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+    // Preservation check violated on the first iteration's post-body state
+    // (opaque(1) + 1 = -4, fails `!= -4`) but entry (n=0: 5+0=5) is fine.
+    let preservation_violated = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+
+    for (source, expect_status, expect_msg) in [
+        (entry_ok, None, None),
+        (entry_violated, Some(3), Some("does not hold at loop entry")),
+        (preservation_violated, Some(3), Some("is not preserved by the loop body")),
+    ] {
+        let src = write_tmp_vani("bug134-invariant-runtime", &source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            match (expect_status, expect_msg) {
+                (Some(code), Some(msg)) => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(code),
+                        "BUG-134 regression: {:?} expected exit {code}, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        String::from_utf8_lossy(&output.stderr).contains(msg),
+                        "expected {:?} on stderr, got: {}",
+                        msg,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                _ => {
+                    assert!(
+                        output.status.success(),
+                        "BUG-134 regression: {:?} should run cleanly when the invariant \
+                         is actually satisfied throughout, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+        }
+    }
+}
+
+// BUG-134, continued: `continue` must NOT bypass the preservation
+// check -- confirmed as a REAL bug while building this (a bare
+// end-of-body append is skipped by `continue`, which jumps straight
+// to the loop's condition re-check). Also confirms `break` correctly
+// does NOT require the invariant to hold (breaking exits the loop,
+// there's no "next iteration" to preserve it for), an unlabeled
+// `continue` inside a NESTED loop does not wrongly trigger the OUTER
+// loop's check, and a labeled `continue 'outer` from within a nested
+// loop DOES trigger the outer loop's check.
+#[test]
+fn undecidable_invariant_preservation_check_is_not_bypassed_by_continue() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let opaque_fn = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode { 0 then 5, _ then 0 - 5 };
+}
+"#;
+    // Violated exactly at n=1 (opaque(1)+1 = -4, fails != -4), which
+    // the loop `continue`s past -- without the fix, this ran to
+    // completion silently instead of trapping.
+    let continue_bypass = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    if n == 1 {{ continue; }}\n  \
+         }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+    // Same violating shape, but a `break` instead of `continue` at
+    // the violating iteration -- must NOT trap (no next iteration to
+    // preserve the invariant for).
+    let break_not_checked = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 100\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    if n == 1 {{ break; }}\n  \
+         }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+    // Unlabeled continue inside a NESTED loop must not trigger the
+    // OUTER loop's (undecidable) invariant check -- the outer
+    // invariant here always holds, so this must run to completion.
+    let nested_unlabeled_continue = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  let total: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 0 - 100;\n  {{\n    n = n + 1;\n    let m: i64 = 0;\n    \
+         while m < 3 {{\n      m = m + 1;\n      if m == 2 {{ continue; }}\n      total = total + 1;\n    \
+         }}\n  }}\n  print total;\n  return 0;\n}}\n"
+    );
+    // Labeled `continue 'outer` from within a nested loop DOES target
+    // the outer loop and must trip its (violated) preservation check.
+    let labeled_continue = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  'outer: while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    let m: i64 = 0;\n    \
+         while m < 3 {{\n      m = m + 1;\n      if n == 1 {{ continue 'outer; }}\n    \
+         }}\n  }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+
+    for (source, expect_status, expect_msg) in [
+        (continue_bypass, Some(3), Some("is not preserved by the loop body")),
+        (break_not_checked, None, None),
+        (nested_unlabeled_continue, None, None),
+        (labeled_continue, Some(3), Some("is not preserved by the loop body")),
+    ] {
+        let src = write_tmp_vani("bug134-invariant-continue", &source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            match (expect_status, expect_msg) {
+                (Some(code), Some(msg)) => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(code),
+                        "BUG-134 regression: {:?} expected exit {code}, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        String::from_utf8_lossy(&output.stderr).contains(msg),
+                        "expected {:?} on stderr, got: {}",
+                        msg,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                _ => {
+                    assert!(
+                        output.status.success(),
+                        "BUG-134 regression: {:?} should run cleanly, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+        }
+    }
+}
