@@ -3040,3 +3040,59 @@ Bug report for vani-compiler:
 ```
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260807-164627-backend-divergence-27af176ceb
+
+Repro: `tools/localfuzz/findings/20260807-164627-backend-divergence-27af176ceb/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260807-164627-backend-divergence-27af176ceb/fix_attempt.md`
+
+### Staging Entry: vani-lang 0.17.0 - LLVM + C Backend Division
+
+**Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/arabic/vec_invariants.vani`
+
+**Mutant/Generated Source:**
+```vani
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/vec_invariants.vani              # LLVM
+//   vanic run examples/language/arabic/vec_invariants.vani --backend=c  # C
+
+هدف "Loop invariants over Vec length, end-to-end";
+
+دالة main() -> i64 {
+  ليكن قائمة: Vec<i64> = vec(0);
+  ليكن ع: i64 = 1;
+
+  بينما ع < 5
+  مستقر ع >= 1;
+  مستقر ع <= 5;
+  {
+    قائمة = push(قائمة, ع * 9223372036854775807);
+    ع = ع + 1;
+  }
+
+  أثبت ع == 5;
+  أثبت len(قائمة) == 5;
+
+  اطبع قائمة[0];
+  اطبع قائمة[1];
+  اطبع قائمة[2];
+  اطبع قائمة[3];
+  اطبع قائمة[4];
+
+  أرجع 0;
+}
+```
+
+**Finding Kind:** backend-divergence
+
+**Raw Result Data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "0\n9223372036854775807\n9223372036854775807\n922337
