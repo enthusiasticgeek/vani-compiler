@@ -3601,6 +3601,109 @@ fn vanic_build_links_self_referential_struct_vec_example_without_manual_lm_flag(
     let _ = fs::remove_dir_all(&dir);
 }
 
+// BUG-124/BUG-125 (2026-08-06), found auditing category H's own
+// prediction ("run an actual `vanic build` ... on every reachable
+// cell, not just JIT/interpret it"). `is_bare_metal_triple`'s
+// substring heuristics (`"none"` / `"eabi"` / `"-elf"`) misclassified
+// any real Linux ARM EABI target (`arm-unknown-linux-gnueabi`,
+// `*-gnueabihf`, ... the Debian armel/armhf family, e.g. Raspberry Pi
+// OS 32-bit) as bare-metal, since "eabi" also appears in those
+// triples' ABI suffix despite them having a full OS + libc. With a
+// real `arm-linux-gnueabi-gcc` + sysroot cross-toolchain, `vanic
+// build --target=arm-unknown-linux-gnueabi` on ANY program failed
+// with `undefined reference to 'exp'`/`'erf'`/`'fmod'` (BUG-112's
+// exact class -- the bare-metal branch adds no `-lm` at all).
+// Separately (BUG-125), `src/sort_runtime.c` (embedded into `vanic`
+// via `include_str!`, linked into every LLVM-backend binary)
+// unconditionally required `#pragma GCC target("avx512f...")` +
+// `<immintrin.h>` regardless of target architecture -- on this same
+// ARM cross-toolchain that failed to compile outright ("unknown
+// target attribute 'avx512f'"), degrading to a non-fatal warning
+// that still produced a binary, but with `intent_vec_i64__sort`
+// undefined -- so ANY program actually calling `sort`/`sort_by`
+// failed to LINK on a non-x86 target. Both confirmed against a real
+// `arm-linux-gnueabi-gcc` + `libc6-dev-armel-cross` sysroot. Gated on
+// that toolchain being present (not installed in this repo's own CI
+// image, which only cross-installs `aarch64-linux-gnu-gcc` for a
+// SEPARATE lib-only QEMU job) -- skips gracefully otherwise, same
+// pattern as the `lli_available()`-gated LLVM tests.
+fn arm_gnueabi_cross_gcc_available() -> bool {
+    Command::new("arm-linux-gnueabi-gcc")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+fn vanic_build_cross_compiles_math_and_sort_program_for_real_arm_linux_target() {
+    use std::fs;
+    if !arm_gnueabi_cross_gcc_available() {
+        return;
+    }
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-bug124-125-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src_path = dir.join("math_and_sort.vani");
+    fs::write(
+        &src_path,
+        r#"
+            fn main() -> i64 {
+              let m: f64 = exp(1.0);
+              let xs: Vec<i64> = vec(3, 1, 2);
+              let _ = sort(mut ref xs);
+              print m;
+              print xs[0];
+              return 0;
+            }
+        "#,
+    )
+    .expect("write source");
+    let out_bin = dir.join("arm_bin");
+
+    let build_output = Command::new(binary)
+        .args([
+            "build",
+            src_path.to_str().unwrap(),
+            "--target=arm-unknown-linux-gnueabi",
+            "-o",
+            out_bin.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc build --target=arm-unknown-linux-gnueabi should execute: {e}"));
+    assert!(
+        build_output.status.success(),
+        "cross-build for arm-unknown-linux-gnueabi (math + sort) failed with status {:?}\nstderr: {}",
+        build_output.status,
+        String::from_utf8_lossy(&build_output.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&build_output.stderr).contains("sort runtime compilation failed"),
+        "sort_runtime.c must compile cleanly on a non-x86 cross target (BUG-125), stderr:\n{}",
+        String::from_utf8_lossy(&build_output.stderr)
+    );
+    // Confirm a real ARM ELF binary was produced (can't execute it here
+    // without a qemu-user emulator, but the LINK succeeding -- with
+    // both libm-referencing math helpers AND intent_vec_i64__sort
+    // actually resolving -- is exactly the failure mode BUG-124/125 had).
+    let bytes = fs::read(&out_bin).expect("read output binary");
+    assert_eq!(&bytes[0..4], b"\x7fELF", "expected a real ELF binary");
+    assert_eq!(bytes[4], 1, "expected ELFCLASS32 (32-bit ARM)");
+    let e_machine = u16::from_le_bytes([bytes[18], bytes[19]]);
+    assert_eq!(e_machine, 40, "expected EM_ARM (40) in the ELF header");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn intentc_test_harness_mode_runs_each_test_fn_in_isolation() {
     // A file with no top-level `fn main` and `#[test]`-attributed

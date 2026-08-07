@@ -8770,3 +8770,97 @@ tests not added for those specifically, since they're negative results without a
 distinguishing assertion beyond "compiles and runs" -- already covered by the existing
 end-to-end test corpus's general float-literal-coercion coverage). Category G is now
 fully audited.
+
+## BUG-124 (2026-08-06) -- `vanic build --target=arm-*-linux-gnueabi*` misclassified as bare-metal
+
+Found auditing category H's own 6-cell (bare_metal / cross / host-POSIX x C / LLVM)
+link-flag-parity matrix. `is_bare_metal_triple` (`src/main.rs`) used substring checks
+(`"none"` / `"eabi"` / `"-elf"`) as a proxy for "this is a freestanding microcontroller
+target" -- but `"eabi"` also appears in a large family of REAL Linux userspace target
+triples that use the EABI calling convention (soft/hard float) while having a full OS
+and libc: `arm-unknown-linux-gnueabi`, `arm-unknown-linux-gnueabihf`,
+`armv7-unknown-linux-gnueabihf`, ... (the Debian armel/armhf family -- Raspberry Pi OS
+32-bit is exactly this). The existing unit test (`bare_metal_triple_detection`) never
+covered this triple family at all, only `aarch64-unknown-linux-gnu`/`x86_64-unknown-
+linux-musl` as "not bare metal" examples.
+
+Verified against a REAL cross-toolchain (installed `arm-linux-gnueabi-gcc` +
+`libc6-dev-armel-cross` for this investigation specifically, since the misclassification
+otherwise silently "worked" in the sense of producing SOME broken output rather than a
+loud, obviously-wrong error): `vanic build --target=arm-unknown-linux-gnueabi` on a
+program calling `exp()` failed with `undefined reference to 'exp'`/`'erf'`/`'fmod'` --
+BUG-112's exact class, since the misclassified triple took the bare-metal link branch
+(which adds no `-lm` at all, on the theory that a freestanding target has no libc to
+link against).
+
+Fix: `is_bare_metal_triple` now checks for a real OS component (`"linux"`, `"darwin"`,
+`"windows"`, `"freebsd"`, `"android"`) FIRST -- any triple naming an actual kernel/OS is
+never bare-metal, regardless of its ABI suffix -- before falling through to the
+existing freestanding-heuristic substrings. New unit tests in `src/main.rs` extend
+`bare_metal_triple_detection` with the `gnueabi`/`gnueabihf` family (confirmed NOT
+bare-metal) plus a genuinely-bare-metal EABI triple (confirmed the fix didn't weaken
+detection there). New end-to-end test in `tests/run_end_to_end.rs`,
+`vanic_build_cross_compiles_math_and_sort_program_for_real_arm_linux_target`, gated on
+`arm-linux-gnueabi-gcc` being on `PATH` (skips gracefully otherwise, same pattern as
+the `lli_available()`-gated LLVM tests -- this repo's own CI doesn't install this
+specific cross-toolchain, only `aarch64-linux-gnu-gcc` for a separate lib-only QEMU
+job) -- a real subprocess `vanic build --target=arm-unknown-linux-gnueabi`, checking
+the link succeeds and the output is a genuine 32-bit ARM ELF binary.
+
+## BUG-125 (2026-08-06) -- `sort`/`sort_by` failed to link on any non-x86 cross target
+
+Found investigating BUG-124 on the same real ARM cross-toolchain: even after fixing the
+bare-metal misclassification, a program calling `sort`/`sort_by` still failed --
+`src/sort_runtime.c` (embedded into `vanic` via `include_str!`, unconditionally linked
+into every LLVM-backend binary) starts with `#pragma GCC target("avx512f,avx512bw,
+avx512dq,avx512vl,avx2,bmi2,popcnt")` and `#include <immintrin.h>` with NO architecture
+guard at all. On `arm-linux-gnueabi-gcc` this failed to compile outright (`unknown
+target attribute 'avx512f'`, `immintrin.h: No such file or directory`) -- `vanic build`
+degraded this to a non-fatal WARNING and still produced a linked binary, but with
+`intent_vec_i64__sort`/`intent_vec_double__sort` never defined, so any program actually
+CALLING `sort`/`sort_by` failed at the FINAL link step with `undefined reference to
+'intent_vec_i64__sort'`.
+
+Root cause: the AVX-512 block-partition scan (`_block_part`, inside the `DEFINE_SORT`
+macro, instantiated once for `int64_t` and once for `double`) uses `_mm512_cmpge_epi64_
+mask`/`_mm512_cmplt_epi64_mask` to build a 64-bit "which of these BLOCK elements
+qualify" bitmask, x86-only by construction.
+
+Fix: gated the `#pragma GCC target`/`<immintrin.h>` behind `#if defined(__x86_64__) ||
+defined(__i386__)` (setting a `VANI_SORT_HAVE_AVX512` flag), and extracted the two
+mask-computation shapes (`>= pivot` / `< pivot`) into `VANI_SORT_MASK_GE`/
+`VANI_SORT_MASK_LT` macros with two implementations: the existing AVX-512 one
+(untouched, byte-for-byte identical logic, just relocated) on x86, and a portable
+scalar loop (`for (bi = 0; bi < BLOCK; bi++) if (ptr[bi] >= pivot) mask |= 1 << bi;`,
+using T's own native comparison operators) everywhere else -- same output shape, just
+without the vectorized fast path. Verified the scalar fallback's correctness directly
+(without needing `qemu-user`, which also isn't installed on this dev machine): patched
+a copy of `sort_runtime.c` to force the non-x86 branch, compiled it standalone on this
+native x86_64 host, and ran 2000 randomized `int64_t` + 500 randomized `double` sort
+trials against `qsort`/insertion-sort references -- all matched exactly. The real cross
+build (`arm-unknown-linux-gnueabi`, both math AND sort in one program) now compiles and
+links cleanly with no warning, verified by the same new BUG-124 end-to-end test
+(asserts the "sort runtime compilation failed" warning text is absent).
+
+Aside (not fixed, out of scope): `#pragma GCC target("avx512f,...")` forces AVX-512
+codegen for ANY x86 build regardless of the actual host CPU's capability (no runtime
+CPUID dispatch) -- this dev machine's own CPU (Haswell) doesn't support AVX-512 and a
+standalone test harness compiled with an explicit conflicting `-march=native` crashed
+with an illegal instruction. The REAL `vanic build`/`vanic run` pipeline (which doesn't
+pass `-march=native`) was unaffected -- confirmed executing a native (non-cross) build
+of the same math+sort program on this exact machine, which ran correctly -- so this is
+either already handled by the specific flags `vanic` passes, or a narrower, pre-existing
+limitation unrelated to this session's fix; not chased further since it's orthogonal to
+both this bug and the link-flag-parity theme of category H.
+
+Full `cargo test --release` clean, zero regressions.
+
+Category H status: the 6-cell matrix's bare-metal cell was fundamentally
+misclassifying real Linux ARM targets (BUG-124, more severe than a single missing
+flag), which also unmasked BUG-125 (an architecture-portability gap unrelated to link
+flags specifically, found investigating the same real cross target). The audit's own
+suggested `-lpthread` check was tested directly (a `Mutex`/task-using example
+cross-compiled and linked cleanly without `-lpthread` on the same real toolchain --
+modern glibc folds pthread symbols into libc itself, matching the existing `-lm`
+helper's own comment about this) and found to be correct as-is, not a bug. Category H
+is now fully audited.

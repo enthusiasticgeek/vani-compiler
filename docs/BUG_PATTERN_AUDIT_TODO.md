@@ -447,20 +447,41 @@ never been exhaustively diffed for flag parity. Concrete checks:
 - For each of the 6 cells, list every linker flag the OTHER 5 cells
   use that this cell doesn't, and confirm each omission is
   intentional (e.g. `bare_metal` correctly omitting libc/libm) rather
-  than a copy-paste gap.
+  than a copy-paste gap. **RESOLVED as BUG-124** (2026-08-06) -- found
+  something worse than a missing flag: `is_bare_metal_triple`
+  misclassified an entire family of REAL Linux targets
+  (`arm-unknown-linux-gnueabi`/`gnueabihf`, the Debian armel/armhf
+  family) as bare-metal, because "eabi" appears in their ABI suffix.
+  `vanic build --target=arm-unknown-linux-gnueabi` failed to link ANY
+  program (`undefined reference to 'exp'`) on a real cross-toolchain.
+  Fixed by checking for a real OS component first.
 - Specifically check `-lpthread`/threading-runtime flags across all
   6 cells for a program that uses `task`/`Mutex`/`Channel` --
   BUG-112's own writeup only checked `-lm`; the exact same
   three-branch code structure could have the identical gap for
   `-lpthread` in a branch nobody's tested a threading program against
-  yet.
+  yet. **AUDITED, no bug** (2026-08-06) -- tested directly against the
+  same real ARM cross-toolchain (a `Mutex`-using example): links
+  cleanly without `-lpthread` on the `is_cross` branch. Modern glibc
+  folds pthread symbols into libc itself, matching the existing
+  `-lm` helper's own comment about this same fact -- the omission is
+  correct, not a gap.
 - Run an actual `vanic build` (not just `vanic run`) for a
   math-using AND a threading-using program on every reachable
   cell (host-POSIX x both backends is easy; cross/bare_metal need
   the appropriate `--target=`), not just JIT/interpret it -- BUG-112
   was invisible to `vanic run` entirely (`lli` auto-resolves libm),
   so `vanic build`-specific coverage is the only way to catch this
-  class.
+  class. **Done** (2026-08-06) -- installed a real `arm-linux-
+  gnueabi-gcc` + `libc6-dev-armel-cross` sysroot specifically to run
+  actual cross-builds rather than reason about flags in the abstract;
+  this is exactly what surfaced BUG-124, and BUG-124's fix in turn
+  unmasked a SECOND, unrelated bug (BUG-125: `sort_runtime.c`'s
+  AVX-512 code had no non-x86 fallback at all, so any program calling
+  `sort`/`sort_by` failed to link on this same real cross target even
+  after BUG-124's fix). Both fixed; see `docs/TODO_CURRENT.md`'s
+  BUG-124 and BUG-125 entries for the full writeups. Category H is
+  now fully audited -- the last category in this pass.
 
 ---
 
