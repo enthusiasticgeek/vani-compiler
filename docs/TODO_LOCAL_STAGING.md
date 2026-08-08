@@ -203,7 +203,7 @@ writeup + fix + tests.
 
 Repro: `tools/localfuzz/findings/20260803-062600-check-crash-04126cff87/repro.vani`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive in the HARNESS's own crash-detection heuristic (reviewed 2026-08-07). The repro's first line is literally the text `--set env:RUST_BACKTRACE=1` (garbage, not valid vāṇी syntax, likely a qwen hallucination) -- vanic's own parse-error diagnostic quotes that offending source line verbatim, and the harness's `is_crash()` check does a dumb substring search for `RUST_BACKTRACE` across stderr, matching the QUOTED SOURCE TEXT rather than an actual Rust panic backtrace. Verified directly: this file produces a normal, well-formed sequence of parse-error diagnostics (exit 1), not a crash. No compiler change needed.
 
 ---
 
@@ -211,7 +211,7 @@ STATUS: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260803-073518-run-crash-c77cd8d171/repro.vani`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: LIKELY NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation added an extra blocking `tcp_accept`/`tcp_connect_local` call beyond what the base example's client/server exchange actually provides connections for -- the extra call blocks forever waiting for a connection that never arrives (v1.6's `recv`/`accept` are blocking-only). Same class as the already-closed 20260807-171043-run-crash-3ebdb63967 and 20260807-191810-run-crash-01517aa646 candidates. No compiler change needed.
 
 Found a bug in the vani-compiler project's local staging log where running the `echo_match_suspend.vani` example file with the C backend crashes. The generated mutant source is as provided, and it includes asynchronous functions that may lead to unexpected behavior or crashes when executed. 
 
@@ -225,7 +225,7 @@ Expected outcome: Identify and fix the bug causing the crash on the C backend wh
 
 Repro: `tools/localfuzz/findings/20260803-110707-run-crash-3f94aefdee/repro.vani`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -319,7 +319,7 @@ Fix attempt: `tools/localfuzz/findings/20260803-112813-backend-divergence-488f14
 Repro: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-121804-backend-divergence-f06e4a126e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -455,7 +455,7 @@ tests.
 Repro: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-140059-run-crash-b5503177c0/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `run-crash`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -464,7 +464,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-143426-backend-divergence-5c89fde762/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-143426-backend-divergence-5c89fde762/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 The vani-compiler local staging log indicates that there was a backend-divergence issue with the control_flow.vani test case, specifically using both LLVM and C backends. The generated mutant source demonstrates incorrect behavior in the `temdeg` function when the input is less than zero, where it should return -1 instead of adding 5. The divergence arises because the LLVM backend encountered a type mismatch between an integer constant (0) and a double value, while the C backend successfully compiled the code without errors but produced divergent output.
 
@@ -523,7 +523,7 @@ fix + tests.
 Repro: `tools/localfuzz/findings/20260803-150406-backend-divergence-75632c6549/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-150406-backend-divergence-75632c6549/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -594,7 +594,7 @@ When the `control_flow.v
 Repro: `tools/localfuzz/findings/20260803-152100-run-crash-463a6dbf2d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-152100-run-crash-463a6dbf2d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 ---
 
@@ -603,7 +603,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-154648-backend-divergence-06e41ad849/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-154648-backend-divergence-06e41ad849/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -612,7 +612,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-155509-backend-divergence-7dbe333a4b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-155509-backend-divergence-7dbe333a4b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -621,7 +621,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-155852-backend-divergence-9890f22086/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-155852-backend-divergence-9890f22086/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -630,7 +630,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-161512-run-crash-388a573f5a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-161512-run-crash-388a573f5a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: LIKELY NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation added an extra blocking `tcp_accept`/`tcp_connect_local` call beyond what the base example's client/server exchange actually provides connections for -- the extra call blocks forever waiting for a connection that never arrives (v1.6's `recv`/`accept` are blocking-only). Same class as the already-closed 20260807-171043-run-crash-3ebdb63967 and 20260807-191810-run-crash-01517aa646 candidates. No compiler change needed.
 
 ---
 
@@ -713,7 +713,7 @@ Fix attempt: `tools/localfuzz/findings/20260803-164037-backend-divergence-fff312
 Repro: `tools/localfuzz/findings/20260803-165310-backend-divergence-29eecfabd1/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-165310-backend-divergence-29eecfabd1/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -722,7 +722,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-170453-backend-divergence-089aaf6ae9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-170453-backend-divergence-089aaf6ae9/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -731,7 +731,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-171656-run-crash-c762f07d31/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-171656-run-crash-c762f07d31/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -740,7 +740,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-174717-backend-divergence-b600ec1f18/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-174717-backend-divergence-b600ec1f18/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -800,7 +800,7 @@ Fix attempt: `tools/localfuzz/findings/20260803-182951-backend-divergence-86aeb7
 Repro: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-184651-backend-divergence-15e17b9e43/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -809,7 +809,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-185109-backend-divergence-9aeae2f8ff/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -818,7 +818,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-190819-run-crash-10bcae90d4/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-190819-run-crash-10bcae90d4/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -827,7 +827,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-193223-backend-divergence-c9f03b1901/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-193223-backend-divergence-c9f03b1901/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -928,7 +928,7 @@ hàm main() -> i64 {
 Repro: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-213809-backend-divergence-dcc5ded4a3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -999,7 +999,7 @@ This bug affects the `--backend=c` and `--backend=llvm` backends.
 Repro: `tools/localfuzz/findings/20260803-222704-backend-divergence-2c07ac5b34/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-222704-backend-divergence-2c07ac5b34/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1008,7 +1008,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-223621-backend-divergence-e5e2bac4a4/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-223621-backend-divergence-e5e2bac4a4/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 This error occurs when the `observe` method does not correctly update the minimum and maximum values in the `Tracker` struct after each observation. Specifically, it fails to set the correct minimum value when encountering a smaller observation than the current minimum. This issue is due to an incorrect comparison inside the `observe` method, where the condition `(v < self.min)` is used instead of `(v <= self.min)`. The comparison should be for equality to include all equal values as valid minimums.
 
@@ -1021,7 +1021,7 @@ This bug affects the C backend (`--backend=c`) and likely will manifest in other
 Repro: `tools/localfuzz/findings/20260803-225346-backend-divergence-5331f77dc9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-225346-backend-divergence-5331f77dc9/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1030,7 +1030,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260803-230655-backend-divergence-1713f2d074/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260803-230655-backend-divergence-1713f2d074/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1121,7 +1121,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-001040-backend-divergence-bdea3d
 Repro: `tools/localfuzz/findings/20260804-001435-backend-divergence-6c96d8f994/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-001435-backend-divergence-6c96d8f994/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1130,7 +1130,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-004714-backend-divergence-67ec8a83a0/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-004714-backend-divergence-67ec8a83a0/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1139,7 +1139,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-012352-run-crash-dcb44d3673/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-012352-run-crash-dcb44d3673/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -1148,7 +1148,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-013821-backend-divergence-a7ad30e389/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-013821-backend-divergence-a7ad30e389/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1185,7 +1185,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-015119-backend-divergence-2a7456
 Repro: `tools/localfuzz/findings/20260804-020400-backend-divergence-ecaac997fc/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-020400-backend-divergence-ecaac997fc/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1250,7 +1250,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-023744-backend-divergence-b6deed
 Repro: `tools/localfuzz/findings/20260804-024656-backend-divergence-023dd39c03/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-024656-backend-divergence-023dd39c03/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1259,7 +1259,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-025511-backend-divergence-937ffb77f7/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-025511-backend-divergence-937ffb77f7/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1293,7 +1293,7 @@ Running a test case on finnish async/await code:
 
 - Found a run-crash in LLVM backend.
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 ```
 
 ---
@@ -1303,7 +1303,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-034411-backend-divergence-d216d5dfa0/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-034411-backend-divergence-d216d5dfa0/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1312,7 +1312,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-035315-backend-divergence-12228864d3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-035315-backend-divergence-12228864d3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1373,7 +1373,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-050008-backend-divergence-745cdf
 
 STAGING ENTRY: `/home/virgo/source/vani-compiler-localfuzz/examples/language/persian/async_cancel_auto.vani` has been submitted with a backend-divergence finding for LLVM and C backends, resulting in rc=1 and rc=3 respectively. The failure was due to an assertion error `v_a == (-1)` in the main function of the generated code when running on both LLVM and C backends.
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1400,7 +1400,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-053000-backend-divergence-93add3
 Repro: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-055133-backend-divergence-3c281b1ca7/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1409,7 +1409,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-055516-backend-divergence-e911ebfd8c/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1461,7 +1461,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-064233-backend-divergence-d14882
 Repro: `tools/localfuzz/findings/20260804-065950-backend-divergence-e24b934c3c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-065950-backend-divergence-e24b934c3c/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1470,7 +1470,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-070757-backend-divergence-76bf613726/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-070757-backend-divergence-76bf613726/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1479,7 +1479,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-071117-backend-divergence-7a26100cf5/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-071117-backend-divergence-7a26100cf5/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 This mutation causes a backend-divergence issue in the vani-compiler project's C backend, specifically in the `funkce rozbalit_nebo` function. The observed symptom is that the function fails to correctly handle enums when using the LLVM backend, leading to divergent outputs with the `Opt.None` case.
 
@@ -1608,7 +1608,7 @@ Raw result data:
 Repro: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-075629-backend-divergence-3fd375b0c4/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1718,7 +1718,7 @@ intent "A4.4 — CancelToken auto-plumbing
 Repro: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-094131-run-crash-92a4ac0326/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -1834,7 +1834,7 @@ Repro: `tools/localfuzz/findings/20260804-113736-backend-divergence-00bd1ebcda/r
 Fix attempt: `tools/localfuzz/findings/20260804-113736-backend-divergence-00bd1ebcda/fix_attempt.md`
 
 ```
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 ```
 
 ---
@@ -1884,7 +1884,7 @@ Please note that this staging entry does not provide enough information to deter
 Repro: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-121128-backend-divergence-37b3466abe/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -1940,7 +1940,7 @@ exit-code mismatch) found while triaging this finding.
 Repro: `tools/localfuzz/findings/20260804-142552-backend-divergence-37f3f8fa69/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-142552-backend-divergence-37f3f8fa69/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -1949,7 +1949,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-145413-backend-divergence-5d61f9e78b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-145413-backend-divergence-5d61f9e78b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 Summary:
 A vanic candidate bug report has been generated for the vani-compiler project's local staging log, focusing on a bug related to backend-divergence in the LLVM backend. The mutant/generated source code is provided below:
@@ -1994,7 +1994,7 @@ fn main() -> i64 {
 Repro: `tools/localfuzz/findings/20260804-151134-backend-divergence-e583602923/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-151134-backend-divergence-e583602923/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -2018,7 +2018,7 @@ for the full root-cause writeup.
 Repro: `tools/localfuzz/findings/20260804-152807-backend-divergence-0d719c381e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-152807-backend-divergence-0d719c381e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 **Staging Entry:**
 
@@ -2105,7 +2105,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-161440-backend-divergence-ec889e
 
 VANIC: [build] /home/virgo/source/vani-compiler-localfuzz/examples/language/english/tracker.vani --backend=c
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -2161,7 +2161,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-163203-backend-divergence-e873d1
 Repro: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-192840-backend-divergence-05bd1b1e14/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -2170,7 +2170,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-201316-backend-divergence-83efda749b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-201316-backend-divergence-83efda749b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 Vani compiler is running against a local staging log for the vani-lang project. A mutant was generated from the `korean` language in the `examples/language/korean/early_exit.vani` corpus file, targeting both LLVM and C backends. When attempting to run the mutant, the `llvm` backend encountered an assertion failure in a specific line of code, while the `c` backend resulted in a timing out error due to an integer constant being expected to have an integer type. These findings indicate that there is an issue with how the `fadd double 0.0, 0` operation handles integral types in the C backend, which could lead to unexpected behavior or crashes when compiled on different platforms or compilers.
 
@@ -2181,7 +2181,7 @@ Vani compiler is running against a local staging log for the vani-lang project. 
 Repro: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-204024-backend-divergence-ffadfdc1f9/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-138 on main (2026-08-07). A `u32`-typed Vec index reaching `clone_at` produced a GEP whose declared index type (hard-coded `i64`) didn't match the actual `i32` operand -- `lli` rejected the malformed IR outright. Same defect found at 9 total call sites in `backend_llvm.rs` (`clone_at`, `vec_remove_at`, the `simd*_load`/`simd*_store` family); fixed with one shared `widen_index_to_i64` helper. See `docs/TODO_CURRENT.md`'s BUG-138 entry on vani-compiler.
 
 ---
 
@@ -2190,7 +2190,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260804-213005-backend-divergence-deb22ec24a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-213005-backend-divergence-deb22ec24a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 The vani-compiler local staging log shows that running the mutant `for_loops.vani` with LLVM and C backends diverged in terms of output. The LLVM backend produced a successful compilation and execution, while the C backend encountered an error due to an integer constant not having an integer type.
 
@@ -2227,7 +2227,7 @@ This staging entry indicates that further investigation is needed to identify th
 Repro: `tools/localfuzz/findings/20260804-222218-run-crash-d66ccbb300/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-222218-run-crash-d66ccbb300/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -2236,7 +2236,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260805-144709-run-crash-cc1ce9a3ad/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260805-144709-run-crash-cc1ce9a3ad/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed an assert's argument to `i64::MAX` (`count_odd(9223372036854775807)`), turning a fast O(n) check into an astronomically large workload -- a timeout by design, not a compiler hang. No compiler change needed.
 
 ---
 
@@ -2245,7 +2245,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260805-225926-run-crash-00aefb32bc/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260805-225926-run-crash-00aefb32bc/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: LIKELY NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation added an extra blocking `tcp_accept`/`tcp_connect_local` call beyond what the base example's client/server exchange actually provides connections for -- the extra call blocks forever waiting for a connection that never arrives (v1.6's `recv`/`accept` are blocking-only). Same class as the already-closed 20260807-171043-run-crash-3ebdb63967 and 20260807-191810-run-crash-01517aa646 candidates. No compiler change needed.
 
 ```plaintext
 **ANF Lift Test Result**
@@ -2292,7 +2292,7 @@ fn drive(ep: i64, t: mut ref Task__anf_compose) -> i64 {
 Repro: `tools/localfuzz/findings/20260806-033737-run-crash-ea3a66e1a1/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-033737-run-crash-ea3a66e1a1/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -2301,7 +2301,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260806-041544-run-crash-195d1c365a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-041544-run-crash-195d1c365a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 ---
 
@@ -2310,7 +2310,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260806-052908-run-crash-9ede1b9751/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-052908-run-crash-9ede1b9751/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 **Staging Entry for vani-compiler Local Fuzzing on /home/virgo/source/vani-compiler-localfuzz/examples/language/maithili/async_cancel_auto.vani**
 
@@ -2377,7 +2377,7 @@ The exact repro source is provided in the `Mutant/generated source` block above.
 Repro: `tools/localfuzz/findings/20260806-074341-run-crash-0bef22ebdc/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-074341-run-crash-0bef22ebdc/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -2386,7 +2386,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260806-095440-run-crash-db4aa42d2b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-095440-run-crash-db4aa42d2b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: LIKELY NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation added an extra blocking `tcp_accept`/`tcp_connect_local` call beyond what the base example's client/server exchange actually provides connections for -- the extra call blocks forever waiting for a connection that never arrives (v1.6's `recv`/`accept` are blocking-only). Same class as the already-closed 20260807-171043-run-crash-3ebdb63967 and 20260807-191810-run-crash-01517aa646 candidates. No compiler change needed.
 
 ---
 
@@ -2615,7 +2615,7 @@ the new value, no `store`).
 Repro: `tools/localfuzz/findings/20260806-224550-run-crash-27eb46786e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260806-224550-run-crash-27eb46786e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -2642,7 +2642,7 @@ genuinely fresh per iteration, unlike this case).
 Repro: `tools/localfuzz/findings/20260807-031507-run-crash-e0f7921e18/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-031507-run-crash-e0f7921e18/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 ---
 
@@ -2679,7 +2679,7 @@ Fix attempt: `tools/localfuzz/findings/20260807-032718-backend-divergence-5e53ed
 Repro: `tools/localfuzz/findings/20260807-033842-run-crash-18ab69b14b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-033842-run-crash-18ab69b14b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 ---
 
@@ -2703,7 +2703,7 @@ array handling minus the declaration.
 Repro: `tools/localfuzz/findings/20260807-042648-run-crash-b8572331c3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-042648-run-crash-b8572331c3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 The staging log indicates a run-crash with the given vani compiler-generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/tamil/async_cancel_auto.vani`. The generated code attempts to call `await` multiple times in a row, which can lead to issues related to concurrency and error handling. Specifically, the `await` function should not be called more than once without waiting for the previous one to complete.
 
@@ -2744,7 +2744,7 @@ async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
 Repro: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-054930-backend-divergence-3f72ac5ca3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-07) -- no longer reproduces on a fresh `main` build (commit 9d5a0e6 or later; originally recorded as `backend-divergence`, now classifies as `clean-success`). Whatever fixed this wasn't traced back to a specific `BUG-N` -- most likely an incidental side effect of unrelated work landing on `main` between when this was staged and 2026-08-07. Closing as stale.
 
 ---
 
@@ -2774,7 +2774,7 @@ This bug affects both the LLVM backend and the C backend of the vani compiler.
 Repro: `tools/localfuzz/findings/20260807-081658-run-crash-3127119dac/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-081658-run-crash-3127119dac/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -2783,7 +2783,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-083513-backend-divergence-38ba6657f0/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-083513-backend-divergence-38ba6657f0/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: REAL FINDING, NOT YET FIXED (reviewed 2026-08-07, flagged for the user separately from BUG-137/138/139). `parallel for i from -9223372036854775808 to 4 { ... xs[i] ... }` (base: `parallel_for_mul_reduction.vani`, mutated start bound to i64::MIN) -- LLVM correctly traps (exit 3, no output) on the out-of-bounds access, but the C backend's `parallel for` loop silently executes ZERO iterations and returns the untouched initial value (exit 0, prints `1` instead of trapping) -- a genuine silent-wrong-answer divergence, not just a diagnostic-quality gap. Root cause not yet investigated (likely the C backend's iteration-count/chunk computation wrapping or underflowing for this range). Not chased in the BUG-137/138/139 pass -- surfaced to the user as a 4th finding after the fact; awaiting a decision on whether to pick it up.
 
 ---
 
@@ -2792,7 +2792,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-092755-backend-divergence-e393d00e1f/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-092755-backend-divergence-e393d00e1f/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-139 on main (2026-08-07). `enum Result { Ok(i64), Err(String) }` -- `String` isn't a real vāṇी type (only `Str`/`OwnedStr` are) -- was silently accepted by `vanic check` as long as the `Err` variant was never actually constructed; the checker never validated that a struct field / enum variant payload / function-signature type actually exists. Scope turned out broader than just enums (struct fields and function signatures had the same gap) -- fixed with a general recursive type-existence validator applied to all three declaration sites. See `docs/TODO_CURRENT.md`'s BUG-139 entry on vani-compiler.
 
 ---
 
@@ -2846,7 +2846,7 @@ fn classify(m: Mode, n: i64) -> i64 {
 Repro: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-110057-backend-divergence-3a5b98954b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: DUPLICATE of an already-documented, tracked limitation (reviewed 2026-08-07). `examples/edge_cases/TEST_MATRIX.md` already marks `xfail_closure_in_block_expr.vani` (this candidate's base file) as "KNOWN BUG" -- a closure inside a block expression gets mistyped as `void*` in C codegen. This candidate's mutation (a duplicated `let f = ...;`) just triggers the same known limitation via a slightly different manifestation (a `cc`-level redefinition error instead of the base xfail's own failure mode). Not a new discovery; no compiler change made here.
 
 ---
 
@@ -2855,7 +2855,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-112326-backend-divergence-8e728c2666/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-112326-backend-divergence-8e728c2666/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 This is a bug report for the vani-compiler project's local staging log, detailing a backend-divergence issue related to a specific mutant generated from the provided code. The mutant causes an integer overflow in the `add` function when executed by both the `rustc` and `llvm` backends.
 
@@ -2875,7 +2875,7 @@ Backend(s) affected: Rustc and LLVM.
 Repro: `tools/localfuzz/findings/20260807-113848-backend-divergence-6efcedf723/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-113848-backend-divergence-6efcedf723/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-137 on main (2026-08-07). `let (q, r) = f(...); let (q, r) = f(...);` (same names, same scope) compiled fine on LLVM/SSA-C but failed to build on tree-C (`redefinition of 'v_q'`) -- tuple-destructure `let` lowering never got the same-scope-shadow -> `Reassign` treatment the plain `Stmt::Let` handler already has. Fixed by mirroring that exact check into the tuple-destructure path. See `docs/TODO_CURRENT.md`'s BUG-137 entry on vani-compiler.
 
 ---
 
@@ -2884,7 +2884,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-123745-run-crash-66bd2e8d82/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-123745-run-crash-66bd2e8d82/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -2921,7 +2921,7 @@ Fix attempt: `tools/localfuzz/findings/20260807-130652-backend-divergence-e6c065
 Repro: `tools/localfuzz/findings/20260807-131911-run-crash-b384bceb19/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-131911-run-crash-b384bceb19/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation deleted or no-op'd the loop-termination increment/decrement in the base example's own control flow (confirmed via diff against the base file), so the loop waits forever for a condition that can no longer become true. A logic bug the mutation introduced into the *test program*, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -2969,7 +2969,7 @@ The compilation process was successful, but the execution took longer than expec
 Repro: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-134643-backend-divergence-6f2e1fa134/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-08-07). The C backend exits 134 (raw `SIGABRT`) and LLVM exits 3 for this trap category -- a deliberate, long-standing scoping decision (see `docs/TODO_CURRENT.md`'s BUG-106-class entries and `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2), not a wrong-answer divergence. The harness's `run_c["rc"] != run_l["rc"]` check flags this pairing every time by construction; it isn't actionable. No compiler change needed.
 
 ---
 
@@ -2978,7 +2978,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260807-152744-run-crash-a79d18ac24/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-152744-run-crash-a79d18ac24/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG -- false positive (reviewed 2026-08-07). Fuzzer mutation changed a `delay(5, ...)`/`delay(10, ...)` call to `delay(9223372036854775807, ...)`, i.e. `sleep_ms(i64::MAX)` -- a real, legitimately multi-million-year sleep by design, not a compiler hang. The timeout is expected, correct behavior for the mutated program. No compiler change needed.
 
 Running the mutant code with LLVM backend resulted in a crash (status: rc = null, stdout = "", stderr = "", timed_out = true). Running the same code with C backend also resulted in a crash (status: rc = null, stdout = "", stderr = "", timed_out = true).
 
