@@ -3867,3 +3867,55 @@ The vani-compiler local staging log reveals a run-crash issue in the test case `
 ---
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260808-214622-backend-divergence-9b7c2322c7
+
+Repro: `tools/localfuzz/findings/20260808-214622-backend-divergence-9b7c2322c7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-214622-backend-divergence-9b7c2322c7/fix_attempt.md`
+
+**Staging Entry: Early Exit Bug in Portuguese Translation**
+
+---
+
+**Summary**: The vani-compiler, when attempting to run a specific program (early_exit.vani) containing Portuguese code with different backends (LLVM and C), experienced backend-divergence. Specifically, the compiler crashed with an integer overflow error on the line `para i desde -9223372036854775808 até limit {` when using LLVM.
+
+**Environment**:
+- Compiler Source: Not read
+- Compiler Version: vani-compiler (latest stable)
+- Operating System: Linux
+- Backend(s): LLVM, C
+
+**Repro Source**:
+```vani
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/early_exit.vani              # LLVM
+//   vanic run examples/language/portuguese/early_exit.vani --backend=c  # C
+
+intenção "break and continue in loops";
+
+// `parar` = break, `continuar` = continue
+
+função count_odd(limit: i64) -> i64 {
+  seja count: i64 = 0;
+  para i desde -9223372036854775808 até limit {
+    se i * 2 == i + i {
+      continuar;
+    }
+  }
+  retornar count;
+}
+
+função main() -> i64 {
+  afirmar count_odd(4) == 2;
+  imprimir count_odd(4);
+  retornar 0;
+}
+```
+
+**Observed Symptom**: The compiler crashed with the message `integer overflow in int64_t mul`. This indicates that the program encountered a mathematical operation that resulted in an overflow, which is not supported by the target architecture.
+
+**Backends Affected**: The crash occurred in both LLVM and C
