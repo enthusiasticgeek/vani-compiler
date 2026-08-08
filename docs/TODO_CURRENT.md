@@ -10140,3 +10140,93 @@ Full `cargo test --release` clean (2829 lib tests + 211 end-to-end tests
 + all other integration suites, 0 failed).
 
 Category D is now closed. Next free bug number is **BUG-145**.
+
+## BUG-145 (2026-08-08) -- LLVM's `parallel for` GOMP trip-count math had NO overflow guard for any reduction operator, and mostly SIGSEGV'd
+
+Fifth finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category E
+(`parallel for`/`reduce` correctness beyond BUG-140's one fixed shape).
+Systematically tested all 4 originally-listed candidates across all 9
+`ReductionOp` variants (Add, Mul, BitAnd, BitOr, BitXor, Min, Max, And,
+Or) with hand-computed expected values, on both backends.
+
+**Confirmed SAFE (3 of 4)**:
+- **Empty range** (`from 5 to 5` and the descending `from 5 to 3` shape)
+  -- every reduction operator correctly leaves the accumulator at its
+  identity value (0 for `+`, 1 for `*`, -1/all-ones for `&`, 0 for `|`/
+  `^`, i64::MAX for `min`, i64::MIN for `max`, `true` for `&&`, `false`
+  for `||`) on both backends. No garbage, no spurious trap.
+- **Single-iteration range** -- correctly combines the accumulator with
+  exactly that one element, confirmed against hand-computed values, both
+  backends.
+- **Nested `parallel for`** -- tested all 3 nesting shapes (parallel-in-
+  parallel, parallel-in-plain-for, plain-for-in-parallel) with a real
+  cross-product reduction (sum of 0..11 = 66); all compute the correct
+  answer on both backends.
+
+**Confirmed VULNERABLE (1 of 4), fixed as BUG-145 -- the most severe
+finding of this whole audit round**: "was BUG-140's fix applied
+unconditionally regardless of reduction operator?" Answer: **BUG-140's
+fix was never applied to the LLVM backend AT ALL.** Its GOMP-outlining
+path (`emit_parallel_for_via_gomp` in `backend_llvm.rs`) computes the
+trip count for manual thread-chunk partitioning via a raw, unchecked
+`sub i64 %end_v, %start_v` -- GOMP's own hand-rolled equivalent of the
+exact GCC OpenMP canonical-loop trip-count precompute BUG-140 fixed on
+the C backend, just via manual chunk math instead of a compiler pragma.
+Testing the extreme-start-bound repro (`i64::MIN` start) across every
+reduction operator revealed the guard's total absence had been masked:
+`Add`/`Mul` happened to still exit with code 3 (matching the expected
+"clean trap" convention) purely by COINCIDENCE -- their own checked-
+arithmetic reduction step (`llvm.sadd.with.overflow.i64` etc., the
+ordinary per-operation overflow check every arithmetic op gets)
+happened to catch a garbage value read via the GEP that the corrupted
+`%chunk`/`%my_lo`/`%my_hi` math produced. Every OTHER operator --
+`BitAnd`, `BitOr`, `BitXor`, `Min`, `Max`, `And`, `Or` -- **SIGSEGV'd
+outright (exit 139)** on the identical repro shape, just swapping the
+reduction operator. Both outcomes are undefined behavior stemming from
+the same corrupted trip-count computation; the "working" two were never
+actually protected, just lucky. This means BUG-140's own regression
+tests (which only exercised `Mul` on LLVM) accidentally validated a
+non-existent guard.
+
+**Fix**: added the LLVM-IR equivalent of BUG-140's C fix --
+`llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)` computed before
+GOMP's chunk-math, branching to a clean `exit(3)` on overflow. Scoped to
+signed loop types only, mirroring BUG-140's own reasoning (an unsigned
+range's `end - start` can never overflow i64). Hit one implementation
+snag worth noting: the fix's first version drew its SSA temp names from
+`ctx.fresh_tmp()` (the parent function's counter) but landed inside the
+OUTLINED function's own body text, which gets its numbering from a
+SEPARATE, independently-reset `outlined_ctx` created later in the same
+function -- producing a `multiple definition of local value` LLVM
+verifier error the moment both counters independently reached the same
+number. Fixed by switching to hard-coded SSA names, matching this whole
+preamble's own established convention (every other name in it --
+`%start_v`, `%end_v`, `%tid`, `%nt`, etc. -- is already hard-coded, not
+counter-generated).
+
+Verified: `opt -passes=verify` accepts the emitted IR; all 9 reduction
+operators now trap identically (exit 3 on LLVM, exit 134 on C) instead
+of a mix of coincidental-trap/SIGSEGV; re-ran the empty-range and
+single-iteration battery (18 cases) plus 3 nesting shapes to confirm the
+fix introduced no regressions; re-ran every existing `parallel for`
+example in `examples/language/english/` (`atomics.vani`,
+`fn_pointers.vani`, `memory_safety.vani`, `parallel_for_jit_run.vani`,
+`parallel_for_mul_reduction.vani`, `parallel.vani`, `tasks.vani`) --
+all still exit 0 with correct output. `vanic check examples` unchanged
+from the post-BUG-144 baseline (74, zero new failures).
+
+Added `parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_
+llvm` and `parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_
+in_llvm` to `src/lib.rs` (mirroring BUG-140's own C-backend test pair
+exactly, LLVM-IR-shaped). Added
+`parallel_for_extreme_start_bound_traps_cleanly_for_every_reduction_op_
+on_llvm` (real subprocess runs across all 9 reduction operators,
+asserting exit code 3 -- not 139 -- for each) and
+`nested_parallel_for_computes_correct_answer_on_both_backends` (real
+subprocess runs, hand-computed expected value 66) to
+`tests/run_end_to_end.rs`.
+
+Full `cargo test --release` clean (2831 lib tests + 213 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category E is now closed. Next free bug number is **BUG-146**.

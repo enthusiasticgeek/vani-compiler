@@ -12904,3 +12904,156 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-145 (2026-08-08): bug-pattern-audit-round-2, category E. Unlike
+// BUG-140's C-backend fix, NOTHING guarded the LLVM backend's `parallel
+// for` GOMP-outlining trip-count computation against an extreme start
+// bound, for any reduction operator. `Add`/`Mul` happened to still trap
+// (their own checked-arithmetic reduction step coincidentally caught a
+// garbage value read via the resulting corrupted, out-of-bounds GEP),
+// but every other reduction operator SIGSEGV'd outright (exit 139) --
+// both were undefined behavior from the same corrupted GOMP chunk
+// computation, not real protection. Verifies every one of the 9
+// `ReductionOp` variants now traps cleanly (not a signal-terminated
+// crash) on the LLVM backend for the exact extreme-bound shape that used
+// to SIGSEGV most of them.
+#[test]
+fn parallel_for_extreme_start_bound_traps_cleanly_for_every_reduction_op_on_llvm() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let cases: &[(&str, &str, &str, &str)] = &[
+        ("add", "+", "0", "acc = acc + xs[i];"),
+        ("mul", "*", "1", "acc = acc * xs[i];"),
+        ("band", "&", "-1", "acc = acc & xs[i];"),
+        ("bor", "|", "0", "acc = acc | xs[i];"),
+        ("bxor", "^", "0", "acc = acc ^ xs[i];"),
+        ("min", "min", "9223372036854775807", "acc = min(acc, xs[i]);"),
+        ("max", "max", "-9223372036854775808", "acc = max(acc, xs[i]);"),
+    ];
+    for (label, op_sym, init, body_stmt) in cases {
+        let src = write_tmp_vani(
+            &format!("bug145-parallel-extreme-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let acc: i64 = {init};
+  parallel for i from -9223372036854775808 to 4
+  reduce acc with {op_sym};
+  {{
+    {body_stmt}
+  }}
+  print acc;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-145 regression: reduction op '{label}' should trap cleanly \
+             (exit 3) on LLVM for an extreme start bound instead of \
+             SIGSEGV-ing (exit 139) or silently computing a wrong answer, \
+             got status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // bool-typed reductions (&&/||) use a different element/init shape.
+    let bool_cases: &[(&str, &str, &str, &str)] = &[
+        ("and", "&&", "true", "acc = acc && xs[i];"),
+        ("or", "||", "false", "acc = acc || xs[i];"),
+    ];
+    for (label, op_sym, init, body_stmt) in bool_cases {
+        let src = write_tmp_vani(
+            &format!("bug145-parallel-extreme-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  let xs: [bool; 4] = [true, true, true, true];
+  let acc: bool = {init};
+  parallel for i from -9223372036854775808 to 4
+  reduce acc with {op_sym};
+  {{
+    {body_stmt}
+  }}
+  print acc;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-145 regression: bool reduction op '{label}' should trap \
+             cleanly (exit 3) on LLVM for an extreme start bound, got \
+             status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+// Companion to the crash-fix test above: confirms nested `parallel for`
+// (both orderings -- parallel-in-parallel and parallel-in-plain) still
+// computes the mathematically correct answer, closing out category E's
+// last untested candidate. Real subprocess run, hand-computed expected
+// value (sum of 0..11 = 66).
+#[test]
+fn nested_parallel_for_computes_correct_answer_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug-pattern-e-nested-parallel-for",
+        r#"
+fn main() -> i64 {
+  let total: i64 = 0;
+  parallel for i from 0 to 3
+  reduce total with +;
+  {
+    let row_sum: i64 = 0;
+    parallel for j from 0 to 4
+    reduce row_sum with +;
+    {
+      row_sum = row_sum + (i * 4 + j);
+    }
+    total = total + row_sum;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "nested parallel for should run cleanly ({:?}), got status {:?}, \
+             stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "66",
+            "wrong nested-reduction result ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

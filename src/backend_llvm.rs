@@ -46481,7 +46481,53 @@ fn emit_parallel_for_via_gomp(
         deferred.push_str("  %nt = sext i32 %nt32 to i64\n");
     }
     // chunk = ceil((end - start) / nt) = (end - start + nt - 1) / nt
-    deferred.push_str("  %range = sub i64 %end_v, %start_v\n");
+    //
+    // BUG-145: this trip-count computation is GOMP's own equivalent of
+    // the GCC OpenMP canonical-loop trip-count precompute BUG-140 fixed
+    // on the C backend -- an extreme start bound (e.g. `i64::MIN`) makes
+    // `end - start` overflow i64. Unlike BUG-140's C fix, NOTHING
+    // guarded this on the LLVM side at all: a raw, unchecked `sub`
+    // silently wrapped, corrupting `%chunk`/`%my_lo`/`%my_hi` into
+    // garbage that the loop below then used as real bounds for an
+    // unchecked fixed-array GEP. Confirmed via direct testing across
+    // every reduction operator: `Add`/`Mul` happened to still trap
+    // (their reduction step's OWN checked-arithmetic intrinsic caught
+    // the garbage value read from the resulting out-of-bounds GEP) but
+    // `BitAnd`/`BitOr`/`BitXor`/`Min`/`Max`/`And`/`Or` SIGSEGV'd outright
+    // -- both are undefined behavior from the same corrupted computation,
+    // not a real guard; the "working" operators were just lucky. Fixed
+    // the same way BUG-140 was: trap cleanly via a checked-subtraction
+    // intrinsic (mirroring the identical `llvm.ssub.with.overflow.i64`
+    // pattern the general checked-`Sub` expression path already uses)
+    // before GOMP's chunk math ever sees a corrupted value. Scoped to
+    // signed loop types only, mirroring BUG-140's own reasoning: an
+    // unsigned range's `end - start` can never overflow i64 in the
+    // first place.
+    // Hard-coded SSA names here (not `ctx.fresh_tmp()`/`fresh_label()`)
+    // to match this whole preamble's existing convention -- the loop
+    // BODY below gets its own independent, restart-from-0 numbering via
+    // a fresh `outlined_ctx` created later (this is one LLVM function,
+    // `@__intent_par_<id>`, but two separate Rust counters feed into
+    // it; drawing from the parent `ctx`'s counter here previously
+    // produced names like `%t6` that collided with `outlined_ctx`'s own
+    // independently-numbered `%t6`).
+    if ty.is_signed_integer() {
+        deferred.push_str(
+            "  %range_pair = call {i64, i1} @llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)\n",
+        );
+        deferred.push_str("  %range = extractvalue {i64, i1} %range_pair, 0\n");
+        deferred.push_str("  %range_of = extractvalue {i64, i1} %range_pair, 1\n");
+        deferred.push_str("  %range_no_of = xor i1 %range_of, true\n");
+        deferred.push_str(
+            "  br i1 %range_no_of, label %par_range_ok, label %par_range_fail\n",
+        );
+        deferred.push_str("par_range_fail:\n");
+        deferred.push_str("  call void @exit(i32 3)\n");
+        deferred.push_str("  unreachable\n");
+        deferred.push_str("par_range_ok:\n");
+    } else {
+        deferred.push_str("  %range = sub i64 %end_v, %start_v\n");
+    }
     deferred.push_str("  %r1 = add i64 %range, %nt\n");
     deferred.push_str("  %r2 = sub i64 %r1, 1\n");
     deferred.push_str("  %chunk = sdiv i64 %r2, %nt\n");

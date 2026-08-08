@@ -14283,6 +14283,73 @@ fn main() -> i64 {
         );
     }
 
+    // BUG-145 (2026-08-08): bug-pattern-audit-round-2, category E. The LLVM
+    // backend's `parallel for` never got BUG-140's fix at all -- its GOMP-
+    // outlining path (`emit_parallel_for_via_gomp`) computes the trip count
+    // via a raw, unchecked `sub i64 %end_v, %start_v` (GOMP's own manual
+    // chunk-math equivalent of GCC's OpenMP canonical-loop trip-count
+    // precompute) with nothing guarding it, for ANY reduction operator.
+    // Confirmed via direct execution across all 9 `ReductionOp` variants on
+    // the extreme-bound repro: `Add`/`Mul` happened to still trap (their
+    // OWN checked-arithmetic reduction step coincidentally caught the
+    // garbage value read via the resulting out-of-bounds GEP), but
+    // `BitAnd`/`BitOr`/`BitXor`/`Min`/`Max`/`And`/`Or` SIGSEGV'd outright --
+    // both are undefined behavior from the same corrupted chunk computation,
+    // not a real guard. Fixed with the LLVM-IR equivalent of BUG-140's C fix:
+    // `llvm.ssub.with.overflow.i64` before GOMP's chunk math ever runs.
+    #[test]
+    fn parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let acc: i64 = -1;
+              parallel for i from -9223372036854775808 to 4
+              reduce acc with &;
+              {
+                acc = acc & xs[i];
+              }
+              return acc;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM");
+        assert!(
+            ll.contains("llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)"),
+            "expected a checked-subtraction guard on the GOMP trip-count \
+             computation, got:\n{ll}"
+        );
+        // The guard must come BEFORE GOMP's own chunk-math (%r1/%chunk/
+        // %my_lo/%my_hi), not after -- otherwise the corrupted value still
+        // feeds the loop bounds.
+        let guard_pos = ll.find("llvm.ssub.with.overflow.i64").unwrap();
+        let chunk_pos = ll.find("%chunk = sdiv").unwrap();
+        assert!(
+            guard_pos < chunk_pos,
+            "expected the overflow guard before GOMP's chunk-size division, \
+             got guard at {guard_pos}, chunk math at {chunk_pos} in:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let acc: i64 = -1;
+              parallel for i from 0 as u64 to 4 as u64
+              reduce acc with &;
+              {
+                acc = acc & xs[i];
+              }
+              return acc;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM");
+        assert!(
+            !ll.contains("llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)"),
+            "expected NO overflow guard for an unsigned loop variable, got:\n{ll}"
+        );
+    }
+
     #[test]
     fn parallel_for_reduce_supports_and_on_bool() {
         let source = r#"

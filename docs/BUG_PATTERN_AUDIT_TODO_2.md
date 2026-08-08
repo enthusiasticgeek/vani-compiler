@@ -401,7 +401,52 @@ Candidates:
 
 </details>
 
-## E. `parallel for` + `reduce` correctness audit beyond the one fixed shape (🟡 medium)
+## E. `parallel for` + `reduce` correctness audit beyond the one fixed shape (🟡 medium) -- CLOSED 2026-08-08, BUG-145
+
+**Update (2026-08-08)**: this category is now closed. All 4 candidates
+tested across all 9 `ReductionOp` variants with hand-computed expected
+values on both backends.
+
+**Confirmed SAFE (3 of 4)**: empty range (every operator correctly
+leaves the accumulator at its identity value, no garbage, no spurious
+trap), single-iteration range (correctly combines with exactly that one
+element), and nested `parallel for` (all 3 nesting shapes computed the
+correct answer, sum of 0..11 = 66, on both backends).
+
+**Confirmed VULNERABLE (1 of 4), fixed as BUG-145 -- the most severe
+finding of this entire audit round.** The question "was BUG-140's guard
+applied unconditionally regardless of reduction operator?" turned out to
+have a much bigger answer than expected: **BUG-140's fix was never
+applied to the LLVM backend at all.** Its GOMP-outlining path computes
+the trip count via a raw, unchecked `sub i64 %end_v, %start_v` -- GOMP's
+own hand-rolled equivalent of the exact GCC OpenMP trip-count precompute
+BUG-140 fixed on the C backend. Testing the extreme-bound repro across
+every operator revealed the guard's total absence had been masked:
+`Add`/`Mul` happened to still exit 3 by pure COINCIDENCE (their own
+per-operation checked-arithmetic caught a garbage value read via the
+resulting corrupted, out-of-bounds GEP) -- but `BitAnd`, `BitOr`,
+`BitXor`, `Min`, `Max`, `And`, `Or` all **SIGSEGV'd outright (exit
+139)** on the identical shape. Both are undefined behavior from the same
+corrupted computation; BUG-140's own LLVM-side "it already traps
+correctly" conclusion (which only ever tested `Mul`) was validating a
+guard that never existed. Fixed with the LLVM-IR equivalent of BUG-140's
+fix: `llvm.ssub.with.overflow.i64` before GOMP's chunk math, using
+hard-coded SSA names to match this preamble's own convention (a first
+attempt using the parent function's temp counter collided with the
+outlined function body's own independently-numbered counter, an LLVM
+verifier error worth remembering for next time this code is touched).
+
+Regression tests: `parallel_for_with_i64_min_start_bound_gets_an_
+overflow_guard_in_llvm`, `parallel_for_with_unsigned_loop_var_gets_no_
+overflow_guard_in_llvm` (src/lib.rs, mirroring BUG-140's C-backend pair
+exactly); `parallel_for_extreme_start_bound_traps_cleanly_for_every_
+reduction_op_on_llvm` (all 9 operators, asserts exit 3 not 139),
+`nested_parallel_for_computes_correct_answer_on_both_backends`
+(tests/run_end_to_end.rs). Full writeup in `docs/TODO_CURRENT.md`'s
+BUG-145 section.
+
+<details>
+<summary>Original (2026-08-07) category E writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: BUG-140 found ONE silent-wrong-answer shape in
 `parallel for` (an extreme start bound). The feature has several other
@@ -426,6 +471,8 @@ real hand-computed expected values:
   "Backends today still lower this as a sequential for loop"), does nesting
   still compute the mathematically correct answer, or does something about
   the reduction-variable/pragma machinery assume non-nesting?
+
+</details>
 
 ## F. Localfuzz harness's own false-positive surface (🟢 low priority — process improvement, not a compiler bug)
 
