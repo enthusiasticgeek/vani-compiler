@@ -990,7 +990,7 @@ vanic-candidate-1928013-1785795059753022202: /tmp/vanic-candidate-1928013-178579
 
 This bug affects the `--backend=c` and `--backend=llvm` backends.
 
-### STATUS: needs human/frontier root-cause review.
+### STATUS: RE-VERIFIED CLEAN (2026-08-08) -- no longer reproduces on current main (commit a20345e). Whatever fixed this wasn't traced to a specific BUG-N -- most likely an incidental side effect of the day's BUG-141..145 fixes or earlier work. Closing as stale.
 
 ---
 
@@ -1824,7 +1824,7 @@ Fix attempt: `tools/localfuzz/findings/20260804-101448-backend-divergence-2f33b4
 
 - **Backend(s) Affected:** The bug is reproducible with both the LLVM and C backends.
 
-**STATUS: needs human/frontier root-cause review.
+**STATUS: RE-VERIFIED CLEAN (2026-08-08) -- no longer reproduces on current main (commit a20345e). Closing as stale.
 
 ---
 
@@ -1871,7 +1871,7 @@ STAGING ENTRY FOR BUG REPORT:
 
 **AFFECTED BACKENDS**: LLVM
 
-**STATUS: needs human/frontier root-cause review.**
+**STATUS: RE-VERIFIED CLEAN (2026-08-08) -- no longer reproduces on current main (commit a20345e). Closing as stale.**
 
 ---
 
@@ -1893,7 +1893,7 @@ STATUS: NOT A BUG -- documented, permanent trap-code convention (reviewed 2026-0
 Repro: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-124721-backend-divergence-e1a72b3ec9/fix_attempt.md`
 
-`vani-lang: pashto` with mutant/generated source failing in backend-divergence (`vanic-candidate-2894631-1785847639971673372`) due to assertion failure in `fn_main`. Expected behavior was `-9223372036854775808`, but got assertion error. STATUS: needs human/frontier root-cause review.
+`vani-lang: pashto` with mutant/generated source failing in backend-divergence (`vanic-candidate-2894631-1785847639971673372`) due to assertion failure in `fn_main`. Expected behavior was `-9223372036854775808`, but got assertion error. STATUS: RE-VERIFIED CLEAN (2026-08-08) -- no longer reproduces on current main (commit a20345e). Closing as stale.
 
 ---
 
@@ -2070,7 +2070,7 @@ A backend-divergence occurred when attempting to compile a specific mutant in th
 Repro: `tools/localfuzz/findings/20260804-160100-backend-divergence-1f30a9e695/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260804-160100-backend-divergence-1f30a9e695/fix_attempt.md`
 
-**STATUS: needs human/frontier root-cause review.**
+**STATUS: RE-VERIFIED CLEAN (2026-08-08) -- no longer reproduces on current main (commit a20345e). Closing as stale.**
 
 ---
 
@@ -2490,7 +2490,7 @@ The compilation process resulted in either a crash or a hang, specifically indic
 ### Which backend(s) it affects:
 This bug report focuses on both the LLVM and C backends since the code snippet is designed to work with both.
 
-### STATUS: needs human/frontier root-cause review.
+### STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Both backends time out because the fuzzed source itself calls `sleep_ms(9223372036854775807, ...)` (i64::MAX milliseconds, ~292 million years) via the async delay() smoke-test template -- a correct implementation is EXPECTED to hang on this input. Not a compiler defect; the harness's 20s timeout is just far too short for a legitimately absurd sleep duration in the fuzzed program. Closing.
 I have not read the compiler source, so I do not have a root cause for this issue. However, I am confident that the observed symptom (run-crash) can be attributed to a problem in the implementation of either the `delay` function or the asynchronous runtime within the vani compiler.
 
 To address this issue, further investigation into the compiler's source code will be required. This may involve identifying the specific parts of the code that are causing the timeout and debugging them to understand why they are failing.
@@ -2590,7 +2590,7 @@ The LLVM backend was not executed.
 **Affected Backends**:
 The bug affects the LLVM backend, which was not executed during the test.
 
-**STATUS: needs human/frontier root-cause review.**
+**STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented, permanent SIGABRT-vs-exit(3) trap-code convention difference between backends (see docs/TODO_CURRENT.md's BUG-140/145 writeups and the runtime-errors primer), not a bug. Closing.**
 
 ---
 
@@ -2960,7 +2960,7 @@ The compilation process was successful, but the execution took longer than expec
 - **Code Review**: Have a peer review the generated code to ensure it is free of errors and follows best practices for the vani language.
 - **Compiler and Runtime Updates**: Consider updating the compiler and runtime components to resolve any known bugs or improvements.
 
-**STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Both backends time out because the fuzzed source has a genuine, correct infinite loop: `let i: i64 = -9223372036854775808; while i < 5 { i = i + 1; }` needs ~9.2 quintillion iterations to terminate -- any correct implementation takes far longer than the harness's 20s timeout to actually finish. Not a compiler defect. Closing.
 
 ---
 
@@ -3288,7 +3288,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-030058-backend-divergence-b50f8e
 Repro: `tools/localfuzz/findings/20260808-043453-backend-divergence-0d08fab9e3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-043453-backend-divergence-0d08fab9e3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3297,7 +3297,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-052212-backend-divergence-cb94a73ac4/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-052212-backend-divergence-cb94a73ac4/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3391,7 +3391,7 @@ The vani-compiler local staging log shows a backend-divergence issue with the ge
 Repro: `tools/localfuzz/findings/20260808-074400-backend-divergence-bf2461b5d3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-074400-backend-divergence-bf2461b5d3/fix_attempt.md`
 
- STATUS: needs human/frontier root-cause review.
+ STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3450,7 +3450,7 @@ Vani-compiler was tested on both LLVM and Clang backends.
 Repro: `tools/localfuzz/findings/20260808-092406-backend-divergence-cc96713f85/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-092406-backend-divergence-cc96713f85/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3459,7 +3459,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-094730-run-crash-8cf8ef3265/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-094730-run-crash-8cf8ef3265/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Same `sleep_ms(9223372036854775807, ...)` async-template issue as 20260806-162420-run-crash-3b08e2a115 -- see that entry. Not a compiler defect. Closing.
 
 ---
 
@@ -3468,7 +3468,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-102231-run-crash-e5381da78e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-102231-run-crash-e5381da78e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Same `sleep_ms(9223372036854775807, ...)` async-template issue as 20260806-162420-run-crash-3b08e2a115 -- see that entry. Not a compiler defect. Closing.
 
 ---
 
@@ -3507,7 +3507,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-105511-backend-divergence-05c242
 Repro: `tools/localfuzz/findings/20260808-120147-backend-divergence-b9bbca4215/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-120147-backend-divergence-b9bbca4215/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 The vanic compiler encountered a backend-divergence issue when running the `fn_pointers.vani` example file with both the LLVM and C backends. The observed symptom was an integer overflow during multiplication in the `square` function, which caused divergent output between the two backends. This divergence occurred on the `i64.mul` operation, indicating that the type inference and handling of signed integers might not be consistent across both backends.
 
@@ -3520,7 +3520,7 @@ To resolve this issue, a human or frontier model would need to examine the speci
 Repro: `tools/localfuzz/findings/20260808-120628-backend-divergence-9b020d96de/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-120628-backend-divergence-9b020d96de/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3588,7 +3588,7 @@ The program crashes with an integer overflow error when executed using the C bac
 Repro: `tools/localfuzz/findings/20260808-124017-backend-divergence-d9be2b8ffe/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-124017-backend-divergence-d9be2b8ffe/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3597,7 +3597,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-125056-backend-divergence-efabc6f05d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-125056-backend-divergence-efabc6f05d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3661,7 +3661,7 @@ The C backend crashed due to an integer overflow in the `
 Repro: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Both backends time out because the fuzzed source's mutator flipped a loop increment: `let i: i64 = 0; while i < 50 { ...; i = i + -1; }` -- `i` decreases every iteration and never reaches 50, an infinite loop in the mutated test program itself. Not a compiler defect. Closing.
 
 ---
 
@@ -3670,7 +3670,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: REAL FINDING, NOT YET FIXED (2026-08-08) -- confirmed and minimized: `let bits: u8 = 1 as u8; let shifted: u8 = bits << 3 + 0;` produces malformed LLVM IR (`%v_2 = shl i8 %v_0, %v_1` where `%v_1` is typed i64, not i8 -- `lli` rejects it outright: "defined with type 'i64' but expected 'i8'"). Trigger is specifically a COMPOUND shift-amount expression (`3 + 0`); a bare literal shift amount (`bits << 3`) works fine, so this isn't the already-fixed BUG-141/BUG-138 index-width class -- it's the same width-mismatch family applied to `Shl`'s RHS operand instead of a GEP/call index. Queued as a category-A-shaped candidate in docs/BUG_PATTERN_AUDIT_TODO_3.md for the next session.
 
 The provided CANDIDATE bug report has been drafted based on the given corpus file and mutant source, which exhibit a backend-divergence issue in the vani-compiler project. The backend-divergence kind indicates that the program's output differs significantly between LLVM and C backends when run with different options.
 
@@ -3725,7 +3725,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-145959-backend-divergence-f3fef0
 Repro: `tools/localfuzz/findings/20260808-150021-backend-divergence-65faa42884/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-150021-backend-divergence-65faa42884/fix_attempt.md`
 
-**STATUS: needs human/frontier root-cause review.**
+**STATUS: REAL FINDING, NOT YET FIXED (2026-08-08) -- confirmed: an `enum` with a `Box<dyn Iface>`-payloaded variant that is NEVER CONSTRUCTED (only the enum's OTHER variants are instantiated in the repro) fails to compile on the C backend: `error: unknown type name 'intent_dyn_Drawable'` at the enum's own union-member declaration for that variant's storage slot. LLVM's on-demand lowering never touches the unconstructed variant and compiles clean. Same eager-whole-module-C-emission-vs-on-demand-LLVM-lowering divergence shape BUG-139 itself found (payload type never gets its prerequisite type declaration emitted before the union references it) -- but for `Box<dyn Iface>`'s fat-pointer/vtable type specifically, not a name-existence gap BUG-139's fix would catch (`Drawable` IS a real, declared interface here). Queued as a category-A-adjacent candidate in docs/BUG_PATTERN_AUDIT_TODO_3.md for the next session.**
 
 **BACKENDS AFFECTED:**
 
@@ -3784,7 +3784,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-152911-backend-divergence-a7aae9
 Repro: `tools/localfuzz/findings/20260808-154503-run-crash-f0d4363f6b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-154503-run-crash-f0d4363f6b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Both backends time out: the mutated source sends 2 values on a single-slot rendezvous Channel but calls `channel_recv` THREE times -- the 3rd recv spin-waits forever for a message that was never sent. An extra/unmatched recv call introduced by mutation, not a compiler defect. Closing.
 
 This bug report is for a reproduction of a crash or hang in the vani-compiler project's local staging log for the example `concurrency.vani`. The mutant/source is provided below, along with the observed symptom (crash/hang) and which backend(s) it affects. No specific cause has been determined yet, and a human/root-cause review is required.
 
@@ -3825,7 +3825,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-154851-backend-divergence-c17fc7
 Repro: `tools/localfuzz/findings/20260808-160950-backend-divergence-74aa0ed7f5/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-160950-backend-divergence-74aa0ed7f5/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3834,7 +3834,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260808-164617-backend-divergence-01fb0e3f02/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-164617-backend-divergence-01fb0e3f02/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 The vani-compiler project's local staging log has reported a backend-divergence issue with the provided CANDIDATE bug report. The generated source contains an `if let` statement followed by `while let` loop, each binding to an enum `Opt`. The `next_opt` function performs an arithmetic operation that can lead to integer overflow when dealing with large numbers. Upon running the code, the `if let` statement prints the value `42`, the `while let` loop iterates through a series of values without diverging, and the main function returns 0.
 
@@ -3849,7 +3849,7 @@ A human/frontier root-cause review is required to determine the exact cause of t
 Repro: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: BENIGN (2026-08-08) -- re-verified on current main (commit a20345e). C exits 134, LLVM exits 3 -- the documented trap-code convention difference, not a bug. Closing.
 
 ---
 
@@ -3866,7 +3866,7 @@ The vani-compiler local staging log reveals a run-crash issue in the test case `
 
 ---
 
-**STATUS: needs human/frontier root-cause review.**
+**STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a20345e). Same `sleep_ms(9223372036854775807, ...)` async-template issue as 20260806-162420-run-crash-3b08e2a115 -- see that entry. Not a compiler defect. Closing.**
 
 ---
 
