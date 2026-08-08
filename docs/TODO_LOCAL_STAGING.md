@@ -3252,3 +3252,31 @@ found seconds apart from the same stale binary. Re-verified against a fresh
 `main` build: C now correctly exits `134`, matching the documented
 C-exits-134-vs-LLVM-exits-3 trap convention. Run `tools/localfuzz/refresh.sh`
 to bring this worktree's binary current.
+
+---
+
+### Candidate: 20260808-030058-backend-divergence-b50f8e9f88
+
+Repro: `tools/localfuzz/findings/20260808-030058-backend-divergence-b50f8e9f88/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-030058-backend-divergence-b50f8e9f88/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
