@@ -12478,3 +12478,97 @@ fn main() -> i64 { return 0; }
         "expected an unknown-type diagnostic on stderr, got: {stderr}"
     );
 }
+
+// BUG-140 (2026-08-07): found via localfuzz. `parallel for i from
+// i64::MIN to 4 { ... xs[i] ... }` on the C backend used to silently
+// execute ZERO iterations (GCC's OpenMP canonical-loop trip-count
+// computation is UB when the true iteration count overflows the loop
+// variable's type), returning the untouched initial reduction value
+// instead of trapping -- while LLVM correctly trapped on the same
+// program. Verifies both the pathological case now traps identically
+// on both backends, AND that a normal, non-pathological `parallel for`
+// still computes the correct answer (no false-positive regression).
+#[test]
+fn parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug140-parallel-for-i64-min",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  parallel for i from -9223372036854775808 to 4
+  reduce prod with *;
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "BUG-140 regression: C backend should trap (134) on this extreme \
+         loop range instead of silently skipping the loop, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("integer overflow"),
+        "expected an overflow message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "LLVM should also trap on this same program; status {:?}",
+        output_llvm.status
+    );
+
+    // Normal case: no false-positive regression.
+    let normal_src = write_tmp_vani(
+        "bug140-parallel-for-normal",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  parallel for i from 0 to 4
+  reduce prod with *;
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_normal = Command::new(binary)
+        .args(["run", normal_src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output_normal.status.success(),
+        "a normal parallel_for loop should not trap; status {:?}, stderr: {}",
+        output_normal.status,
+        String::from_utf8_lossy(&output_normal.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output_normal.stdout).trim(),
+        "24",
+        "expected the correct product 24, got: {}",
+        String::from_utf8_lossy(&output_normal.stdout)
+    );
+}

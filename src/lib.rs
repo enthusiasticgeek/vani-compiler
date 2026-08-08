@@ -13861,6 +13861,73 @@ fn main() -> i64 {
         compile_to_c(source).expect("reduce with * on integer should type-check");
     }
 
+    // BUG-140 (2026-08-07): found via localfuzz. `parallel for i from
+    // i64::MIN to 4 { ... xs[i] ... }` traps correctly on LLVM but the C
+    // backend's `#pragma omp parallel for` silently executed ZERO
+    // iterations instead -- GCC's OpenMP canonical-loop trip-count
+    // computation (`end - start`, signed arithmetic) is undefined
+    // behavior when the true iteration count exceeds the loop variable's
+    // max positive value. A genuine silent-wrong-answer bug, not a
+    // crash. Fixed by computing `end - start` through the same checked-
+    // subtraction helper regular `Sub` expressions already use, right
+    // before the omp-pragma'd loop -- traps cleanly instead of letting
+    // GCC's own lowering corrupt the trip count.
+    #[test]
+    fn parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let prod: i64 = 1;
+              parallel for i from -9223372036854775808 to 4
+              reduce prod with *;
+              {
+                prod = prod * xs[i];
+              }
+              return prod;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_check_i64_sub(") && c.contains("_Pragma(\"omp parallel for"),
+            "expected an intent_check_i64_sub(...) overflow guard immediately \
+             before the omp-pragma'd loop, got:\n{c}"
+        );
+        // The guard call must come BEFORE the pragma/loop, not after --
+        // otherwise GCC's own trip-count computation still runs first.
+        let guard_pos = c.find("intent_check_i64_sub(").unwrap();
+        let pragma_pos = c.find("_Pragma(\"omp parallel for").unwrap();
+        assert!(
+            guard_pos < pragma_pos,
+            "expected the overflow guard before the omp pragma, got guard at \
+             {guard_pos}, pragma at {pragma_pos} in:\n{c}"
+        );
+    }
+
+    #[test]
+    fn parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_c() {
+        // Unsigned loop types can't hit the signed-overflow trip-count
+        // bug -- `end - start` for a well-formed ascending unsigned
+        // range never exceeds the type's own range. The guard should be
+        // scoped to signed loop variable types only.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let prod: i64 = 1;
+              parallel for i from 0 as u64 to 4 as u64
+              reduce prod with *;
+              {
+                prod = prod * xs[i];
+              }
+              return prod;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            !c.contains("intent_check_u64_sub("),
+            "expected NO overflow guard for an unsigned loop variable, got:\n{c}"
+        );
+    }
+
     #[test]
     fn parallel_for_reduce_supports_and_on_bool() {
         let source = r#"

@@ -14853,7 +14853,40 @@ return __intent_ret; }}\n",
         } => {
             let local = local_name(var);
             let c_ty = c_leaf_type(ty);
+            let start_v = emit_expr(start);
+            let end_v = emit_expr(end);
             if *parallel {
+                // BUG-140 (2026-08-07): found via localfuzz. GCC's
+                // OpenMP canonical-loop-form trip-count computation
+                // (internally `end - start`, using SIGNED arithmetic)
+                // is undefined behavior when that difference exceeds
+                // the type's max positive value -- e.g. `start` near
+                // `i64::MIN` with a small positive `end`. Confirmed
+                // directly: the exact same loop bounds run correctly
+                // under a plain sequential `for` (no omp pragma) but
+                // silently execute ZERO iterations under `#pragma omp
+                // parallel for` -- a genuine silent-wrong-answer bug,
+                // not a crash, so it can't be caught by the existing
+                // "does this trap cleanly" test shape. Guard by
+                // computing `end - start` through the SAME checked-
+                // subtraction helper regular Sub expressions already
+                // use (`intent_check_<ty>_sub`, discarding the
+                // result) -- if the loop's true iteration count would
+                // overflow this type, trap here with a clean
+                // diagnostic before GCC's own OpenMP lowering ever
+                // sees the loop, instead of silently corrupting the
+                // trip count. Unsigned loop types can't hit this --
+                // `end - start` for a well-formed ascending unsigned
+                // range never exceeds the type's own range -- so the
+                // guard is scoped to signed types only.
+                if ty.is_signed_integer() {
+                    out.push_str(&format!(
+                        "  (void){}({}, {});\n",
+                        overflow_helper(BinaryOp::Sub, ty),
+                        end_v,
+                        start_v,
+                    ));
+                }
                 // Effects verifier has proven the body is pure
                 // (no shared mutable state, no I/O, no consuming
                 // mutator calls); reductions are carved out via
@@ -14882,8 +14915,8 @@ return __intent_ret; }}\n",
                 "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
                 c_ty,
                 local,
-                emit_expr(start),
-                emit_expr(end)
+                start_v,
+                end_v
             ));
             for s in body {
                 emit_stmt(s, out);

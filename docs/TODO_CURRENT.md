@@ -9680,3 +9680,70 @@ integration suites, 0 failed) plus the full-corpus `vanic check examples` sweep.
 Localfuzz worktree's `docs/TODO_LOCAL_STAGING.md` closed out for all 77 previously-
 unreviewed candidates (see the localfuzz worktree's own commit history on the
 `local-fuzz-findings` branch).
+
+## BUG-140 (2026-08-07) -- `parallel for` with an extreme start bound silently skipped the loop on the C backend
+
+The 4th finding from the same localfuzz triage pass above, deliberately held back
+from the BUG-137/138/139 summary given to the user (a design-fork-sized new
+investigation, not something to silently fold into an already-large pass) and
+picked up separately once the user confirmed they wanted it chased.
+
+`parallel for i from -9223372036854775808 to 4 { ... xs[i] ... }` (mutation of
+`examples/language/english/parallel_for_mul_reduction.vani`, start bound set to
+`i64::MIN`) traps correctly on LLVM (out-of-bounds `xs[i]`, exit 3) but on the C
+backend silently printed `1` (the untouched initial `prod` value) and exited 0 --
+the loop body never ran at all. Root-caused with a standalone C probe compiled
+with/without `-fopenmp`: the exact same canonical loop form (`for (int64_t i =
+(-9223372036854775808); i < 4; i++) { ... }`) runs correctly as a plain sequential
+loop but executes ZERO iterations under `#pragma omp parallel for`. GCC's OpenMP
+lowering computes the loop's trip count internally as `end - start` using SIGNED
+64-bit arithmetic; for this range, `4 - INT64_MIN` mathematically exceeds
+`INT64_MAX`, triggering signed-integer-overflow UB in GCC's own generated
+trip-count code -- observed result: the computed count comes out as (effectively)
+zero, so OpenMP schedules no work at all. A genuine silent-wrong-answer bug, not a
+crash, and specific to the `#pragma omp parallel for` path -- `parallel: bool ==
+false` loops (plain `_Pragma("GCC ivdep")`) are unaffected, confirmed directly.
+
+Fixed by computing `end - start` through the SAME overflow-checked-subtraction
+helper (`intent_check_<ty>_sub`, `backend_c.rs`'s `overflow_helper`) that ordinary
+`Sub` expressions already use elsewhere in this file, discarding the result,
+emitted immediately before the `_Pragma("omp parallel for ...")` line. If the
+loop's true iteration count would overflow the loop variable's type, this traps
+cleanly (reusing the exact same "assertion failed"-style `exit(3)`-on-LLVM /
+`abort()`-on-C mechanism as every other checked-arithmetic site, including
+today's BUG-136 stdout-flush fix) before GCC's own lowering ever sees the loop,
+instead of letting it silently corrupt the trip count. Scoped to signed loop
+variable types only (`ty.is_signed_integer()`) -- an unsigned loop variable can't
+hit this: `end - start` for a well-formed ascending unsigned range never exceeds
+the type's own representable range, so guarding it would just be dead-weight
+runtime cost on the hot path for zero benefit.
+
+Verified directly: the exact repro now traps identically on both backends (LLVM
+exit 3, C exit 134 "integer overflow in i64 sub" -- the standard trap-code
+convention documented in `10b_runtime_errors_primer.md`'s Row 2, matching
+BUG-136's fix from earlier the same day). Re-ran EVERY `parallel for`-using
+example in `examples/language/english/` (`atomics.vani`, `fn_pointers.vani`,
+`parallel_for_jit_run.vani`, `memory_safety.vani`, `parallel_for_mul_reduction.vani`,
+`parallel.vani`, `tasks.vani`) on the C backend to confirm zero false-positive
+regressions -- all still exit 0 with correct output, confirmed the unmutated
+`parallel_for_mul_reduction.vani` still computes the correct product (24).
+
+Added `parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c` (asserts
+the guard call text is present AND ordered before the omp pragma in the emitted
+C) and `parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_c` (asserts
+the guard is absent for a `u64` loop variable) to `src/lib.rs`. Added
+`parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c` to
+`tests/run_end_to_end.rs` (real subprocess runs: the pathological case now traps
+identically on both backends with the overflow message on stderr, AND a normal,
+non-pathological `parallel for` still computes the correct product 24 -- both
+halves in one test so a future regression in either direction is caught).
+
+No tutorial-documented behavior to correct or extend -- this was previously
+undocumented internal codegen behavior, not something any tutorial page claimed
+was safe.
+
+Full `cargo test --release` clean (2815 lib tests + all integration suites, 0
+failed).
+
+This closes out the last of the 4 findings from the 2026-08-07 localfuzz backlog
+triage. Next free bug number is **BUG-141**.
