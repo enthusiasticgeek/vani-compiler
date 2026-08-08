@@ -3223,7 +3223,17 @@ This bug affects both the LLVM and C backends of the vani compiler.
 Repro: `tools/localfuzz/findings/20260807-221140-backend-divergence-0d05995ac7/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-221140-backend-divergence-0d05995ac7/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- stale harness binary, not a real divergence (reviewed
+2026-08-07). The recorded `c.rc: 1` is the pre-BUG-130 masked exit code
+(`vanic run` used to report a signal-killed child as a bare `1` instead of
+`128+signal`) -- this worktree's own `target/release/vanic` binary hadn't been
+refreshed since before BUG-130 landed on `main` earlier today. Re-ran this exact
+repro against a fresh `main` build: C now correctly exits `134`, matching the
+documented C-exits-134-vs-LLVM-exits-3 trap convention (same non-bug pattern as
+the other 9 candidates closed out in this same pass). The qwen hypothesis below
+("lifetime elision... auto-deref") is not accurate -- disregard. Run
+`tools/localfuzz/refresh.sh` to bring this worktree's binary current so future
+findings don't reproduce already-fixed bugs.
 
 The generated source (`main.vani`) has introduced a bug in the handling of multi-call chain reads back to the same source. Specifically, the compiler is performing lifetime elision incorrectly when chaining `shared` calls with an auto-deref, leading to an overflow error during multiplication operations. This issue affects the 'llvm' backend but does not affect the 'rc' (return code) in the 'c' (compiler) run.
 
@@ -3236,4 +3246,9 @@ To resolve this, the developer should investigate the compiler's logic for lifet
 Repro: `tools/localfuzz/findings/20260807-225636-backend-divergence-7fe600fa45/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260807-225636-backend-divergence-7fe600fa45/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A BUG -- stale harness binary, not a real divergence (reviewed
+2026-08-07). Same class as 20260807-221140-backend-divergence-0d05995ac7 above,
+found seconds apart from the same stale binary. Re-verified against a fresh
+`main` build: C now correctly exits `134`, matching the documented
+C-exits-134-vs-LLVM-exits-3 trap convention. Run `tools/localfuzz/refresh.sh`
+to bring this worktree's binary current.
