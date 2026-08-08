@@ -3685,3 +3685,35 @@ The observed symptom is that the program's output diverges between these two bac
 This divergence is indicated by the raw result data provided in JSON format, which shows different `rc` values and outputs for the C and LLVM backends.
 
 To address this issue, a human/frontier model should be used to review the generated source code for potential issues that might be causing the divergent behavior between the two backends.
+
+---
+
+### Candidate: 20260808-145959-backend-divergence-f3fef04d1a
+
+Repro: `tools/localfuzz/findings/20260808-145959-backend-divergence-f3fef04d1a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-145959-backend-divergence-f3fef04d1a/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "index out of bounds: 0, len 0\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "94849281095851\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "features": [
+    "clone_at on a Vec<Struct> element",
+    "array/Vec bounds and iteration"
+  ]
+}
+```
+
