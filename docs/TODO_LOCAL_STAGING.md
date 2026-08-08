@@ -3344,3 +3344,31 @@ GENERATED SOURCE:
   নিশ্চিত s == 30;
 
   মান xs: [i64
+
+---
+
+### Candidate: 20260808-054600-backend-divergence-c22d70fbf0
+
+Repro: `tools/localfuzz/findings/20260808-054600-backend-divergence-c22d70fbf0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-054600-backend-divergence-c22d70fbf0/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "integer overflow in i64 add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
