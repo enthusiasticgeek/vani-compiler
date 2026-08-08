@@ -10230,3 +10230,56 @@ Full `cargo test --release` clean (2831 lib tests + 213 end-to-end tests
 + all other integration suites, 0 failed).
 
 Category E is now closed. Next free bug number is **BUG-146**.
+
+## Localfuzz harness hardening (2026-08-08) -- category F, no BUG-N (process improvement, not a compiler bug)
+
+Sixth and final item from `docs/BUG_PATTERN_AUDIT_TODO_2.md`. Per the
+audit doc's own framing this was explicitly not a compiler defect --
+`tools/localfuzz/harness.py`'s `CRASH_MARKERS` substring-match heuristic
+had a confirmed false-positive (the bare identifier `RUST_BACKTRACE`
+appearing as literal DATA inside a qwen-generated candidate's own source
+text, echoed back verbatim by vanic's normal, non-crashing parse-error
+diagnostic -- not an actual Rust panic).
+
+**Fix, two independent hardenings**:
+1. Tightened the `RUST_BACKTRACE` marker from the bare env-var name to
+   the full, specific phrase Rust's panic runtime actually appends after
+   a real panic (`"run with `RUST_BACKTRACE=1`"`) -- a fuzzer
+   coincidentally generating that exact multi-word phrase as ordinary
+   program text is astronomically less likely than the single word
+   alone matching by chance.
+2. Added a signal-based crash check to `is_crash()`: on POSIX,
+   `subprocess.Popen`'s `returncode` is negative when the child died by
+   signal (e.g. -11 for SIGSEGV) -- a reliable, text-content-independent
+   signal that was sitting unused in `result["rc"]` already. Added as an
+   ADDITIONAL check alongside the text markers, not a replacement:
+   confirmed this project's default Rust panic strategy is unwind (no
+   `panic = "abort"` in `Cargo.toml`), so an ordinary panic reaching
+   `main()` exits with a normal positive code (101), not a signal death
+   -- text-matching stays the only way to catch that class of crash;
+   the signal check mainly catches `vanic`'s own process dying by signal
+   (e.g. a genuine stack-overflow SIGSEGV in the compiler itself that
+   the panic runtime can't turn into a clean unwind).
+
+Verified with a standalone ad-hoc script (no formal pytest harness
+exists anywhere in this repo for Python tooling, so didn't invent one
+for a single low-priority fix) covering 5 cases: the original false
+positive (now correctly NOT flagged), a genuine panic with the full
+anchored phrase (still correctly flagged), a signal-killed child with
+no text markers at all (newly correctly flagged), a clean run (still
+correctly not flagged), and a timeout (still correctly flagged
+regardless of `rc`). Confirmed via grep that no other script in
+`tools/localfuzz/` references `CRASH_MARKERS`/`is_crash` directly, so
+this change has no cross-file blast radius.
+
+Deliberately did NOT harden every other `CRASH_MARKERS` entry
+speculatively -- the other 9 markers are all multi-word phrases already
+(the same "coincidental match" risk class this fix targets), except
+`SIGSEGV`/`SIGABRT`, which are lower-risk bare tokens a fuzzer is much
+less likely to type verbatim than a plausible-sounding env-var name.
+Left as a possible future follow-up, not chased now, matching this
+item's own explicitly-stated low priority.
+
+This closes out `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s full scope -- all 6
+categories (A-F) are now closed. The next bug hunt needs a genuinely new
+theme, not a category G, per that document's own closing note.

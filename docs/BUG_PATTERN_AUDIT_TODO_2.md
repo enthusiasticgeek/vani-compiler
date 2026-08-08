@@ -1,5 +1,12 @@
 # vāṇी — Bug-pattern audit, round 2 (post-BUG-140)
 
+**STATUS (2026-08-08): CLOSED.** All 6 categories (A-F) triaged and
+resolved — BUG-141 through BUG-145 fixed and pushed, plus one harness
+hardening (category F, not a compiler defect, no BUG-N). Per this doc's
+own closing convention (see the "Process" section at the bottom), the
+next bug hunt needs a genuinely new theme, not a category G — this
+file's scope is exhausted.
+
 Created 2026-08-07 for a fresh session to pick up. Mirrors
 `docs/BUG_PATTERN_AUDIT_TODO.md`'s own methodology exactly (that document's
 8 categories, A through H, are now fully closed — BUG-113 through BUG-125 —
@@ -474,23 +481,40 @@ real hand-computed expected values:
 
 </details>
 
-## F. Localfuzz harness's own false-positive surface (🟢 low priority — process improvement, not a compiler bug)
+## F. Localfuzz harness's own false-positive surface (🟢 low priority — process improvement, not a compiler bug) -- CLOSED 2026-08-08, no BUG-N (not a compiler defect)
 
-**Where this comes from**: found during the 2026-08-07 77-item backlog
-triage — one candidate's "crash" was the harness's own `CRASH_MARKERS`
-substring-match heuristic (`tools/localfuzz/harness.py`) tripping on the
-literal text `RUST_BACKTRACE` appearing in the FUZZED SOURCE ITSELF (quoted
-verbatim in a normal parse-error diagnostic), not an actual Rust panic. The
-harness's `is_crash()` does a dumb `any(m in result["stderr"] for m in
-CRASH_MARKERS)` check — any qwen-hallucinated garbage source text containing
-one of `CRASH_MARKERS`' literal strings ("panicked at", "SIGSEGV", "internal
-compiler error", etc.) as DATA rather than an actual signal could produce
-the same false positive again. Not a vani-compiler bug and not blocking —
-worth a small harness hardening (check the child's actual OS-level
-termination signal via `proc.returncode < 0` on POSIX, rather than /
-in addition to text-matching) the next time someone is touching
-`harness.py` for an unrelated reason. Low priority; listed here so it
-isn't silently forgotten, not because it needs its own session.
+**Update (2026-08-08)**: closed. Two independent hardenings to
+`tools/localfuzz/harness.py`, exactly matching this category's own
+suggested fix: (1) tightened the `RUST_BACKTRACE` marker to the full
+phrase Rust's panic runtime actually prints (`"run with
+`RUST_BACKTRACE=1`"`), not the bare env-var name, so a fuzzer generating
+that identifier as ordinary program text can't coincidentally match it
+again; (2) added a signal-based check to `is_crash()` (`result["rc"] <
+0` on POSIX) as an ADDITIONAL, text-content-independent crash signal,
+alongside (not replacing) the text markers -- confirmed this project's
+default Rust panic strategy is unwind (no `panic = "abort"` in
+`Cargo.toml`), so an ordinary panic still exits with a normal positive
+code (101) and needs text-matching to catch; the signal check mainly
+catches `vanic`'s own process dying by a raw signal (e.g. a genuine
+stack-overflow SIGSEGV in the compiler itself). Verified with a
+standalone ad-hoc script covering 5 cases (the original false positive,
+a genuine panic, a signal-killed child, a clean run, a timeout) since no
+Python test infrastructure exists anywhere in this repo to hook into.
+Deliberately did not harden every other marker speculatively -- full
+writeup in `docs/TODO_CURRENT.md`'s "Localfuzz harness hardening"
+section.
+
+**Original (2026-08-07) writeup, kept for the reasoning trail**: found
+during the 2026-08-07 77-item backlog triage — one candidate's "crash"
+was the harness's own `CRASH_MARKERS` substring-match heuristic
+tripping on the literal text `RUST_BACKTRACE` appearing in the FUZZED
+SOURCE ITSELF (quoted verbatim in a normal parse-error diagnostic), not
+an actual Rust panic. The harness's `is_crash()` did a dumb `any(m in
+result["stderr"] for m in CRASH_MARKERS)` check — any qwen-hallucinated
+garbage source text containing one of `CRASH_MARKERS`' literal strings
+("panicked at", "SIGSEGV", "internal compiler error", etc.) as DATA
+rather than an actual signal could produce the same false positive
+again.
 
 ---
 

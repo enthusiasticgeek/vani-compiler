@@ -69,7 +69,20 @@ GENERATE_EVERY = int(os.environ.get("HARNESS_GENERATE_EVERY", "10"))
 ATTEMPT_FIXES = os.environ.get("HARNESS_ATTEMPT_FIXES", "1") == "1"
 
 CRASH_MARKERS = (
-    "panicked at", "RUST_BACKTRACE", "memory allocation of",
+    "panicked at",
+    # BUG-pattern-audit-round-2 category F (2026-08-08): the bare
+    # identifier "RUST_BACKTRACE" false-positived once already -- a
+    # qwen-generated candidate happened to contain that literal string
+    # in its OWN source text, and vanic's normal (non-crashing) parse-
+    # error diagnostic echoed the offending source line back verbatim,
+    # tripping this marker on a clean rejection. Anchored to the full
+    # phrase Rust's panic runtime actually prints (the standard
+    # backtrace-hint suffix line every real panic gets) instead of the
+    # bare env-var name -- a fuzzer coincidentally generating this exact
+    # multi-word phrase as data is astronomically less likely than the
+    # single word alone.
+    "run with `RUST_BACKTRACE=1`",
+    "memory allocation of",
     "Segmentation fault", "double free", "free(): invalid",
     "SIGSEGV", "SIGABRT", "internal compiler error",
     "unreachable!()", "not yet implemented", "stack overflow",
@@ -286,6 +299,24 @@ def run_vanic(args, timeout, cwd=None, binary=None):
 
 def is_crash(result):
     if result["timed_out"]:
+        return True
+    # BUG-pattern-audit-round-2 category F (2026-08-08): on POSIX,
+    # subprocess.Popen sets returncode to the NEGATIVE signal number
+    # when the child was killed by a signal (e.g. -11 for SIGSEGV, -6
+    # for SIGABRT) -- a reliable, text-content-independent crash signal
+    # that was sitting unused in `result["rc"]` the whole time. `vanic`
+    # itself normally translates a crashing CHILD process's (lli / a
+    # cc-compiled binary) signal death into an ordinary positive exit
+    # code (see BUG-130, "vanic run exit-code masking"), so this mostly
+    # catches vanic's OWN process dying by signal -- e.g. a genuine
+    # stack-overflow SIGSEGV in the compiler itself, which the Rust
+    # panic runtime can't always turn into a clean unwind. Kept as an
+    # ADDITIONAL signal alongside the text markers below, not a
+    # replacement: an ordinary Rust panic reaching main() exits with a
+    # normal positive code (101) under this project's default unwind
+    # panic strategy, not a signal death, so text-matching is still the
+    # only way to catch that class of crash.
+    if result["rc"] is not None and result["rc"] < 0:
         return True
     return any(m in result["stderr"] for m in CRASH_MARKERS)
 
