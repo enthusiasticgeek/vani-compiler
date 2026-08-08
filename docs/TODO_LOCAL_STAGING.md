@@ -3469,3 +3469,33 @@ Repro: `tools/localfuzz/findings/20260808-102231-run-crash-e5381da78e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260808-102231-run-crash-e5381da78e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-105511-backend-divergence-05c242c3c1
+
+Repro: `tools/localfuzz/findings/20260808-105511-backend-divergence-05c242c3c1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-105511-backend-divergence-05c242c3c1/fix_attempt.md`
+
+```json
+{
+  "stage_entry": {
+    "run": {
+      "command": [
+        "vanic",
+        "run",
+        "examples/language/filipino/iterate.vani",
+        "--backend=c"
+      ]
+    },
+    "expected_result": "crash/hang/ divergent output",
+    "actual_result": "divergent output (integer overflow in int64_t add)",
+    "affected_backend": "C",
+    "details": {
+      "command_output": "",
+      "error_message": "integer overflow in int64_t add\n"
+    }
+  },
+  "status": "needs human/frontier root-cause review."
+}
+```
