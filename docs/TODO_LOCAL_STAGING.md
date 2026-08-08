@@ -3298,3 +3298,49 @@ Repro: `tools/localfuzz/findings/20260808-052212-backend-divergence-cb94a73ac4/r
 Fix attempt: `tools/localfuzz/findings/20260808-052212-backend-divergence-cb94a73ac4/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-052955-backend-divergence-50e2471fae
+
+Repro: `tools/localfuzz/findings/20260808-052955-backend-divergence-50e2471fae/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-052955-backend-divergence-50e2471fae/fix_attempt.md`
+
+BASE CORPUS: /home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/for_loops.vani
+
+GENERATED SOURCE:
+```vani
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/for_loops.vani              # LLVM
+//   vanic run examples/language/bengali/for_loops.vani --backend=c  # C
+
+উদ্দেশ্য "for-loops over integer ranges";
+
+// `প্রতি` = for, `থেকে` = from, `পর্যন্ত` = to, `বিরাম` = break
+
+কাজ sum_squares(n: i64) -> i64 {
+  মান total: i64 = 0;
+  প্রতি i থেкে 1 পর্যন্ত n {
+    total = total + i * i;
+  }
+  ফেরত total;
+}
+
+কাজ find_first_zero(xs: দেখ [i64; 5]) -> i64 {
+  মান result: i64 = 0 - 1;
+  প্রতি i থেкে 0 পর্যন্ত len(xs) {
+    যদি xs[i] == 0 {
+      result = i হিসাবে i64;
+      বিরাম;
+    }
+  }
+  ফেরত result;
+}
+
+কাজ main() -> i64 {
+  মান s: i64 = sum_squares(5);
+  নিশ্চিত s == 30;
+
+  মান xs: [i64
