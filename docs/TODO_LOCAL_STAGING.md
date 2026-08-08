@@ -3442,3 +3442,12 @@ The compilation resulted in a backend-divergence error, with an integer overflow
 Vani-compiler was tested on both LLVM and Clang backends.
 
 #### Status: Needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-092406-backend-divergence-cc96713f85
+
+Repro: `tools/localfuzz/findings/20260808-092406-backend-divergence-cc96713f85/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-092406-backend-divergence-cc96713f85/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
