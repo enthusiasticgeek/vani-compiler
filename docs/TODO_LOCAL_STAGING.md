@@ -3580,3 +3580,12 @@ The program crashes with an integer overflow error when executed using the C bac
 ### END OF STAGING ENTRY
 
 ---
+
+---
+
+### Candidate: 20260808-124017-backend-divergence-d9be2b8ffe
+
+Repro: `tools/localfuzz/findings/20260808-124017-backend-divergence-d9be2b8ffe/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-124017-backend-divergence-d9be2b8ffe/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
