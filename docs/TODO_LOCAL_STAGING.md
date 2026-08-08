@@ -3662,3 +3662,26 @@ Repro: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-141920-backend-divergence-fc33c7c09f
+
+Repro: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The provided CANDIDATE bug report has been drafted based on the given corpus file and mutant source, which exhibit a backend-divergence issue in the vani-compiler project. The backend-divergence kind indicates that the program's output differs significantly between LLVM and C backends when run with different options.
+
+Here is a brief summary of what was executed:
+1. `vanic run examples/language/english/floats_and_shifts.vani` (LLVM backend, JIT via lli)
+2. `vanic run examples/language/english/floats_and_shifts.vani --backend=c` (C backend, gcc)
+
+The observed symptom is that the program's output diverges between these two backends:
+- LLVM backend produces "7.75\n8\n"
+- C backend produces ""
+
+This divergence is indicated by the raw result data provided in JSON format, which shows different `rc` values and outputs for the C and LLVM backends.
+
+To address this issue, a human/frontier model should be used to review the generated source code for potential issues that might be causing the divergent behavior between the two backends.
