@@ -3521,3 +3521,62 @@ Repro: `tools/localfuzz/findings/20260808-120628-backend-divergence-9b020d96de/r
 Fix attempt: `tools/localfuzz/findings/20260808-120628-backend-divergence-9b020d96de/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-123115-backend-divergence-9c57a8a354
+
+Repro: `tools/localfuzz/findings/20260808-123115-backend-divergence-9c57a8a354/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-123115-backend-divergence-9c57a8a354/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+### Bug Report
+
+#### Environment
+- **Compiler Version:** vani-compiler-localfuzz
+- **Compiler Type:** LLVM backend
+
+#### Steps to Reproduce
+1. Generate a mutant/source from the given base corpus file `examples/language/thai/for_loops.vani`.
+2. Run the mutant with both the default LLVM backend and the C backend.
+
+**Generated Source:**
+
+```vani
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/for_loops.vani              # LLVM
+//   vanic run examples/language/thai/for_loops.vani --backend=c  # C
+
+จุดประสงค์ "Thai for-loop smoke-test";
+
+ฟังก์ชัน main() -> i64 {
+  ให้ ผลรวม: i64 = 0;
+  สำหรับ i จาก -9223372036854775808 ถึง 6 {
+    ผลรวม = ผลรวม + i;
+    ผลรวม = ผลรวม + i;
+  }
+  ยืนยัน ผลรวม == 15;
+  พิมพ์ "Thai for-loops OK", ผลรวม;
+  คืน 0;
+}
+```
+
+#### Observed Symptom
+The program crashes with an integer overflow error when executed using the C backend (`--backend=c`).
+
+#### Backend Affected
+- **LLVM:** Crashes with an integer overflow error.
+- **C:** Crashes with an integer overflow error.
+
+**Status: needs human/frontier root-cause review.**
+
+---
+
+### END OF STAGING ENTRY
+
+---
