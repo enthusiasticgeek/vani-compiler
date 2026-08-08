@@ -131,6 +131,30 @@ rejects the whole loop rather than risk a race.
   means a `parallel for` that compiles is guaranteed
   data-race-free.
 
+## Boundary values: what happens with an extreme range
+
+Race-freedom (above) is about the loop BODY -- whether two
+iterations can step on the same memory. A separate question is
+the loop's own BOUNDS: `end - start` has to be computed somewhere
+to split the work across threads, and if `start`/`end` are chosen
+so that subtraction overflows the loop variable's type (an `i64`
+range starting near `i64::MIN`, for instance), that computation
+itself needs to be safe.
+
+It is: both backends check `end - start` for overflow before any
+thread starts, and trap cleanly (the same `exit(3)`/abort-with-
+message convention documented in [Intermediate 10b](../intermediate/10b_runtime_errors_primer.md))
+rather than let a corrupted trip count silently compute the wrong
+answer or divide work across threads incorrectly. This holds
+regardless of which `reduce` operator the loop uses (`+`, `*`,
+`&`, `|`, `^`, `min`, `max`, `&&`, `||`) and on both backends --
+the C backend's OpenMP lowering and the LLVM backend's manual
+thread-chunking both go through the same style of checked
+subtraction as any other arithmetic operation in this language.
+Ordinary loop ranges (starting at `0`, or any pair of bounds that
+don't approach the type's extremes) never come close to this edge
+and behave exactly as shown above.
+
 ## What's allowed in a `parallel for` body
 
 | Allowed | Rejected |
