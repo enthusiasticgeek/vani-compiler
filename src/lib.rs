@@ -1533,6 +1533,65 @@ mod tests {
         compile_to_llvm(source).expect("clone_at(ref [T; N]) compiles to LLVM");
     }
 
+    // BUG-138 (2026-08-07): found via localfuzz. `clone_at(ref xs, i)` with
+    // a `u32`-typed `i` produced a GEP whose declared index type (`i64`)
+    // didn't match the actual operand's LLVM type (`i32`, since `u32`
+    // loads as `i32`) -- `lli` rejected the malformed IR outright. Same
+    // root cause hit `vec_remove_at` and the `simd*_load`/`simd*_store`
+    // family (9 call sites total, all sharing the same unguarded
+    // `emit_expr(&args[1], ...)` pattern with no index-width check).
+    // Fixed with a shared `widen_index_to_i64` helper, mirroring the
+    // widening the plain Array-Index write path already did.
+    #[test]
+    fn clone_at_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              let v: i64 = clone_at(ref xs, i);
+              return v;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("clone_at with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn vec_remove_at_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              return vec_remove_at(mut ref xs, i);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("vec_remove_at with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_load_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8);
+              let i: u32 = 0;
+              let v: vec128<i64> = simd_load(ref xs, i);
+              return simd_reduce_add(v);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("simd_load with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
     #[test]
     fn generic_function_unused_surfaces_dead_code_diagnostic() {
         // T1.4 phase 2: monomorphization is now wired up.
@@ -5821,6 +5880,66 @@ mod tests {
         compile(source).expect("tuple swap should compile");
     }
 
+    // BUG-137 (2026-08-07): `let (q, r) = f(...); let (q, r) = f(...);`
+    // (same names, same scope) always emitted a fresh `TypedStmt::Let`
+    // for each destructured name on BOTH occurrences -- fine on
+    // LLVM/SSA-C (every binding gets a fresh numeric id regardless of
+    // source name), but tree-C's `TypedStmt::Let` codegen declares a C
+    // local using the raw source name with no uniquification, so the
+    // second `let (q, r)` produced a duplicate `int64_t v_q`
+    // declaration and failed to even compile. Found via localfuzz.
+    // Fixed by mirroring the plain `Stmt::Let` handler's same-scope-
+    // shadow detection: a repeated destructured name now emits
+    // `TypedStmt::Reassign` instead of a second `TypedStmt::Let`.
+    #[test]
+    fn tuple_destructure_shadow_reassigns_instead_of_redeclaring_on_tree_c() {
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn divmod(a: i64, b: i64) -> (i64, i64) {
+              return (a / b, a % b);
+            }
+            fn main() -> i64 {
+              let (q, r) = divmod(17, 5);
+              let (q, r) = divmod(20, 3);
+              return q + r;
+            }
+        "#;
+        let c = compile_to_c(source).expect("tuple-destructure shadow should compile to C");
+        let fn_main_start = c.find("fn_main(void) {").expect("fn_main body");
+        let fn_main_body = &c[fn_main_start..(fn_main_start + 500).min(c.len())];
+        let q_decl_count = fn_main_body.matches("int64_t v_q =").count();
+        assert_eq!(
+            q_decl_count, 1,
+            "expected exactly ONE `int64_t v_q` declaration (the second \
+             `let (q, r)` should reassign, not redeclare), got {q_decl_count} in:\n{fn_main_body}"
+        );
+        assert!(
+            fn_main_body.contains("v_q = ") && fn_main_body.matches("v_q = ").count() == 2,
+            "expected the second `let (q, r)` to emit a plain `v_q = ...;` \
+             reassignment, got:\n{fn_main_body}"
+        );
+    }
+
+    #[test]
+    fn tuple_destructure_shadow_with_changed_element_type_is_rejected() {
+        let source = r#"
+            fn pair_i() -> (i64, i64) { return (1, 2); }
+            fn pair_f() -> (f64, f64) { return (1.0, 2.0); }
+            fn main() -> i64 {
+              let (a, b) = pair_i();
+              let (a, b) = pair_f();
+              return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(
+            result.is_err(),
+            "shadowing a tuple-destructured name with a different element \
+             type should be rejected, same as plain `let` shadowing"
+        );
+    }
+
     #[test]
     fn vec_set_returns_updated_vec_compiles() {
         // `set(xs, 0, 100)` returns a new Vec with index
@@ -7353,6 +7472,131 @@ mod tests {
             "expected duplicate-field diagnostic, got: {:?}",
             errors
         );
+    }
+
+    // BUG-139 (2026-08-07): found via localfuzz -- a struct field, enum
+    // variant payload, or function parameter/return type naming a
+    // struct/enum that was never declared (typo, or a Rust-ism like
+    // `String` instead of `OwnedStr`) was silently accepted at its
+    // DECLARATION site as long as the bogus type was never actually
+    // CONSTRUCTED anywhere in the program. `vanic check` said "ok",
+    // both backends ran clean with no output, and the declaration was
+    // silent dead weight -- until something DID construct it, at
+    // which point the C backend failed late and confusingly at the
+    // `cc` stage (its eager whole-module type emission tripped over
+    // the missing type) while LLVM's on-demand lowering just never
+    // touched it, reading like a backend divergence when the real
+    // defect was upstream in the checker.
+    #[test]
+    fn enum_variant_payload_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            enum Result { Ok(i64), Err(String) }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown enum payload type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'String'")
+                && e.message.contains("variant 'Err' payload")),
+            "expected unknown-type diagnostic naming the variant, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_field_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            struct Foo { x: NotARealType }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown struct field type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("struct 'Foo' field 'x'")),
+            "expected unknown-type diagnostic naming the field, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn function_param_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            fn unused_fn(x: NotARealType) -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown fn param type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("function 'unused_fn' parameter 'x'")),
+            "expected unknown-type diagnostic naming the parameter, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn function_return_type_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            fn unused_fn() -> NotARealType { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown fn return type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("function 'unused_fn' return type")),
+            "expected unknown-type diagnostic naming the return type, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn nested_unknown_type_inside_vec_is_still_caught() {
+        // The recursive validator must see through wrapper types, not
+        // just bare `Type::Struct` in field/param position directly.
+        let source = r#"
+            struct Foo { xs: Vec<NotARealType> }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown type nested in Vec<T> should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")),
+            "expected unknown-type diagnostic to see through Vec<T>, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn generic_struct_field_referencing_its_own_type_param_is_accepted() {
+        // Regression guard for the validator itself: a bare generic
+        // parameter (`T` in `struct Box<T> { value: T }`) must NOT be
+        // flagged as an unknown type -- `Type::Param` is always
+        // parser-confirmed to be a real in-scope generic parameter by
+        // the time the checker sees it.
+        let source = r#"
+            struct Box2<T> { value: T }
+            fn main() -> i64 {
+              let b: Box2<i64> = Box2 { value: 5 };
+              return b.value;
+            }
+        "#;
+        compile(source).expect("generic struct with its own type param should compile");
+    }
+
+    #[test]
+    fn recursive_struct_referencing_itself_through_vec_is_accepted() {
+        // Regression guard: a struct referencing its OWN name (a
+        // legitimate, common recursive shape via Vec<Self>) must not
+        // be flagged -- `struct_names_for_type_check` is built from
+        // the complete `program.structs` list before any per-field
+        // validation runs, so self-reference and forward-reference
+        // both resolve correctly.
+        let source = r#"
+            struct Node { value: i64, children: Vec<Node> }
+            fn main() -> i64 {
+              let kids: Vec<Node> = vec();
+              let n: Node = Node { value: 1, children: kids };
+              return n.value;
+            }
+        "#;
+        compile(source).expect("self-referential struct via Vec<Self> should compile");
     }
 
     #[test]

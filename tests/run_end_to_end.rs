@@ -12374,3 +12374,107 @@ fn main() -> i64 {
         "expected the bounds-check message on stderr, got: {stderr:?}"
     );
 }
+
+// BUG-137 (2026-08-07): found via localfuzz triaging a batch of previously-
+// unreviewed candidates. `let (q, r) = f(...);` redeclared (shadowed) in the
+// same scope compiled fine on LLVM/SSA-C but failed to even build on tree-C
+// (duplicate `int64_t v_q` declaration -- tuple-destructure codegen never
+// got the same shadow-handling regular `let` has). Verified on BOTH C
+// codegen paths: the default (SSA-C, no `#[no_mangle]`) and tree-C (forced
+// via an unrelated `#[no_mangle] fn`).
+#[test]
+fn tuple_destructure_shadow_runs_correctly_on_both_c_codegen_paths() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for (stem, source) in [
+        (
+            "bug137-tuple-shadow-ssa-c",
+            r#"
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+fn main() -> i64 {
+  let (q, r) = divmod(17, 5);
+  let (q, r) = divmod(20, 3);
+  return q + r;
+}
+"#
+            .to_string(),
+        ),
+        (
+            "bug137-tuple-shadow-tree-c",
+            r#"
+#[no_mangle]
+fn keep_alive() -> i64 { return 0; }
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+fn main() -> i64 {
+  let (q, r) = divmod(17, 5);
+  let (q, r) = divmod(20, 3);
+  return q + r;
+}
+"#
+            .to_string(),
+        ),
+    ] {
+        let src = write_tmp_vani(stem, &source);
+        let output_c = Command::new(binary)
+            .args(["run", src.to_str().unwrap(), "--backend=c"])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+        assert_eq!(
+            output_c.status.code(),
+            Some(8),
+            "BUG-137 regression ({stem}): expected exit 8 (20/3 = 6 rem 2, \
+             6+2=8), got status {:?}, stderr: {}",
+            output_c.status,
+            String::from_utf8_lossy(&output_c.stderr)
+        );
+
+        let output_llvm = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+        assert_eq!(
+            output_llvm.status.code(),
+            Some(8),
+            "{stem}: LLVM backend should agree with C; status {:?}, stderr: {}",
+            output_llvm.status,
+            String::from_utf8_lossy(&output_llvm.stderr)
+        );
+    }
+}
+
+// BUG-139 (2026-08-07): found via localfuzz. An enum variant payload
+// naming a nonexistent type (`String` instead of `OwnedStr`) used to be
+// silently accepted at declaration time as long as no variant construction
+// ever forced a real type lookup -- `vanic check` exited 0 with no
+// diagnostic. Verifies the real CLI path (not just the compile() library
+// helper) now rejects it immediately, before either backend is even
+// attempted.
+#[test]
+fn enum_variant_with_unknown_payload_type_rejected_by_vanic_check() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug139-unknown-enum-payload-type",
+        r#"
+enum Result { Ok(i64), Err(String) }
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc check should execute: {e}"));
+    assert!(
+        !output.status.success(),
+        "BUG-139 regression: an enum variant payload naming a nonexistent \
+         type should be rejected by `vanic check`, got status {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown type 'String'"),
+        "expected an unknown-type diagnostic on stderr, got: {stderr}"
+    );
+}

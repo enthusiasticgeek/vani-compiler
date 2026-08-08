@@ -7991,7 +7991,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // Read the removed value, shift elements left, dec len.
             if name == "vec_remove_at" {
                 let xs = emit_expr(&args[0], ctx, out);
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let dp = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
@@ -9905,7 +9906,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         ));
                         p
                     };
-                    let idx = emit_expr(&args[1], ctx, out);
+                    let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                     let slot_p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
@@ -9989,7 +9991,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load {}*, {}** {}\n",
                     data_p, elt_ty, elt_ty, data_pp
                 ));
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let slot_p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 {}\n",
@@ -11403,7 +11406,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = extractvalue {} {}, 0\n",
@@ -11458,7 +11462,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data = emit_expr(&args[2], ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -11599,7 +11604,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
                 let elem_ptr = ctx.fresh_tmp();
@@ -11643,7 +11649,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data = emit_expr(&args[2], ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
@@ -11759,7 +11766,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
                 let elem_ptr = ctx.fresh_tmp();
@@ -11803,7 +11811,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         (vs, val)
                     }
                 };
-                let idx = emit_expr(&args[1], ctx, out);
+                let idx_raw = emit_expr(&args[1], ctx, out);
+                let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
                 let data = emit_expr(&args[2], ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
@@ -47206,6 +47215,30 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
             ty
         ),
     }
+}
+
+/// Widens an already-emitted index operand to i64 for a GEP whose own
+/// `i64` index-type slot is hard-coded in the format string. BUG-138
+/// (2026-08-07, found via localfuzz): several `Vec`/array-indexing
+/// builtins (`clone_at`, `vec_remove_at`, the SIMD-lane get/set
+/// helpers) emitted `idx = emit_expr(&args[1], ...)` and dropped that
+/// value straight into a `getelementptr ..., i64 {}` slot with no
+/// type check -- a `u32`-typed index (loaded as LLVM `i32`) produced
+/// a GEP whose declared index type (`i64`) didn't match the actual
+/// operand's type, which `lli`/`llc` reject outright as malformed IR.
+/// Mirrors the widening the plain `xs[i]` Array-Index write path
+/// already did (see the sibling call site a few thousand lines up).
+fn widen_index_to_i64(index: &TypedExpr, idx_v: String, ctx: &mut FnCtx, out: &mut String) -> String {
+    if matches!(index.ty, Type::I64 | Type::U64) {
+        return idx_v;
+    }
+    let dest = ctx.fresh_tmp();
+    let op = if index.ty.is_signed_integer() { "sext" } else { "zext" };
+    out.push_str(&format!(
+        "  {} = {} {} {} to i64\n",
+        dest, op, llvm_type(&index.ty), idx_v
+    ));
+    dest
 }
 
 /// Storage type spelling for `Atomic<T>` in LLVM IR. The

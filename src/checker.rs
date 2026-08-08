@@ -1050,6 +1050,164 @@ fn check_impl(
         crate::ast::set_box_recursive_structs(box_recursive);
     }
 
+    // BUG-139 (2026-08-07): found via localfuzz -- a struct field,
+    // enum variant payload, or function parameter/return type naming
+    // a struct/enum that was never declared (a plain typo, or a
+    // Rust-ism like `String` instead of `OwnedStr`) was silently
+    // accepted at its DECLARATION site. As long as the bogus type was
+    // never actually CONSTRUCTED anywhere in the program, nothing
+    // downstream ever looked up its field/variant layout, so it
+    // reached the backends untouched -- `vanic check` said "ok", both
+    // `vanic run` invocations exited 0 with no output, and the whole
+    // declaration was silent dead weight. The one case that WASN'T
+    // silent (an enum payload that IS referenced through some other
+    // variant construction) failed late and confusingly: tree-C's
+    // eager whole-module struct/union emission hit `cc`'s own
+    // "unknown type name" error, while LLVM's on-demand lowering
+    // never touched the type at all and ran clean -- reading like a
+    // backend divergence when the real defect was upstream, in the
+    // checker never validating the name in the first place.
+    //
+    // `struct_names`/`enum_names`/`interface_names` are built here,
+    // after `monomorphize_type_decls_in_program` has already expanded
+    // every generic instantiation into a concrete `StructDecl`/
+    // `EnumDecl` -- so a name that's STILL missing from these sets by
+    // this point is genuinely unresolvable, not just an unexpanded
+    // generic template.
+    let struct_names_for_type_check: std::collections::HashSet<String> =
+        program.structs.iter().map(|d| d.name.clone()).collect();
+    let enum_names_for_type_check: std::collections::HashSet<String> =
+        program.enums.iter().map(|d| d.name.clone()).collect();
+    let interface_names_for_type_check: std::collections::HashSet<String> =
+        program.interfaces.iter().map(|d| d.name.clone()).collect();
+
+    /// Recursively walks `ty`, returning the first name it finds that
+    /// doesn't resolve against the program's own struct/enum/interface
+    /// declarations. `Type::Param` is always accepted -- the parser
+    /// already distinguishes a genuine in-scope generic parameter from
+    /// an ordinary name reference at parse time (see `parse_type`), so
+    /// by the time a name reaches here as `Type::Struct`/`Type::Enum`
+    /// it was never recognized as a generic parameter in the first
+    /// place.
+    fn type_references_unknown_name(
+        ty: &Type,
+        struct_names: &std::collections::HashSet<String>,
+        enum_names: &std::collections::HashSet<String>,
+        interface_names: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        match ty {
+            Type::I8 | Type::I16 | Type::I32 | Type::I64
+            | Type::U8 | Type::U16 | Type::U32 | Type::U64
+            | Type::F32 | Type::F64 | Type::Bool
+            | Type::Str | Type::OwnedStr
+            | Type::Task | Type::Condvar | Type::Barrier | Type::FileHandle
+            | Type::UnionFind | Type::Graph | Type::Trie | Type::SkipList
+            | Type::BloomFilter | Type::Region
+            | Type::Param(_) => None,
+
+            Type::Struct(name) => {
+                if struct_names.contains(name) { None } else { Some(name.clone()) }
+            }
+            Type::Enum(name) => {
+                if enum_names.contains(name) { None } else { Some(name.clone()) }
+            }
+            Type::Object(name) => {
+                if interface_names.contains(name) { None } else { Some(name.clone()) }
+            }
+
+            Type::Vec(inner) | Type::Vec128(inner) | Type::Vec256(inner) | Type::Vec512(inner)
+            | Type::Ref(inner) | Type::RefMut(inner)
+            | Type::TaskR(inner) | Type::Atomic(inner)
+            | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::RwLock(inner) | Type::ReadGuard(inner) | Type::WriteGuard(inner)
+            | Type::Deque(inner) | Type::HashSet(inner)
+            | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner)
+            | Type::Box(inner) | Type::Ptr(inner) | Type::PtrMut(inner)
+            | Type::Pool(inner) | Type::Handle(inner) | Type::Tainted(inner)
+            | Type::BoundedPtr(inner) | Type::ArenaRef(inner)
+            | Type::Channel(inner, _) => {
+                type_references_unknown_name(inner, struct_names, enum_names, interface_names)
+            }
+
+            Type::Array { element, .. } => {
+                type_references_unknown_name(element, struct_names, enum_names, interface_names)
+            }
+
+            Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+                type_references_unknown_name(k, struct_names, enum_names, interface_names)
+                    .or_else(|| type_references_unknown_name(v, struct_names, enum_names, interface_names))
+            }
+
+            Type::Tuple(elements) => elements
+                .iter()
+                .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names)),
+
+            Type::FnPtr(params, ret) | Type::Closure(params, ret) => params
+                .iter()
+                .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
+                .or_else(|| type_references_unknown_name(ret, struct_names, enum_names, interface_names)),
+
+            // `Apply` (unexpanded generic instantiation) shouldn't
+            // survive past monomorphization, but if one somehow does,
+            // check the base name plus every type argument rather
+            // than silently passing it.
+            Type::Apply { name, args } => {
+                if !struct_names.contains(name) && !enum_names.contains(name) {
+                    return Some(name.clone());
+                }
+                args.iter()
+                    .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
+            }
+        }
+    }
+
+    fn validate_type_reference_exists(
+        ty: &Type,
+        span: Span,
+        context: &str,
+        struct_names: &std::collections::HashSet<String>,
+        enum_names: &std::collections::HashSet<String>,
+        interface_names: &std::collections::HashSet<String>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(unknown_name) =
+            type_references_unknown_name(ty, struct_names, enum_names, interface_names)
+        {
+            diagnostics.push(
+                Diagnostic::new(
+                    span,
+                    format!("unknown type '{}' referenced in {}", unknown_name, context),
+                )
+                .with_elaboration(crate::diagnostic_elaborations::unknown_type_in_declaration(
+                    &unknown_name,
+                )),
+            );
+        }
+    }
+
+    for function in &program.functions {
+        for param in &function.params {
+            validate_type_reference_exists(
+                &param.ty,
+                param.span,
+                &format!("function '{}' parameter '{}'", function.name, param.name),
+                &struct_names_for_type_check,
+                &enum_names_for_type_check,
+                &interface_names_for_type_check,
+                &mut diagnostics,
+            );
+        }
+        validate_type_reference_exists(
+            &function.return_type,
+            function.span,
+            &format!("function '{}' return type", function.name),
+            &struct_names_for_type_check,
+            &enum_names_for_type_check,
+            &interface_names_for_type_check,
+            &mut diagnostics,
+        );
+    }
+
     let mut struct_registry: BTreeMap<String, StructInfo> = BTreeMap::new();
     for decl in &program.structs {
         if decl.fields.len() > 64 {
@@ -1076,6 +1234,15 @@ fn check_impl(
         // No new struct-decl rejection needed.
         let _is_v31_synth = decl.name.starts_with("Task__");
         for field in &decl.fields {
+            validate_type_reference_exists(
+                &field.ty,
+                field.span,
+                &format!("struct '{}' field '{}'", decl.name, field.name),
+                &struct_names_for_type_check,
+                &enum_names_for_type_check,
+                &interface_names_for_type_check,
+                &mut diagnostics,
+            );
             // (ref-field rejection lifted 2026-06-08 â€” see L4 (B)
             //  Phase 3 + 4 comment above. Both v3.1 synth and
             //  user-declared structs may now carry ref fields.)
@@ -1292,6 +1459,15 @@ fn check_impl(
                 ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &decl.variants[i].name)));
             }
             if let Some(payload_ty) = decl.variants[i].payload.first() {
+                validate_type_reference_exists(
+                    payload_ty,
+                    decl.variants[i].name_span,
+                    &format!("enum '{}' variant '{}' payload", decl.name, decl.variants[i].name),
+                    &struct_names_for_type_check,
+                    &enum_names_for_type_check,
+                    &interface_names_for_type_check,
+                    &mut diagnostics,
+                );
                 // T1.2 phase 2 struct RAII landed in closures
                 // #98 / #100; #113 added OwnedStr; #118 added
                 // Vec<T>; #119 added `[T;N]` of Copy; #122
@@ -15422,11 +15598,50 @@ fn check_one_stmt(
                     span: *span,
                     binding_decl_span: None,
                 };
-                body.push(TypedStmt::Let {
-                    name: name.clone(),
-                    ty: elt_ty.clone(),
-                    expr: access_expr,
-                });
+                // BUG-137: mirror the plain `Stmt::Let` handler's
+                // same-scope-shadow detection above. Without this,
+                // `let (q, r) = f(...); let (q, r) = f(...);` always
+                // emitted a fresh `TypedStmt::Let` for each name on
+                // BOTH occurrences -- fine on LLVM/SSA-C (both number
+                // every binding freshly, source name is cosmetic),
+                // but tree-C's `TypedStmt::Let` codegen declares a C
+                // local using the raw source name with no
+                // uniquification, so the second `let (q, r)` produced
+                // a duplicate `int64_t v_q` declaration and failed to
+                // even compile (`redefinition of 'v_q'`). Whether a
+                // program actually reaches tree-C for an unrelated
+                // reason (any SSA-unsupported feature anywhere in the
+                // module forces the WHOLE module onto it) determined
+                // whether this shape built at all.
+                let same_scope_existing = env.current_get(name).cloned();
+                if let Some(old) = same_scope_existing {
+                    if old.ty != elt_ty {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                *span,
+                                format!(
+                                    "shadowing 'let {}' must preserve its type; previous type was {}, new type is {}",
+                                    name, old.ty, elt_ty
+                                ),
+                            )
+                            .with_related(old.decl_span, format!("'{}' was previously declared here as {}", name, old.ty))
+                            .with_elaboration(crate::diagnostic_elaborations::type_mismatch(&old.ty.to_string(), &elt_ty.to_string())),
+                        );
+                    }
+                    let drop_old = !old.ty.is_copy() && old.moved.is_none();
+                    body.push(TypedStmt::Reassign {
+                        name: name.clone(),
+                        ty: elt_ty.clone(),
+                        expr: access_expr,
+                        drop_old,
+                    });
+                } else {
+                    body.push(TypedStmt::Let {
+                        name: name.clone(),
+                        ty: elt_ty.clone(),
+                        expr: access_expr,
+                    });
+                }
                 env.insert_current(
                     name.clone(),
                     VarInfo {

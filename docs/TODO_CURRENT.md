@@ -9568,3 +9568,115 @@ when one fires" section gained a short addendum noting the stdout-preservation f
 stale claim -- so this is an addition, not a correction like BUG-129/130's sweep).
 
 Full `cargo test --release` clean (2801 lib tests + all integration suites, 0 failed).
+
+## Localfuzz backlog triage (2026-08-07) -- BUG-137, BUG-138, BUG-139
+
+Asked "any new open bugs to fix?" after BUG-136 -- discovered the localfuzz worktree's
+`docs/TODO_LOCAL_STAGING.md` had 77 candidates (out of 142 ever staged, spanning
+2026-08-03 through 2026-08-07) still marked "needs human/frontier root-cause review,"
+never actually triaged. Re-ran every one of them against a fresh `main` build
+(commit 6f749d4) using the harness's own classification logic (`check` -> both
+backends' `run`, same timeouts): 42 no longer reproduce at all (already fixed by
+unrelated earlier work, never traced back to a specific BUG-N); 9 are the documented,
+permanent "C exits 134 (raw SIGABRT) vs LLVM exits 3" trap-code convention -- not
+bugs; 1 was a false positive in the HARNESS's own crash-detection heuristic (a
+`RUST_BACKTRACE` substring match against the fuzzed source's own injected garbage
+text, not an actual Rust panic); 1 duplicated an already-documented, tracked
+limitation (`examples/edge_cases/TEST_MATRIX.md`'s `xfail_closure_in_block_expr.vani`
+entry); 20 were run-crash timeouts, every one traced via diff-against-base to a
+fuzzer mutation that broke the *test program's* own control flow, not the compiler
+(8x `sleep_ms(i64::MAX)`, 7x a deleted/no-op'd loop increment, 4x an extra blocking
+`tcp_accept`/`tcp_connect_local`, 1x a mixed type-change + broken-loop case). The
+remaining 3 were genuine, confirmed, previously-unknown compiler bugs -- fixed below.
+
+### BUG-137 -- tuple-destructure `let` shadowing broke the C backend
+
+`let (q, r) = f(...); let (q, r) = f(...);` (same names, same scope) compiled fine on
+LLVM/SSA-C but failed to even build on tree-C: `redefinition of 'v_q'`. Root cause:
+the plain `Stmt::Let` handler in `checker.rs` (`check_one_stmt`) already detects a
+same-scope shadow (`env.current_get(name)`) and emits `TypedStmt::Reassign` instead of
+a second `TypedStmt::Let` -- this is what makes ordinary scalar shadowing (`let x = 1;
+let x = 2;`) safe on tree-C, which declares C locals by raw source name with no
+uniquification. The `Stmt::LetTuple` handler (checker.rs, tuple-destructure desugar)
+never got the same treatment -- it always emitted a fresh `TypedStmt::Let` per
+destructured name on both occurrences. Fixed by mirroring the exact same
+same-scope-shadow check (plus the matching type-mismatch diagnostic) into the
+per-name loop that builds each destructured binding.
+
+Added `tuple_destructure_shadow_reassigns_instead_of_redeclaring_on_tree_c` and
+`tuple_destructure_shadow_with_changed_element_type_is_rejected` to `src/lib.rs`, and
+`tuple_destructure_shadow_runs_correctly_on_both_c_codegen_paths` to
+`tests/run_end_to_end.rs` (real subprocess runs against both C codegen paths).
+
+### BUG-138 -- `u32` Vec index produced invalid LLVM IR in several builtins
+
+A `u32`-typed loop variable indexing a `Vec` through `clone_at` produced a GEP
+instruction whose declared index type (hard-coded `i64` in the format string) didn't
+match the actual operand's LLVM type (`i32`, since `u32` loads as `i32`) -- `lli`
+rejected the malformed IR outright (`%tNN defined with type 'i32' but expected
+'i64'`). Grepped for the same unguarded `let idx = emit_expr(&args[1], ...)` pattern
+across `backend_llvm.rs` and found 9 total call sites sharing the defect: `clone_at`
+(both its Array and Vec branches), `vec_remove_at`, and the `simd_load`/`simd_store`/
+`simd256_load`/`simd256_store`/`simd512_load`/`simd512_store` family. Fixed with one
+shared `widen_index_to_i64` helper (mirrors the widening the plain Array-Index write
+path already did, a few thousand lines up in the same file) applied at all 9 sites.
+
+Added 3 tests to `src/lib.rs` (`clone_at_with_u32_index_widens_to_i64_in_llvm_ir`,
+`vec_remove_at_with_u32_index_widens_to_i64_in_llvm_ir`,
+`simd_load_with_u32_index_widens_to_i64_in_llvm_ir` -- one representative from each
+affected builtin family, asserting the emitted IR contains a `zext i32 ... to i64`
+immediately before the GEP).
+
+### BUG-139 -- checker never validated that a struct field / enum variant payload / function-signature type actually exists
+
+`enum Result { Ok(i64), Err(String) }` -- `String` isn't a real vāṇी type (only `Str`/
+`OwnedStr` are) -- was silently accepted by `vanic check`. Investigation found this
+wasn't enum-specific: a struct field or function parameter/return type naming a
+nonexistent struct/enum was ALSO silently accepted, as long as the bogus type was
+never actually CONSTRUCTED anywhere in the program (nothing downstream ever looked up
+its field/variant layout). The one case that wasn't silent (a payload that IS
+constructed somewhere) failed late and confusingly: tree-C's eager whole-module
+struct/union emission hit `cc`'s own "unknown type name" error, while LLVM's
+on-demand lowering never touched the type and ran clean -- reading like a backend
+divergence when the real defect was upstream in the checker.
+
+Asked the user to scope the fix given the wider blast radius (struct fields +
+function signatures, not just the originally-reported enum case) -- chose the full
+sweep over the narrower enum-only fix. Added a recursive `type_references_unknown_name`
+validator in `checker.rs` covering all ~61 `Type` variants (leaf scalars/builtins
+always valid; `Type::Struct`/`Type::Enum`/`Type::Object` checked against the
+program's own declared names; `Type::Param` always valid since the parser already
+distinguishes a genuine in-scope generic parameter from an ordinary name reference at
+parse time; every wrapper type -- `Vec<T>`, `Box<T>`, `Ref<T>`, `Tuple`, `HashMap<K,V>`,
+etc. -- recurses into its inner type(s)). Wired into three declaration sites: struct
+fields, enum variant payloads, and function parameter/return types, all validated
+right after `monomorphize_type_decls_in_program` has already expanded every generic
+instantiation (so a name still missing from the registry by then is genuinely
+unresolvable, not just an unexpanded generic template). New
+`unknown_type_in_declaration` elaboration in `diagnostic_elaborations.rs` (distinct
+from the existing `unknown_struct_type`, which fires at a runtime construction/
+field-access site and always assumes "struct" specifically -- this one fires at
+declaration time, before the name is known to mean struct vs. enum vs. a plain typo).
+
+Verified against the full example corpus (`vanic check examples`, 1040 files) before
+trusting this as a low-risk change -- found exactly one flagged file
+(`examples/language/mandarin/async_cancel_auto.vani`), confirmed via `git stash` to
+already fail to even PARSE on the pre-BUG-137/138/139 baseline build (an unrelated,
+pre-existing bug: the Mandarin `异步` async-keyword spelling isn't recognized when
+this file is checked directly) -- not a regression from this change, just a
+cascading secondary diagnostic from an already-broken parse. Not fixed here (out of
+scope, unrelated to this session's work); flagged for a future pass.
+
+Added 7 tests to `src/lib.rs` (one rejection case each for enum-payload / struct-field
+/ fn-param / fn-return-type / nested-inside-Vec unknown types, plus two POSITIVE
+regression guards -- a generic struct referencing its own type parameter, and a
+struct recursively referencing itself through `Vec<Self>` -- confirming the validator
+doesn't over-reject legitimate generic or self-referential code) and 1 test to
+`tests/run_end_to_end.rs` (real `vanic check` subprocess run).
+
+Full `cargo test --release` clean after all three fixes (2813 lib tests + all
+integration suites, 0 failed) plus the full-corpus `vanic check examples` sweep.
+
+Localfuzz worktree's `docs/TODO_LOCAL_STAGING.md` closed out for all 77 previously-
+unreviewed candidates (see the localfuzz worktree's own commit history on the
+`local-fuzz-findings` branch).
