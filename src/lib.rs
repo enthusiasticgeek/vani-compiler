@@ -1747,6 +1747,74 @@ mod tests {
         );
     }
 
+    // BUG-143 (2026-08-08): bug-pattern-audit-round-2, category C. Found
+    // incidentally while probing the `_Pragma("GCC ivdep")` non-parallel
+    // for-loop site for BUG-140-style boundary-value UB (confirmed that
+    // site is safe -- see run_end_to_end.rs's ivdep regression test).
+    // `while_bounds_hints`'s helper `collect_vec_idx_in_expr` recorded
+    // ANY `Var`-based `Index` access keyed by the while-loop's own
+    // variable, with no check that the indexed value is actually a
+    // `Vec<T>` -- a fixed-size `[T; N]` array matches identically. The
+    // hint's emission side (`while_bounds_hints`) unconditionally renders
+    // `{name}.len`, assuming a Vec's `.len` struct field; a `[T; N]`
+    // lowers to a raw C array with no such member, so indexing one inside
+    // a `while i < N { xs[i] } ` loop -- a completely ordinary idiom --
+    // produced `v_xs.len`, a hard `cc` failure ("request for member 'len'
+    // in something not a structure or union"). Fixed by gating the hint
+    // on the underlying (Ref/RefMut-stripped) type actually being
+    // `Type::Vec`.
+    #[test]
+    fn while_loop_indexing_a_fixed_array_compiles_and_runs_on_tree_c() {
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn main() -> i64 {
+              let xs: [i64; 4] = [10, 20, 30, 40];
+              let i: i64 = 0;
+              let sum: i64 = 0;
+              while i < 4 {
+                sum = sum + xs[i];
+                i = i + 1;
+              }
+              return sum;
+            }
+        "#;
+        let c = compile_to_c(source).expect(
+            "while-loop indexing a fixed array by the loop var must compile to tree-C",
+        );
+        assert!(
+            !c.contains("v_xs.len") && !c.contains("v_xs->len"),
+            "must not emit a Vec-shaped bounds hint (`{{name}}.len`) for a \
+             fixed-size array (no such struct field exists in C), got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn while_loop_indexing_a_vec_still_gets_the_bounds_hint_on_tree_c() {
+        // Companion to the array test above: confirm the fix didn't
+        // over-narrow the hint and disable it for the Vec case it was
+        // originally written for.
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30, 40);
+              let i: i64 = 0;
+              let sum: i64 = 0;
+              while i < 4 {
+                sum = sum + xs[i];
+                i = i + 1;
+              }
+              return sum;
+            }
+        "#;
+        let c = compile_to_c(source).expect("while-loop indexing a Vec must compile to tree-C");
+        assert!(
+            c.contains("_ihi") && c.contains("loop bound out of vec range"),
+            "expected the Vec bounds hint to still be emitted, got:\n{c}"
+        );
+    }
+
     #[test]
     fn generic_function_unused_surfaces_dead_code_diagnostic() {
         // T1.4 phase 2: monomorphization is now wired up.

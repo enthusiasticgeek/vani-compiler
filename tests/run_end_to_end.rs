@@ -12695,3 +12695,118 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-143 (2026-08-08): bug-pattern-audit-round-2, category C. Found while
+// probing the `_Pragma("GCC ivdep")` non-parallel for-loop site for a
+// BUG-140-style boundary-value UB. `while_bounds_hints`'s Vec-index
+// collector recorded a fixed-size `[T; N]` array the same as a `Vec<T>`,
+// but its emission side always renders `{name}.len` -- a real struct
+// field on `Vec<T>`, nonexistent on a raw C array -- producing a hard
+// `cc` failure ("request for member 'len' in something not a structure
+// or union") for the completely ordinary `while i < N { xs[i] }` idiom
+// over a fixed array. Real subprocess run, not just a compile check:
+// confirms the loop actually computes the correct sum.
+#[test]
+fn while_loop_indexing_a_fixed_array_runs_correctly_on_c_backend() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug143-while-array-index",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [10, 20, 30, 40];
+  let i: i64 = 0;
+  let sum: i64 = 0;
+  while i < 4 {
+    sum = sum + xs[i];
+    i = i + 1;
+  }
+  print sum;
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output.status.success(),
+        "BUG-143 regression: a while-loop indexing a fixed array by its own \
+         loop var should compile and run cleanly on the C backend, got \
+         status {:?}, stdout: {}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "100",
+        "expected the correct sum 100, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+// Category C's other half: confirmed via a standalone C probe (matching
+// BUG-140's own investigative technique) that `_Pragma("GCC ivdep")` --
+// the sibling pragma to the one BUG-140 fixed, emitted for every
+// non-parallel `for`/`while` loop -- does NOT share BUG-140's GCC-
+// internal signed-overflow UB. Unlike `#pragma omp parallel for`, which
+// needs GCC to precompute a trip count (`end - start`) ahead of time to
+// partition work across threads, a plain `for (T i = start; i < end;
+// i++)`/`while` loop's exit condition is re-evaluated fresh every
+// iteration -- there's no equivalent precompute step for `ivdep` (a
+// vectorization hint, not a parallelization directive) to get wrong.
+// This test locks in a clean-pass result on the exact repro shape BUG-140
+// used, per this project's "a clean pass still gets a regression test"
+// convention -- confirms the loop traps correctly (via the ordinary
+// per-element bounds check, on the very first iteration) rather than
+// silently computing zero iterations or something else wrong.
+#[test]
+fn non_parallel_for_with_extreme_start_bound_traps_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug-pattern-c-ivdep-extreme-bound",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  for i from -9223372036854775808 to 4
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "the ivdep-pragma'd non-parallel for-loop should trap on the first \
+         out-of-bounds access (same as a plain loop would), got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "LLVM should also trap on this same program; status {:?}",
+        output_llvm.status
+    );
+}

@@ -237,7 +237,51 @@ it):
 
 </details>
 
-## C. Compiler-emitted-pragma + boundary-value UB audit (🔴 high)
+## C. Compiler-emitted-pragma + boundary-value UB audit (🔴 high) -- CLOSED 2026-08-08, BUG-143
+
+**Update (2026-08-08)**: this category is now closed. The primary
+question (does `ivdep` share BUG-140's UB) was answered directly with a
+standalone C probe, same technique BUG-140 itself used: **no** -- a
+plain `for`/`while` loop re-evaluates its exit condition every
+iteration; there's no "precompute the total trip count via signed
+subtraction" step for `ivdep` (a vectorization hint) the way `#pragma
+omp parallel for` needs one to partition work across threads ahead of
+time. Verified through `vanic` directly too: the BUG-140 repro reshaped
+as a non-parallel `for` loop traps correctly on the first genuinely
+out-of-bounds access, on both backends. A grep of `backend_c.rs`
+confirmed exactly 3 `_Pragma` sites total (while-ivdep, for-ivdep,
+for-omp-parallel) -- no other pragma/GCC-transform site exists to audit.
+`#[bounded(N)]`'s depth counter uses a plain runtime `int` comparison
+with no pragma/transform involvement, so it was never a candidate either.
+
+**Incidental finding while constructing the ivdep probe, fixed as
+BUG-143**: forcing an extreme bound through a `while`-loop shape (rather
+than `for`) surfaced an unrelated, more severe bug -- `while_bounds_
+hints`'s Vec-index collector (`collect_vec_idx_in_expr`) recorded ANY
+`Var`-based `Index` access keyed by the loop variable with no check that
+it's actually a `Vec<T>`; a fixed-size `[T; N]` array matches the exact
+same AST shape. The hint's emission side unconditionally renders
+`{name}.len`, a real `Vec<T>` struct field that doesn't exist on a raw C
+array. Result: the completely ordinary idiom `while i < 4 { sum = sum +
+xs[i]; i = i + 1; }` over a `[i64; 4]` failed to even compile (`cc`:
+"request for member 'len' in something not a structure or union") --
+no extreme values needed, this was a basic-idiom breakage, not a
+boundary-value one. Fixed by gating the collector on the underlying type
+actually being `Type::Vec`. Confirmed the fix doesn't over-narrow (the
+genuine Vec case still gets the hint) and that skipping the hint for
+arrays costs nothing but a missed optimizer nicety -- every access is
+still bounds-checked per-element at runtime regardless.
+
+Regression tests: `while_loop_indexing_a_fixed_array_compiles_and_runs_
+on_tree_c`, `while_loop_indexing_a_vec_still_gets_the_bounds_hint_on_
+tree_c` (src/lib.rs); `while_loop_indexing_a_fixed_array_runs_correctly_
+on_c_backend`, `non_parallel_for_with_extreme_start_bound_traps_
+correctly_on_both_backends` (tests/run_end_to_end.rs, the latter a
+"clean pass still gets a test" lock-in for the ivdep question itself).
+Full writeup in `docs/TODO_CURRENT.md`'s BUG-143 section.
+
+<details>
+<summary>Original (2026-08-07) category C writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: BUG-140 — `parallel for i from i64::MIN to 4 {
 ... }` traps correctly on LLVM but the C backend's `#pragma omp parallel
@@ -269,6 +313,8 @@ just `parallel for`'s start bound) — array bounds, `#[bounded(N)]`'s depth
 counter, default/sentinel values, anywhere a signed extreme value could
 reach emitted C source as a bare literal rather than going through a
 runtime-computed variable.
+
+</details>
 
 ## D. Type-existence validation: gaps beyond BUG-139's three sites (🟡 medium)
 

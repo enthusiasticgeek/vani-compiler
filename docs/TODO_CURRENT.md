@@ -9909,3 +9909,98 @@ vs. module-level consts, confirmed vulnerable and fixed as BUG-142,
 which turned out to have two symptoms sharing one root cause: the
 parameter-diagnostic case and the plain/tuple `let`-Reassign case).
 Next free bug number is **BUG-143**.
+
+## BUG-143 (2026-08-08) -- `while` loop indexing a fixed-size array with the loop var hit a nonexistent `.len` field in tree-C
+
+Third finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category C
+(compiler-emitted-pragma + boundary-value UB audit) -- found incidentally
+while investigating the category's own primary question, not what the
+investigation set out to find.
+
+**Category C's primary question, answered first**: does `_Pragma("GCC
+ivdep")` (the sibling pragma to BUG-140's fixed `#pragma omp parallel
+for` site, emitted for every non-parallel `for`/`while` loop) share
+BUG-140's GCC-internal signed-overflow UB for extreme loop bounds?
+Answer: **no** -- confirmed via a standalone C probe (the same technique
+BUG-140 itself used) that a plain `for (T i = start; i < end; i++)` loop
+re-evaluates its exit condition fresh every iteration; there's no
+equivalent "precompute the total trip count via signed subtraction"
+step for `ivdep` (a vectorization hint) the way `#pragma omp parallel
+for` needs one to partition work across threads ahead of time. Verified
+directly through `vanic` too: the real BUG-140 repro reshaped as a
+non-parallel `for` loop traps correctly on the very first iteration (a
+genuine out-of-bounds access, via the ordinary per-element runtime
+bounds check) on both backends -- exit 134 on C, exit 3 on LLVM. A grep
+of `backend_c.rs` confirmed exactly 3 `_Pragma` sites total (while-ivdep,
+for-ivdep, for-omp-parallel) -- no other pragma/GCC-transform-triggering
+site exists to audit. `#[bounded(N)]`'s depth counter (the audit's other
+named candidate) uses a plain runtime `int` comparison with no
+pragma/transform involvement -- not a candidate. Category C's primary
+question is closed with no fix needed; locked in with
+`non_parallel_for_with_extreme_start_bound_traps_correctly_on_both_backends`
+in `tests/run_end_to_end.rs` (a "clean pass still gets a regression
+test," per this project's convention).
+
+**The incidental finding**: while constructing repros to probe the ivdep
+question, forcing an EXTREME start bound through a `while`-loop shape
+(rather than `for`) hit an entirely unrelated, more severe bug. Minimal
+repro (no extreme values needed at all):
+```
+fn main() -> i64 {
+  let xs: [i64; 4] = [10, 20, 30, 40];
+  let i: i64 = 0;
+  let sum: i64 = 0;
+  while i < 4 {
+    sum = sum + xs[i];
+    i = i + 1;
+  }
+  return sum;
+}
+```
+This is a completely ordinary idiom, yet `cc` failed outright: `request
+for member 'len' in something not a structure or union`.
+
+Root cause: `backend_c.rs`'s `while_bounds_hints` optimizer aid hoists a
+single bounds assertion before a `while var < upper`/`var <= upper` loop
+when the body indexes a Vec by the loop var, letting gcc's VRP prove the
+per-element check redundant. Its collector, `collect_vec_idx_in_expr`,
+recorded ANY `Var`-based `Index` access keyed by the loop variable with
+NO check that the indexed value is actually a `Vec<T>` -- a fixed-size
+`[T; N]` array's `Index` access matches the exact same AST shape. The
+hint's emission side (`while_bounds_hints` itself) unconditionally
+renders `{name}.len` (or `{name}->len` for a ref), assuming a `Vec<T>`
+struct's `.len` field -- but a `[T; N]` lowers to a raw C array with no
+`.len` member at all, so `v_xs.len` is simply invalid C.
+
+Fix: gated `collect_vec_idx_in_expr`'s `Index` branch on the underlying
+(Ref/RefMut-stripped) type actually being `Type::Vec`, matching the
+project's established pattern for this exact class of "one lowering
+mistakenly treats an array the same as a Vec" bug. Skipping the hint for
+arrays costs nothing but a missed optimizer hint -- every indexed access
+is still bounds-checked per-element at runtime regardless, confirmed by
+re-running the extreme-bound version of this same repro through a
+`while` loop after the fix: correctly traps (134 on C, 3 on LLVM) instead
+of failing to compile.
+
+Verified the fix doesn't over-narrow: the original Vec-shaped case
+(`while i < 4 { sum = sum + xs[i]; }` where `xs: Vec<i64>`) still gets
+the hint emitted (`_ihi`/`loop bound out of vec range` present in the
+tree-C output). Re-ran `vanic check examples`: identical 72 pre-existing,
+unrelated failures before and after -- zero regressions. (Both repro
+paths only reach tree-C -- forced here via an unrelated `#[no_mangle]`
+fn, same "SSA's own emission path never had this bug in the first place"
+situation as BUG-137/BUG-142 -- so nothing in the default SSA-eligible
+corpus was ever exposed to this bug, which is presumably why it went
+unnoticed.)
+
+Added `while_loop_indexing_a_fixed_array_compiles_and_runs_on_tree_c`
+and `while_loop_indexing_a_vec_still_gets_the_bounds_hint_on_tree_c` to
+`src/lib.rs`. Added
+`while_loop_indexing_a_fixed_array_runs_correctly_on_c_backend` (real
+subprocess run, asserts the correct sum 100) to
+`tests/run_end_to_end.rs`.
+
+Full `cargo test --release` clean (2823 lib tests + 209 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category C is now closed. Next free bug number is **BUG-144**.

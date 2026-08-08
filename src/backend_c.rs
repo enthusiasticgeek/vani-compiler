@@ -13552,8 +13552,33 @@ fn collect_vec_idx_in_expr(
         E::Index { array, index, .. } => {
             if let E::Var(vec_name) = &array.kind {
                 if expr_is_loop_var(index, loop_var) {
-                    let is_ref = matches!(&array.ty, Type::Ref(_) | Type::RefMut(_));
-                    out.entry(vec_name.clone()).or_insert(is_ref);
+                    // BUG-143: this hint's emission side
+                    // (`while_bounds_hints`) always renders
+                    // `{local}.len` / `{local}->len`, assuming a
+                    // `Vec<T>`'s `.len` struct field -- but `array`
+                    // can just as easily be a fixed-size `[T; N]`,
+                    // which lowers to a raw C array with no `.len`
+                    // member at all. Indexing a `[T; N]` inside a
+                    // `while i < N { xs[i] }`/`while i <= N-1 { .. }`
+                    // loop (an extremely ordinary idiom) hit this and
+                    // produced `v_xs.len` -- a hard `cc` failure
+                    // ("request for member 'len' in something not a
+                    // structure or union"). Gate on the underlying
+                    // (Ref/RefMut-stripped) type actually being
+                    // `Type::Vec` before recording it; a bare array
+                    // is still bounds-checked per-element at runtime
+                    // regardless (this hint is purely an optimizer
+                    // aid), so skipping it here just means gcc's VRP
+                    // doesn't get the hoisted assertion -- correct
+                    // either way.
+                    let inner_ty = match &array.ty {
+                        Type::Ref(inner) | Type::RefMut(inner) => inner.as_ref(),
+                        other => other,
+                    };
+                    if matches!(inner_ty, Type::Vec(_)) {
+                        let is_ref = matches!(&array.ty, Type::Ref(_) | Type::RefMut(_));
+                        out.entry(vec_name.clone()).or_insert(is_ref);
+                    }
                 }
             }
             collect_vec_idx_in_expr(array, loop_var, out);
