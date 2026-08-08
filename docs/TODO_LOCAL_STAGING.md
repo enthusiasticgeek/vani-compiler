@@ -3653,3 +3653,12 @@ fn main() -> i64 {
 
 #### Observed Symptom:
 The C backend crashed due to an integer overflow in the `
+
+---
+
+### Candidate: 20260808-140812-run-crash-a904c554b7
+
+Repro: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-140812-run-crash-a904c554b7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
