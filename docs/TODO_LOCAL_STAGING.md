@@ -3280,3 +3280,12 @@ Fix attempt: `tools/localfuzz/findings/20260808-030058-backend-divergence-b50f8e
 }
 ```
 
+
+---
+
+### Candidate: 20260808-043453-backend-divergence-0d08fab9e3
+
+Repro: `tools/localfuzz/findings/20260808-043453-backend-divergence-0d08fab9e3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-043453-backend-divergence-0d08fab9e3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
