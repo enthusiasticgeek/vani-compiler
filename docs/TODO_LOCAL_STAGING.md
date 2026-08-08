@@ -3919,3 +3919,12 @@ função main() -> i64 {
 **Observed Symptom**: The compiler crashed with the message `integer overflow in int64_t mul`. This indicates that the program encountered a mathematical operation that resulted in an overflow, which is not supported by the target architecture.
 
 **Backends Affected**: The crash occurred in both LLVM and C
+
+---
+
+### Candidate: 20260808-230959-run-crash-740941fdd1
+
+Repro: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
