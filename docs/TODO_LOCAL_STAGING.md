@@ -3372,3 +3372,14 @@ Fix attempt: `tools/localfuzz/findings/20260808-054600-backend-divergence-c22d70
 }
 ```
 
+
+---
+
+### Candidate: 20260808-065121-backend-divergence-5954540ee6
+
+Repro: `tools/localfuzz/findings/20260808-065121-backend-divergence-5954540ee6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-065121-backend-divergence-5954540ee6/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+The vani-compiler local staging log shows a backend-divergence issue with the generated code from the provided mutant. The final exit status is 3, indicating a crash or hang in the executed program. The output indicates an "index out of bounds" error during the execution. The specific backend(s) affected are LLVM and the Rust backend.
