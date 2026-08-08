@@ -12572,3 +12572,64 @@ fn main() -> i64 {
         String::from_utf8_lossy(&output_normal.stdout)
     );
 }
+
+// BUG-141 (2026-08-08): bug-pattern-audit-round-2, category A. `set(mut
+// ref xs, i, v)` / `set(xs, i, v)` with a narrower-than-i64 index type
+// (`u8`/`u16`/`u32`) reached backend_llvm.rs's generic vec-mutator call
+// site with its raw checked width, producing a `call` whose argument
+// type (e.g. `i32`) didn't match the callee's hard-coded `i64 %i`
+// parameter -- unlike every sibling mutator on the same dispatch path
+// (`swap_remove`/`insert`/`vec_swap`/`vec_take`/`vec_drop`), which all
+// coerce their index/count arg to a fixed width in checker.rs. Verifies
+// both backends compute the correct answer for a `u8`-typed index across
+// several distinct index values, not just that it doesn't crash.
+#[test]
+fn set_mut_with_narrow_index_types_writes_the_correct_slot_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug141-set-mut-narrow-index",
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+  let i0: u8 = 0;
+  let i3: u8 = 3;
+  let i9: u8 = 9;
+  let r0: i64 = set(mut ref xs, i0, 1000);
+  let r3: i64 = set(mut ref xs, i3, 1003);
+  let r9: i64 = set(mut ref xs, i9, 1009);
+  assert r0 == 0;
+  assert r3 == 0;
+  assert r9 == 0;
+  assert xs[0] == 1000;
+  assert xs[1] == 20;
+  assert xs[3] == 1003;
+  assert xs[8] == 90;
+  assert xs[9] == 1009;
+  print xs[0], xs[1], xs[3], xs[8], xs[9];
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-141 regression: set() with a u8 index should run cleanly \
+             ({:?}), got status {:?}, stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1000 20 1003 90 1009",
+            "wrong values written via a u8 index ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

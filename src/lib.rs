@@ -1592,6 +1592,54 @@ mod tests {
         );
     }
 
+    // BUG-141 (2026-08-08): bug-pattern-audit-round-2, category A. Unlike
+    // every sibling mutator on this dispatch path (`swap_remove`/`insert`/
+    // `vec_swap`/`vec_take`/`vec_drop`, all of which run their index/count
+    // arg through `coerce_checked(..., I64/U64, ...)` in checker.rs),
+    // `check_set_builtin` only validated `index.ty().is_integer()` and let
+    // the raw checked type through -- `set(mut ref xs, i, v)` with a
+    // `u32`-typed `i` produced `call i64 @intent_vec_i64__set_mut(...,
+    // i32 %t, i64 %v)`, a declared-vs-actual argument type mismatch against
+    // the callee's hard-coded `i64 %i` parameter. Same root-cause shape as
+    // BUG-138, just at a call site instead of a GEP.
+    #[test]
+    fn set_mut_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              let r: i64 = set(mut ref xs, i, 99);
+              return xs[1];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("set(mut ref) with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the set_mut call, got:\n{ll}"
+        );
+        assert!(
+            !ll.contains("call i64 @intent_vec_i64__set_mut(%intent_vec_i64* %xs.addr, i32"),
+            "the set_mut call must not pass a raw i32 for the i64 index parameter, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn set_consuming_with_u16_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u16 = 1;
+              let ys: Vec<i64> = set(xs, i, 99);
+              return ys[1];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("set(consuming) with u16 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i16") && ll.contains(" to i64"),
+            "expected the u16 index to be zext'd to i64 before the set call, got:\n{ll}"
+        );
+    }
+
     #[test]
     fn generic_function_unused_surfaces_dead_code_diagnostic() {
         // T1.4 phase 2: monomorphization is now wired up.

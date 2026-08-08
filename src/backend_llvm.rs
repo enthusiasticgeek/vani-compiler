@@ -16588,10 +16588,38 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 };
                 let helper_name =
                     format!("@intent_vec_{}__{}", vec_struct_tag(&elt), helper_op);
+                // BUG-141: `set`/`set_mut`'s index arg (position 1) is
+                // the one builtin in this dispatch that check_set_builtin
+                // never coerces to a fixed width (unlike swap_remove/
+                // insert/vec_swap/vec_take/vec_drop, which all run their
+                // index/count arg through `coerce_checked(..., I64/U64,
+                // ...)` in checker.rs) -- a narrower-than-i64 index (e.g.
+                // `u32`) reaches here with its raw checked type and gets
+                // passed to a callee whose `%i` parameter is hard-coded
+                // `i64`, producing a declared-vs-actual argument type
+                // mismatch. Same root-cause shape as BUG-138's GEP-index
+                // mismatch, just at a call site instead of a GEP.
+                let index_arg_pos = if matches!(name.as_str(), "set" | "set_mut") {
+                    Some(1)
+                } else {
+                    None
+                };
                 let arg_strs: Vec<String> = args
                     .iter()
-                    .map(|a| {
-                        format!("{} {}", llvm_type_string(&a.ty), emit_expr(a, ctx, out))
+                    .enumerate()
+                    .map(|(i, a)| {
+                        let v = emit_expr(a, ctx, out);
+                        let v = if Some(i) == index_arg_pos {
+                            widen_index_to_i64(a, v, ctx, out)
+                        } else {
+                            v
+                        };
+                        let ty_str = if Some(i) == index_arg_pos {
+                            "i64".to_string()
+                        } else {
+                            llvm_type_string(&a.ty)
+                        };
+                        format!("{} {}", ty_str, v)
                     })
                     .collect();
                 let dest = ctx.fresh_tmp();

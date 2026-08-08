@@ -42,7 +42,68 @@ or lower confidence a bug actually exists here).
 
 ---
 
-## A. Index-parameter type-width audit across every builtin (🔴 highest priority)
+## A. Index-parameter type-width audit across every builtin (🔴 highest priority) -- CLOSED 2026-08-08, BUG-141
+
+**Update (2026-08-08)**: this category is now closed. The originally-planned
+approach (triage all ~180 `grep -n "emit_expr(&args\[1\]" src/backend_llvm.rs`
+hits) turned out to be the wrong search surface -- corrected methodology and
+result below; the original writeup is kept underneath for the reasoning trail.
+
+**Corrected method**: the real question isn't "which codegen sites call
+`emit_expr(&args[1], ...)`" but "which checker functions accept an index/count
+argument via a bare `index.ty().is_integer()` check and pass its *raw* checked
+type through, vs. which ones call `coerce_checked(..., &Type::I64` or `&Type::
+U64, ...)` (inserting an actual widening cast into the typed IR before codegen
+ever runs)." The latter is safe by construction regardless of what codegen
+does with it. `grep -n "is_integer()" src/checker.rs` returns exactly 11 hits
+total (not ~180) -- small enough to triage exhaustively in one pass:
+- `clone_at` -- already fixed, BUG-138.
+- `set` / `set_mut` (`check_set_builtin`) -- **found vulnerable, fixed as
+  BUG-141**: the index arg reached `backend_llvm.rs`'s generic vec-builtin
+  call site with its raw width, producing a `call` argument that didn't match
+  the callee's hard-coded `i64 %i` parameter. Confirmed via `opt -passes=
+  verify` that LLVM's verifier actually accepts this (implicit same-symbol
+  call-type bitcast is legal IR) and that it happened to still compute correct
+  results on this host/LLVM version (x86-64 register zero-extension + LLVM's
+  own per-operand CC lowering rescued it) -- not a proven wrong-answer bug in
+  practice, but a genuinely invalid declared-vs-actual IR shape worth closing
+  on the same footing as BUG-138 rather than leaving it fragile against a
+  different target/LLVM version. Fix: route the index arg through the same
+  `widen_index_to_i64` helper BUG-138 introduced, special-cased for `set`/
+  `set_mut` at that call site.
+- `Index` / `IndexAssign` (the `xs[i]` read/write path, checker.rs lines
+  21952 and 14007) -- confirmed SAFE independently: both already widen at the
+  *backend* level via a pre-existing `widen_index_to_64` helper (predates
+  BUG-138; `clone_at`/`set_mut` simply never called it). No bug here.
+- `for`-loop range bounds (checker.rs line 14509) -- both bounds get
+  `promoted_integer_type` + `coerce_numeric_operand`'d to a shared type; the
+  extreme-value gotcha there is BUG-140's already-fixed literal-typing issue,
+  not a width-mismatch bug.
+- The remaining ~6 hits are generic binary-op / cast / struct-field integer
+  checks, unrelated to indexing.
+
+**Why the C backend needed no equivalent fix**: checked `set_mut`'s C
+signature (`backend_c.rs`) -- a plain `int64_t i` parameter. C's implicit
+integer promotion at the call site correctly widens any narrower argument
+type; there's no C-level equivalent of LLVM IR's strict textual-type-matching
+requirement that BUG-138/BUG-141 both hit. The C backend is structurally
+immune to this whole bug class, not just untested for it.
+
+**Net result**: only 2 of the 11 real candidates were vulnerable (`clone_at`,
+`set`/`set_mut`), both now fixed (BUG-138, BUG-141). The generic 8-named-
+builtin list this category originally proposed checking (`push`, `pop`,
+`insert`, `swap_remove`, `set`, `set_mut`, `get`, `get_mut`) turned out to be
+mostly moot: `push`/`pop` take no index at all, `insert`/`swap_remove` were
+already safe via `coerce_checked`, and there's no standalone `get`/`get_mut`
+builtin in this language (indexing is the `xs[i]` operator, covered above).
+Regression tests: `set_mut_with_u32_index_widens_to_i64_in_llvm_ir` and
+`set_consuming_with_u16_index_widens_to_i64_in_llvm_ir` (src/lib.rs);
+`set_mut_with_narrow_index_types_writes_the_correct_slot_on_both_backends`
+(tests/run_end_to_end.rs). Full writeup in `docs/TODO_CURRENT.md`'s BUG-141
+section.
+
+<details>
+<summary>Original (2026-08-07) category A writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: BUG-138 — a `u32`-typed index reaching `clone_at`
 produced a GEP whose declared index type (hard-coded `i64` in the format
@@ -90,6 +151,8 @@ each — don't just run it and check the exit code, since (per BUG-138) the
 failure mode is `lli`/`llc`/`cc` REJECTING malformed output outright, which
 `vanic run`/`vanic check` alone won't always surface clearly as "here's the
 exact type mismatch."
+
+</details>
 
 ## B. Same-scope shadowing beyond plain scalar `let` (🔴 high)
 

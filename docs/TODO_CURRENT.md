@@ -9746,4 +9746,79 @@ Full `cargo test --release` clean (2815 lib tests + all integration suites, 0
 failed).
 
 This closes out the last of the 4 findings from the 2026-08-07 localfuzz backlog
-triage. Next free bug number is **BUG-141**.
+triage.
+
+## BUG-141 (2026-08-08) -- `set`/`set_mut` with a narrower-than-i64 index produced a mismatched LLVM call
+
+First finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category A (index-
+parameter type-width audit). Grounded in BUG-138's exact shape but a
+different mechanism: BUG-138 was a GEP whose hard-coded index type didn't
+match the operand; this one is a *call* whose callee has a hard-coded `i64
+%i` parameter.
+
+`check_set_builtin` (checker.rs) validated the index argument with only
+`index.ty().is_integer()` and left its raw checked width untouched --
+unlike every sibling mutator reachable through the same
+`backend_llvm.rs` vec-builtin dispatch (`swap_remove`/`insert`/`vec_swap`/
+`vec_take`/`vec_drop`), all of which run their index/count argument
+through `coerce_checked(..., &Type::I64` or `&Type::U64, ...)` in the
+checker, inserting an actual widening cast into the typed IR before
+codegen ever sees it. Confirmed via a systematic grep of every
+`.is_integer()`-style check in checker.rs (11 hits): all index/bound-
+shaped ones except `clone_at` (already fixed as BUG-138) and `set`/
+`set_mut` funnel through `coerce_checked`. `Index`/`IndexAssign` (the
+`xs[i]` read/write path) already widen at the *backend* level via the
+pre-existing `widen_index_to_64` helper, so those were confirmed safe
+independently.
+
+Concretely: `set(mut ref xs, i, v)` with `i: u32` emitted `call i64
+@intent_vec_i64__set_mut(%intent_vec_i64* %xs.addr, i32 %t10, i64 99)` --
+the callee's declared signature is `i64 @intent_vec_i64__set_mut(...,
+i64 %i, ...)`. Confirmed via `opt -passes=verify` that LLVM's verifier
+does NOT reject this (a same-named direct-call signature mismatch is
+legal IR -- the callee is implicitly treated as bitcast to the call
+site's own inferred function type), and confirmed via direct execution
+on both the LLVM JIT (`lli`) and AOT `llc`-lowered paths that small
+positive index values happened to still produce correct results on this
+x86-64 host (32-bit register writes zero-extend the upper 32 bits per
+the ISA, and LLVM's own calling-convention lowering for narrower types
+still emits a correctly-signed extend based on the call site's own
+operand type) -- so this was not a confirmed wrong-answer bug in
+practice on this platform, but a genuinely invalid declared-vs-actual
+IR shape that's fragile against a different LLVM version/target/
+optimization pipeline, and matches BUG-138's exact root-cause category
+closely enough to fix on the same footing rather than leave open.
+
+The C backend was checked and confirmed NOT vulnerable to this specific
+shape: `backend_c.rs`'s `set_mut` helper takes a plain C `int64_t i`
+parameter, and C's implicit integer promotion at the call site correctly
+widens a `uint32_t`/`uint8_t`/etc. argument -- there's no equivalent to
+LLVM IR's strict textual-type-matching requirement.
+
+**Fix**: `backend_llvm.rs`'s generic vec-builtin call-site loop (the one
+BUG-138 already documented, immediately before it) now special-cases
+`set`/`set_mut`'s index argument (position 1), routing it through the
+same `widen_index_to_i64` helper BUG-138 introduced, before it's folded
+into `arg_strs`.
+
+Verified: `opt -passes=verify` now accepts the emitted IR; the call site
+correctly reads `call i64 @intent_vec_i64__set_mut(..., i64 %t11, ...)`
+with an explicit `zext i32 ... to i64` feeding `%t11`. Re-ran `vanic
+check examples` before and after (via `git stash`) to confirm identical
+72 pre-existing, unrelated failures either way (labeled-break edge
+cases and a couple of known generic-inference gaps) -- zero regressions
+introduced.
+
+Added `set_mut_with_u32_index_widens_to_i64_in_llvm_ir` and
+`set_consuming_with_u16_index_widens_to_i64_in_llvm_ir` (checks the
+`zext` is present and, for the mut-ref form, that no raw-`i32` call
+remains) to `src/lib.rs`. Added
+`set_mut_with_narrow_index_types_writes_the_correct_slot_on_both_backends`
+to `tests/run_end_to_end.rs` (real subprocess runs on both backends,
+several distinct `u8` index values, comparing actual printed output
+against hand-computed expected values -- not just a clean-exit check).
+
+Full `cargo test --release` clean (2817 lib tests + 206 end-to-end tests
++ all other integration suites, 0 failed).
+
+Next free bug number is **BUG-142**.
