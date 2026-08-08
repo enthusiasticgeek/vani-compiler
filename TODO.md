@@ -7,7 +7,7 @@
 
 ## Current status (as of 2026-07-28)
 
-- **Version**: `0.9.1` (tagged v0.1.0 through v0.9.1; see RELEASING.md for full history).
+- **Version**: `0.9.2-dev` (tagged v0.1.0 through v0.9.2-dev; see RELEASING.md for full history).
 - **Tests**: 2600 lib tests passing, **0 failing** — first fully clean
   `cargo test --lib` run in a while; the 3 Win64 FFI-ABI failures that
   had been showing up (and being written off as "pre-existing,
