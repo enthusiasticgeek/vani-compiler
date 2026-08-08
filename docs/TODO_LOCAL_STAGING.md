@@ -3841,3 +3841,12 @@ The vani-compiler project's local staging log has reported a backend-divergence 
 The backend-divergence symptom indicates that the behavior of the code may vary depending on the specific backend being used. In this case, the bug was observed in both LLVM and regular Rust targets. The log includes the exit codes from both backends (134 for LLVM and 3 for regular Rust), as well as the output produced by each backend.
 
 A human/frontier root-cause review is required to determine the exact cause of the integer overflow issue and develop a fix.
+
+---
+
+### Candidate: 20260808-184931-backend-divergence-22ea13e15c
+
+Repro: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
