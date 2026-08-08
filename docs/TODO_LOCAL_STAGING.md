@@ -3850,3 +3850,20 @@ Repro: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/r
 Fix attempt: `tools/localfuzz/findings/20260808-184931-backend-divergence-22ea13e15c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-201651-run-crash-b756331010
+
+Repro: `tools/localfuzz/findings/20260808-201651-run-crash-b756331010/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-201651-run-crash-b756331010/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+The vani-compiler local staging log reveals a run-crash issue in the test case `/home/virgo/source/vani-compiler-localfuzz/examples/language/hungarian/async_cancel_auto.vani`. Specifically, the mutant/generated source results in a crash or hang during execution. The backend(s) affected by this issue are LLVM and C.
+
+---
+
+**STATUS: needs human/frontier root-cause review.**
