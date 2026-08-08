@@ -3817,3 +3817,12 @@ Fix attempt: `tools/localfuzz/findings/20260808-154851-backend-divergence-c17fc7
   "status": "needs human/frontier root-cause review."
 }
 ```
+
+---
+
+### Candidate: 20260808-160950-backend-divergence-74aa0ed7f5
+
+Repro: `tools/localfuzz/findings/20260808-160950-backend-divergence-74aa0ed7f5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-160950-backend-divergence-74aa0ed7f5/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
