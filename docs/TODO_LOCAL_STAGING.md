@@ -3776,3 +3776,14 @@ Fix attempt: `tools/localfuzz/findings/20260808-152911-backend-divergence-a7aae9
 }
 ```
 
+
+---
+
+### Candidate: 20260808-154503-run-crash-f0d4363f6b
+
+Repro: `tools/localfuzz/findings/20260808-154503-run-crash-f0d4363f6b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-154503-run-crash-f0d4363f6b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This bug report is for a reproduction of a crash or hang in the vani-compiler project's local staging log for the example `concurrency.vani`. The mutant/source is provided below, along with the observed symptom (crash/hang) and which backend(s) it affects. No specific cause has been determined yet, and a human/root-cause review is required.
