@@ -316,7 +316,57 @@ runtime-computed variable.
 
 </details>
 
-## D. Type-existence validation: gaps beyond BUG-139's three sites (🟡 medium)
+## D. Type-existence validation: gaps beyond BUG-139's three sites (🟡 medium) -- CLOSED 2026-08-08, BUG-144
+
+**Update (2026-08-08)**: this category is now closed. All 4 candidates
+triaged with direct repros:
+
+- **Generic `Type::Apply` names, `methods on`/`implement` blocks --
+  confirmed SAFE.** `Type::Apply`'s validator arm already checks the
+  base name; `methods on`/`implement` both hoist into `program.functions`
+  (via `hoist_methods_into_functions`/`hoist_impls_into_functions`)
+  before BUG-139's validator loop runs, so they're covered as ordinary
+  function declarations already.
+- **Bare `interface` declarations, local `let`/`let (a,b)` annotations --
+  found genuinely vulnerable, fixed as BUG-144.** Both are the exact same
+  "declared but never constructed -> silently dead, then a wall of
+  cryptic backend errors if it IS constructed" shape BUG-139 itself
+  found -- `interface Foo { fn bar(self: Bogus) -> Bogus; }` with no
+  `implement` ran 0-exit silently on both backends; `let xs: Vec<Bogus> =
+  vec();` passed `vanic check` clean then failed with dozens of `cc`
+  "unknown type name" errors / an `lli` "getelementptr must be sized"
+  error instead of one diagnostic.
+
+**The genuinely hard part**: making the interface-validation loop
+correctly STRICT surfaced 3 categories of false positive against the
+full corpus + existing test suite, each a real pre-existing gap the new
+check simply made visible for the first time -- interface method
+self-params can legitimately be the un-substituted `Self` placeholder
+keyword (parser-stamped `Type::Struct("Self")`), a real declared
+enum/struct that a resolution pass (`resolve_enum_types_in_program`)
+just never touched for `program.interfaces` specifically (it processes
+the sibling `program.impls` but not interfaces themselves), or a bare
+generic template name in a blanket-impl-targeting interface
+(`self: Wrap<i64>`) that monomorphization's name-mangling never touches
+since interfaces aren't a monomorphization target at all. Fixed each at
+its actual root (a `Self`-name exception, a `program.interfaces` loop
+added to the enum-resolution pass, and a `__`-prefix-match fallback
+scoped to just the interface-validation loop) rather than loosening the
+general-purpose validator everywhere.
+
+Regression tests: `interface_method_signature_with_unknown_type_is_
+rejected`, `interface_method_self_typed_as_self_keyword_is_accepted`,
+`interface_method_self_typed_as_a_real_enum_is_accepted`,
+`interface_method_self_typed_as_generic_blanket_target_is_accepted`,
+`let_annotation_with_unknown_type_is_rejected_even_via_empty_vec_
+inference`, `let_tuple_annotation_with_unknown_type_is_rejected`
+(src/lib.rs); `interface_method_with_unknown_type_rejected_by_vanic_
+check`, `interface_method_self_typed_as_real_enum_runs_correctly_on_
+both_backends` (tests/run_end_to_end.rs). Full writeup in
+`docs/TODO_CURRENT.md`'s BUG-144 section.
+
+<details>
+<summary>Original (2026-08-07) category D writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: BUG-139 — the checker never validated that a
 struct field / enum variant payload / function parameter-or-return type
@@ -348,6 +398,8 @@ Candidates:
   BogusType { ... }` — do these get the same validation, given they're
   processed through a different hoisting pass (`hoist_methods_into_functions`)
   than plain function declarations?
+
+</details>
 
 ## E. `parallel for` + `reduce` correctness audit beyond the one fixed shape (🟡 medium)
 

@@ -12810,3 +12810,97 @@ fn main() -> i64 {
         output_llvm.status
     );
 }
+
+// BUG-144 (2026-08-08): bug-pattern-audit-round-2, category D. A bare
+// `interface` declaration's own method signatures were never validated
+// against the program's declared struct/enum/interface names -- an
+// `interface Foo { fn bar(self: BogusType) -> BogusType; }` with no
+// `implement` block anywhere passed `vanic check` clean and ran 0-exit on
+// BOTH backends (confirmed the same "silently dead" shape BUG-139 found).
+#[test]
+fn interface_method_with_unknown_type_rejected_by_vanic_check() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug144-interface-unknown-type",
+        r#"
+interface Foo {
+    fn bar(self: BogusType) -> BogusType;
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc check should execute: {e}"));
+    assert!(
+        !output.status.success(),
+        "BUG-144 regression: an interface method signature naming a \
+         nonexistent type should be rejected by `vanic check`, got status {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown type 'BogusType'") && stderr.contains("interface 'Foo'"),
+        "expected an unknown-type diagnostic naming the interface, got: {stderr}"
+    );
+}
+
+// Companion to the rejection test above: confirm the fix's three
+// exceptions (the `Self` placeholder, a real enum used as a self-type,
+// and a blanket-impl-targeting generic self-type) don't just type-check
+// but actually RUN correctly end to end on both backends -- real
+// subprocess runs, not just a compile check.
+#[test]
+fn interface_method_self_typed_as_real_enum_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug144-interface-enum-self",
+        r#"
+enum Color { Red, Green, Blue }
+
+interface Eq {
+    fn eq(self: Color, other: Color) -> bool;
+}
+
+implement Eq for Color {
+    fn eq(self: Color, other: Color) -> bool {
+        return (self as i32) == (other as i32);
+    }
+}
+
+fn main() -> i64 {
+    let a: Color = Color.Red;
+    let b: Color = Color.Red;
+    let c: Color = Color.Blue;
+    assert a.eq(b) == true;
+    assert a.eq(c) == false;
+    print "ok";
+    return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-144 regression: a real enum used as an interface method's \
+             self-type should compile and run cleanly ({:?}), got status {:?}, \
+             stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "ok",
+            "wrong output ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

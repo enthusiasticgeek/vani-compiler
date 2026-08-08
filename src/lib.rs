@@ -1815,6 +1815,138 @@ mod tests {
         );
     }
 
+    // BUG-144 (2026-08-08): bug-pattern-audit-round-2, category D. BUG-139's
+    // type-existence validator (`type_references_unknown_name` in
+    // checker.rs) was wired into struct fields / enum variants / function
+    // params+return only. Two more sites silently accepted a reference to
+    // a type that was never declared anywhere: (1) a bare `interface`
+    // declaration's own method signatures (never validated at all,
+    // `implement`/`methods on` blocks get it for free via hoisting into
+    // `program.functions`, but the interface DECLARATION itself never
+    // routes through that), and (2) a local `let`/`let (a, b)` type
+    // annotation (BUG-139 only wired top-level declarations). Both were
+    // confirmed silent at `vanic check` time and then failed late with a
+    // wall of cryptic backend errors instead of one clean diagnostic --
+    // the exact "declared but never constructed" shape BUG-139 itself
+    // found. Fixing the interface case surfaced two more pre-existing,
+    // unrelated gaps as false positives during the fix: interface method
+    // self-params can legitimately be `Self` (the un-substituted
+    // placeholder keyword, parser-stamped as `Type::Struct("Self")`) or a
+    // real declared enum/struct name that a resolution pass just never
+    // touched for `program.interfaces` (`resolve_enum_types_in_program`
+    // processes `program.impls` but not the sibling `program.interfaces`),
+    // or a generic template name in a blanket-impl-targeting interface
+    // (`self: Wrap<i64>`) that monomorphization's name-mangling never
+    // touches since interfaces aren't a monomorphization target at all.
+    #[test]
+    fn interface_method_signature_with_unknown_type_is_rejected() {
+        let source = r#"
+            interface Foo {
+                fn bar(self: BogusType) -> BogusType;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("interface method with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'BogusType'")
+                && e.message.contains("interface 'Foo' method 'bar'")),
+            "expected an unknown-type diagnostic naming the interface method, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_self_keyword_is_accepted() {
+        let source = r#"
+            interface Describable {
+                fn name(self: Self) -> i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect(
+            "the un-substituted `Self` placeholder in a bare interface \
+             declaration must never be flagged as an unknown type",
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_a_real_enum_is_accepted() {
+        let source = r#"
+            enum Color { Red, Green, Blue }
+            interface Eq {
+                fn eq(self: Color, other: Color) -> bool;
+            }
+            implement Eq for Color {
+                fn eq(self: Color, other: Color) -> bool {
+                    return (self as i32) == (other as i32);
+                }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect(
+            "a real declared enum used as an interface method's self-type \
+             must resolve correctly, not be flagged as unknown",
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_generic_blanket_target_is_accepted() {
+        let source = r#"
+            struct Wrap<T> { val: T }
+            interface Labeled {
+                fn get_label(self: Wrap<i64>) -> i64;
+            }
+            implement<T> Labeled for Wrap<T> {
+                fn get_label(self: Wrap<T>) -> i64 { return 99; }
+            }
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { val: 0 };
+                return w.get_label();
+            }
+        "#;
+        compile(source).expect(
+            "a blanket-impl-targeting interface's generic self-type must \
+             resolve against the monomorphized instantiation, not be \
+             flagged as an unknown bare generic template name",
+        );
+    }
+
+    #[test]
+    fn let_annotation_with_unknown_type_is_rejected_even_via_empty_vec_inference() {
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<TotallyMadeUpType> = vec();
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("let annotation with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'TotallyMadeUpType'")
+                && e.message.contains("let annotation")),
+            "expected an unknown-type diagnostic naming the let annotation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn let_tuple_annotation_with_unknown_type_is_rejected() {
+        let source = r#"
+            fn pair() -> (i64, i64) { return (1, 2); }
+            fn main() -> i64 {
+                let (a, b): (TotallyBogusType, i64) = pair();
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("let-tuple annotation with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'TotallyBogusType'")
+                && e.message.contains("destructure-let annotation")),
+            "expected an unknown-type diagnostic naming the destructure-let \
+             annotation, got: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn generic_function_unused_surfaces_dead_code_diagnostic() {
         // T1.4 phase 2: monomorphization is now wired up.

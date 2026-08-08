@@ -10004,3 +10004,139 @@ Full `cargo test --release` clean (2823 lib tests + 209 end-to-end tests
 + all other integration suites, 0 failed).
 
 Category C is now closed. Next free bug number is **BUG-144**.
+
+## BUG-144 (2026-08-08) -- interface method signatures and local `let` annotations never got BUG-139's type-existence check
+
+Fourth finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category D
+(type-existence validation gaps beyond BUG-139's three sites). Systematically
+checked all 4 originally-listed candidates.
+
+**Confirmed SAFE (2 of 4)**:
+- Generic `Type::Apply` instantiation names -- the validator's `Apply` arm
+  already checks `name` against `struct_names`/`enum_names`; confirmed via
+  a direct repro (`fn make() -> BogusGeneric<i64>`) that this fires
+  correctly for a never-declared generic name.
+- `methods on`/`implement` blocks -- confirmed SAFE for both forms; both
+  get hoisted into `program.functions` (via `hoist_methods_into_functions`
+  / `hoist_impls_into_functions`) BEFORE BUG-139's validator loop runs, so
+  they're already covered as ordinary function declarations.
+
+**Confirmed VULNERABLE (2 of 4), fixed as BUG-144**:
+- **Bare `interface` declarations.** `interface Foo { fn bar(self:
+  BogusType) -> BogusType; }` with no `implement` block anywhere passed
+  `vanic check` clean and ran 0-exit on both backends -- BUG-139's exact
+  "declared but never constructed -> silently dead" shape, just one level
+  up (the interface DECLARATION itself, as opposed to a struct/enum/fn
+  declaration). `program.interfaces` was never iterated by BUG-139's fix
+  at all -- only consulted as a lookup TARGET for `Type::Object`
+  validation elsewhere.
+- **Local `let`/`let (a, b)` type annotations.** BUG-139 wired the
+  validator into top-level struct fields/enum variants/fn signatures
+  only; local annotations were untouched. Confirmed via `let xs:
+  Vec<TotallyMadeUpType> = vec();` (the empty-vec-inference path takes
+  the element type straight from the annotation, so there's no
+  initializer-side type mismatch to accidentally catch it) -- passed
+  `vanic check` clean, then failed VERY late with a wall of dozens of
+  cryptic backend errors instead of one diagnostic (`cc`: repeated
+  "unknown type name 'Struct_TotallyMadeUpType'"; `lli`: "base element of
+  getelementptr must be sized"). Same shape for `let (a, b): (Bogus,
+  i64) = ...;`.
+
+**Fix, mechanical part**: hoisted BUG-139's `type_references_unknown_name`
+/ `validate_type_reference_exists` out of their original home nested
+inside `check_impl` to module level in `checker.rs`, so `check_one_stmt`'s
+`Stmt::Let`/`Stmt::LetTuple` handlers could call them too (a function-local
+`fn` item isn't visible outside its enclosing function). Added an
+`interfaces: HashSet<String>` field to `Env`, populated in `check_function`
+(threaded in as a new parameter) the same way `structs`/`enums` already
+are, so the per-statement checker has interface names on hand without
+adding yet another function parameter everywhere. Wired the validator
+into: a new loop over `program.interfaces` (right after the existing
+`program.functions` loop); `Stmt::Let`'s annotation (deriving
+`struct_names`/`enum_names` from `env.structs.keys()`/`env.enums.keys()`
+rather than storing yet more redundant Env state); `Stmt::LetTuple`'s
+annotation (mirroring BUG-137/BUG-142's own precedent of keeping
+`LetTuple` in lockstep with plain `Let`).
+
+**Fix, the interesting part**: the interface-validation loop's first
+build against the full example corpus surfaced 3 categories of false
+positive, each a genuine pre-existing gap the new, stricter check simply
+made visible for the first time:
+1. **`Self` placeholder.** `interface Describable { fn name(self: Self)
+   -> i64; }` -- a completely ordinary interface declaration pattern
+   (confirmed in `examples/language/english/default_method_inherited_
+   self_type.vani` and 9 other corpus files) -- parses `Self` as the
+   parser's default bare-identifier stamp, `Type::Struct("Self")`, which
+   stays un-substituted until a concrete `implement` block provides the
+   real type. `Self` can never itself be a declared struct/enum name.
+   Fixed by special-casing `name == "Self"` in `type_references_unknown_
+   name`'s `Type::Struct` arm, the same way `Type::Param` is always
+   accepted.
+2. **A real enum used as an interface method's self-type.**
+   `interface Eq { fn eq(self: Color, other: Color) -> bool; }` where
+   `Color` is a genuinely declared enum (`examples/language/english/
+   enum_eq.vani`'s own documented pattern) -- `resolve_enum_types_in_
+   program` (the pass that re-stamps the parser's default `Type::
+   Struct(name)` to `Type::Enum(name)` once a name is confirmed to be an
+   enum) processes `program.impls` but never the sibling `program.
+   interfaces`, so the bare interface declaration's own copy of the
+   signature stayed `Type::Struct("Color")` forever, even though the
+   matching `implement Eq for Color` block's copy of the identical
+   signature correctly resolved. Fixed by adding a `program.interfaces`
+   loop to `resolve_enum_types_in_program`, mirroring the existing
+   `program.impls` loop.
+3. **A generic template name in a blanket-impl-targeting interface.**
+   `interface Labeled { fn get_label(self: Wrap<i64>) -> i64; }` paired
+   with `implement<T> Labeled for Wrap<T> { ... }` (caught by two
+   existing tests, `blanket_impl_expands_for_concrete_type` and
+   `generic_struct_methods_and_iface_impl_compile`, which is how this
+   one surfaced -- `cargo test`, not the corpus sweep) -- `program.
+   interfaces` is never a monomorphization target at all, so `Wrap`
+   (the bare generic template name) never gets expanded/replaced the
+   way `program.structs`/`program.impls` do, and `struct_names_for_
+   type_check` is deliberately built AFTER monomorphization has already
+   dropped that template in favor of its concrete `Wrap__i64`
+   expansions. Fixed -- scoped to JUST the interface-validation loop, not
+   the general-purpose validator used everywhere else -- by reusing the
+   same "bare generic name resolves to its instantiation" prefix-match
+   heuristic `Env::resolve_struct_name`/`resolve_enum_name` already use
+   elsewhere in this file for the identical ambiguity: derive a
+   `struct_names_for_iface_check`/`enum_names_for_iface_check` pair that
+   additionally contains each existing struct/enum's `__`-split base
+   name.
+
+Deliberately did NOT loosen the general-purpose validator itself for any
+of these three cases -- non-interface declarations (struct fields, enum
+variants, fn signatures, local annotations) DO get properly monomorphized
+and enum-resolved, so they should stay strict; only the interface
+declaration's mirror of the exact same signature has this gap, because
+interfaces sit outside every one of those passes.
+
+Verified: `vanic check examples` before/after (`git stash`) shows exactly
+0 new distinct failing files -- the only diff is 2 extra diagnostic lines
+on `examples/language/mandarin/async_cancel_auto.vani`, a file already in
+the pre-existing 72-error baseline (confirmed during BUG-139's own
+investigation to be an unrelated Mandarin-async-keyword parse ordering
+quirk); the new "let annotation" check just fires an earlier, more
+specific diagnostic alongside the pre-existing "let initializer" mismatch
+for the same 2 already-broken lines -- not a regression. Full `cargo test
+--release` also clean after the false-positive fixes (initially caught 2
+real regressions here, both fixed by the generic-blanket prefix-match
+before commit).
+
+Added 6 tests to `src/lib.rs`: `interface_method_signature_with_unknown_
+type_is_rejected`, `interface_method_self_typed_as_self_keyword_is_
+accepted`, `interface_method_self_typed_as_a_real_enum_is_accepted`,
+`interface_method_self_typed_as_generic_blanket_target_is_accepted`,
+`let_annotation_with_unknown_type_is_rejected_even_via_empty_vec_
+inference`, `let_tuple_annotation_with_unknown_type_is_rejected`. Added 2
+to `tests/run_end_to_end.rs`: `interface_method_with_unknown_type_
+rejected_by_vanic_check` (real subprocess, checks stderr) and
+`interface_method_self_typed_as_real_enum_runs_correctly_on_both_
+backends` (real subprocess runs on both backends, not just a compile
+check).
+
+Full `cargo test --release` clean (2829 lib tests + 211 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category D is now closed. Next free bug number is **BUG-145**.
