@@ -3392,3 +3392,53 @@ Repro: `tools/localfuzz/findings/20260808-074400-backend-divergence-bf2461b5d3/r
 Fix attempt: `tools/localfuzz/findings/20260808-074400-backend-divergence-bf2461b5d3/fix_attempt.md`
 
  STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-081143-backend-divergence-31d4dc6a76
+
+Repro: `tools/localfuzz/findings/20260808-081143-backend-divergence-31d4dc6a76/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-081143-backend-divergence-31d4dc6a76/fix_attempt.md`
+
+### Staging Entry
+
+#### What Was Run:
+The vani-compiler was compiled with `vani -S` on a local staging log.
+
+#### Repro Source:
+```vani
+// vani-lang: swedish
+//
+// Phase 13.18: first Nordic dialect. Swedish uses å/ä/ö.
+// Norwegian and Danish (queued) use å/æ/ø; Finnish uses ä/ö.
+
+syfte "Compute a small score with checked constraints";
+
+funktion add(a: i64, b: i64) -> i64 {
+  återvänd a + b;
+}
+
+funktion bounded_score(base: i64) -> i64
+kräver base >= 0;
+{
+  låt doubled: i64 = base * 9223372036854775807;
+  påstå doubled >= base;
+  återvänd add(doubled, 2);
+}
+
+funktion main() -> i64 {
+  låt answer = bounded_score(20);
+  bevisa 2 + 2 == 4;
+  påstå answer >= 0;
+  skriv answer;
+  återvänd 0;
+}
+```
+
+#### Observed Symptom:
+The compilation resulted in a backend-divergence error, with an integer overflow in the multiplication of `base * 9223372036854775807`.
+
+#### Affected Backends:
+Vani-compiler was tested on both LLVM and Clang backends.
+
+#### Status: Needs human/frontier root-cause review.
