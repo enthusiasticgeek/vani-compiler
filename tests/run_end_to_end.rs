@@ -11703,3 +11703,872 @@ fn main() -> i64 { return deep(10); }
         stderr
     );
 }
+
+// BUG-126 (2026-08-07): reassigning an Array-typed binding (via
+// `x = [...]` or same-scope `let`-shadowing, which the checker
+// desugars into the same Reassign node) produced invalid C --
+// `v_xs = ((int64_t[5]){...});`, which `cc` rejects since C arrays
+// aren't assignable via `=`. Separately, reassigning a `ref
+// T`-typed binding corrupted memory on LLVM: `ctx.locals[name]`
+// for a ref holds the raw pointer VALUE (not an alloca address --
+// see the L4(B) Let-path comment in backend_llvm.rs), but Reassign
+// unconditionally `store`d into it as though it WERE an address,
+// silently overwriting the first field of whatever the ref pointed
+// at. Found via localfuzz backend-divergence findings (tracked
+// pre-fix in docs/UNRESOLVED_GAPS_TODO.md item A1). Fixed by
+// special-casing `Type::Array` in backend_c.rs's Reassign arm
+// (memcpy/per-element store into the existing storage instead of
+// `=`) and `ty.is_any_ref()` in backend_llvm.rs's Reassign arm
+// (rebind `ctx.locals` to the new pointer value instead of
+// `store`ing through the old one, mirroring the Let path).
+#[test]
+fn reassign_array_and_ref_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/reassign_array_and_ref.vani",
+        manifest_dir
+    );
+    let expected = "10\n63\n63\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "reassigning an Array binding (C backend) or a ref binding \
+             (LLVM backend) produced the wrong result for {:?} -- see \
+             BUG-126",
+            backend_args
+        );
+    }
+}
+
+// BUG-127 (2026-08-07): the checker's overflow-elision pass
+// deliberately keeps SMT facts about a reassigned variable alive
+// across a loop body (for a separate loop-invariant-preservation
+// check), which made a fact true only on the FIRST time control
+// reaches a statement (e.g. `n == 0`, from before the loop) look
+// like it still held on every later iteration too. The elision
+// pass "proved" `n + i64::MIN` never overflows using that stale
+// fact and elided the runtime guard; the LLVM backend then wrapped
+// silently on the second iteration and looped forever instead of
+// trapping -- turning an intended 5-iteration loop into a real
+// infinite one. Wrapped in the real `timeout` command: if this
+// regresses, the test fails (killed, exit 124) after 10s instead of
+// hanging the whole suite forever, same pattern as the BUG-109 /
+// echo_pool regression tests above. This is a real subprocess run
+// because the bug is a runtime hang, not a compile-time/string-level
+// difference a `compile_to_llvm` check could catch on its own.
+#[test]
+fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/loop_carried_overflow_not_elided.vani",
+        manifest_dir
+    );
+
+    for (backend_args, expect_code) in [
+        (vec!["run", &example], 3),
+        // 134 = 128 + SIGABRT (6): the C-backend overflow trap still
+        // raises a raw `abort()`, and BUG-130 (2026-08-07) fixed
+        // `vanic run` to report the shell convention for a signal-
+        // killed child instead of masking it as a bare `1`.
+        (vec!["run", &example, "--backend=c"], 134),
+    ] {
+        let mut cmd_args = vec!["10", binary];
+        cmd_args.extend(backend_args.iter().copied());
+        let output = Command::new("timeout")
+            .args(&cmd_args)
+            .output()
+            .unwrap_or_else(|e| panic!("timeout+intentc {:?} should execute: {e}", backend_args));
+        assert_eq!(
+            output.status.code(),
+            Some(expect_code),
+            "{:?}: status {:?} (124 = timeout/hang -- BUG-127 regression: the \
+             loop-carried overflow check was wrongly elided again), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stdout)
+                .contains("unreachable: overflow should have trapped"),
+            "{:?}: the overflow trap did not fire before the print -- BUG-127 \
+             regression",
+            backend_args
+        );
+    }
+}
+
+// BUG-129 (2026-08-07): tree-C's `requires`-clause runtime guard
+// still used the raw libc `assert()` macro (SIGABRT on failure) long
+// after BUG-116 gave the SSA-C path's own `requires` lowering a
+// clean `fprintf(stderr, "assertion failed: %s\n", msg); exit(3);`
+// shape. `vanic build` falls back to tree-C for the WHOLE module
+// whenever ANY function uses an SSA-unsupported feature (here,
+// `match` in `pick`), so this affected `f`'s `requires` clause too
+// even though `f` itself has nothing SSA-unsupported about it. Real
+// subprocess run (not a `compile_to_c` string check) because the
+// actual bug is in the SIGNAL behavior at runtime -- a string check
+// can't distinguish `exit(3)` from a `SIGABRT`-raising `assert()`
+// that happens to print similar-looking text.
+#[test]
+fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/requires_guard_survives_tree_c_fallback.vani",
+        manifest_dir
+    );
+
+    let output = Command::new(binary)
+        .args(["run", &example, "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "BUG-129 regression: a requires-clause violation on tree-C fell back to \
+         raw assert()/SIGABRT instead of a clean exit(3); status {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "5\n",
+        "the first (satisfied) requires call should still print normally before \
+         the second (violating) call traps"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("precondition violated in 'f'"),
+        "expected a clean precondition-violated message on stderr, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// BUG-130 (2026-08-07): `vanic run`'s own process wrapper used
+// `status.code().unwrap_or(1)` at every call site, which silently
+// converts a signal-killed child into a generic exit code `1` --
+// indistinguishable from a program that legitimately called
+// `exit(1)`, and losing which signal it actually was. Integer
+// overflow on the C backend still raises a real `SIGABRT`
+// (deliberately out of scope for the BUG-106-class `exit(3)`
+// conversions, which were scoped to the LLVM backend's misleading-
+// `lli`-crash-report problem -- see the "What actually happens"
+// section of `tutorials/src/intermediate/10b_runtime_errors_primer.md`),
+// making it a reliable way to produce a signal-killed child for this
+// test. (The `#[bounded(N)]` guard used to serve this same role, but
+// itself moved to a clean `exit(3)` on both C codegen paths as a
+// follow-up cleanup after BUG-130 -- see the "Aside (not fixed, out
+// of scope)" note this test's own history carries in
+// `docs/TODO_CURRENT.md`'s BUG-130 entry.) Expects the shell
+// convention `128 + signal` (134 = 128 + SIGABRT's 6), matching what
+// a directly-executed binary's own shell would show.
+#[test]
+fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug130-signal-exit-code",
+        r#"
+fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+fn main() -> i64 { return add_it(9223372036854775807, 1); }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output.status.code(),
+        Some(134),
+        "BUG-130 regression: a SIGABRT-killed child was reported as a bare exit \
+         code instead of 128+signal (134 = 128 + SIGABRT); status {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// BUG-131 (2026-08-07): `sort`/`sort_by`'s block-partition scan (only
+// entered for >= 128 elements) used AVX-512 intrinsics unconditionally
+// on any x86_64 host with no runtime CPU-capability check -- SIGILL on
+// any x86_64 CPU predating AVX-512 (confirmed on this dev machine's
+// own Haswell CPU). Fixing that crash surfaced a second, pre-existing
+// bug: `double`'s mask compare reused `int64_t`'s raw-bit-pattern
+// comparison, which does NOT preserve IEEE-754 ordering for negative
+// doubles -- invisible before this fix since the crash always fired
+// first on a non-AVX-512 host. Both fixed in `sort_runtime.c`: real
+// runtime CPUID dispatch via `__builtin_cpu_supports("avx512f")`, and
+// a genuinely-floating-point AVX-512/scalar compare for `double`
+// instead of reusing `int64_t`'s bit-pattern path. Real subprocess run
+// (not a string check) because `sort_runtime.c` is a separate C file
+// compiled by a real `cc` invocation at `vanic run` time, entirely
+// outside anything `compile_to_c`/`compile_to_llvm` touch.
+#[test]
+fn sort_large_block_partition_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/sort_large_block_partition.vani",
+        manifest_dir
+    );
+    let expected = "i64 sorted ok, min: -997663\n\
+                     i64 sorted ok, max: 998334\n\
+                     f64 sorted ok, min: -997.663\n\
+                     f64 sorted ok, max: 998.334\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-131 regression: {:?} failed with status {:?} (132/133/etc = still \
+             SIGILL-crashing on AVX-512), stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-131 regression: sort produced wrong output for {:?} -- likely the \
+             double raw-bit-pattern comparison bug again",
+            backend_args
+        );
+    }
+}
+
+// BUG-133 (2026-08-07): `ensures` now mirrors `requires`'s existing
+// model -- an SMT-undecidable postcondition (here, `opaque` has no
+// `ensures` of its own, so SMT has nothing to reason `wrapper`'s
+// postcondition from) no longer hard-fails the build; it compiles and
+// gets a real runtime guard at the return site instead, using the
+// existing `intent_assert_fail`/`exit(3)` mechanism. Real subprocess
+// runs (not compile_to_c/compile_to_llvm string checks) because the
+// whole point is verifying actual RUNTIME behavior: the guard must
+// stay silent when satisfied and trap with the right exit code and
+// message when actually violated.
+#[test]
+fn undecidable_ensures_runtime_guard_traps_only_when_actually_violated() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let satisfied = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode {
+    0 then 5,
+    _ then 0 - 5
+  };
+}
+fn wrapper(mode: i64) -> i64
+  ensures _return >= 0;
+{
+  return opaque(mode);
+}
+fn main() -> i64 {
+  print wrapper(0);
+  return 0;
+}
+"#;
+    let violated = satisfied.replace("wrapper(0)", "wrapper(1)");
+
+    for (source, expect_status, expect_stdout_contains) in [
+        (satisfied, None, Some("5")),
+        (violated.as_str(), Some(3), None),
+    ] {
+        let src = write_tmp_vani("bug133-ensures-runtime", source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            if let Some(code) = expect_status {
+                assert_eq!(
+                    output.status.code(),
+                    Some(code),
+                    "BUG-133 regression: {:?} expected exit {code} (postcondition \
+                     violated), got status {:?}, stderr: {}",
+                    backend_args,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("postcondition violated in 'wrapper'"),
+                    "expected the postcondition-violated message on stderr, got: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "BUG-133 regression: {:?} should run cleanly when the ensures \
+                     clause is actually satisfied, got status {:?}, stderr: {}",
+                    backend_args,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            if let Some(expected) = expect_stdout_contains {
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains(expected),
+                    "expected stdout to contain {:?} for {:?}, got: {}",
+                    expected,
+                    backend_args,
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+        }
+    }
+}
+
+// BUG-133, continued: the runtime guard reads back the already-
+// materialized return temp (`__intent_ret_<span>`), not the raw
+// return expression a second time -- a side-effecting return (here,
+// a `push` the ensures-guarded function calls indirectly through
+// `side_effecting`) must fire exactly once, not twice.
+#[test]
+fn undecidable_ensures_runtime_guard_does_not_double_evaluate_return_expr() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let source = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode {
+    0 then 5,
+    _ then 0 - 5
+  };
+}
+fn side_effecting(counter: mut ref Vec<i64>, mode: i64) -> i64 {
+  let n: i64 = push(counter, 1) as i64;
+  let _ = n;
+  return opaque(mode);
+}
+fn wrapper(counter: mut ref Vec<i64>, mode: i64) -> i64
+  ensures _return >= 0;
+{
+  return side_effecting(counter, mode);
+}
+fn main() -> i64 {
+  let calls: Vec<i64> = vec();
+  let _ = wrapper(mut ref calls, 0);
+  print len(ref calls) as i64;
+  return 0;
+}
+"#;
+    let src = write_tmp_vani("bug133-ensures-no-double-eval", source);
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?} failed: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1",
+            "BUG-133 regression: {:?} -- the ensures runtime guard double-evaluated \
+             the return expression (push ran more than once), got: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-134 (2026-08-07): `invariant`'s runtime-guard follow-up to
+// BUG-133. Verifies the entry-check and preservation-check guards
+// actually fire (exit 3 + message) only when genuinely violated, and
+// stay silent when satisfied, on both backends -- real subprocess
+// runs since the point is observing actual runtime behavior.
+#[test]
+fn undecidable_invariant_runtime_guards_trap_only_when_actually_violated() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let opaque_fn = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode { 0 then 5, _ then 0 - 5 };
+}
+"#;
+    // Entry check satisfied throughout -> runs to completion.
+    let entry_ok = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 0 - 100;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+    // Entry check violated on the very first iteration.
+    let entry_violated = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 1000;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+    // Preservation check violated on the first iteration's post-body state
+    // (opaque(1) + 1 = -4, fails `!= -4`) but entry (n=0: 5+0=5) is fine.
+    let preservation_violated = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{ n = n + 1; }}\n  print n;\n  return 0;\n}}\n"
+    );
+
+    for (source, expect_status, expect_msg) in [
+        (entry_ok, None, None),
+        (entry_violated, Some(3), Some("does not hold at loop entry")),
+        (preservation_violated, Some(3), Some("is not preserved by the loop body")),
+    ] {
+        let src = write_tmp_vani("bug134-invariant-runtime", &source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            match (expect_status, expect_msg) {
+                (Some(code), Some(msg)) => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(code),
+                        "BUG-134 regression: {:?} expected exit {code}, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        String::from_utf8_lossy(&output.stderr).contains(msg),
+                        "expected {:?} on stderr, got: {}",
+                        msg,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                _ => {
+                    assert!(
+                        output.status.success(),
+                        "BUG-134 regression: {:?} should run cleanly when the invariant \
+                         is actually satisfied throughout, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+        }
+    }
+}
+
+// BUG-134, continued: `continue` must NOT bypass the preservation
+// check -- confirmed as a REAL bug while building this (a bare
+// end-of-body append is skipped by `continue`, which jumps straight
+// to the loop's condition re-check). Also confirms `break` correctly
+// does NOT require the invariant to hold (breaking exits the loop,
+// there's no "next iteration" to preserve it for), an unlabeled
+// `continue` inside a NESTED loop does not wrongly trigger the OUTER
+// loop's check, and a labeled `continue 'outer` from within a nested
+// loop DOES trigger the outer loop's check.
+#[test]
+fn undecidable_invariant_preservation_check_is_not_bypassed_by_continue() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let opaque_fn = r#"
+fn opaque(mode: i64) -> i64 {
+  return match mode { 0 then 5, _ then 0 - 5 };
+}
+"#;
+    // Violated exactly at n=1 (opaque(1)+1 = -4, fails != -4), which
+    // the loop `continue`s past -- without the fix, this ran to
+    // completion silently instead of trapping.
+    let continue_bypass = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    if n == 1 {{ continue; }}\n  \
+         }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+    // Same violating shape, but a `break` instead of `continue` at
+    // the violating iteration -- must NOT trap (no next iteration to
+    // preserve the invariant for).
+    let break_not_checked = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  while n < 100\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    if n == 1 {{ break; }}\n  \
+         }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+    // Unlabeled continue inside a NESTED loop must not trigger the
+    // OUTER loop's (undecidable) invariant check -- the outer
+    // invariant here always holds, so this must run to completion.
+    let nested_unlabeled_continue = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  let total: i64 = 0;\n  while n < 3\n  \
+         invariant opaque(n) >= 0 - 100;\n  {{\n    n = n + 1;\n    let m: i64 = 0;\n    \
+         while m < 3 {{\n      m = m + 1;\n      if m == 2 {{ continue; }}\n      total = total + 1;\n    \
+         }}\n  }}\n  print total;\n  return 0;\n}}\n"
+    );
+    // Labeled `continue 'outer` from within a nested loop DOES target
+    // the outer loop and must trip its (violated) preservation check.
+    let labeled_continue = format!(
+        "{opaque_fn}fn main() -> i64 {{\n  let n: i64 = 0;\n  'outer: while n < 3\n  \
+         invariant opaque(n) + n != 0 - 4;\n  {{\n    n = n + 1;\n    let m: i64 = 0;\n    \
+         while m < 3 {{\n      m = m + 1;\n      if n == 1 {{ continue 'outer; }}\n    \
+         }}\n  }}\n  print \"reached end\", n;\n  return 0;\n}}\n"
+    );
+
+    for (source, expect_status, expect_msg) in [
+        (continue_bypass, Some(3), Some("is not preserved by the loop body")),
+        (break_not_checked, None, None),
+        (nested_unlabeled_continue, None, None),
+        (labeled_continue, Some(3), Some("is not preserved by the loop body")),
+    ] {
+        let src = write_tmp_vani("bug134-invariant-continue", &source);
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            match (expect_status, expect_msg) {
+                (Some(code), Some(msg)) => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(code),
+                        "BUG-134 regression: {:?} expected exit {code}, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        String::from_utf8_lossy(&output.stderr).contains(msg),
+                        "expected {:?} on stderr, got: {}",
+                        msg,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                _ => {
+                    assert!(
+                        output.status.success(),
+                        "BUG-134 regression: {:?} should run cleanly, got status {:?}, stderr: {}",
+                        backend_args,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+        }
+    }
+}
+
+// Follow-up cleanup after BUG-130 (2026-08-07): BUG-117 already fixed the
+// `#[bounded(N)]` recursion-depth guard's raw `abort()` on both LLVM codegen
+// paths, but its C-backend counterpart (tree-C and SSA-C, each with its own
+// separate copy of the guard) was explicitly flagged as "not fixed, out of
+// scope" in BUG-130's own writeup. Both C codegen paths now use the same
+// `exit(3)` + message shape as every other C-backend runtime guard
+// (`assert`/`requires`/`ensures`/`invariant`). Verified on both codegen
+// paths: `#[no_mangle]` anywhere in the module forces the whole module onto
+// tree-C (see `ssa_path_supports` in `src/main.rs`); without it, this
+// program is small enough to take the default SSA-C path.
+#[test]
+fn bounded_attribute_violation_exits_cleanly_on_c_backend_ssa_and_tree_paths() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for (stem, source) in [
+        (
+            "bug130-followup-bounded-c-ssa",
+            r#"
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#
+            .to_string(),
+        ),
+        (
+            "bug130-followup-bounded-c-tree",
+            r#"
+#[no_mangle]
+fn keep_alive() -> i64 { return 0; }
+#[bounded(3)]
+fn deep(n: i64) -> i64 {
+  if n <= 0 { return 0; }
+  return deep(n - 1) + 1;
+}
+fn main() -> i64 { return deep(10); }
+"#
+            .to_string(),
+        ),
+    ] {
+        let src = write_tmp_vani(stem, &source);
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap(), "--backend=c"])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "expected a clean exit(3) for a #[bounded(N)] violation on the C \
+             backend ({stem}), not a raw SIGABRT; status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("recursion bound exceeded"),
+            "expected the recursion-bound message on stderr ({stem}), got: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+// BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
+// backend-divergence finding -- reported as a divergence because the C
+// backend's raw `abort()` (deliberately kept for bounds/overflow/div-by-
+// zero/shift, per the same BUG-106-class scoping decision documented in
+// `tutorials/src/intermediate/10b_runtime_errors_primer.md`'s Row 2) does
+// not flush stdio, so every `print` statement buffered before the trap
+// was silently lost -- while the LLVM backend's `exit(3)` (BUG-120)
+// preserves it. Same underlying trap, same computed values, but the C
+// backend's stdout looked empty next to LLVM's, reading like the two
+// backends disagreed when they didn't. Fixed by adding `fflush(stdout);`
+// immediately before each of these `abort()` calls.
+#[test]
+fn c_backend_preserves_buffered_stdout_before_a_raw_abort_trap() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug136-stdout-lost-before-abort",
+        r#"
+fn main() -> i64 {
+  print "line one";
+  print "line two";
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let i: i64 = -1;
+  print xs[i];
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("line one") && stdout.contains("line two"),
+        "BUG-136 regression: buffered stdout before an abort()-raising trap was \
+         lost on the C backend; stdout: {stdout:?}, stderr: {stderr:?}, status: {:?}",
+        output.status
+    );
+    assert!(
+        stderr.contains("index out of bounds"),
+        "expected the bounds-check message on stderr, got: {stderr:?}"
+    );
+}
+
+// BUG-137 (2026-08-07): found via localfuzz triaging a batch of previously-
+// unreviewed candidates. `let (q, r) = f(...);` redeclared (shadowed) in the
+// same scope compiled fine on LLVM/SSA-C but failed to even build on tree-C
+// (duplicate `int64_t v_q` declaration -- tuple-destructure codegen never
+// got the same shadow-handling regular `let` has). Verified on BOTH C
+// codegen paths: the default (SSA-C, no `#[no_mangle]`) and tree-C (forced
+// via an unrelated `#[no_mangle] fn`).
+#[test]
+fn tuple_destructure_shadow_runs_correctly_on_both_c_codegen_paths() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for (stem, source) in [
+        (
+            "bug137-tuple-shadow-ssa-c",
+            r#"
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+fn main() -> i64 {
+  let (q, r) = divmod(17, 5);
+  let (q, r) = divmod(20, 3);
+  return q + r;
+}
+"#
+            .to_string(),
+        ),
+        (
+            "bug137-tuple-shadow-tree-c",
+            r#"
+#[no_mangle]
+fn keep_alive() -> i64 { return 0; }
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+fn main() -> i64 {
+  let (q, r) = divmod(17, 5);
+  let (q, r) = divmod(20, 3);
+  return q + r;
+}
+"#
+            .to_string(),
+        ),
+    ] {
+        let src = write_tmp_vani(stem, &source);
+        let output_c = Command::new(binary)
+            .args(["run", src.to_str().unwrap(), "--backend=c"])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+        assert_eq!(
+            output_c.status.code(),
+            Some(8),
+            "BUG-137 regression ({stem}): expected exit 8 (20/3 = 6 rem 2, \
+             6+2=8), got status {:?}, stderr: {}",
+            output_c.status,
+            String::from_utf8_lossy(&output_c.stderr)
+        );
+
+        let output_llvm = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+        assert_eq!(
+            output_llvm.status.code(),
+            Some(8),
+            "{stem}: LLVM backend should agree with C; status {:?}, stderr: {}",
+            output_llvm.status,
+            String::from_utf8_lossy(&output_llvm.stderr)
+        );
+    }
+}
+
+// BUG-139 (2026-08-07): found via localfuzz. An enum variant payload
+// naming a nonexistent type (`String` instead of `OwnedStr`) used to be
+// silently accepted at declaration time as long as no variant construction
+// ever forced a real type lookup -- `vanic check` exited 0 with no
+// diagnostic. Verifies the real CLI path (not just the compile() library
+// helper) now rejects it immediately, before either backend is even
+// attempted.
+#[test]
+fn enum_variant_with_unknown_payload_type_rejected_by_vanic_check() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug139-unknown-enum-payload-type",
+        r#"
+enum Result { Ok(i64), Err(String) }
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc check should execute: {e}"));
+    assert!(
+        !output.status.success(),
+        "BUG-139 regression: an enum variant payload naming a nonexistent \
+         type should be rejected by `vanic check`, got status {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown type 'String'"),
+        "expected an unknown-type diagnostic on stderr, got: {stderr}"
+    );
+}
+
+// BUG-140 (2026-08-07): found via localfuzz. `parallel for i from
+// i64::MIN to 4 { ... xs[i] ... }` on the C backend used to silently
+// execute ZERO iterations (GCC's OpenMP canonical-loop trip-count
+// computation is UB when the true iteration count overflows the loop
+// variable's type), returning the untouched initial reduction value
+// instead of trapping -- while LLVM correctly trapped on the same
+// program. Verifies both the pathological case now traps identically
+// on both backends, AND that a normal, non-pathological `parallel for`
+// still computes the correct answer (no false-positive regression).
+#[test]
+fn parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug140-parallel-for-i64-min",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  parallel for i from -9223372036854775808 to 4
+  reduce prod with *;
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "BUG-140 regression: C backend should trap (134) on this extreme \
+         loop range instead of silently skipping the loop, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("integer overflow"),
+        "expected an overflow message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "LLVM should also trap on this same program; status {:?}",
+        output_llvm.status
+    );
+
+    // Normal case: no false-positive regression.
+    let normal_src = write_tmp_vani(
+        "bug140-parallel-for-normal",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  parallel for i from 0 to 4
+  reduce prod with *;
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_normal = Command::new(binary)
+        .args(["run", normal_src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output_normal.status.success(),
+        "a normal parallel_for loop should not trap; status {:?}, stderr: {}",
+        output_normal.status,
+        String::from_utf8_lossy(&output_normal.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output_normal.stdout).trim(),
+        "24",
+        "expected the correct product 24, got: {}",
+        String::from_utf8_lossy(&output_normal.stdout)
+    );
+}

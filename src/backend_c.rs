@@ -13338,16 +13338,12 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
         ));
         out.push_str(&format!(
             "  if (++{} > {}) {{ \
-              fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})]); aborting\\n\"); \
-              abort(); \
+              fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})])\\n\"); \
+              exit(3); \
             }}\n",
             counter_name, bound, function.name, bound
         ));
-        for requirement in &function.requires {
-            out.push_str("  assert(");
-            out.push_str(&emit_expr(requirement));
-            out.push_str(");\n");
-        }
+        emit_requires_guards(function, out);
         for stmt in &function.body {
             emit_stmt(stmt, out);
         }
@@ -13367,17 +13363,57 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
     emit_params(function, out);
     out.push_str(") {\n");
 
-    for requirement in &function.requires {
-        out.push_str("  assert(");
-        out.push_str(&emit_expr(requirement));
-        out.push_str(");\n");
-    }
+    emit_requires_guards(function, out);
 
     for stmt in &function.body {
         emit_stmt(stmt, out);
     }
 
     out.push_str("}\n");
+}
+
+/// BUG-129: emit each `requires` clause as a runtime guard matching
+/// `ssa_backend_c.rs`'s `intent_assert_fail` shape (`fprintf(stderr,
+/// "assertion failed: %s\n", <msg>); exit(3);`) instead of the raw
+/// libc `assert()` macro. BUG-116 (2026-08-05) added this exact
+/// shape for the SSA path's own `requires` lowering, but tree-C's
+/// requires codegen was deliberately left on the OLD `assert()`
+/// shape at the time -- a comment on tree-C's `TypedStmt::Assert`
+/// fix (a few hundred lines up in this file) explains why: "the
+/// `requires`-clause precondition check ... already calls `abort()`
+/// consistently on BOTH backends, so it isn't a divergence" -- true
+/// when written (before BUG-116 existed), but BUG-116 introduced a
+/// NEW divergence this comment didn't anticipate: SSA-C's `requires`
+/// moved to `exit(3)` + a real message while tree-C's (and tree-
+/// LLVM's) stayed on raw `assert()`/`abort()`. Since `vanic build`
+/// silently falls back from SSA-C to tree-C whenever ANY function in
+/// the module uses an SSA-unsupported feature (see `ssa_path_
+/// supports` in main.rs -- a whole-MODULE gate, not per-function),
+/// this affected any `requires` clause in a program that also
+/// happened to contain something SSA-C doesn't support elsewhere
+/// (e.g. a `ref Vec<T>` parameter, a `match`) -- not just the
+/// specific function with the unsupported feature. Message text
+/// mirrors `ssa.rs`'s `lower_function`: `"precondition violated in
+/// '<fn>'"`, or `"... (requires #<n>)"` per clause when a function
+/// has more than one `requires`.
+fn emit_requires_guards(function: &TypedFunction, out: &mut String) {
+    let n = function.requires.len();
+    for (i, requirement) in function.requires.iter().enumerate() {
+        let message = if n > 1 {
+            format!(
+                "precondition violated in '{}' (requires #{})",
+                function.name,
+                i + 1
+            )
+        } else {
+            format!("precondition violated in '{}'", function.name)
+        };
+        out.push_str("  if (!(");
+        out.push_str(&emit_expr(requirement));
+        out.push_str(")) { fprintf(stderr, \"assertion failed: %s\\n\", \"");
+        out.push_str(&escape_c_string(&message));
+        out.push_str("\"); exit(3); }\n");
+    }
 }
 
 fn emit_params(function: &TypedFunction, out: &mut String) {
@@ -13715,6 +13751,59 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
             expr,
             drop_old,
         } => {
+            // BUG-126: `xs = [...]` (including same-scope
+            // `let`-shadowing, which the checker desugars into
+            // this same Reassign node — see checker.rs's
+            // "Same-scope let -> Reassign" comment) on an
+            // Array-typed binding used to fall through to the
+            // generic `name = expr;` catch-all below, which is
+            // invalid C — arrays aren't assignable via `=`.
+            // Write into the existing storage instead, mirroring
+            // the Let path's array handling just without a new
+            // declaration.
+            if let Type::Array { element, length } = ty {
+                if let TypedExprKind::ArrayLit { elements } = &expr.kind {
+                    let element_strs: Vec<String> = elements.iter().map(emit_expr).collect();
+                    for (i, es) in element_strs.iter().enumerate() {
+                        out.push_str("  ");
+                        out.push_str(&local_name(name));
+                        out.push('[');
+                        out.push_str(&i.to_string());
+                        out.push_str("] = ");
+                        out.push_str(es);
+                        out.push_str(";\n");
+                    }
+                } else {
+                    let needs_struct_unwrap = matches!(
+                        &expr.kind,
+                        TypedExprKind::Call { .. }
+                            | TypedExprKind::Block { .. }
+                            | TypedExprKind::IfExpr { .. }
+                            | TypedExprKind::Match { .. }
+                    );
+                    if needs_struct_unwrap {
+                        let wrapper = array_return_struct_name(element, *length);
+                        out.push_str(&format!(
+                            "  {} _intent_reassign_{} = {};\n  memcpy({}, _intent_reassign_{}.data, sizeof({}));\n",
+                            wrapper,
+                            name,
+                            emit_expr(expr),
+                            local_name(name),
+                            name,
+                            local_name(name),
+                        ));
+                    } else {
+                        out.push_str("  memcpy(");
+                        out.push_str(&local_name(name));
+                        out.push_str(", ");
+                        out.push_str(&emit_expr(expr));
+                        out.push_str(", sizeof(");
+                        out.push_str(&local_name(name));
+                        out.push_str("));\n");
+                    }
+                }
+                return;
+            }
             if *drop_old {
                 // Heap-shaped reassign: evaluate the RHS into
                 // a temp first, free the OLD value, then move
@@ -14764,7 +14853,40 @@ return __intent_ret; }}\n",
         } => {
             let local = local_name(var);
             let c_ty = c_leaf_type(ty);
+            let start_v = emit_expr(start);
+            let end_v = emit_expr(end);
             if *parallel {
+                // BUG-140 (2026-08-07): found via localfuzz. GCC's
+                // OpenMP canonical-loop-form trip-count computation
+                // (internally `end - start`, using SIGNED arithmetic)
+                // is undefined behavior when that difference exceeds
+                // the type's max positive value -- e.g. `start` near
+                // `i64::MIN` with a small positive `end`. Confirmed
+                // directly: the exact same loop bounds run correctly
+                // under a plain sequential `for` (no omp pragma) but
+                // silently execute ZERO iterations under `#pragma omp
+                // parallel for` -- a genuine silent-wrong-answer bug,
+                // not a crash, so it can't be caught by the existing
+                // "does this trap cleanly" test shape. Guard by
+                // computing `end - start` through the SAME checked-
+                // subtraction helper regular Sub expressions already
+                // use (`intent_check_<ty>_sub`, discarding the
+                // result) -- if the loop's true iteration count would
+                // overflow this type, trap here with a clean
+                // diagnostic before GCC's own OpenMP lowering ever
+                // sees the loop, instead of silently corrupting the
+                // trip count. Unsigned loop types can't hit this --
+                // `end - start` for a well-formed ascending unsigned
+                // range never exceeds the type's own range -- so the
+                // guard is scoped to signed types only.
+                if ty.is_signed_integer() {
+                    out.push_str(&format!(
+                        "  (void){}({}, {});\n",
+                        overflow_helper(BinaryOp::Sub, ty),
+                        end_v,
+                        start_v,
+                    ));
+                }
                 // Effects verifier has proven the body is pure
                 // (no shared mutable state, no I/O, no consuming
                 // mutator calls); reductions are carved out via
@@ -14793,8 +14915,8 @@ return __intent_ret; }}\n",
                 "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
                 c_ty,
                 local,
-                emit_expr(start),
-                emit_expr(end)
+                start_v,
+                end_v
             ));
             for s in body {
                 emit_stmt(s, out);
@@ -22178,6 +22300,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect(index < 0 || index >= length, 0)) {\n\
         fprintf(stderr, \"index out of bounds: %lld, len %lld\\n\",\n\
                 (long long)index, (long long)length);\n\
+        fflush(stdout);\n\
         abort();\n\
     }\n\
     if (index < 0 || index >= length) __builtin_unreachable();\n\
@@ -22230,6 +22353,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     {c} r;\n\
     if (__builtin_expect({bl}(a, b, &r), 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     return r;\n\
@@ -22254,10 +22378,12 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
             "static INTENT_UNUSED inline {c} intent_checked_{t}_{op}({c} a, {c} b) {{\n\
     if (__builtin_expect(b == 0, 0)) {{\n\
         fprintf(stderr, \"division by zero\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     if (__builtin_expect(b == -1 && a == {min}, 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        fflush(stdout);\n\
         abort();\n\
     }}\n\
     return a {c_op} b;\n\

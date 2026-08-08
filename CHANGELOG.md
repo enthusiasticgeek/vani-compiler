@@ -1,13 +1,19 @@
 # Changelog
 
-## [v0.9.1] — 2026-08-02
+## [v0.9.1] — 2026-08-07
 
-Fixes found during a systematic sweep of `docs/TESTING_MATRIX_TODO.md`'s
-container-x-feature nesting matrix (19 rows, both backends, real
-end-to-end runs checked against hand-computed values). No new language
-features or breaking changes — patch release.
+Patch release consolidating roughly 70 bug fixes across five sweeps since
+v0.9.0: the testing-matrix sweep below (BUG-68–80, 2026-08-02), a 49-row
+feature-combination gaps sweep (BUG-81–104, 2026-08-03–04), 8 more bugs
+found by `tools/localfuzz` random-mutation fuzzing (BUG-105–112,
+2026-08-04–05), a root-cause-pattern audit across 8 categories (BUG-113–125,
+2026-08-05–06), and a final day combining 15 directly-found bugs with a
+full triage of a 77-item localfuzz backlog (BUG-126–140, 2026-08-07). No new
+language features or breaking changes. See `RELEASE_NOTES/v0.9.1.md` for the
+full sweep-by-sweep writeup; full per-bug detail for every number lives in
+`docs/TODO_CURRENT.md`.
 
-### Fixed
+### Fixed (testing-matrix sweep, BUG-68–80)
 
 - **BUG-68**: `ensures` clauses the SMT encoder couldn't fully verify (e.g. a `ref` struct parameter's field) were silently treated as PROVEN instead of erroring — a real soundness gap, not just a missing-feature restriction. Struct-field SMT modeling is now general (any struct-typed binding, not just literal-initialized locals), so this class of contract is now genuinely checked instead of rubber-stamped. Also fixed: a loop invariant over a struct field mutated via `p.field = ...;` inside the loop body was incorrectly rejected as "not preserved."
 - **BUG-69**: `vec_fill` crashed the LLVM backend ("PHI node entries do not match predecessors!") whenever called anywhere after a plain `if` statement in the same function.
@@ -23,12 +29,89 @@ features or breaking changes — patch release.
 - **BUG-79**: a struct field of SIMD type (`vec128<T>`/`vec256<T>`/`vec512<T>`) crashed the C backend with an invalid field declaration.
 - **BUG-80**: `Option<Array<T,N>>` crashed the C backend when matched — wrong local-variable type spelling in the generated match arm, then (once fixed) an invalid C array-assignment initializer.
 
+### Fixed (feature-combination gaps sweep, BUG-81–104)
+
+49-row sweep across 11 categories (SIMD x containers/generics, generics x
+concurrency handles, SMT contracts x generics/enums, async x everything,
+`dyn` dispatch x generics, `try`/`?` x containers, thin-coverage collections,
+FFI x generics, a 3-way affine-ownership x generics x containers nesting,
+pattern-match depth, and boundary confirmations). Roughly 15 bugs found,
+nearly all the same root cause recurring at different call sites: a
+monomorphization/codegen "find every use of X" walker covering only a
+handful of the AST's shapes, not all of them. Full per-bug detail in
+`docs/TODO_CURRENT.md` and `docs/FEATURE_COMBINATION_GAPS_TODO.md`.
+
+### Fixed (localfuzz-found bugs, BUG-105–112)
+
+8 bugs found by `tools/localfuzz` random-mutation fuzzing, most notably
+**BUG-110**: both SSA backends — the default codegen path for most vāṇी
+programs — silently emitted fully unchecked arithmetic (no overflow,
+divide-by-zero, or shift-range guards) regardless of what the checker had
+determined was needed. The single most impactful fix in this release.
+
+### Fixed (bug-pattern audit, BUG-113–125)
+
+Organized by root-cause *pattern* rather than feature combination, across 8
+categories. Highlights:
+
+- **BUG-116**: the SSA path never lowered `requires` clauses at all — a
+  violated precondition hit a fully unguarded raw `sdiv` on the default
+  backend, a genuine silent safety hole.
+- **BUG-113/115/117/120/135**: a recurring class of "raw `abort()` instead
+  of a clean `exit(3)`" sites across both backends and both codegen paths
+  (`requires` guards, Vec bounds checks, `#[bounded(N)]` recursion guards,
+  checked-arithmetic guards) — each caused `lli` to print a misleading
+  internal-crash-report banner for an ordinary, expected trap.
+- **BUG-121**: `HashMap<K, bool>` produced invalid LLVM IR.
+- **BUG-122**: two more packed-bit `Vec<bool>` layout gaps (nested-Vec
+  construction, struct-field reads) beyond the one already fixed earlier.
+- **BUG-124**: an entire family of real ARM Linux cross-compile targets
+  (`arm-unknown-linux-gnueabi`/`gnueabihf`) misclassified as bare-metal,
+  failing to link any program.
+- **BUG-125**: found while verifying BUG-124's fix — AVX-512 sort-runtime
+  code had no non-x86 fallback, failing to link on the same real cross
+  target even after BUG-124 was fixed.
+
+### Fixed (localfuzz backlog triage + new bugs, BUG-126–140)
+
+15 bugs found and fixed directly in one day, then a separate pass triaging
+a 77-item backlog of never-reviewed localfuzz findings (42 no longer
+reproduced, 9 were a documented trap-code convention rather than bugs, the
+rest false positives from the fuzzer mutating test programs into broken
+control flow, not real compiler defects). Highlights:
+
+- **BUG-130**: `vanic run` masked a signal-killed child as a bare exit code
+  `1` instead of `128 + signal`.
+- **BUG-133 / BUG-134**: `ensures` and `invariant` clauses gained real
+  runtime enforcement, closing the long-standing asymmetry with `requires`
+  — an SMT-undecidable clause now compiles clean with a runtime guard
+  instead of either being silently ignored or blocking the build.
+- **BUG-136**: the C backend's raw `abort()` traps (bounds/overflow/
+  divide-by-zero/shift, deliberately not converted to `exit(3)`) didn't
+  flush stdio, silently discarding any buffered `print` output before the
+  crash.
+- **BUG-137**: tuple-destructure `let (a, b) = ...;` shadowing (same names,
+  same scope) failed to even compile on the C backend.
+- **BUG-138**: a `u32`-typed `Vec` index reaching `clone_at`/`vec_remove_at`/
+  the `simd*_load`/`simd*_store` family produced invalid LLVM IR.
+- **BUG-139**: the checker never validated that a struct field, enum
+  variant payload, or function parameter/return type actually names a real
+  declared type — an undeclared type name (or a Rust-ism like `String`
+  instead of `OwnedStr`) was silently accepted as long as it was never
+  actually constructed.
+- **BUG-140**: `parallel for` with a pathological loop range (an extreme
+  start bound) silently executed zero iterations on the C backend instead
+  of trapping — a genuine GCC OpenMP undefined-behavior case that the
+  compiler now guards against.
+
 ### Documentation
 
 - `tutorials/src/intermediate/09_ffi.md` — added a worked example for an `extern "C"` function *returning* a small struct by value (previously only parameter-passing was demonstrated; BUG-77 was found because this direction had never actually been exercised against a real linked C function).
 - `tutorials/src/intermediate/04_generics_iface.md` — added a worked example constructing two different instantiations of the same user-defined generic struct in one program (BUG-70/BUG-73's exact scenario, now verified fixed).
 - `tutorials/src/intermediate/12_smt_deepdive.md` — the "works today / doesn't yet" table now lists struct-field access in `requires`/`ensures`/`prove` as supported, reflecting BUG-68's fix.
 - `tutorials/src/advanced/05_simd.md` — added a worked example of a struct holding both a `vec128<T>` field and a plain `Vec<T>` field (BUG-79's exact scenario, now verified fixed).
+- `tutorials/src/intermediate/10b_runtime_errors_primer.md` — corrected two stale claims describing pre-BUG-129/BUG-130 behavior as still current (a `requires` clause on a `ref Vec<T>` parameter no longer hits a different SIGABRT-raising code path; `vanic run --backend=c` no longer masks a signal-killed child's exit code as a bare `1`); documented `ensures`/`invariant`'s new runtime-enforcement behavior (BUG-133/134); added a short addendum on the stdout-preservation fix (BUG-136).
+- `tutorials/src/intermediate/12b_compile_time_vs_runtime_primer.md` — the "`requires`/`ensures`/`invariant` (at the failing site)" section and closing summary now describe all three contract kinds uniformly, reflecting BUG-133/134.
 
 ---
 

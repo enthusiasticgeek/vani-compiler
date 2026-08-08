@@ -1,0 +1,39 @@
+// BUG-126 (2026-08-07): reassigning an Array-typed binding (via
+// `x = [...]` or same-scope `let`-shadowing, which the checker
+// desugars into the same Reassign node) produced invalid C --
+// arrays aren't assignable via `=` in C. Separately, reassigning
+// a `ref T`-typed binding corrupted memory on LLVM: the ref's raw
+// pointer VALUE (its `ctx.locals` entry, which for refs holds the
+// pointer itself rather than an alloca address -- see the L4(B)
+// comment in backend_llvm.rs) was mistaken for a storage ADDRESS
+// to `store` into, silently clobbering whatever the ref pointed
+// at. This example exercises both bugs: an array reassigned via
+// same-scope shadowing, and a `ref` rebound via both shadowing
+// and a plain `r = ...;` reassignment.
+
+struct Point { x: i64, y: i64 }
+
+fn shared(p: ref Point) -> ref Point {
+  return p;
+}
+
+fn area(p: ref Point) -> i64 {
+  return p.x * p.y;
+}
+
+fn main() -> i64 {
+  let xs: [i64; 5] = [1, 2, 3, 4, 5];
+  let xs: [i64; 5] = [10, 20, 30, 40, 50];
+  print xs[0];
+
+  let pt: Point = Point { x: 7, y: 9 };
+  let r: ref Point = shared(ref pt);
+  let r: ref Point = shared(ref pt);
+  print area(r);
+
+  let r2: ref Point = shared(ref pt);
+  r2 = shared(ref pt);
+  print area(r2);
+
+  return 0;
+}

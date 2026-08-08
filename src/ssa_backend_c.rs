@@ -372,7 +372,7 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
         .unwrap();
         writeln!(
             out,
-            "  if (++{} > {}) {{ fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})]); aborting\\n\"); abort(); }}",
+            "  if (++{} > {}) {{ fprintf(stderr, \"recursion bound exceeded in '{}' (#[bounded({})])\\n\"); exit(3); }}",
             counter_name, bound, f.name, bound
         ).unwrap();
     }
@@ -1664,7 +1664,7 @@ fn emit_instr(
                         };
                         writeln!(
                             out,
-                            "  if (__builtin_expect({}(({ty})({l}), ({ty})({r}), &v_{res}), 0)) {{ fprintf(stderr, \"integer overflow in {tyname} {op_name}\\n\"); abort(); }}",
+                            "  if (__builtin_expect({}(({ty})({l}), ({ty})({r}), &v_{res}), 0)) {{ fprintf(stderr, \"integer overflow in {tyname} {op_name}\\n\"); fflush(stdout); abort(); }}",
                             builtin,
                             ty = ty_c,
                             l = c_operand(l),
@@ -1679,7 +1679,7 @@ fn emit_instr(
                     BinaryOp::Div | BinaryOp::Rem => {
                         writeln!(
                             out,
-                            "  if (({}) == 0) {{ fprintf(stderr, \"division by zero\\n\"); abort(); }}",
+                            "  if (({}) == 0) {{ fprintf(stderr, \"division by zero\\n\"); fflush(stdout); abort(); }}",
                             c_operand(r)
                         )
                         .unwrap();
@@ -1700,7 +1700,7 @@ fn emit_instr(
                             let op_name = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
                             writeln!(
                                 out,
-                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); abort(); }}",
+                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); fflush(stdout); abort(); }}",
                                 r = c_operand(r),
                                 l = c_operand(l),
                                 min = min_macro,
@@ -1719,7 +1719,7 @@ fn emit_instr(
                         };
                         writeln!(
                             out,
-                            "  if {} {{ fprintf(stderr, \"shift amount out of range\\n\"); abort(); }}",
+                            "  if {} {{ fprintf(stderr, \"shift amount out of range\\n\"); fflush(stdout); abort(); }}",
                             range_check
                         )
                         .unwrap();
@@ -2771,7 +2771,7 @@ fn emit_instr(
                     if *checked {
                         writeln!(
                             out,
-                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
                             idx_str, array_op_str, dot,
                         )
                         .unwrap();
@@ -2797,7 +2797,7 @@ fn emit_instr(
                         if let Some(n) = static_len {
                             writeln!(
                                 out,
-                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
                                 idx_str, n,
                             )
                             .unwrap();
@@ -2869,7 +2869,7 @@ fn emit_instr(
                     if *checked {
                         writeln!(
                             out,
-                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
                             c_operand(index),
                             c_operand(array),
                             dot,
@@ -2913,7 +2913,7 @@ fn emit_instr(
                         if let Some(n) = static_len {
                             writeln!(
                                 out,
-                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
                                 c_operand(index),
                                 n,
                             )

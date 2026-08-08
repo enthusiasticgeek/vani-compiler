@@ -8852,6 +8852,10 @@ of the same math+sort program on this exact machine, which ran correctly -- so t
 either already handled by the specific flags `vanic` passes, or a narrower, pre-existing
 limitation unrelated to this session's fix; not chased further since it's orthogonal to
 both this bug and the link-flag-parity theme of category H.
+**Update 2026-08-07**: this WAS a real, narrower bug after all -- fixed as BUG-131
+below (the file-wide pragma also let GCC auto-vectorize unrelated non-sort code with
+AVX-512 instructions, SIGILL on any pre-AVX-512 x86 host; `vanic`'s own default build
+flags didn't shield against it the way this aside speculated).
 
 Full `cargo test --release` clean, zero regressions.
 
@@ -8864,3 +8868,882 @@ cross-compiled and linked cleanly without `-lpthread` on the same real toolchain
 modern glibc folds pthread symbols into libc itself, matching the existing `-lm`
 helper's own comment about this) and found to be correct as-is, not a bug. Category H
 is now fully audited.
+
+## BUG-126 (2026-08-07) -- reassigning an Array binding broke C, reassigning a `ref T` binding corrupted memory on LLVM
+
+Found picking up item A1 from `docs/UNRESOLVED_GAPS_TODO.md` (itself found chasing a
+localfuzz backend-divergence finding). Two independent bugs sharing one root shape --
+both live in `TypedStmt::Reassign` codegen, and both are reachable two ways: an
+explicit `x = ...;` reassignment, or same-scope `let`-shadowing (`checker.rs`
+deliberately desugars a same-scope `let` with a matching type into a `Reassign` node --
+see its "Same-scope let -> Reassign" comment -- so shadowing and explicit reassignment
+share the exact same codegen path).
+
+**C backend, Array type**: `let xs: [i64; 5] = [1,2,3,4,5]; xs = [10,20,30,40,50];`
+compiled to `v_xs = ((int64_t[5]){ 10, 20, 30, 40, 50 });` -- a hard `cc` error
+(`assignment to expression with array type`), since C arrays aren't assignable via `=`.
+`backend_c.rs`'s `Reassign` arm special-cases `Vec`/`OwnedStr`/`Struct`/`Enum` for
+`drop_old` handling but had no `Type::Array` arm at all, so it fell into the generic
+`name = expr;` catch-all -- the exact same catch-all the `Let` arm avoids by declaring
+with a proper `T name[N] = {...};` initializer instead.
+
+**LLVM backend, `ref T` type**: `let r: ref Point = shared(ref pt); r = shared(ref pt);
+print area(r);` silently printed garbage (observed `1266547254094656` instead of `63`)
+-- reading LLVM IR directly showed the smoking gun: `%t3 = call %Struct_Point*
+@fn_shared(...)` (the first `let`'s result, no alloca -- see the L4(B) comment on the
+Let arm: ref-typed lets skip the alloca and store the raw pointer VALUE itself in
+`ctx.locals[name].1`), then `%t4 = call %Struct_Point* @fn_shared(...)` (the reassign's
+new value), then `store %Struct_Point* %t4, %Struct_Point** %t3` -- reinterpreting
+`%t3`, a `%Struct_Point*` VALUE (the address of `pt`), as though it were a
+`%Struct_Point**` storage slot, and writing `%t4` into the first 8 bytes of `pt`
+itself (its `x` field) as a raw pointer-bit-pattern. The later `call i64 @fn_area(
+%Struct_Point* %t3)` then read `p.x` back as that garbage pointer value truncated to
+an integer. `backend_llvm.rs`'s generic `Reassign` arm assumes `ctx.locals.get(name)`
+always yields a real alloca address to `store` into; that assumption is simply false
+for refs.
+
+Fix: gave `Reassign` its own early carve-out in each affected backend, mirroring the
+`Let` arm's existing special-casing instead of extending the generic path.
+- `backend_c.rs`: `Type::Array` now writes into the EXISTING storage instead of
+  declaring anything new -- per-element `v_xs[i] = ...;` stores for an `ArrayLit` RHS,
+  `memcpy(v_xs, ..., sizeof(v_xs))` for any other RHS shape (including the
+  struct-wrapper-unwrap case for a Call/Block/IfExpr/Match RHS), matching the `Let`
+  arm's own two RHS shapes just without the leading declaration.
+- `backend_llvm.rs`: `ty.is_any_ref()` now evaluates the RHS and rebinds
+  `ctx.locals[name]` directly to the new pointer value -- no `store` at all, exactly
+  mirroring the `Let` arm's own ref carve-out and matching true SSA rebind semantics
+  (confirmed `ssa.rs`'s pure-SSA `Reassign` lowering already does the analogous
+  "just remap the name to the new value" with zero store instructions -- this was
+  purely a tree-LLVM gap, not present in the SSA path).
+
+Checked all other let-shadowable types (struct, `Vec<i64>`, `Str`, tuple, enum,
+`ref Vec<i64>`) via direct repros on both backends -- none showed the bug; it was
+specifically Array-on-C and ref-on-LLVM. Root-caused via `vanic emit`'s raw C/LLVM IR
+output rather than guessing -- the exact assignment-into-existing-storage vs.
+declare-fresh-storage divergence was visible directly in the emitted C, and the
+value-vs-address confusion was visible directly in the emitted LLVM IR.
+
+Added `examples/language/english/reassign_array_and_ref.vani` plus an end-to-end test
+(`reassign_array_and_ref_example_produces_correct_output_on_both_backends` in
+`tests/run_end_to_end.rs`, real `vanic run` on both backends, checks actual stdout) and
+two fast compile-only regression tests in `src/lib.rs`
+(`bug126_array_reassign_uses_memcpy_not_invalid_c_assignment`,
+`bug126_ref_reassign_rebinds_pointer_value_not_store_through_it_on_llvm`) pinning the
+emitted C/LLVM text shape so a regression fails fast without needing a `cc`/`lli`
+round-trip.
+
+Full `cargo test --release` clean (2789 lib tests + all integration suites, 0 failed),
+including the 3 new tests above.
+
+## BUG-127 (2026-08-07) -- loop-carried checked-arithmetic elision used a stale pre-loop fact, LLVM hung instead of trapping on overflow
+
+Found picking up item A2 from `docs/UNRESOLVED_GAPS_TODO.md` -- an EXPLICITLY
+PREDICTED-BUT-NEVER-TESTED risk named by `docs/BUG_PATTERN_AUDIT_TODO.md` category B:
+"could `ssa_pass.rs` ever flip `checked` from `true` to `false` on a Binary instruction
+incorrectly? ... elision reasoning across a loop with a non-monotonic induction
+variable." The prediction named the wrong file (turned out to be `checker.rs`, not
+`ssa_pass.rs`) but the mechanism was exactly right.
+
+Repro: `while n < 100 { if n == 5 { break; } n = n + -9223372036854775808; }` (n starts
+at 0) -- on LLVM, `vanic run` HUNG FOREVER (confirmed via `timeout 5`, killed every
+time); on C, correctly traps with `"integer overflow in int64_t add"` and exit 1.
+
+Root cause: `checker.rs`'s overflow-elision pass (inside the badly-named
+`try_elide_bounds_in_typed_expr`, which does BOTH Index-bounds elision AND
+Add/Sub/Mul/Div/Rem/Shl/Shr elision) runs on the RHS of the loop's `n = n + ...;`
+Reassign using whatever `smt_facts` are live at that point. Two existing call sites
+(`if loops.is_empty() { drop_facts_mentioning(smt_facts, name); }`, both in
+`check_one_stmt`) DELIBERATELY skip invalidating facts about a reassigned variable
+when inside a loop -- by design, so a separate loop-invariant-preservation check can
+still see the loop's ENTRY facts. But the elision pass runs on that SAME
+not-yet-invalidated fact set: on the very first pass through the loop body, `n == 0`
+(from the `let n: i64 = 0;` before the loop) was still live, and the "monotone result"
+overflow-proof goal (`(b<=0 || a+b>=a) && (b>=0 || a+b<=a)`, evaluated over the SMT
+wrapping-arithmetic model) DOES hold for `a=0, b=i64::MIN` (`0 + i64::MIN` wraps to
+`i64::MIN`, which is `<= 0` -- no overflow). SMT proved the goal, `checked` flipped to
+`false`, and the runtime guard was elided -- for a proof that's only valid on the FIRST
+iteration. The checker doesn't do general loop-invariant inference, so it can't tell
+that `n == 0` stops being true after the first iteration. On the SECOND iteration `n`
+is actually `i64::MIN`, and `i64::MIN + i64::MIN` wraps (mod 2^64) to exactly `0` --
+producing a genuine 2-cycle oscillation between `0` and `i64::MIN` that never equals 5
+and never reaches 100, hence the infinite loop instead of a trap.
+
+Confirmed directly by comparing LLVM IR before/after: `vanic emit --backend=llvm` on
+the repro showed `%v_6 = add i64 %v_1, %v_5` (a bare, unchecked `add`) inside the loop's
+body block, vs. the checked-add helper (`call i64 @__intent_checked_add_i64(...)`) that
+the exact same source pattern produces OUTSIDE a loop, or for a genuinely
+SMT-unprovable value (a plain function parameter).
+
+Fix: added an `inside_loop: bool` parameter to `try_elide_bounds_in_typed_expr`
+(threaded through its ~19 call sites, `!loops.is_empty()` at the 10 external
+`check_one_stmt` sites, forwarded unchanged through its 9 internal recursive calls),
+and skip the Div/Rem/Shl/Shr/Add/Sub/Mul-checked-elision arms entirely whenever
+`inside_loop` is true -- deliberately conservative (loses some legitimate
+would-have-elided optimization opportunities inside loops) rather than attempting
+precise loop-invariant tracking, matching this codebase's established "sound over
+clever" bias for this class of bug (see the SSA `Unreachable`-terminator memory, or
+BUG-116's runtime-guard-fallback philosophy). The Index (array-bounds) elision arm in
+the SAME function is intentionally left untouched by this guard: a `for i from 0 to
+len(xs)` loop's own induction-variable facts (`i >= 0 && i < len(xs)`) are freshly and
+soundly re-derived every iteration by construction (a different, already-correct
+mechanism -- confirmed the existing `smt_elides_vec_bounds_in_for_loop_body` test still
+passes unchanged). Verified none of the 8 existing `smt_elides_*` overflow/bounds/
+divisor/shift elision tests are themselves inside a loop, so none regressed.
+
+Added `examples/language/english/loop_carried_overflow_not_elided.vani` plus an
+end-to-end test (`loop_carried_overflow_not_elided_example_traps_instead_of_hanging_
+on_both_backends` in `tests/run_end_to_end.rs`, wrapped in the real `timeout` command
+so a regression fails in 10s instead of hanging the suite/CI forever, matching the
+BUG-109/echo_pool precedent) and a fast compile-only test in `src/lib.rs`
+(`bug127_loop_carried_overflow_check_is_not_elided`, asserts `llvm.sadd.with.overflow`
+survives in the tree-LLVM emission for the loop repro).
+
+Full `cargo test --release` clean (2790 lib tests + all integration suites, 0 failed),
+including the 3 new tests above.
+
+## BUG-128 (2026-08-07) -- async fn's v3.1 state-machine transform hid a use-before-declare bug from both normal checks
+
+Found picking up item A3 from `docs/UNRESOLVED_GAPS_TODO.md`. A plain (non-async)
+function correctly rejects using a variable before its `let` declaration -- two
+diagnostics fire: `"unknown variable 'n'"` and `"unreachable statement after a
+control-flow exit"` (confirmed directly: `fn main() -> i64 { return n; let n: i64 =
+5; }`). The identical shape inside an `async fn` whose body contains an `io_*_async`
+call -- `return FetchResult.Ok(n); let n: i64 = io_recv_async(fd, size);` -- was
+silently ACCEPTED (`vanic check` reported `ok`), and the full program hung on both
+backends when actually run.
+
+Root cause: `async fn` bodies with an `io_*_async` call go through the v3.1
+state-machine transform in `parser.rs`'s `try_v31_transform` -- BEFORE `checker.rs`
+ever sees the function. The transform splits the flat body into per-suspend-point
+segments, wrapped as `while true { if state_tag==0 {...} if state_tag==1 {...} ...
+}`, and promotes any local that crosses a suspend point into a field on a synthesized
+`Task__<fn>` struct. Both of checker.rs's normal protections are defeated by this
+BEFORE it gets to run on the ACTUAL bug:
+- **Reachability**: the dead `let n = io_recv_async(...);` statement, originally
+  "after an unconditional return in the same list," lands in its OWN `if
+  state_tag==N` block after the split -- a syntactically distinct, genuinely
+  reachable branch from the checker's point of view, not "after" anything anymore.
+- **Use-before-declare**: `n` gets unconditionally promoted to a Task struct field
+  (the promotion pass doesn't do reachability analysis -- it just collects every
+  local that's read inside a segment other than the one that declares it), so every
+  reference to `n` gets rewritten to `t.n`, a struct field access that's ALWAYS
+  syntactically valid. There's no bare `Var("n")` left for "unknown variable" to
+  ever fire on.
+
+Confirmed via a real diff: the localfuzz finding that surfaced this
+(`20260806-193817-run-crash-2767ef4c1c`) is the shipped
+`examples/language/english/echo_p24_try_keyword.vani` example with exactly the
+`let`/`return` pair swapped -- the shipped example itself is correct and unaffected.
+
+Fix: added a narrow, syntax-only reachability check (`v31_reject_dead_code` +
+`v31_stmt_terminates` in `parser.rs`) that runs on the flat, try-desugared async body
+INSIDE `try_v31_transform`, right after `desugar_try_in_v31_body` and BEFORE the
+ANF-lift + segment-splitting collector run -- i.e. on the body shape where "dead code
+after a return, in the same list" is still syntactically true, before the transform
+erases that fact. Deliberately mirrors only `checker.rs`'s reachability check (`Stmt`
+kind shapes only, no scope/type info needed) rather than also re-implementing
+use-before-declare detection in the parser -- the reachability half alone is
+sufficient to catch and reject this bug pattern, since any use-before-declare shape
+here necessarily has the "declare" half sitting in genuinely dead code. On rejection,
+`try_v31_transform` returns its existing `Err(diag)` path, which the caller already
+falls back from to the v1 synchronous async desugar -- that fallback re-runs the
+FULL normal checker.rs pass on the (still correctly-ordered-in-source) body too, so
+the rejected program actually surfaces BOTH the new reachability diagnostic and the
+normal checker's own diagnostics (a bit more verbose than a single clean error, but
+matches this codebase's existing behavior for every other v3.1-transform rejection
+path, which already falls back the same way).
+
+Verified the fix doesn't regress the legitimate case: `echo_p24_try_keyword.vani`
+(correct ordering) still compiles and runs correctly on both backends, and all 79
+existing `v31`-prefixed unit tests plus the `llvm_backend_run_produces_same_output_as_c`
+end-to-end sweep (which runs dozens of async examples including this one) pass
+unchanged.
+
+Added `bug128_async_fn_use_before_declare_across_suspend_point_is_rejected` to
+`src/lib.rs`, right next to the existing `v31_phase24_try_in_async_fn_accepted` test
+it mirrors (same body, `let`/`return` swapped) -- asserts `compile()` now rejects with
+either diagnostic.
+
+Full `cargo test --release` clean (2792 lib tests + all integration suites, 0 failed).
+
+## BUG-129 (2026-08-07) -- tree-C's `requires` guard still raised SIGABRT via raw assert(), not exit(3)
+
+Found picking up the first previously-known gap from `docs/UNRESOLVED_GAPS_TODO.md`
+section C (originally noted while updating tutorials 2026-08-07, not chased at the
+time). A `requires` clause violated at a call site SMT can't resolve either way
+(discharges to a runtime guard, not a compile-time rejection) correctly gave
+`"assertion failed: precondition violated in '<fn>'"` + clean `exit(3)` on the C
+backend for a plain scalar parameter -- but the SAME shape for a function taking a
+`ref Vec<T>` parameter instead gave a raw glibc `assert()`-macro crash and a real
+`SIGABRT`.
+
+Root cause: `ref Vec<T>` isn't the actual trigger -- it just reliably forces the
+WHOLE MODULE off the SSA-C fast path onto tree-C (`ssa_path_supports` in `main.rs` is
+a module-wide gate: if ANY function anywhere in the program uses an SSA-unsupported
+feature, EVERY function falls back to tree codegen, not just the unsupported one).
+Confirmed directly: a program with a plain scalar `requires` clause and a completely
+unrelated `match` statement elsewhere in the same file shows the identical raw-`assert()`
+crash for the scalar case too. `backend_c.rs`'s tree-walking `requires`-clause codegen
+(two call sites: the normal function path and the `#[bounded(N)]` path) still emitted
+the raw C `assert(EXPR);` macro. BUG-116 (2026-08-05) gave the SSA-C path's own
+`requires` lowering (`ssa.rs`) a real runtime guard via `intent_assert_fail`, which
+`ssa_backend_c.rs` inlines as `fprintf(stderr, "assertion failed: %s\n", msg);
+exit(3);` -- but tree-C's `requires` codegen was explicitly, deliberately left
+untouched by an EARLIER fix (the comment on tree-C's `TypedStmt::Assert` fix reads:
+"the `requires`-clause precondition check ... already calls `abort()` consistently on
+BOTH backends, so it isn't a divergence"). That was true when written -- before
+BUG-116 existed, when tree-C and tree-LLVM's `requires` guards matched each other.
+BUG-116 introduced a NEW divergence this comment never anticipated: SSA-C's `requires`
+moved to the clean `exit(3)` shape while tree-C's (and tree-LLVM's -- see below)
+stayed on the old one.
+
+Fix: added `emit_requires_guards` in `backend_c.rs`, replacing both raw-`assert()`
+call sites with the same `if (!(EXPR)) { fprintf(stderr, "assertion failed: %s\n",
+"<message>"); exit(3); }` shape `ssa_backend_c.rs` uses, with the identical message
+format `ssa.rs` generates (`"precondition violated in '<fn>'"`, or `"... (requires
+#<n>)"` per clause for a multi-`requires` function). Checked tree-LLVM's own
+`requires` codegen (`backend_llvm.rs`) for the same class of staleness: it already
+uses `exit(3)` (fixed separately by BUG-113), just without a message string -- a much
+smaller cosmetic gap than tree-C's SIGABRT-vs-clean-exit divergence, and left
+out of scope here since it isn't the acute "misleading crash" problem this bug is
+about.
+
+Added `examples/language/english/requires_guard_survives_tree_c_fallback.vani` (a
+scalar `requires` clause forced onto tree-C by an unrelated `match` elsewhere in the
+file, with the violating call routed through an indirection that also defeats SMT's
+compile-time call-site proof) plus an end-to-end test
+(`requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3` in
+`tests/run_end_to_end.rs`, a real subprocess run since the bug is specifically about
+SIGNAL behavior, not just stderr text) and a fast compile-only test in `src/lib.rs`
+(`bug129_tree_c_requires_guard_uses_exit3_not_raw_assert`).
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).
+
+## BUG-130 (2026-08-07) -- `vanic run` masked a signal-killed child as a bare exit code 1
+
+Found picking up item C2 from `docs/UNRESOLVED_GAPS_TODO.md`. `src/main.rs` used
+`status.code().unwrap_or(1)` at every point where it forwards a compiled program's own
+exit status as `vanic run`/`vanic build`'s own process exit code (5 call sites: the C
+backend's direct-`cc`-then-run path, the LLVM backend's `lli` path, an internal helper
+returning `(i32, stdout, stderr)`, and the two QEMU cross-compile run paths).
+`std::process::ExitStatus::code()` returns `None` specifically when the child was
+killed BY A SIGNAL rather than exiting normally (on Unix -- Windows processes killed
+by an unhandled exception still report a code via `.code()`, so this doesn't arise
+there) -- so any program that hit a raw `abort()` (e.g. the `#[bounded(N)]`
+recursion-depth guard's C-backend codegen, which still calls `abort()` directly rather
+than `exit(3)`) was reported by `vanic run` as exit code `1`, indistinguishable from a
+program that legitimately called `exit(1)`, with no indication a signal was involved
+at all. Confirmed directly: `vanic emit --backend=c` + manual `cc` + direct execution
+of a `#[bounded(3)]` violation shows the shell's `Aborted (core dumped)` and exit
+`134`; the identical program via `vanic run --backend=c` reported a bare `1`.
+
+Fix: added a `child_exit_code` helper in `main.rs` that falls back to the shell
+convention (`128 + signal`, via `std::os::unix::process::ExitStatusExt::signal()`
+behind `#[cfg(unix)]`) instead of a bare `1` whenever `status.code()` returns `None`,
+and switched all 5 call sites to use it. A signal-killed child now reports `134` (128
++ `SIGABRT`'s 6) instead of `1`, matching what a directly-executed binary's own shell
+shows.
+
+This is a broad, mechanical change to `vanic run`'s own exit-code reporting, so it
+surfaced one piece of expected fallout in the existing test suite (not a new bug):
+BUG-127's own regression test asserted the C-backend overflow trap (which ALSO still
+raises a raw `abort()`, same as the `#[bounded(N)]` guard) reports exit `1` -- that was
+only ever true because of THIS bug; updated the assertion to the now-correct `134`.
+
+Added `signal_killed_child_reports_128_plus_signal_not_a_bare_1` to
+`tests/run_end_to_end.rs` (real subprocess run against a `#[bounded(3)]` violation on
+the C backend, asserting exit `134`, since the bug is specifically about signal
+behavior that a compile-only check can't observe).
+
+Aside (not fixed, out of scope): the `#[bounded(N)]` guard's own raw `abort()` on the C
+backend is itself a smaller instance of the same "should this be a clean `exit(3)`
+instead of a raw signal" question BUG-113/116/120/129 already fixed for several other
+runtime-guard call sites -- flagged here for a future pass, not chased in this one
+since `vanic run` now reports it accurately either way (134 either from a genuine
+`SIGABRT` or, if fixed later, from `ExitCode::from(3)`; either is now correctly
+distinguishable from the OTHER).
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed;
+this includes updating BUG-127's own test expectation as described above).
+
+## BUG-131 (2026-08-07) -- sort's AVX-512 path had no CPU-capability check, and hid a second bug once fixed
+
+Found picking up item C5 from `docs/UNRESOLVED_GAPS_TODO.md` -- the "biggest remaining
+undertaking" flagged there, and it lived up to that billing: fixing it surfaced a
+SEPARATE, more severe pre-existing correctness bug (part 2 below), confirmed with the
+user before proceeding to fix both in the same pass rather than just the originally-
+scoped crash.
+
+**Part 1 -- the crash.** `sort_runtime.c` (linked into every LLVM-backend binary) had
+`#pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")` applied
+FILE-WIDE, unconditionally, on any x86_64 build. This meant two things: (a) the hand-
+written `_mm512_*` intrinsics in `_block_part`'s mask computation always compiled in
+and always ran, with no runtime check for whether the CPU executing the binary
+actually has AVX-512; (b) GCC's auto-vectorizer was free to emit AVX-512 ANYWHERE ELSE
+in the file it judged profitable, not just in the two functions that intentionally use
+it. Confirmed both empirically: a 200-element shuffled `Vec<i64>` sort (large enough
+to enter `_block_part`, which only fires for >= 128 elements) crashed with `SIGILL` on
+this dev machine's own Haswell CPU (no AVX-512) -- but the crash site was
+`si_recurse`'s own pivot-selection loop, NOT the block-partition mask code, confirming
+(b) as a real, separate risk from (a).
+
+Fixed with genuine runtime CPUID dispatch instead of a compile-time-only guarantee.
+The vector compare moved into `vani_sort_mask_*_i64_avx512`/`_f64_avx512`, each
+decorated with `__attribute__((target("avx512f,avx512bw,avx512dq,avx512vl")))` so GCC
+compiles THOSE specific functions with AVX-512 enabled regardless of command-line
+flags. A `_scalar` sibling for each is decorated with `__attribute__((target(
+"arch=x86-64")))`, which -- verified by disassembly, not just documentation -- both
+overrides the (now-removed) file-wide pragma AND prevents GCC from auto-vectorizing
+that function with AVX-512/AVX2/BMI2 the way the ambient pragma used to allow. A thin
+dispatcher picks between the two via `__builtin_cpu_supports("avx512f")` (a cheap read
+of a CPUID probe GCC's runtime caches on first use). `target_clones` (GCC's usual
+IFUNC-based multiversioning attribute) was tried first and rejected: it silently
+NO-OPs (`-Wattributes`: "ignoring attribute 'target_clones' because it conflicts with
+attribute 'target'") when combined with an enclosing `#pragma GCC target` -- confirmed
+empirically before trusting it, since getting that specific interaction wrong would
+have silently reintroduced the exact crash this fix exists to prevent. Dropping the
+file-wide pragma entirely (not just adding the dispatch functions) was necessary to
+also close (b) -- confirmed via disassembly that `si_recurse` and both `_scalar`
+functions now contain zero `zmm`/AVX-512-mask-register instructions, while both
+`_avx512` functions correctly do.
+
+**Part 2 -- found while verifying part 1's fix.** Testing the fix with a large enough
+array to actually exercise `_block_part` (the earlier BUG-125-era investigation used
+arrays too small to ever reach it, which is why this went unnoticed for two sessions)
+surfaced a second bug: a 300-element shuffled `Vec<f64>` with negative values sorted
+into the WRONG order (not a crash). Root cause: the mask macros compared `double`
+values via `_mm512_cmpge_epi64_mask`/`_mm512_cmplt_epi64_mask` -- a SIGNED INT64
+comparison of the double's raw bit pattern, reusing `int64_t`'s own comparison path.
+That's correct for `int64_t` (its bit pattern IS its native ordering) but wrong for
+`double`: IEEE-754 negative doubles do NOT preserve their true ordering under raw
+signed-int64 comparison -- e.g. `-1000.0`'s bits (`-4571364728013586432`) compare
+GREATER than `-0.001`'s bits (`-4661117527937406468`) as raw `int64_t`, backwards from
+`-1000.0 < -0.001`. This was a BUG-125-era decision, explicitly noted as deliberate at
+the time ("never using an FP compare intrinsic even for `sd_block_part`") -- but never
+actually verified against real negative-double data, because on THIS exact class of
+machine (x86_64, no AVX-512), the crash from part 1 always fired first, before a
+large-enough sort could ever run to completion and expose the wrong ordering. Fixing
+part 1 made this observable for the first time.
+
+Fixed by giving `double` its own genuinely-floating-point mask functions
+(`vani_sort_mask_*_f64_avx512` using `_mm512_cmp_pd_mask` with `_CMP_GE_OQ`/
+`_CMP_LT_OQ`, `vani_sort_mask_*_f64_scalar` using native `>=`/`<`) instead of routing
+through `int64_t`'s bit-pattern path -- `int64_t`'s own comparison functions are
+unchanged. The shared `VANI_SORT_MASK_GE`/`LT` macros now dispatch on `pivot`'s type
+via C11 `_Generic` (resolved entirely at compile time, since each `DEFINE_SORT(T,
+prefix)` instantiation has a concretely-typed `pivot`) instead of blindly treating
+everything as `int64_t` bits.
+
+Added `examples/language/english/sort_large_block_partition.vani` (a 300-element
+xorshift64-generated `Vec<i64>`/`Vec<f64>` pair, deterministic but not a giant literal
+list, verified via in-source ordering checks) plus an end-to-end test
+(`sort_large_block_partition_example_produces_correct_output_on_both_backends` in
+`tests/run_end_to_end.rs`, a real subprocess run since `sort_runtime.c` is compiled by
+a genuine `cc` invocation at `vanic run` time, entirely outside anything
+`compile_to_c`/`compile_to_llvm` touch). Verified via direct disassembly (not just the
+test suite) that the AVX-512 functions correctly emit `zmm` instructions and the
+scalar/dispatcher functions correctly don't. Also re-verified the BUG-125 ARM
+cross-compile path (a non-x86 target never enters any of this file's `VANI_SORT_HAVE_
+AVX512` branch at all) is unaffected.
+
+Full `cargo test --release` clean (2793 lib tests + all integration suites, 0 failed).
+
+## BUG-132 (2026-08-07) -- non-ASCII type names could be declared but never referenced, for scripts with no case distinction
+
+Found picking up item C4 from `docs/UNRESOLVED_GAPS_TODO.md` -- flagged there as "more a
+product decision than a bug." Confirmed the fix direction with the user before
+implementing (Unicode-aware case check, preserving the ASCII PascalCase convention for
+cased scripts and extending it correctly to case-less ones) rather than guessing.
+
+A struct/enum declared with a non-ASCII name (`struct ကက { x: i64 }`, Myanmar script)
+parsed fine as a DECLARATION -- `parse_struct_decl`/`parse_enum_decl` impose no case
+restriction on the name at all, matching every other identifier in the language. But
+three separate "does this identifier look like a type name" call sites in `parser.rs`
+(the plain type-position path, the module-qualified `a::b::Type` path, and the
+`Name { field: val }` struct-literal lookahead in expression position) all gated on
+`c.is_ascii_uppercase()` -- meaning the struct could never actually be REFERENCED
+anywhere: not as a type annotation, not to construct a value of it. Myanmar (like
+Devanagari, CJK, Arabic, Thai, and many other scripts) has no upper/lowercase
+distinction at all, so no identifier in that script could ever satisfy an
+ASCII-uppercase-start check, regardless of case-like conventions the script might have
+for other purposes.
+
+Fixed with a single shared `is_type_name_start(c: char) -> bool` helper in `parser.rs`:
+`c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())`. For cased scripts
+(ASCII, Cyrillic, Greek, etc.) this preserves the existing convention exactly --
+`c.is_uppercase()` is Unicode-aware, so `Точка` (Cyrillic, uppercase-start) now works
+as a type name while `точка` (lowercase-start) is still correctly rejected, matching
+ASCII `Point`/`point`. For case-less scripts, `is_lowercase()` is false for every
+character (there's no lowercase form to compare against), so `is_alphabetic() &&
+!is_lowercase()` accepts any letter -- exactly the "case doesn't apply here, don't
+gate on it" behavior needed. Applied at all three call sites so declaring AND
+referencing a non-ASCII-named type (both as a type annotation and to construct a
+struct literal) work consistently, not just one.
+
+Updated the existing pinning test (previously named `non_ascii_struct_name_declares_
+but_cannot_be_used_as_a_type_annotation`, asserting the OLD rejecting behavior) to
+`non_ascii_struct_name_can_be_declared_and_used_as_a_type_annotation`, now asserting
+the Myanmar struct actually compiles and the type is really emitted (checks for
+`Struct_ကက` verbatim in the C/LLVM output -- non-ASCII names aren't mangled). Added
+two more: `cyrillic_struct_name_requires_uppercase_start_matching_ascii_convention`
+(confirms the cased-script distinction survives the fix in both directions) and
+`ascii_lowercase_struct_name_still_rejected_as_a_type_annotation` (a pure regression
+guard pinning the unchanged ASCII behavior).
+
+Full `cargo test --release` clean (2795 lib tests + all integration suites, 0 failed).
+
+## BUG-133 (2026-08-07) -- `ensures` gained real runtime enforcement, closing the asymmetry with `requires`
+
+Found picking up item C3 from `docs/UNRESOLVED_GAPS_TODO.md` -- the one item explicitly
+flagged as "a bigger feature, not a quick fix," and correctly so: this is a genuine
+feature addition, not a one-function bug fix. Before touching code, sketched three
+design options for the user (mirror `requires` exactly / add runtime as pure defense-
+in-depth on top of the existing compile-time gate / an opt-in strictness flag) with a
+recommendation; the user picked the recommended option (mirror `requires`) and the
+recommended sequencing (`ensures` first, `invariant` as a separate follow-up).
+
+**The asymmetry**: `requires` already has two independent mechanisms -- a compile-time
+call-site proof attempt (a PROVEN violation is a hard build error; anything else
+silently compiles) and an UNCONDITIONAL runtime guard at the callee's function entry
+(BUG-116/129's `exit(3)` + message, always emitted regardless of call-site
+provability). `ensures` had only the first half: `verify_ensures_at_return` treated
+`Verdict::Proven` as silent and treated `Disproven` (a confirmed counterexample),
+`Unknown` (SMT genuinely can't decide), `SkippedUnsupported` (the clause uses a
+construct outside the v1 SMT encoder -- not a reason the CODE can't run, just that
+static proof can't attempt it), and `Unavailable` (no `z3` binary at all) as
+IDENTICAL hard build failures. That's the gap: `requires` never blocks a build over
+mere undecidability; `ensures` always did.
+
+**Fix**: `Disproven` still hard-fails the build, unchanged (a confirmed counterexample
+is worth catching at the cheapest possible point, regardless of clause kind). Every
+other non-`Proven` outcome (`Unknown`/`SkippedUnsupported`/`Unavailable`) now compiles
+clean and synthesizes a `TypedStmt::Assert` injected right before the `return`
+instead of pushing a diagnostic -- reusing the exact same `intent_assert_fail`/
+`exit(3)` mechanism `assert`/`prove`/`requires` already use, so **no new backend
+codegen was needed on any of the 4 codegen paths** (tree-C, tree-LLVM, SSA-C,
+SSA-LLVM); `TypedStmt::Assert` was already correct everywhere from BUG-106/113.
+Message convention mirrors `requires` exactly: `"postcondition violated in '<fn>'"`,
+or `"... (ensures #<n>)"` per clause for a multi-`ensures` function.
+
+Two real implementation bugs found and fixed while getting this working (documented
+here since they're the kind of mistake worth remembering the shape of):
+1. The runtime guard's `_return` substitution used to reference the RAW return
+   expression (`return_expr`, same as the compile-time proof uses), which would have
+   silently DOUBLE-EVALUATED a side-effecting return expression (e.g.
+   `return log_and_compute();` -- the log/compute side effect would fire once for the
+   synthesized runtime check and again for the actual return). Fixed by moving the
+   `verify_ensures_at_return` call to AFTER the return value is already materialized
+   into its `__intent_ret_<span>` temp (`check_one_stmt`'s existing use-once-store
+   pattern, there specifically to avoid a different use-after-free issue with drops)
+   and substituting `_return` with a reference to THAT temp instead -- the compile-
+   time SMT proof still reasons about the raw expression symbolically (SMT never
+   executes anything, so that's fine), only the runtime path changed. Verified via a
+   dedicated test (`push`ing to a counter Vec through an ensures-guarded function,
+   confirming exactly 1 push, not 2, on both backends).
+2. `check_expr` (needed to type-check the synthesized runtime assertion) resolves
+   `Var` nodes against the checker's `Env`, but the return temp is a compiler-internal
+   name that's never inserted into `Env` (only real user `let`s/params are) --
+   referencing it crashed with "unknown variable". Fixed by registering the temp into
+   `Env` with `no_drop: true` (critical: the SAME `Env` also drives a separate
+   drop-emission pass a few lines later in `check_one_stmt`, and without `no_drop`,
+   that pass would emit a spurious `Drop` for the temp -- freeing a non-Copy return
+   value like `Vec`/`OwnedStr` before it's actually returned to the caller). Safe to
+   insert unconditionally with no cleanup: the parser/lexer reject any identifier
+   starting with `__intent`, so no user code can ever collide with it, and each
+   return site's temp name is span-unique, so no other return site's insertion can
+   collide either.
+
+Updated the tutorials that documented the old "ensures/invariant have zero runtime
+enforcement, full stop" behavior (`intermediate/10b_runtime_errors_primer.md`'s Row 2
+table + aside, `intermediate/12b_compile_time_vs_runtime_primer.md`'s "at the failing
+site" section + summary) to describe the new split accurately: `ensures` now has
+runtime enforcement matching `requires`; `invariant` does not yet (tracked as the
+BUG-134 follow-up). Also updated one existing test whose NAME described the old
+behavior (`ensures_on_vec_of_struct_element_field_is_rejected_not_silently_accepted`
+-> `..._gets_a_runtime_guard_not_a_hard_error`) -- this was the one piece of "expected
+fallout" the full test suite surfaced, exactly the class of program BUG-133 was built
+to stop rejecting.
+
+Added 3 fast compile-only tests in `src/lib.rs` (proven-still-elides,
+disproven-still-hard-fails, undecidable-now-compiles-with-a-guard) and 2 end-to-end
+tests in `tests/run_end_to_end.rs` (real subprocess runs on both backends: the guard
+stays silent when satisfied and traps with `exit(3)` + the right message when
+actually violated; the side-effect-not-duplicated property specifically).
+
+Full `cargo test --release` clean (2797 lib tests + all integration suites, 0 failed;
+includes updating the one pre-existing test whose name described the now-superseded
+behavior, as described above).
+
+## BUG-134 (2026-08-07) -- `invariant` gained real runtime enforcement (BUG-133's follow-up)
+
+Second and final half of item C3, closing it out entirely: `invariant` now gets the
+same treatment BUG-133 gave `ensures` -- a `Disproven` verdict (a confirmed SMT
+counterexample) still hard-fails the build; `Unknown`/`SkippedUnsupported`/
+`Unavailable` now compile clean with a runtime guard instead. `verify_loop_invariants`
+and `verify_loop_invariants_with_havoc` (the shared core both delegate to) now take
+`env: &mut Env` and return `Vec<TypedStmt>` -- the caller decides where to place them,
+since (unlike `ensures`'s single return-site guard) a loop needs the runtime check in
+TWO different places with different placement constraints.
+
+**Entry check.** Can't simply be inserted as a plain statement right before the loop
+the way it might seem: a `for` loop's own induction variable isn't a real variable
+outside the loop's own braces in the generated code, so an entry-check assert
+referencing it can't live in the OUTER statement list. Solved uniformly for both
+`while` and `for` with a synthesized "once" flag: `let mut __intent_inv_entry_<span>:
+bool = true;` declared before the loop, consumed by `if __intent_inv_entry_<span> {
+...entry-check asserts...; __intent_inv_entry_<span> = false; }` prepended as the
+FIRST statement of the loop's own body -- fires exactly once, on the first pass
+through the body, using the body's own naturally-scoped variables (including a
+for-loop's induction variable), without re-evaluating the loop's own condition/bounds
+expressions a second time (which would risk double-evaluating a side-effecting one,
+the same class of bug BUG-133 fixed for `ensures`'s `_return`).
+
+**Preservation check.** Appending the guard at the textual end of the loop body is
+NOT sufficient on its own -- found as a REAL bug while verifying this, not a
+theoretical concern: `continue` jumps straight to the loop's condition re-check,
+silently skipping any code appended after it in the same block, so an iteration that
+hits `continue` before reaching the appended check would never actually run it.
+Confirmed directly: a loop whose invariant was violated exactly on the iteration that
+hit `continue` ran to completion instead of trapping. Fixed with a new
+`inject_before_matching_continues` helper (mirroring the file's existing
+`inject_shallow_free_before_returns`, which solves the analogous problem for
+`return`/heap frees) that recursively walks the loop body and inserts the
+preservation-check statements before every `TypedStmt::Continue` that targets THIS
+loop -- an unlabeled `continue` in the loop's own direct scope, or a labeled
+`continue 'this_loop's_label` from anywhere, including inside a nested loop (whose
+OWN unlabeled `continue` is correctly left alone, since that targets the inner loop,
+not this one). `break` is deliberately NOT instrumented -- breaking exits the loop
+entirely, so there's no next iteration left for the invariant to be preserved for.
+
+Verified all of this directly, not just via the test suite: disassembled/inspected
+emitted C for a `while` and a `for` loop with an undecidable invariant, confirming the
+once-flag wraps only the entry check and the preservation check appears both at the
+natural loop-body end and before a `continue`; ran 8 distinct scenarios by hand across
+both backends (proven elides / disproven still hard-fails / undecidable-satisfied runs
+clean / undecidable-violated-at-entry traps / undecidable-violated-at-preservation
+traps, for both `while` and `for`) before writing a single test; then specifically
+constructed and confirmed the `continue`-bypass bug, fixed it, and re-verified; then
+confirmed `break` is correctly NOT checked, an unlabeled `continue` in a nested loop
+does NOT cross into the outer loop's check, and a LABELED `continue 'outer` from a
+nested loop DOES correctly trigger the outer loop's check.
+
+Updated both tutorials BUG-133 had already touched (since they explicitly described
+`invariant` as "still not done yet" at the time) to reflect the complete picture:
+`intermediate/10b_runtime_errors_primer.md`'s Row 2 table + aside now documents both
+new message shapes (`"...does not hold at loop entry..."` / `"...is not preserved by
+the loop body..."`, with the `for`-loop wording variants) and the once-flag +
+continue-injection design; `intermediate/12b_compile_time_vs_runtime_primer.md`'s "at
+the failing site" section and summary now describe all three contract kinds
+uniformly.
+
+Added 3 fast compile-only tests in `src/lib.rs` (proven elides for both loop kinds,
+disproven still hard-fails, undecidable compiles with both guard sites present +
+once-flag variable visible in the C output) and 2 end-to-end tests in
+`tests/run_end_to_end.rs` (real subprocess runs, both backends: entry/preservation
+guards fire only when actually violated across 3 programs; and a 4-program sweep
+specifically for the `continue`/`break`/nested-loop/labeled-continue interaction,
+including the exact `continue`-bypass shape that was caught as a real bug during
+development).
+
+Full `cargo test --release` clean (2800 lib tests + all integration suites, 0 failed)
+-- notably zero regressions despite this touching the `While`/`For` statement-checking
+code shared by every loop in every test program in the suite.
+
+This closes out `docs/UNRESOLVED_GAPS_TODO.md`'s item C3 entirely, and with it every
+single item in that document -- the doc's full original scope (3 new bugs + 5
+previously-known gaps, 8 items total) is now completely closed.
+
+## BUG-135 (2026-08-07) -- `#[bounded(N)]`'s C-backend recursion guard still raised a raw SIGABRT, not `exit(3)`
+
+Follow-up cleanup flagged as an explicit "Aside (not fixed, out of scope)" in BUG-130's
+own writeup above: the `#[bounded(N)]` recursion-depth guard's C-backend codegen
+(`backend_c.rs`'s tree-C path AND `ssa_backend_c.rs`'s separate copy of the same guard)
+still called `fprintf(stderr, "...")` followed by a raw `abort()`, unlike every other
+runtime guard on this backend (`assert`/`requires`/`ensures`/`invariant`, and the
+LLVM-backend version of this SAME guard, already converted to `exit(3)` by BUG-117).
+The LLVM-backend fix was scoped there specifically because raw `abort()` made `lli`
+print a misleading "PLEASE submit a bug report" internal-crash banner for an ordinary,
+expected trap -- a problem the C backend's own `SIGABRT` termination never had, which
+is why this C-backend instance was deliberately left out of BUG-117's scope at the
+time. Picked up now on its own merits: a clean, message-bearing `exit(3)` is still
+strictly better than an unlabeled `SIGABRT` even without the `lli`-specific motivation,
+and it removes one more asymmetry between the two backends' abort surfaces.
+
+Fixed both C codegen paths identically: `backend_c.rs`'s bounded-fn entry sequence
+(~line 13340) and `ssa_backend_c.rs`'s (~line 375) both now emit `fprintf(stderr,
+"recursion bound exceeded in '<fn>' (#[bounded(<N>)])\n"); exit(3);` instead of the
+`abort()` call (dropped the now-inaccurate "; aborting" trailer from the message text
+too). `stdlib.h` was already included on both paths (needed for the pre-existing
+`abort()` call), so no new include was required.
+
+Verified directly against a current build on both C codegen paths: a plain program
+with a `#[bounded(3)]` violation takes the default SSA-C path and now exits `3` (was
+`134`); adding an unrelated `#[no_mangle] fn` to force the whole module onto tree-C
+(per `ssa_path_supports` in `main.rs`) reproduces the same `exit(3)` there too.
+
+This fix has a real fallout: `tests/run_end_to_end.rs`'s
+`signal_killed_child_reports_128_plus_signal_not_a_bare_1` (BUG-130's own regression
+test) relied on this exact guard's raw `SIGABRT` as its only reliable way to produce a
+signal-killed child on the C backend -- it would have silently started asserting a
+now-wrong exit code once this landed. Switched its repro to an integer-overflow trap
+instead (`add_it(i64::MAX, 1)`), which still raises a raw `abort()` on the C backend
+(bounds/overflow/divide-by-zero/shift remain deliberately out of scope for the
+BUG-106-class `exit(3)` conversions) and is now the more honest choice regardless,
+since it no longer depends on a guard that keeps getting fixed out from under it.
+
+Extended `bounded_attribute_emits_depth_counter_on_c_backend` (`src/lib.rs`) to assert
+`exit(3)` (not `abort()`) on both tree-C (via `compile_to_c`) and SSA-C (via
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit`, mirroring the pattern
+already used by the nearby MIN/-1 overflow-guard test). Added
+`bounded_attribute_violation_exits_cleanly_on_c_backend_ssa_and_tree_paths` to
+`tests/run_end_to_end.rs` (real subprocess runs against both codegen paths, asserting
+exit `3` and the recursion-bound message on stderr).
+
+Full `cargo test --release` clean (2800 lib tests + all integration suites, 0 failed).
+
+Not a `docs/UNRESOLVED_GAPS_TODO.md` item (that document's scope is fully closed as of
+BUG-134 above) -- found by re-reading BUG-130's own "not fixed, out of scope" aside
+when asked to pick the next item to work on, since no open item remained in any of the
+tracked TODO docs.
+
+## BUG-136 (2026-08-07) -- C backend's raw `abort()` traps silently discarded buffered stdout, unlike LLVM's `exit(3)`
+
+Found via localfuzz: its `graph_algo2.vani` (English) fuzzer mutation reported a
+"backend-divergence" finding where the C backend's stdout was completely empty and the
+LLVM backend's showed 5+ prior `print` lines, for what looked like the same crash.
+Re-running the repro against a fresh build confirmed both backends actually agree on
+the underlying trap (an out-of-bounds index of `-1` into a length-5 Vec/array -- a bug
+in the fuzzed *test program* itself, not a compiler wrong-answer) -- the divergence was
+purely a diagnostic artifact: raw `abort()` does NOT flush stdio buffers the way
+`exit()` does, so any `print` output the C-backend binary had already buffered before
+the trap fired was silently lost, while LLVM's `exit(3)` (BUG-120) flushed and
+preserved it. A second localfuzz finding from the same batch (`vec_invariants.vani`,
+Arabic, a genuine silent-wrong-answer divergence from `while`-loop-carried overflow)
+turned out to already be fixed on current main -- a duplicate of BUG-127 earlier today,
+closed out in the localfuzz worktree's staging log with no compiler change needed. The
+other 3 candidates in the same batch (2x `sleep_ms(i64::MAX)` mutations, 1x a racy
+double-`tcp_connect_local` mutation) were false positives -- fuzzer-introduced bugs in
+the *test programs*, not the compiler; also closed out in the staging log.
+
+Scoped this fix to exactly the 4 "Row 2" trap categories `tutorials/src/intermediate/
+10b_runtime_errors_primer.md` documents as deliberately-still-`abort()` on the C
+backend: bounds checks, integer overflow, divide-by-zero (+ `MIN / -1` overflow),
+and shift-past-width. Added `fflush(stdout);` immediately before each of these traps'
+`abort()` call, on both C codegen paths (tree-C in `backend_c.rs`: bounds ~line 22270,
+overflow ~line 22323, div-by-zero/overflow ~lines 22348/22353; SSA-C in
+`ssa_backend_c.rs`: overflow ~line 1667, div-by-zero/overflow ~lines 1682/1703, shift
+~line 1722, bounds ~lines 2774/2800/2872/2916 -- 4 sites because reads and writes each
+have a checked/unchecked-length variant). Deliberately did NOT touch the much larger
+set of OOM-guard `abort()` calls (`if (!ptr) abort();`) scattered through the runtime
+helpers, nor the Vec-builtin-method contract checks (`swap_remove`/`insert`/`set`/
+`set_mut`/`pop`, which use the same `fprintf`+`abort()` shape but aren't part of the
+tutorial's documented Row 2 surface) -- flagged as a similar-but-separate follow-up,
+not chased here.
+
+Also discovered tree-C's `intent_check_<ty>_divisor`/`intent_check_<ty>_shift` helper
+functions (using a plain C library `assert()`, which a build with a `-DNDEBUG` cc flag
+would silently compile away) are dead code -- defined but never actually called by any
+tree-C codegen emission site (grepped for call sites, found none outside the
+self-referential `body.contains(...)` filter that gates whether to emit the helper at
+all). Not a live bug since nothing reaches them; noted here in case a future change
+makes them reachable again.
+
+Verified directly against a current build: `graph_algo2`'s repro now shows the same
+buffered `print` output on the C backend as LLVM (previously empty on C). Manually
+confirmed all 4 trap categories preserve prior `print` output on both codegen paths
+(SSA-C by default; tree-C forced via an unrelated `#[no_mangle] fn` per
+`ssa_path_supports` in `main.rs`).
+
+Added `c_backend_flushes_stdout_before_abort_on_all_four_row2_traps` to `src/lib.rs`
+(compile-only, asserts `fflush(stdout); abort();` appears together at each of the 4
+trap sites on both SSA-C and tree-C). Added
+`c_backend_preserves_buffered_stdout_before_a_raw_abort_trap` to
+`tests/run_end_to_end.rs` (real subprocess run: two `print` lines followed by a
+provably-out-of-bounds Vec index, asserts both lines survive on stdout after the C
+backend's `abort()`-driven exit 134).
+
+`tutorials/src/intermediate/10b_runtime_errors_primer.md`'s "What actually happens
+when one fires" section gained a short addendum noting the stdout-preservation fix
+(no prior claim was false here -- this was previously undocumented behavior, not a
+stale claim -- so this is an addition, not a correction like BUG-129/130's sweep).
+
+Full `cargo test --release` clean (2801 lib tests + all integration suites, 0 failed).
+
+## Localfuzz backlog triage (2026-08-07) -- BUG-137, BUG-138, BUG-139
+
+Asked "any new open bugs to fix?" after BUG-136 -- discovered the localfuzz worktree's
+`docs/TODO_LOCAL_STAGING.md` had 77 candidates (out of 142 ever staged, spanning
+2026-08-03 through 2026-08-07) still marked "needs human/frontier root-cause review,"
+never actually triaged. Re-ran every one of them against a fresh `main` build
+(commit 6f749d4) using the harness's own classification logic (`check` -> both
+backends' `run`, same timeouts): 42 no longer reproduce at all (already fixed by
+unrelated earlier work, never traced back to a specific BUG-N); 9 are the documented,
+permanent "C exits 134 (raw SIGABRT) vs LLVM exits 3" trap-code convention -- not
+bugs; 1 was a false positive in the HARNESS's own crash-detection heuristic (a
+`RUST_BACKTRACE` substring match against the fuzzed source's own injected garbage
+text, not an actual Rust panic); 1 duplicated an already-documented, tracked
+limitation (`examples/edge_cases/TEST_MATRIX.md`'s `xfail_closure_in_block_expr.vani`
+entry); 20 were run-crash timeouts, every one traced via diff-against-base to a
+fuzzer mutation that broke the *test program's* own control flow, not the compiler
+(8x `sleep_ms(i64::MAX)`, 7x a deleted/no-op'd loop increment, 4x an extra blocking
+`tcp_accept`/`tcp_connect_local`, 1x a mixed type-change + broken-loop case). The
+remaining 3 were genuine, confirmed, previously-unknown compiler bugs -- fixed below.
+
+### BUG-137 -- tuple-destructure `let` shadowing broke the C backend
+
+`let (q, r) = f(...); let (q, r) = f(...);` (same names, same scope) compiled fine on
+LLVM/SSA-C but failed to even build on tree-C: `redefinition of 'v_q'`. Root cause:
+the plain `Stmt::Let` handler in `checker.rs` (`check_one_stmt`) already detects a
+same-scope shadow (`env.current_get(name)`) and emits `TypedStmt::Reassign` instead of
+a second `TypedStmt::Let` -- this is what makes ordinary scalar shadowing (`let x = 1;
+let x = 2;`) safe on tree-C, which declares C locals by raw source name with no
+uniquification. The `Stmt::LetTuple` handler (checker.rs, tuple-destructure desugar)
+never got the same treatment -- it always emitted a fresh `TypedStmt::Let` per
+destructured name on both occurrences. Fixed by mirroring the exact same
+same-scope-shadow check (plus the matching type-mismatch diagnostic) into the
+per-name loop that builds each destructured binding.
+
+Added `tuple_destructure_shadow_reassigns_instead_of_redeclaring_on_tree_c` and
+`tuple_destructure_shadow_with_changed_element_type_is_rejected` to `src/lib.rs`, and
+`tuple_destructure_shadow_runs_correctly_on_both_c_codegen_paths` to
+`tests/run_end_to_end.rs` (real subprocess runs against both C codegen paths).
+
+### BUG-138 -- `u32` Vec index produced invalid LLVM IR in several builtins
+
+A `u32`-typed loop variable indexing a `Vec` through `clone_at` produced a GEP
+instruction whose declared index type (hard-coded `i64` in the format string) didn't
+match the actual operand's LLVM type (`i32`, since `u32` loads as `i32`) -- `lli`
+rejected the malformed IR outright (`%tNN defined with type 'i32' but expected
+'i64'`). Grepped for the same unguarded `let idx = emit_expr(&args[1], ...)` pattern
+across `backend_llvm.rs` and found 9 total call sites sharing the defect: `clone_at`
+(both its Array and Vec branches), `vec_remove_at`, and the `simd_load`/`simd_store`/
+`simd256_load`/`simd256_store`/`simd512_load`/`simd512_store` family. Fixed with one
+shared `widen_index_to_i64` helper (mirrors the widening the plain Array-Index write
+path already did, a few thousand lines up in the same file) applied at all 9 sites.
+
+Added 3 tests to `src/lib.rs` (`clone_at_with_u32_index_widens_to_i64_in_llvm_ir`,
+`vec_remove_at_with_u32_index_widens_to_i64_in_llvm_ir`,
+`simd_load_with_u32_index_widens_to_i64_in_llvm_ir` -- one representative from each
+affected builtin family, asserting the emitted IR contains a `zext i32 ... to i64`
+immediately before the GEP).
+
+### BUG-139 -- checker never validated that a struct field / enum variant payload / function-signature type actually exists
+
+`enum Result { Ok(i64), Err(String) }` -- `String` isn't a real vāṇी type (only `Str`/
+`OwnedStr` are) -- was silently accepted by `vanic check`. Investigation found this
+wasn't enum-specific: a struct field or function parameter/return type naming a
+nonexistent struct/enum was ALSO silently accepted, as long as the bogus type was
+never actually CONSTRUCTED anywhere in the program (nothing downstream ever looked up
+its field/variant layout). The one case that wasn't silent (a payload that IS
+constructed somewhere) failed late and confusingly: tree-C's eager whole-module
+struct/union emission hit `cc`'s own "unknown type name" error, while LLVM's
+on-demand lowering never touched the type and ran clean -- reading like a backend
+divergence when the real defect was upstream in the checker.
+
+Asked the user to scope the fix given the wider blast radius (struct fields +
+function signatures, not just the originally-reported enum case) -- chose the full
+sweep over the narrower enum-only fix. Added a recursive `type_references_unknown_name`
+validator in `checker.rs` covering all ~61 `Type` variants (leaf scalars/builtins
+always valid; `Type::Struct`/`Type::Enum`/`Type::Object` checked against the
+program's own declared names; `Type::Param` always valid since the parser already
+distinguishes a genuine in-scope generic parameter from an ordinary name reference at
+parse time; every wrapper type -- `Vec<T>`, `Box<T>`, `Ref<T>`, `Tuple`, `HashMap<K,V>`,
+etc. -- recurses into its inner type(s)). Wired into three declaration sites: struct
+fields, enum variant payloads, and function parameter/return types, all validated
+right after `monomorphize_type_decls_in_program` has already expanded every generic
+instantiation (so a name still missing from the registry by then is genuinely
+unresolvable, not just an unexpanded generic template). New
+`unknown_type_in_declaration` elaboration in `diagnostic_elaborations.rs` (distinct
+from the existing `unknown_struct_type`, which fires at a runtime construction/
+field-access site and always assumes "struct" specifically -- this one fires at
+declaration time, before the name is known to mean struct vs. enum vs. a plain typo).
+
+Verified against the full example corpus (`vanic check examples`, 1040 files) before
+trusting this as a low-risk change -- found exactly one flagged file
+(`examples/language/mandarin/async_cancel_auto.vani`), confirmed via `git stash` to
+already fail to even PARSE on the pre-BUG-137/138/139 baseline build (an unrelated,
+pre-existing bug: the Mandarin `异步` async-keyword spelling isn't recognized when
+this file is checked directly) -- not a regression from this change, just a
+cascading secondary diagnostic from an already-broken parse. Not fixed here (out of
+scope, unrelated to this session's work); flagged for a future pass.
+
+Added 7 tests to `src/lib.rs` (one rejection case each for enum-payload / struct-field
+/ fn-param / fn-return-type / nested-inside-Vec unknown types, plus two POSITIVE
+regression guards -- a generic struct referencing its own type parameter, and a
+struct recursively referencing itself through `Vec<Self>` -- confirming the validator
+doesn't over-reject legitimate generic or self-referential code) and 1 test to
+`tests/run_end_to_end.rs` (real `vanic check` subprocess run).
+
+Full `cargo test --release` clean after all three fixes (2813 lib tests + all
+integration suites, 0 failed) plus the full-corpus `vanic check examples` sweep.
+
+Localfuzz worktree's `docs/TODO_LOCAL_STAGING.md` closed out for all 77 previously-
+unreviewed candidates (see the localfuzz worktree's own commit history on the
+`local-fuzz-findings` branch).
+
+## BUG-140 (2026-08-07) -- `parallel for` with an extreme start bound silently skipped the loop on the C backend
+
+The 4th finding from the same localfuzz triage pass above, deliberately held back
+from the BUG-137/138/139 summary given to the user (a design-fork-sized new
+investigation, not something to silently fold into an already-large pass) and
+picked up separately once the user confirmed they wanted it chased.
+
+`parallel for i from -9223372036854775808 to 4 { ... xs[i] ... }` (mutation of
+`examples/language/english/parallel_for_mul_reduction.vani`, start bound set to
+`i64::MIN`) traps correctly on LLVM (out-of-bounds `xs[i]`, exit 3) but on the C
+backend silently printed `1` (the untouched initial `prod` value) and exited 0 --
+the loop body never ran at all. Root-caused with a standalone C probe compiled
+with/without `-fopenmp`: the exact same canonical loop form (`for (int64_t i =
+(-9223372036854775808); i < 4; i++) { ... }`) runs correctly as a plain sequential
+loop but executes ZERO iterations under `#pragma omp parallel for`. GCC's OpenMP
+lowering computes the loop's trip count internally as `end - start` using SIGNED
+64-bit arithmetic; for this range, `4 - INT64_MIN` mathematically exceeds
+`INT64_MAX`, triggering signed-integer-overflow UB in GCC's own generated
+trip-count code -- observed result: the computed count comes out as (effectively)
+zero, so OpenMP schedules no work at all. A genuine silent-wrong-answer bug, not a
+crash, and specific to the `#pragma omp parallel for` path -- `parallel: bool ==
+false` loops (plain `_Pragma("GCC ivdep")`) are unaffected, confirmed directly.
+
+Fixed by computing `end - start` through the SAME overflow-checked-subtraction
+helper (`intent_check_<ty>_sub`, `backend_c.rs`'s `overflow_helper`) that ordinary
+`Sub` expressions already use elsewhere in this file, discarding the result,
+emitted immediately before the `_Pragma("omp parallel for ...")` line. If the
+loop's true iteration count would overflow the loop variable's type, this traps
+cleanly (reusing the exact same "assertion failed"-style `exit(3)`-on-LLVM /
+`abort()`-on-C mechanism as every other checked-arithmetic site, including
+today's BUG-136 stdout-flush fix) before GCC's own lowering ever sees the loop,
+instead of letting it silently corrupt the trip count. Scoped to signed loop
+variable types only (`ty.is_signed_integer()`) -- an unsigned loop variable can't
+hit this: `end - start` for a well-formed ascending unsigned range never exceeds
+the type's own representable range, so guarding it would just be dead-weight
+runtime cost on the hot path for zero benefit.
+
+Verified directly: the exact repro now traps identically on both backends (LLVM
+exit 3, C exit 134 "integer overflow in i64 sub" -- the standard trap-code
+convention documented in `10b_runtime_errors_primer.md`'s Row 2, matching
+BUG-136's fix from earlier the same day). Re-ran EVERY `parallel for`-using
+example in `examples/language/english/` (`atomics.vani`, `fn_pointers.vani`,
+`parallel_for_jit_run.vani`, `memory_safety.vani`, `parallel_for_mul_reduction.vani`,
+`parallel.vani`, `tasks.vani`) on the C backend to confirm zero false-positive
+regressions -- all still exit 0 with correct output, confirmed the unmutated
+`parallel_for_mul_reduction.vani` still computes the correct product (24).
+
+Added `parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c` (asserts
+the guard call text is present AND ordered before the omp pragma in the emitted
+C) and `parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_c` (asserts
+the guard is absent for a `u64` loop variable) to `src/lib.rs`. Added
+`parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c` to
+`tests/run_end_to_end.rs` (real subprocess runs: the pathological case now traps
+identically on both backends with the overflow message on stderr, AND a normal,
+non-pathological `parallel for` still computes the correct product 24 -- both
+halves in one test so a future regression in either direction is caught).
+
+No tutorial-documented behavior to correct or extend -- this was previously
+undocumented internal codegen behavior, not something any tutorial page claimed
+was safe.
+
+Full `cargo test --release` clean (2815 lib tests + all integration suites, 0
+failed).
+
+This closes out the last of the 4 findings from the 2026-08-07 localfuzz backlog
+triage. Next free bug number is **BUG-141**.

@@ -180,24 +180,49 @@ and the backend, confirmed directly against a current build
 | Divide / modulo by zero, **C backend only** | `a / b` / `a % b` when SMT can't prove `b != 0` | `"division by zero"` (no file/line) |
 | Shift past width, **C backend only** | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift amount out of range"` (no file/line) |
 | Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | **nothing** -- no stdout, no stderr, just a clean process exit. Confirmed directly (empty captures on both streams). |
-| `ensures` / `invariant` | post-condition / loop invariant | **not enforced at runtime on ANY backend, at all**, as of this writing -- see the aside below. |
+| `ensures` fails at a return site (SMT-unprovable clause) | Any `return EXPR;` where SMT couldn't prove the post-condition | `"assertion failed: postcondition violated in '<fn>'"` (as of 2026-08-07; matches `requires`'s wording pattern) |
+| `invariant` fails at loop entry (SMT-unprovable clause) | A `while`/`for` loop, checked once on the first pass through the body | `"assertion failed: loop invariant does not hold at loop entry in '<fn>'"` (`while`) or `"...does not hold at the for-loop's first iteration in '<fn>'"` (`for`), as of 2026-08-07 |
+| `invariant` fails after an iteration (SMT-unprovable clause) | Same loop, checked at the natural end of every iteration AND before every `continue` that targets it | `"assertion failed: loop invariant is not preserved by the loop body in '<fn>'"` (`while`) or `"...is not preserved by the for-loop body in '<fn>'"` (`for`) |
 | `prove(p)` | Any `prove ...;` | Not a runtime check at all -- `prove` MUST be discharged by SMT at COMPILE time or the build fails outright; there is no runtime path to reach. |
 
 That's it for the checks that exist. Every other operation
 either succeeds, returns a `Result<T, E>` / `Option<T>` for
 the caller to handle, or is structurally prevented (Row 1).
 
-**Aside -- `ensures`/`invariant` have no runtime backstop.**
-Unlike every other row, `ensures` and `invariant` clauses are
-purely a compile-time SMT concept: if the solver can prove the
-clause, the build succeeds silently; if the solver returns a
-definite counterexample (UNSAT), the build fails outright with
-a diagnostic pointing at the clause -- there is no third,
-"couldn't decide, so check it at runtime instead" path for
-these two specifically (contrast with `requires`, which DOES
-fall back to a runtime guard when SMT can't decide). This is a
-known, open gap, not a regression -- implementing real runtime
-enforcement for `ensures`/`invariant` is future work.
+**Aside -- `ensures` and `invariant` both have a runtime backstop now.**
+Both clauses used to be a purely compile-time SMT concept: if the
+solver could prove the clause, the build succeeded silently; if
+the solver returned anything short of a full proof (a definite
+counterexample OR just "couldn't decide"), the build failed
+outright -- there was no third, "couldn't decide, so check it at
+runtime instead" path for either of them (contrast with
+`requires`, which has always fallen back to a runtime guard when
+SMT can't decide). As of 2026-08-07, both were changed to mirror
+`requires`'s model exactly: a solver-confirmed violation (a genuine
+counterexample) still fails the build -- that's a real bug in the
+function, worth catching at the cheapest point -- but an
+UNDECIDABLE clause (SMT returns "unknown," or the clause uses a
+construct outside the v1 SMT encoder, or no `z3` binary is even
+installed) now compiles clean and gets a real runtime guard
+instead, using the same `exit(3)` + message mechanism as every
+other row in this table.
+
+`invariant` needed more machinery than `ensures` to get there: a
+loop has TWO guard points (entry, checked once per loop; and
+"preservation," checked after every iteration that doesn't exit),
+not `ensures`'s single return-site guard. The entry check can't
+live as plain code right before the loop the way you might expect
+-- a `for` loop's own induction variable isn't a real variable
+outside the loop's own braces in the generated code -- so it's
+wrapped in a synthesized "once" flag that fires the check on the
+loop body's first pass instead. The preservation check has to be
+injected before every `continue` that targets the loop, not just
+appended after the last statement -- a bare append there would be
+silently skipped by any iteration that `continue`s past it (this
+was caught as a real bug while building the fix, not just a
+theoretical concern). `break` correctly does NOT require the
+invariant to hold at the break point -- there's no next iteration
+left to preserve it for.
 
 ### What actually happens when one fires
 
@@ -217,14 +242,12 @@ actually touched, and only on the paths those fixes covered:
    for what was actually an ordinary, expected language-level
    trap.
 2. **C backend (`--backend=c`)**: `assert` and `requires`
-   USUALLY also exit cleanly with code `3` (verified for a
-   scalar `requires` clause) -- but not always: a `requires`
-   clause on a function taking a `ref Vec<T>` parameter,
-   tested directly, hit a different, older code path and
-   raised a real `SIGABRT` via a raw glibc `assert()` macro
-   instead. See Row 5's caveat below for that exact case --
-   if you hit a runtime-error message that doesn't match this
-   section, that mismatch itself is informative.
+   ALWAYS exit cleanly with code `3` -- verified both for a
+   scalar `requires` clause and for a `requires` clause on a
+   function taking a `ref Vec<T>` parameter. (The `ref Vec<T>`
+   case used to hit a different, older code path and raise a
+   real `SIGABRT` via a raw glibc `assert()` macro instead;
+   fixed 2026-08-07 -- see Row 5 below.)
    Bounds / overflow / divide-by-zero / shift are DIFFERENT --
    the C backend still calls a raw libc `abort()` for these
    (never converted to `exit(3)`; the BUG-106-class fixes were
@@ -234,18 +257,28 @@ actually touched, and only on the paths those fixes covered:
    directly-executed `vanic build`-and-run binary shows this as
    the shell's familiar `Aborted` message and exit code `134`
    (128 + `SIGABRT`'s signal number 6). Going through `vanic run
-   --backend=c` specifically, the reported exit code is `1`
-   instead of `134` -- `vanic`'s own process wrapper can't
-   represent "child was killed by a signal" as a plain exit
-   code, and falls back to a generic `1` in that case
-   (`status.code().unwrap_or(1)` in `src/main.rs`), which loses
-   the original signal information. All three numbers (`3` on
-   LLVM, `134` direct-execution on C, `1` via `vanic run
-   --backend=c`) can show up for the SAME source-level trap
-   depending entirely on backend and invocation method --
-   check the STDERR MESSAGE TEXT (present on the C backend,
-   absent on LLVM), not just the exit code, if you need to
-   detect which check actually fired.
+   --backend=c`, the reported exit code now also reads `134` --
+   earlier builds reported a masked, generic `1` instead,
+   because `vanic`'s own process wrapper couldn't represent
+   "child was killed by a signal" as a plain exit code and fell
+   back to `status.code().unwrap_or(1)`, losing the signal
+   information; fixed 2026-08-07 (`src/main.rs`'s
+   `child_exit_code` helper now reports `128 + signal` instead).
+   Both numbers that remain (`3` on LLVM, `134` on C whether run
+   directly or via `vanic run --backend=c`) can show up for the
+   SAME source-level trap depending on which check fired and
+   which backend compiled it -- check the STDERR MESSAGE TEXT
+   (present on the C backend, absent on LLVM), not just the
+   exit code, if you need to detect which check actually fired.
+   One more wrinkle, fixed 2026-08-07: raw `abort()` does NOT
+   flush stdio the way `exit()` does, so any `print` output your
+   program had already buffered before one of these 4 traps fired
+   used to vanish on the C backend -- LLVM's `exit(3)` preserved
+   it, making the two backends' crash output look like it
+   disagreed even when the underlying trap was identical. The C
+   backend now calls `fflush(stdout)` immediately before each of
+   these 4 `abort()` calls, so buffered `print` output survives
+   the crash on both backends.
 3. The process terminates immediately in every case above. No
    destructors run. No `finally` blocks. No cleanup beyond what
    the OS does on process exit.
@@ -465,16 +498,20 @@ actually emitted today:
 2. **Deterministic.** Same input produces the same message.
    Reproducible in a test harness.
 
-**Caveat**: the exact message and exit code can still differ
-by CODE PATH, not just by backend -- a `requires` clause on a
-function taking a `ref Vec<T>` parameter, tested directly,
-printed a raw glibc `assert()`-macro-style message on the C
-backend instead of the `"assertion failed: ..."` wording above,
-and exited via a real `SIGABRT` rather than a clean `exit(3)`.
-If your own program's runtime-error output doesn't match this
-section, that's more informative than the message text itself
--- it means you've found a specific case worth checking against
-a current build.
+**Historical caveat (fixed 2026-08-07)**: a `requires` clause
+on a function taking a `ref Vec<T>` parameter used to differ by
+CODE PATH, not just by backend -- it printed a raw glibc
+`assert()`-macro-style message on the C backend instead of the
+`"assertion failed: ..."` wording above, and exited via a real
+`SIGABRT` rather than a clean `exit(3)`. The actual trigger was
+broader than the `ref Vec<T>` case that first surfaced it: any
+module that fell back to tree-walking C codegen for ANY reason
+hit the same raw-`assert()` path for every `requires` clause in
+that module, not just ones on `ref Vec<T>` params. Both codegen
+paths now share the same `exit(3)` + message mechanism. If your
+own program's runtime-error output still doesn't match this
+section on a current build, that's worth reporting -- it may be
+a genuinely new gap.
 
 ### Catching an abort with a signal handler (services)
 
@@ -666,11 +703,11 @@ named contract."
   `requires` also exit(3) with a message, but bounds/overflow/
   div-by-zero/shift still raise a raw `SIGABRT` -- see "Row 2"
   above for the verified details and the exact numbers each
-  path produces. `ensures`/`invariant` have NO runtime
-  enforcement on either backend today (compile-time-or-nothing).
-  The surface is small and named: assert / prove / requires /
-  ensures / invariant / index OOB / overflow / div-by-zero /
-  shift past width.
+  path produces. `ensures` AND `invariant` now both fall back to a
+  runtime guard on an undecidable clause, same as `requires`
+  (2026-08-07). The surface is small and named: assert / prove /
+  requires / ensures / invariant / index OOB / overflow /
+  div-by-zero / shift past width.
 - **Recoverable failures** are always values -- `Result<T, E>`
   / `Option<T>` propagated via `?` / `try`. No exceptions,
   no unwinding, no "uncaught exception" surprise.

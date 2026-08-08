@@ -1,0 +1,64 @@
+// BUG-131 (2026-08-07): `sort`/`sort_by`'s block-partition scan (only
+// entered for arrays with >= 128 elements -- see `sort_runtime.c`'s
+// `BLOCK`/2*BLOCK threshold) used AVX-512 intrinsics unconditionally
+// on any x86_64 host, with no runtime CPU-capability check -- SIGILL
+// on any x86_64 CPU predating AVX-512. Fixing that crash surfaced a
+// SEPARATE, pre-existing correctness bug: the `double` mask compare
+// used raw int64 bit-pattern comparison (matching `int64_t`'s own,
+// which is correct only because `int64_t` bit patterns ARE its
+// native ordering) -- wrong for negative doubles, whose bit patterns
+// don't preserve IEEE-754 ordering. Both are fixed in
+// `sort_runtime.c`: real runtime CPUID dispatch via
+// `__builtin_cpu_supports("avx512f")`, and `double` gets its own
+// genuinely-floating-point AVX-512/scalar compare instead of reusing
+// int64_t's bit-pattern path. This example needs >= 128 elements
+// (not already sorted, so the fast "already ascending" check doesn't
+// short-circuit before ever reaching block partitioning) with BOTH
+// negative and positive values to exercise the fix for real, rather
+// than the small hand-written literals sort.vani already covers.
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec();
+  let fs: Vec<f64> = vec();
+  let seed: i64 = 12345;
+  let i: i64 = 0;
+  while i < 300 {
+    // xorshift64: deterministic, decent bit-mixing pseudo-random
+    // sequence -- avoids a giant literal list while still covering
+    // negative and positive values across a wide range.
+    seed = seed ^ (seed << 13);
+    seed = seed ^ (seed >> 7);
+    seed = seed ^ (seed << 17);
+    let v: i64 = seed % 1000000;
+    let _ = push(mut ref xs, v);
+    let _ = push(mut ref fs, (v as f64) / 1000.0);
+    i = i + 1;
+  }
+
+  let _ = sort(mut ref xs);
+  let n: i64 = len(ref xs) as i64;
+  let j: i64 = 0;
+  while j < n - 1 {
+    if xs[j] > xs[j + 1] {
+      print "i64 OUT OF ORDER at", j;
+      return 1;
+    }
+    j = j + 1;
+  }
+  print "i64 sorted ok, min:", xs[0];
+  print "i64 sorted ok, max:", xs[n - 1];
+
+  let _ = sort(mut ref fs);
+  let k: i64 = 0;
+  while k < n - 1 {
+    if fs[k] > fs[k + 1] {
+      print "f64 OUT OF ORDER at", k;
+      return 1;
+    }
+    k = k + 1;
+  }
+  print "f64 sorted ok, min:", fs[0];
+  print "f64 sorted ok, max:", fs[n - 1];
+
+  return 0;
+}

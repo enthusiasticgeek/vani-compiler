@@ -190,12 +190,24 @@ the discharge-confidence spectrum.
 
 ### `requires` / `ensures` / `invariant` (at the failing site)
 
-If SMT can't discharge a `requires` at a call site, the
-compiler emits a runtime check at the call site. If SMT
-can't discharge an `ensures` at a return, the compiler
-emits a runtime check at the return. Same for `invariant`
-at loop entry / body / exit. The unproven case stays in
-the artifact as a guard; the proven case is elided.
+If SMT can't discharge a `requires`, the compiler emits a
+runtime check at the callee's function entry (every call
+into the function is guarded, not just the specific call
+site the compiler couldn't verify). As of 2026-08-07,
+`ensures` works the same way: if SMT can't discharge it at
+a `return`, the compiler emits a runtime check right there
+instead of failing the build. `invariant` was converted the
+same day: an undischarged loop invariant now gets TWO guard
+sites instead of `ensures`'s one -- once at loop entry
+(checked on the body's first pass only) and once for
+"preservation" (checked at the natural end of every
+iteration, and before any `continue` that would otherwise
+jump past that check unnoticed). For all three, a genuinely
+DISPROVEN clause (SMT finds a real counterexample) still
+fails the build outright -- only the "SMT couldn't decide
+either way" case falls back to a runtime guard. The unproven
+case stays in the artifact as a guard; the proven case is
+elided either way.
 
 ## The trade
 
@@ -292,8 +304,10 @@ happen.
   escape, parallel-for race-freedom, SMT discharge of
   contracts.
 - **Runtime**: bounds checks, overflow / div-by-zero
-  guards, undischarged assert / prove / requires /
-  ensures / invariant.
+  guards, undischarged assert / requires / ensures /
+  invariant. A genuinely DISPROVEN contract (a real SMT
+  counterexample) still fails the build for all of these --
+  only "SMT couldn't decide" falls back to a runtime guard.
 - The compiler **prefers compile-time** and **falls back
   to runtime** when SMT can't prove the operation safe.
 - Strengthen `requires` / `ensures` to lift checks to

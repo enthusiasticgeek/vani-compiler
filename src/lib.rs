@@ -1016,6 +1016,150 @@ mod tests {
     }
 
     #[test]
+    fn bug126_array_reassign_uses_memcpy_not_invalid_c_assignment() {
+        // BUG-126: same-scope `let`-shadowing of an Array binding
+        // desugars to a Reassign node (see checker.rs's "Same-scope
+        // let -> Reassign" comment); the C backend's Reassign arm
+        // used to fall through to a generic `name = expr;`, which
+        // is invalid C for array types (arrays aren't assignable
+        // via `=`). It must now write into the existing storage
+        // via memcpy/per-element store instead.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 5] = [1, 2, 3, 4, 5];
+              let xs: [i64; 5] = [10, 20, 30, 40, 50];
+              return xs[0];
+            }
+        "#;
+
+        let c = compile_to_c(source).expect("array shadowing should compile");
+        assert!(
+            !c.contains("v_xs = ((int64_t[5])"),
+            "BUG-126 regression: array Reassign emitted an invalid C \
+             array assignment again, got: {c}"
+        );
+        assert!(
+            c.contains("v_xs[0] = ") || c.contains("memcpy(v_xs"),
+            "expected per-element store or memcpy into the existing \
+             array storage, got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug126_ref_reassign_rebinds_pointer_value_not_store_through_it_on_llvm() {
+        // BUG-126: reassigning a `ref T` binding on the LLVM tree
+        // backend used to `store` the new pointer value THROUGH the
+        // OLD pointer value (since ref bindings hold the raw
+        // pointer itself in `ctx.locals`, not an alloca address --
+        // see the L4(B) comment on the Let path) -- corrupting
+        // whatever the old ref pointed at. It must now rebind
+        // `ctx.locals` to the new value with no `store` at all.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn shared(p: ref Point) -> ref Point { return p; }
+            fn area(p: ref Point) -> i64 { return p.x * p.y; }
+            fn main() -> i64 {
+              let pt: Point = Point { x: 7, y: 9 };
+              let r: ref Point = shared(ref pt);
+              let r: ref Point = shared(ref pt);
+              return area(r);
+            }
+        "#;
+
+        let llvm = compile_to_llvm(source).expect("ref shadowing should compile");
+        assert!(
+            !llvm.contains("Struct_Point**"),
+            "BUG-126 regression: ref Reassign reinterpreted the ref's \
+             pointer value as a pointer-to-pointer storage address \
+             again, got: {llvm}"
+        );
+    }
+
+    #[test]
+    fn bug127_loop_carried_overflow_check_is_not_elided() {
+        // BUG-127: a fact like `n == 0` (true only the FIRST time
+        // control reaches a statement) deliberately survives a
+        // same-scope reassignment inside a loop body (kept alive for
+        // a separate loop-invariant-preservation check), which let
+        // the overflow-elision pass "prove" `n + i64::MIN` safe using
+        // a fact that doesn't hold on later iterations, and silently
+        // drop the runtime guard -- see the `if inside_loop { return;
+        // }` guard added to try_elide_bounds_in_typed_expr's Binary
+        // arm. The checked-add helper call must survive in the
+        // emitted LLVM for this loop body.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 100 {
+                if n == 5 {
+                  break;
+                }
+                n = n + -9223372036854775808;
+              }
+              assert n == 5;
+              return 0;
+            }
+        "#;
+
+        // `compile_to_llvm` always exercises the tree-LLVM backend
+        // (unconditionally, unlike `vanic run`'s SSA-eligibility
+        // dispatch), which inlines its own overflow check via
+        // `llvm.sadd.with.overflow` rather than calling a shared
+        // `__intent_checked_add_*` helper (that helper name is
+        // SSA-backend-specific -- see ssa_backend_llvm.rs).
+        let llvm = compile_to_llvm(source).expect("loop should compile");
+        assert!(
+            llvm.contains("llvm.sadd.with.overflow"),
+            "BUG-127 regression: the loop-carried overflow check was \
+             elided again using a stale pre-loop fact, got: {llvm}"
+        );
+    }
+
+    #[test]
+    fn bug129_tree_c_requires_guard_uses_exit3_not_raw_assert() {
+        // BUG-129: tree-C's `requires`-clause runtime guard still
+        // used the raw libc `assert()` macro (SIGABRT on failure)
+        // long after BUG-116 (2026-08-05) gave the SSA-C path's own
+        // `requires` lowering a clean `fprintf(stderr, "assertion
+        // failed: %s\n", msg); exit(3);` shape. A comment on tree-C's
+        // `TypedStmt::Assert` fix explains why this was left alone at
+        // the time -- "the requires-clause precondition check ...
+        // already calls abort() consistently on BOTH backends, so it
+        // isn't a divergence" -- true before BUG-116 existed, but
+        // BUG-116 created exactly that divergence (SSA-C moved to
+        // exit(3), tree-C didn't) without this comment being
+        // revisited. Since `vanic build` falls back to tree-C for
+        // the WHOLE module whenever ANY function uses an SSA-
+        // unsupported feature (not just the one with `requires`),
+        // this affected any program mixing a `requires` clause with
+        // something SSA-C doesn't support elsewhere -- a `ref
+        // Vec<T>` parameter, a `match`, etc. `compile_to_c` always
+        // exercises tree-C directly (unconditionally, unlike `vanic
+        // run`'s SSA-eligibility dispatch), so no such indirection
+        // is needed to reach the buggy code path in this test.
+        let source = r#"
+            fn f(n: i64) -> i64
+              requires n >= 0;
+            {
+              return n;
+            }
+            fn main() -> i64 { return f(3); }
+        "#;
+
+        let c = compile_to_c(source).expect("requires clause should compile");
+        assert!(
+            !c.contains("assert(v_n"),
+            "BUG-129 regression: tree-C emitted the raw assert() macro for a \
+             requires clause again, got: {c}"
+        );
+        assert!(
+            c.contains("precondition violated in 'f'") && c.contains("exit(3)"),
+            "expected the requires guard to use the exit(3) + message shape, \
+             got: {c}"
+        );
+    }
+
+    #[test]
     fn let_shadowing_drops_old_vec() {
         let source = r#"
             fn main() -> i64 {
@@ -1387,6 +1531,65 @@ mod tests {
         "#;
         compile_to_c(source).expect("clone_at(ref [T; N]) compiles to C");
         compile_to_llvm(source).expect("clone_at(ref [T; N]) compiles to LLVM");
+    }
+
+    // BUG-138 (2026-08-07): found via localfuzz. `clone_at(ref xs, i)` with
+    // a `u32`-typed `i` produced a GEP whose declared index type (`i64`)
+    // didn't match the actual operand's LLVM type (`i32`, since `u32`
+    // loads as `i32`) -- `lli` rejected the malformed IR outright. Same
+    // root cause hit `vec_remove_at` and the `simd*_load`/`simd*_store`
+    // family (9 call sites total, all sharing the same unguarded
+    // `emit_expr(&args[1], ...)` pattern with no index-width check).
+    // Fixed with a shared `widen_index_to_i64` helper, mirroring the
+    // widening the plain Array-Index write path already did.
+    #[test]
+    fn clone_at_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              let v: i64 = clone_at(ref xs, i);
+              return v;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("clone_at with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn vec_remove_at_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              return vec_remove_at(mut ref xs, i);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("vec_remove_at with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_load_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8);
+              let i: u32 = 0;
+              let v: vec128<i64> = simd_load(ref xs, i);
+              return simd_reduce_add(v);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("simd_load with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
     }
 
     #[test]
@@ -5677,6 +5880,66 @@ mod tests {
         compile(source).expect("tuple swap should compile");
     }
 
+    // BUG-137 (2026-08-07): `let (q, r) = f(...); let (q, r) = f(...);`
+    // (same names, same scope) always emitted a fresh `TypedStmt::Let`
+    // for each destructured name on BOTH occurrences -- fine on
+    // LLVM/SSA-C (every binding gets a fresh numeric id regardless of
+    // source name), but tree-C's `TypedStmt::Let` codegen declares a C
+    // local using the raw source name with no uniquification, so the
+    // second `let (q, r)` produced a duplicate `int64_t v_q`
+    // declaration and failed to even compile. Found via localfuzz.
+    // Fixed by mirroring the plain `Stmt::Let` handler's same-scope-
+    // shadow detection: a repeated destructured name now emits
+    // `TypedStmt::Reassign` instead of a second `TypedStmt::Let`.
+    #[test]
+    fn tuple_destructure_shadow_reassigns_instead_of_redeclaring_on_tree_c() {
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn divmod(a: i64, b: i64) -> (i64, i64) {
+              return (a / b, a % b);
+            }
+            fn main() -> i64 {
+              let (q, r) = divmod(17, 5);
+              let (q, r) = divmod(20, 3);
+              return q + r;
+            }
+        "#;
+        let c = compile_to_c(source).expect("tuple-destructure shadow should compile to C");
+        let fn_main_start = c.find("fn_main(void) {").expect("fn_main body");
+        let fn_main_body = &c[fn_main_start..(fn_main_start + 500).min(c.len())];
+        let q_decl_count = fn_main_body.matches("int64_t v_q =").count();
+        assert_eq!(
+            q_decl_count, 1,
+            "expected exactly ONE `int64_t v_q` declaration (the second \
+             `let (q, r)` should reassign, not redeclare), got {q_decl_count} in:\n{fn_main_body}"
+        );
+        assert!(
+            fn_main_body.contains("v_q = ") && fn_main_body.matches("v_q = ").count() == 2,
+            "expected the second `let (q, r)` to emit a plain `v_q = ...;` \
+             reassignment, got:\n{fn_main_body}"
+        );
+    }
+
+    #[test]
+    fn tuple_destructure_shadow_with_changed_element_type_is_rejected() {
+        let source = r#"
+            fn pair_i() -> (i64, i64) { return (1, 2); }
+            fn pair_f() -> (f64, f64) { return (1.0, 2.0); }
+            fn main() -> i64 {
+              let (a, b) = pair_i();
+              let (a, b) = pair_f();
+              return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(
+            result.is_err(),
+            "shadowing a tuple-destructured name with a different element \
+             type should be rejected, same as plain `let` shadowing"
+        );
+    }
+
     #[test]
     fn vec_set_returns_updated_vec_compiles() {
         // `set(xs, 0, 100)` returns a new Vec with index
@@ -7209,6 +7472,131 @@ mod tests {
             "expected duplicate-field diagnostic, got: {:?}",
             errors
         );
+    }
+
+    // BUG-139 (2026-08-07): found via localfuzz -- a struct field, enum
+    // variant payload, or function parameter/return type naming a
+    // struct/enum that was never declared (typo, or a Rust-ism like
+    // `String` instead of `OwnedStr`) was silently accepted at its
+    // DECLARATION site as long as the bogus type was never actually
+    // CONSTRUCTED anywhere in the program. `vanic check` said "ok",
+    // both backends ran clean with no output, and the declaration was
+    // silent dead weight -- until something DID construct it, at
+    // which point the C backend failed late and confusingly at the
+    // `cc` stage (its eager whole-module type emission tripped over
+    // the missing type) while LLVM's on-demand lowering just never
+    // touched it, reading like a backend divergence when the real
+    // defect was upstream in the checker.
+    #[test]
+    fn enum_variant_payload_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            enum Result { Ok(i64), Err(String) }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown enum payload type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'String'")
+                && e.message.contains("variant 'Err' payload")),
+            "expected unknown-type diagnostic naming the variant, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_field_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            struct Foo { x: NotARealType }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown struct field type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("struct 'Foo' field 'x'")),
+            "expected unknown-type diagnostic naming the field, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn function_param_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            fn unused_fn(x: NotARealType) -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown fn param type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("function 'unused_fn' parameter 'x'")),
+            "expected unknown-type diagnostic naming the parameter, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn function_return_type_with_unknown_type_is_rejected_even_when_unused() {
+        let source = r#"
+            fn unused_fn() -> NotARealType { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown fn return type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")
+                && e.message.contains("function 'unused_fn' return type")),
+            "expected unknown-type diagnostic naming the return type, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn nested_unknown_type_inside_vec_is_still_caught() {
+        // The recursive validator must see through wrapper types, not
+        // just bare `Type::Struct` in field/param position directly.
+        let source = r#"
+            struct Foo { xs: Vec<NotARealType> }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("unknown type nested in Vec<T> should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'NotARealType'")),
+            "expected unknown-type diagnostic to see through Vec<T>, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn generic_struct_field_referencing_its_own_type_param_is_accepted() {
+        // Regression guard for the validator itself: a bare generic
+        // parameter (`T` in `struct Box<T> { value: T }`) must NOT be
+        // flagged as an unknown type -- `Type::Param` is always
+        // parser-confirmed to be a real in-scope generic parameter by
+        // the time the checker sees it.
+        let source = r#"
+            struct Box2<T> { value: T }
+            fn main() -> i64 {
+              let b: Box2<i64> = Box2 { value: 5 };
+              return b.value;
+            }
+        "#;
+        compile(source).expect("generic struct with its own type param should compile");
+    }
+
+    #[test]
+    fn recursive_struct_referencing_itself_through_vec_is_accepted() {
+        // Regression guard: a struct referencing its OWN name (a
+        // legitimate, common recursive shape via Vec<Self>) must not
+        // be flagged -- `struct_names_for_type_check` is built from
+        // the complete `program.structs` list before any per-field
+        // validation runs, so self-reference and forward-reference
+        // both resolve correctly.
+        let source = r#"
+            struct Node { value: i64, children: Vec<Node> }
+            fn main() -> i64 {
+              let kids: Vec<Node> = vec();
+              let n: Node = Node { value: 1, children: kids };
+              return n.value;
+            }
+        "#;
+        compile(source).expect("self-referential struct via Vec<Self> should compile");
     }
 
     #[test]
@@ -11685,13 +12073,22 @@ mod tests {
     }
 
     #[test]
-    fn ensures_on_vec_of_struct_element_field_is_rejected_not_silently_accepted() {
+    fn ensures_on_vec_of_struct_element_field_gets_a_runtime_guard_not_a_hard_error() {
         // Sweep item: `requires`/`ensures` referencing a `Vec<Struct>`
         // parameter's element field (`pts[0].x` -- FieldAccess over an
         // Index, not a bare Var) still isn't modeled by the SMT array
-        // theory (which only covers scalar Vec/Array elements). Confirm
-        // this now surfaces as a clear compile error instead of being
-        // silently treated as proven.
+        // theory (which only covers scalar Vec/Array elements), so this
+        // clause is `SkippedUnsupported` -- undecidable, not disproven.
+        //
+        // BUG-133 (2026-08-07): this used to be a hard compile error
+        // (test previously named `..._is_rejected_not_silently_
+        // accepted`). It's neither "rejected" nor "silently accepted"
+        // anymore -- `ensures` now mirrors `requires`'s existing model:
+        // an undecidable clause compiles clean and gets a real runtime
+        // guard at the return site instead of blocking the build. The
+        // clause in THIS example is actually true (`_return == pts[0].x`
+        // trivially holds since the body IS `return pts[0].x;`), so the
+        // guard should never actually fire at runtime.
         if !z3_available() {
             return;
         }
@@ -11708,12 +12105,11 @@ mod tests {
               return first_x(pts);
             }
         "#;
-        let errors = compile(source)
-            .expect_err("Vec<Struct> element field access in ensures is unencodable");
+        let c = compile_to_c(source)
+            .expect("BUG-133: an undecidable ensures clause must compile, not hard-fail");
         assert!(
-            errors.iter().any(|e| e.message.contains("cannot verify 'ensures' clause")),
-            "expected an explicit unverifiable-ensures diagnostic (not silent success), got: {:?}",
-            errors
+            c.contains("postcondition violated in 'first_x'"),
+            "expected a runtime guard with the postcondition-violated message, got: {c}"
         );
     }
 
@@ -13463,6 +13859,73 @@ fn main() -> i64 {
             }
         "#;
         compile_to_c(source).expect("reduce with * on integer should type-check");
+    }
+
+    // BUG-140 (2026-08-07): found via localfuzz. `parallel for i from
+    // i64::MIN to 4 { ... xs[i] ... }` traps correctly on LLVM but the C
+    // backend's `#pragma omp parallel for` silently executed ZERO
+    // iterations instead -- GCC's OpenMP canonical-loop trip-count
+    // computation (`end - start`, signed arithmetic) is undefined
+    // behavior when the true iteration count exceeds the loop variable's
+    // max positive value. A genuine silent-wrong-answer bug, not a
+    // crash. Fixed by computing `end - start` through the same checked-
+    // subtraction helper regular `Sub` expressions already use, right
+    // before the omp-pragma'd loop -- traps cleanly instead of letting
+    // GCC's own lowering corrupt the trip count.
+    #[test]
+    fn parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let prod: i64 = 1;
+              parallel for i from -9223372036854775808 to 4
+              reduce prod with *;
+              {
+                prod = prod * xs[i];
+              }
+              return prod;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            c.contains("intent_check_i64_sub(") && c.contains("_Pragma(\"omp parallel for"),
+            "expected an intent_check_i64_sub(...) overflow guard immediately \
+             before the omp-pragma'd loop, got:\n{c}"
+        );
+        // The guard call must come BEFORE the pragma/loop, not after --
+        // otherwise GCC's own trip-count computation still runs first.
+        let guard_pos = c.find("intent_check_i64_sub(").unwrap();
+        let pragma_pos = c.find("_Pragma(\"omp parallel for").unwrap();
+        assert!(
+            guard_pos < pragma_pos,
+            "expected the overflow guard before the omp pragma, got guard at \
+             {guard_pos}, pragma at {pragma_pos} in:\n{c}"
+        );
+    }
+
+    #[test]
+    fn parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_c() {
+        // Unsigned loop types can't hit the signed-overflow trip-count
+        // bug -- `end - start` for a well-formed ascending unsigned
+        // range never exceeds the type's own range. The guard should be
+        // scoped to signed loop variable types only.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let prod: i64 = 1;
+              parallel for i from 0 as u64 to 4 as u64
+              reduce prod with *;
+              {
+                prod = prod * xs[i];
+              }
+              return prod;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        assert!(
+            !c.contains("intent_check_u64_sub("),
+            "expected NO overflow guard for an unsigned loop variable, got:\n{c}"
+        );
     }
 
     #[test]
@@ -26010,6 +26473,53 @@ fn main() -> i64 {
         assert!(ll.contains("Task__fetch") && ll.contains("__poll_fetch"));
     }
 
+    /// BUG-128: same body as `v31_phase24_try_in_async_fn_accepted`
+    /// above, but with the `return` and the `let n = io_recv_async
+    /// (...)` swapped -- `n` is used before it's declared. In a
+    /// plain (non-async) function this is correctly rejected with
+    /// both "unknown variable 'n'" and "unreachable statement after
+    /// a control-flow exit". Before the fix, the v3.1 state-machine
+    /// transform split this flat body into per-suspend-point `if
+    /// state_tag==N` segments -- the dead `let` landed in its own,
+    /// syntactically reachable branch -- and unconditionally
+    /// promoted `n` to a Task struct field regardless of
+    /// reachability, so `t.n` was always a valid field access. Both
+    /// checks were defeated; `vanic check` reported `ok` and the
+    /// full program hung on both backends reading the promoted-but-
+    /// never-initialized field (this exact swap is what a localfuzz
+    /// mutation produced from the shipped
+    /// echo_p24_try_keyword.vani example).
+    #[test]
+    fn bug128_async_fn_use_before_declare_across_suspend_point_is_rejected() {
+        let source = r#"
+            enum FetchResult { Ok(i64), Err(i64) }
+
+            fn maybe_size(mode: i64) -> FetchResult {
+              return match mode {
+                0 then FetchResult.Ok(64),
+                _ then FetchResult.Err(0 - 1)
+              };
+            }
+
+            async fn fetch(fd: i64, mode: i64) -> FetchResult {
+              let size: i64 = try maybe_size(mode);
+              return FetchResult.Ok(n);
+              let n: i64 = io_recv_async(fd, size);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "BUG-128 regression: use-before-declare across a suspend point in an \
+             async fn body must be rejected, not silently accepted"
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("unreachable statement")
+                || e.message.contains("unknown variable")),
+            "expected an unreachable-statement or unknown-variable diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.4 — try with i64 return type uses
     /// legacy ABI (early-return emits plain `return __try_X`,
     /// not `__t.__result = ... return 0;`).
@@ -30509,6 +31019,116 @@ fn main() -> i64 {
                 && c.contains("(uint64_t)") && c.contains("len)) "),
             "expected SSA-C bounds guard before Vec index load, got:\n{c}"
         );
+    }
+
+    // BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
+    // backend-divergence finding. The bounds / overflow / divide-by-zero
+    // / shift traps on the C backend are deliberately still raw
+    // `abort()` (out of scope for the BUG-106/113/116/120/129/135
+    // `exit(3)` conversions -- see `tutorials/src/intermediate/
+    // 10b_runtime_errors_primer.md`'s Row 2). But `abort()` does NOT
+    // flush stdio, unlike `exit()` -- so any `print` output buffered
+    // before the trap fired was silently discarded on the C backend
+    // while the LLVM backend's `exit(3)` preserved it, making the two
+    // backends' crash diagnostics look like they disagreed (a "backend
+    // divergence") even when the underlying trap condition matched
+    // exactly. Fixed by adding `fflush(stdout);` immediately before
+    // each `abort()` at these 4 trap categories, on both C codegen
+    // paths (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
+    // Deliberately NOT touching the many OOM-guard `abort()` calls
+    // (`if (!ptr) abort();`) scattered through the runtime helpers --
+    // a different class, out of scope here.
+    #[test]
+    fn c_backend_flushes_stdout_before_abort_on_all_four_row2_traps() {
+        let overflow_source = r#"
+            fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return add_it(9223372036854775807, 1); }
+        "#;
+        let checked = compile(overflow_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("integer overflow in") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             overflow trap in SSA-C output, got:\n{c}"
+        );
+
+        let div_source = r#"
+            fn div_it(a: i64, b: i64) -> i64 { return a / b; }
+            fn main() -> i64 { return div_it(10, 0); }
+        "#;
+        let checked = compile(div_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("division by zero") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             divide-by-zero trap in SSA-C output, got:\n{c}"
+        );
+
+        let shift_source = r#"
+            fn shift_it(a: i64, k: i64) -> i64 { return a << k; }
+            fn main() -> i64 { return shift_it(1, 99); }
+        "#;
+        let checked = compile(shift_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("shift amount out of range") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             shift trap in SSA-C output, got:\n{c}"
+        );
+
+        let bounds_source = r#"
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              return read(ref xs, 1);
+            }
+        "#;
+        let checked = compile(bounds_source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("index out of bounds") && c.contains("fflush(stdout); abort();"),
+            "expected fflush(stdout) immediately before abort() on the \
+             bounds trap in SSA-C output, got:\n{c}"
+        );
+
+        // Tree-C: bounds and overflow (div-by-zero/overflow share the
+        // same two-guard helper; shift's tree-C helper is unreachable
+        // dead code -- never emitted by any call site, so not tested
+        // here). Force the whole module onto tree-C via `#[no_mangle]`.
+        let tree_c_source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn add_it(a: i64, b: i64) -> i64 { return a + b; }
+            fn div_it(a: i64, b: i64) -> i64 { return a / b; }
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let _ = read(ref xs, 1);
+              let _ = div_it(10, 0);
+              return add_it(9223372036854775807, 1);
+            }
+        "#;
+        let c = compile_to_c(tree_c_source).expect("tree-C compiles");
+        for (needle, label) in [
+            ("index out of bounds", "bounds"),
+            ("integer overflow in", "overflow"),
+            ("division by zero", "division by zero"),
+        ] {
+            let idx = c.find(needle).unwrap_or_else(|| panic!("expected {label} guard in tree-C output, got:\n{c}"));
+            let window = &c[idx..(idx + 200).min(c.len())];
+            assert!(
+                window.contains("fflush(stdout)") && window.contains("abort()"),
+                "expected fflush(stdout) before abort() near the {label} guard in tree-C output, got:\n{window}"
+            );
+        }
     }
 
     #[test]
@@ -42738,6 +43358,36 @@ função main() -> i64 {
             "expected depth counter + cleanup attribute + abort emit, got:\n{}",
             c
         );
+        // Follow-up cleanup after BUG-129/BUG-130 (2026-08-07): the
+        // guard used to call raw `abort()` here (flagged as "not
+        // fixed, out of scope" in BUG-130's own writeup) -- now uses
+        // the same `exit(3)` shape as every other runtime guard on
+        // this backend. Check both tree-C (via compile_to_c above)
+        // and SSA-C (below) -- each has its own separate copy of
+        // this guard.
+        let depth_guard_line = c
+            .lines()
+            .find(|l| l.contains("recursion bound exceeded"))
+            .expect("recursion bound exceeded line");
+        assert!(
+            depth_guard_line.contains("exit(3)") && !depth_guard_line.contains("abort()"),
+            "expected tree-C's bounded(N) guard to use exit(3), not abort(), got:\n{}",
+            depth_guard_line
+        );
+
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ssa_c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        let ssa_depth_guard_line = ssa_c
+            .lines()
+            .find(|l| l.contains("recursion bound exceeded"))
+            .expect("recursion bound exceeded line in SSA-C output");
+        assert!(
+            ssa_depth_guard_line.contains("exit(3)") && !ssa_depth_guard_line.contains("abort()"),
+            "expected SSA-C's bounded(N) guard to use exit(3), not abort(), got:\n{}",
+            ssa_depth_guard_line
+        );
     }
 
     // Closure #289 + tree-LLVM follow-up: bounded fn emit
@@ -52640,45 +53290,291 @@ fn main() -> i64 { return 0; }
         compile_to_llvm(source).expect("two distinct non-ASCII enum variants compile to LLVM");
     }
 
-    // Same audit pass: NOT a collision bug, but a related finding --
-    // a non-ASCII struct NAME can be DECLARED but not actually
-    // REFERENCED as a type: `parse_type` doesn't accept a non-ASCII
-    // identifier token in type-annotation position at all (distinct
-    // from `sanitize_ident`'s C-backend mangling concern -- this is
-    // a parser-level gap, backend-independent, so both backends fail
-    // identically at the parse stage, not just one). Documented as a
-    // known limitation in `docs/BUG_PATTERN_AUDIT_TODO.md` category F
-    // rather than fixed here -- out of scope for a mangling-collision
-    // audit, and unclear whether non-ASCII type names are meant to be
-    // supported at all (no example in `examples/language/*/` uses one).
+    // BUG-132 (2026-08-07): same audit pass originally found a related
+    // gap here -- a non-ASCII struct NAME could be DECLARED but not
+    // actually REFERENCED as a type: `parse_type` (and two other
+    // "does this identifier look struct-shaped" call sites --
+    // module-qualified paths, and the `Name { field: val }` struct-
+    // literal lookahead in expression position) only accepted
+    // `c.is_ascii_uppercase()` as a valid type-name start. Scripts
+    // with NO upper/lowercase distinction at all (Myanmar, Devanagari,
+    // CJK, Arabic, Thai, ...) can never satisfy that, so a struct
+    // declared with e.g. a Myanmar name parsed fine but could never
+    // be referenced anywhere -- a parser-level gap, backend-
+    // independent (both backends failed identically at the parse
+    // stage). Confirmed with the user this was worth fixing (not a
+    // deliberate v1 restriction) and that a Unicode-aware check was
+    // the right direction (preserves the PascalCase convention for
+    // cased scripts, e.g. Cyrillic `Точка` vs `точка`, while accepting
+    // any letter from case-less scripts). Fixed via a shared
+    // `is_type_name_start(c)` helper (`c.is_uppercase() ||
+    // (c.is_alphabetic() && !c.is_lowercase())`) applied at all three
+    // call sites in `parser.rs`.
     #[test]
-    fn non_ascii_struct_name_declares_but_cannot_be_used_as_a_type_annotation() {
-        let decl_only = r#"
+    fn non_ascii_struct_name_can_be_declared_and_used_as_a_type_annotation() {
+        // Myanmar script has no case distinction at all -- any
+        // letter must be accepted as a type-name start.
+        let source = r#"
             struct ကက {
               x: i64,
             }
             fn main() -> i64 {
-              return 0;
-            }
-        "#;
-        compile(decl_only).expect("declaring a non-ASCII-named struct parses fine");
-
-        let referenced = r#"
-            struct ကက {
-              x: i64,
-            }
-            fn main() -> i64 {
-              let a: ကက = ကက { x: 3 };
+              let a: ကက = ကက { x: 42 };
               return a.x;
             }
         "#;
-        let errs = compile(referenced)
-            .expect_err("referencing a non-ASCII struct name as a type is currently rejected");
+        let c = compile_to_c(source).expect("Myanmar-named struct type must compile to C");
+        let ll = compile_to_llvm(source).expect("Myanmar-named struct type must compile to LLVM");
+        assert!(c.contains("Struct_") || ll.contains("%Struct_"), "expected the struct to actually be emitted, got C:\n{c}\nLLVM:\n{ll}");
+    }
+
+    #[test]
+    fn cyrillic_struct_name_requires_uppercase_start_matching_ascii_convention() {
+        // Cyrillic IS a cased script -- the PascalCase-signals-a-type
+        // convention must still apply there, same as ASCII.
+        let upper = r#"
+            struct Точка {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: Точка = Точка { x: 7 };
+              return a.x;
+            }
+        "#;
+        compile(upper).expect("uppercase-start Cyrillic struct name must be usable as a type");
+
+        let lower = r#"
+            struct точка {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: точка = точка { x: 7 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(lower)
+            .expect_err("lowercase-start Cyrillic struct name must still be rejected as a type, matching the ASCII convention");
         assert!(
             errs.iter().any(|e| e.message.contains("expected type")),
             "expected a parse-level 'expected type' diagnostic, got: {:?}",
             errs
         );
+    }
+
+    #[test]
+    fn ascii_lowercase_struct_name_still_rejected_as_a_type_annotation() {
+        // Regression guard: the ASCII PascalCase convention must be
+        // completely unchanged by the Unicode-aware BUG-132 fix.
+        let source = r#"
+            struct point {
+              x: i64,
+            }
+            fn main() -> i64 {
+              let a: point = point { x: 7 };
+              return a.x;
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("lowercase ASCII struct name must still be rejected as a type");
+        assert!(
+            errs.iter().any(|e| e.message.contains("expected type")),
+            "expected a parse-level 'expected type' diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    // BUG-133 (2026-08-07): `ensures` now mirrors `requires`'s existing
+    // model -- an SMT-UNDECIDABLE clause (Unknown / SkippedUnsupported /
+    // Unavailable) no longer hard-fails the build; it compiles clean
+    // and gets a real runtime guard at the return site instead. A
+    // confirmed `Disproven` violation still hard-fails the build,
+    // unchanged. See `verify_ensures_at_return`'s own doc comment in
+    // checker.rs for the full design rationale (Option A from the C3
+    // design-sketch discussion, confirmed with the user before
+    // implementing).
+    #[test]
+    fn bug133_proven_ensures_still_elides_with_zero_runtime_check() {
+        let source = r#"
+            fn my_abs(n: i64) -> i64
+              requires n > -9223372036854775807;
+              ensures _return >= 0;
+            {
+              if n < 0 { return 0 - n; }
+              return n;
+            }
+            fn main() -> i64 { return my_abs(0 - 5); }
+        "#;
+        let c = compile_to_c(source).expect("provable ensures clause must still compile");
+        assert!(
+            !c.contains("postcondition"),
+            "BUG-133 regression: a provable ensures clause emitted a runtime \
+             guard instead of being elided at compile time, got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug133_disproven_ensures_still_hard_fails_the_build() {
+        let source = r#"
+            fn broken(n: i64) -> i64
+              ensures _return >= 0;
+            {
+              return 0 - n - n;
+            }
+            fn main() -> i64 { return broken(5); }
+        "#;
+        let errs = compile(source)
+            .expect_err("a confirmed ensures violation must still be a compile error");
+        assert!(
+            errs.iter().any(|e| e.message.contains("ensures clause does not hold")),
+            "expected the unchanged Disproven diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bug133_undecidable_ensures_compiles_and_gets_a_runtime_guard() {
+        // `opaque` has no `ensures` clause of its own, so SMT has no
+        // fact to reason about `wrapper`'s postcondition from --
+        // `SkippedUnsupported`, previously a hard build error.
+        let source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode {
+                0 then 5,
+                _ then 0 - 5
+              };
+            }
+            fn wrapper(mode: i64) -> i64
+              ensures _return >= 0;
+            {
+              return opaque(mode);
+            }
+            fn main() -> i64 { return wrapper(0); }
+        "#;
+        let c = compile_to_c(source)
+            .expect("BUG-133 regression: an undecidable ensures clause must compile, not hard-fail");
+        let ll = compile_to_llvm(source)
+            .expect("BUG-133 regression: an undecidable ensures clause must compile, not hard-fail");
+        assert!(
+            c.contains("postcondition violated in 'wrapper'") && ll.contains("postcondition violated in 'wrapper'"),
+            "expected a runtime guard with the postcondition-violated message on \
+             both backends, got C:\n{c}\nLLVM:\n{ll}"
+        );
+    }
+
+    // BUG-134 (2026-08-07): `invariant` follow-up to BUG-133 -- the
+    // same "undecidable no longer hard-fails the build" model, applied
+    // to loop invariants. Two guard sites per loop (entry + end-of-
+    // body preservation) instead of one, wrapped in a once-flag `if`
+    // for entry (a `for` loop's own induction variable isn't in scope
+    // OUTSIDE the loop in the generated code, so the entry check can't
+    // live there the way `ensures`'s single return-site guard could)
+    // and injected before every matching `continue` for preservation
+    // (a bare end-of-body append would otherwise be silently skipped
+    // whenever an iteration `continue`s past it -- confirmed as a
+    // REAL bug while building this, not just a hypothetical). See
+    // `verify_loop_invariants_with_havoc`'s own doc comment in
+    // checker.rs for the full design.
+    #[test]
+    fn bug134_proven_while_and_for_invariant_still_elides_with_zero_runtime_check() {
+        let while_source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 5
+              invariant n >= 0;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let for_source = r#"
+            fn main() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 5
+              invariant i >= 0;
+              { sum = sum + i; }
+              return sum;
+            }
+        "#;
+        for source in [while_source, for_source] {
+            let c = compile_to_c(source).expect("provable invariant must still compile");
+            assert!(
+                !c.contains("loop invariant"),
+                "BUG-134 regression: a provable invariant emitted a runtime guard \
+                 instead of being elided at compile time, got: {c}"
+            );
+        }
+    }
+
+    #[test]
+    fn bug134_disproven_invariant_still_hard_fails_the_build() {
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 5
+              invariant n >= 10;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("a confirmed invariant violation must still be a compile error");
+        assert!(
+            errs.iter().any(|e| e.message.contains("loop invariant does not hold at loop entry")),
+            "expected the unchanged Disproven diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bug134_undecidable_while_and_for_invariant_compiles_and_gets_runtime_guards() {
+        // `opaque` has no `ensures`, so referencing it directly inside
+        // the `invariant` clause is unencodable (`SkippedUnsupported`)
+        // -- previously a hard build error for BOTH the entry and
+        // preservation checks.
+        let while_source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode { 0 then 5, _ then 0 - 5 };
+            }
+            fn main() -> i64 {
+              let n: i64 = 0;
+              while n < 3
+              invariant opaque(n) >= 0 - 100;
+              { n = n + 1; }
+              return n;
+            }
+        "#;
+        let for_source = r#"
+            fn opaque(mode: i64) -> i64 {
+              return match mode { 0 then 5, _ then 0 - 5 };
+            }
+            fn main() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 3
+              invariant opaque(i) >= 0 - 100;
+              { sum = sum + i; }
+              return sum;
+            }
+        "#;
+        for (source, entry_msg) in [
+            (while_source, "does not hold at loop entry"),
+            (for_source, "does not hold at the for-loop's first iteration"),
+        ] {
+            let c = compile_to_c(source)
+                .expect("BUG-134 regression: an undecidable invariant must compile, not hard-fail");
+            let ll = compile_to_llvm(source)
+                .expect("BUG-134 regression: an undecidable invariant must compile, not hard-fail");
+            assert!(
+                c.contains(entry_msg) && ll.contains(entry_msg),
+                "expected the entry-check runtime guard on both backends, got C:\n{c}\nLLVM:\n{ll}"
+            );
+            assert!(
+                c.contains("is not preserved by") && ll.contains("is not preserved by"),
+                "expected the preservation-check runtime guard on both backends, got C:\n{c}\nLLVM:\n{ll}"
+            );
+            assert!(
+                c.contains("__intent_inv_entry_"),
+                "expected the once-flag entry-guard variable in the C output, got: {c}"
+            );
+        }
     }
 
     // BUG-106 (found 2026-08-04 by tools/localfuzz plus follow-up

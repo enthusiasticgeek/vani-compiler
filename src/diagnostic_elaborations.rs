@@ -1463,3 +1463,35 @@ pub fn const_expr_overflow() -> Vec<String> {
             .to_string(),
     ]
 }
+
+/// BUG-139 (2026-08-07): a struct field, enum variant payload, or
+/// function parameter/return type that names a struct/enum which was
+/// never declared. Distinct from `unknown_struct_type` (a runtime
+/// construction/field-access site, always a struct specifically) --
+/// this fires at DECLARATION time, before the name is known to be
+/// meant as a struct vs. an enum, and before it's known to be a typo
+/// vs. a genuinely missing declaration vs. a Rust-ism the user
+/// expected to exist (`String` instead of `Str`/`OwnedStr` is the
+/// single most common case found via localfuzz).
+pub fn unknown_type_in_declaration(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No struct, enum, or interface named `{}` is declared anywhere in this program.",
+            name,
+        ),
+        "vāṇी resolves every named type at compile time against the program's own \
+         struct/enum/interface declarations plus its fixed set of built-in types \
+         (i8..i64, u8..u64, f32, f64, bool, Str, OwnedStr, Vec<T>, and friends) -- \
+         there is no implicit import and no type inherited from another language."
+            .to_string(),
+        format!(
+            "Either (a) typo -- compare `{}` against the closest real declaration \
+             or built-in type name (a common one: vāṇी's owned string type is \
+             `OwnedStr`, not `String`), (b) the type is declared in another file \
+             -- add `include \"path.vani\";` at the top, or (c) the type hasn't \
+             been declared yet -- add `struct {} {{ … }}` or `enum {} {{ … }}` \
+             above this use.",
+            name, name, name,
+        ),
+    ]
+}

@@ -2683,7 +2683,7 @@ impl Parser {
                 let starts_uppercase = last_segment
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 if !starts_uppercase {
                     return Err(Diagnostic::new(
@@ -2697,7 +2697,7 @@ impl Parser {
             if name
                 .chars()
                 .next()
-                .map(|c| c.is_ascii_uppercase())
+                .map(is_type_name_start)
                 .unwrap_or(false)
             {
                 let n = name.clone();
@@ -5762,12 +5762,12 @@ impl Parser {
                 let last_upper = last_segment
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 let first_upper = name
                     .chars()
                     .next()
-                    .map(|c| c.is_ascii_uppercase())
+                    .map(is_type_name_start)
                     .unwrap_or(false);
                 let starts_uppercase = last_upper || first_upper;
                 let starts_with_lbrace = matches!(self.current().kind, TokenKind::LBrace);
@@ -6146,6 +6146,27 @@ fn ident_text(token: Token) -> String {
         TokenKind::Ident(name) => name,
         _ => unreachable!("expected identifier"),
     }
+}
+
+/// BUG-132: whether `c` can start a type name -- used to recognize a
+/// bare identifier as a struct/enum reference in type position, and
+/// to disambiguate a `Name { field: val }` struct literal from other
+/// uses of an identifier followed by `{` in expression position.
+/// Struct/enum DECLARATIONS never enforced this (any identifier
+/// works there); this is purely the "looks like a type" convention
+/// used to recognize a REFERENCE to one.
+///
+/// ASCII identifiers keep the existing PascalCase convention
+/// (`c.is_uppercase()` also covers cased non-Latin scripts, e.g.
+/// Cyrillic `Точка`). Scripts with no upper/lowercase distinction at
+/// all (Myanmar, Devanagari, CJK, Arabic, Thai, ...) have no way to
+/// "start uppercase" -- `c.is_lowercase()` is false for them too,
+/// same as `is_uppercase()`, so `is_alphabetic() && !is_lowercase()`
+/// correctly accepts any letter from those scripts without ALSO
+/// accepting genuinely-lowercase Latin/Cyrillic/etc. letters (which
+/// stay rejected, preserving the convention everywhere it applies).
+fn is_type_name_start(c: char) -> bool {
+    c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())
 }
 
 /// Arc 8 step 8f -- synthesize the AST for `await(expr)`:
@@ -8624,6 +8645,62 @@ fn inject_cancel_guards(body: &[Stmt], token_name: &str, span: Span) -> Vec<Stmt
     out
 }
 
+/// BUG-128: walk `stmts` (a flat statement list, and recursively the
+/// bodies of any nested `If`/`While`) and reject the first statement
+/// found after an unconditional `Return`/`Break`/`Continue` in the
+/// SAME list. This is a deliberately narrow, syntax-only mirror of
+/// `checker.rs`'s `check_stmt_list` reachability check -- it doesn't
+/// need scope/type info, just statement shapes, so it can run here
+/// in the parser before the v3.1 state-machine transform splits the
+/// body into per-suspend-point segments and hides the deadness (see
+/// the call site's comment for why the transform defeats the normal
+/// checker.rs pass). An `If` counts as terminating only when BOTH
+/// branches terminate and neither is empty, matching the plain-
+/// function checker's own definition closely enough to avoid new
+/// false-positive rejections of legitimate async fn bodies.
+fn v31_reject_dead_code(stmts: &[Stmt]) -> Option<Diagnostic> {
+    let mut terminated = false;
+    for stmt in stmts {
+        if terminated {
+            return Some(
+                Diagnostic::new(
+                    stmt.span(),
+                    "unreachable statement after a control-flow exit".to_string(),
+                )
+                .with_elaboration(crate::diagnostic_elaborations::unreachable_code(
+                    "statement after a control-flow exit",
+                )),
+            );
+        }
+        if let Some(diag) = v31_reject_dead_code_nested(stmt) {
+            return Some(diag);
+        }
+        terminated = v31_stmt_terminates(stmt);
+    }
+    None
+}
+
+fn v31_reject_dead_code_nested(stmt: &Stmt) -> Option<Diagnostic> {
+    match stmt {
+        Stmt::If { then_body, else_body, .. } => v31_reject_dead_code(then_body)
+            .or_else(|| v31_reject_dead_code(else_body)),
+        Stmt::While { body, .. } => v31_reject_dead_code(body),
+        _ => None,
+    }
+}
+
+fn v31_stmt_terminates(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. } => true,
+        Stmt::If { then_body, else_body, .. } => {
+            !else_body.is_empty()
+                && then_body.last().is_some_and(v31_stmt_terminates)
+                && else_body.last().is_some_and(v31_stmt_terminates)
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
@@ -8669,6 +8746,30 @@ pub(crate) fn try_v31_transform(
         }
         Err(d) => return Some(Err(d)),
     };
+    // BUG-128: reject dead code (a statement after an unconditional
+    // Return/Break/Continue) HERE, on the flat try-desugared body,
+    // before the segment-splitting collector below rewrites it into
+    // a `while true { if state_tag==0 {...} if state_tag==1 {...}
+    // ... }` cascade. checker.rs's normal `check_stmt_list` would
+    // catch this same shape in a plain fn, but it never gets the
+    // chance here: once split, the dead statement lands in its OWN
+    // `if state_tag==N` block -- a syntactically distinct, reachable
+    // branch from the checker's point of view, not "after" the
+    // return in the same list anymore. Any local the dead code
+    // declares (e.g. `let n = io_recv_async(...);` after `return
+    // ...(n);`) also gets unconditionally promoted to a Task struct
+    // field regardless of reachability, so "unknown variable 'n'"
+    // never fires either -- `t.n` is a valid field access even
+    // though `n` was never legitimately in scope. Both of the plain-
+    // function checks this construct relies on are defeated by the
+    // transform, so the check has to run before it, on the body
+    // shape where "after a return, in the same list" is still
+    // syntactically true. Found via a localfuzz finding that swapped
+    // a `let`/`return` pair; the full transformed program hung on
+    // both backends reading the promoted-but-never-initialized field.
+    if let Some(diag) = v31_reject_dead_code(body) {
+        return Some(Err(diag));
+    }
     // Phase 2.2 -- ANF lift nested io_*_async calls out of
     // compound expressions into fresh Let bindings BEFORE
     // running the validator + collector. The lifted body has
