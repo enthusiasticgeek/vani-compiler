@@ -3499,3 +3499,16 @@ Fix attempt: `tools/localfuzz/findings/20260808-105511-backend-divergence-05c242
   "status": "needs human/frontier root-cause review."
 }
 ```
+
+---
+
+### Candidate: 20260808-120147-backend-divergence-b9bbca4215
+
+Repro: `tools/localfuzz/findings/20260808-120147-backend-divergence-b9bbca4215/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-120147-backend-divergence-b9bbca4215/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vanic compiler encountered a backend-divergence issue when running the `fn_pointers.vani` example file with both the LLVM and C backends. The observed symptom was an integer overflow during multiplication in the `square` function, which caused divergent output between the two backends. This divergence occurred on the `i64.mul` operation, indicating that the type inference and handling of signed integers might not be consistent across both backends.
+
+To resolve this issue, a human or frontier model would need to examine the specific details of the code execution in both LLVM and C backends. They may identify potential issues with type inference, overflow handling, or optimizations applied by the different compilers. After identifying the root cause, the vanic compiler team can work on updating its backend implementations to ensure consistency and correctness across all supported platforms.
