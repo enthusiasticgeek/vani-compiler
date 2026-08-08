@@ -3787,3 +3787,33 @@ Fix attempt: `tools/localfuzz/findings/20260808-154503-run-crash-f0d4363f6b/fix_
 STATUS: needs human/frontier root-cause review.
 
 This bug report is for a reproduction of a crash or hang in the vani-compiler project's local staging log for the example `concurrency.vani`. The mutant/source is provided below, along with the observed symptom (crash/hang) and which backend(s) it affects. No specific cause has been determined yet, and a human/root-cause review is required.
+
+---
+
+### Candidate: 20260808-154851-backend-divergence-c17fc7c216
+
+Repro: `tools/localfuzz/findings/20260808-154851-backend-divergence-c17fc7c216/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-154851-backend-divergence-c17fc7c216/fix_attempt.md`
+
+```json
+{
+  "run": "vanic run examples/language/malay/for_loops.vani --backend=c",
+  "crash": null,
+  "divergence": {
+    "kind": "backend-divergence",
+    "c": {
+      "rc": 134,
+      "stdout": "",
+      "stderr": "integer overflow in int64_t add\n",
+      "timed_out": false
+    },
+    "llvm": {
+      "rc": 3,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false
+    }
+  },
+  "status": "needs human/frontier root-cause review."
+}
+```
