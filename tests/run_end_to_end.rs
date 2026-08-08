@@ -12633,3 +12633,65 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-142 (2026-08-08): bug-pattern-audit-round-2, category B. A top-level
+// `const` is seeded into a function's root scope at the same depth its
+// top-level-of-body `let` bindings and parameters are checked at -- a
+// `let` shadowing a const's name used to emit a `TypedStmt::Reassign`
+// targeting a name with no backend-emitted declaration at all. Forced onto
+// the tree backends (via an unrelated `#[no_mangle]` fn, since the SSA
+// path's fresh numeric naming happens to sidestep the bug) to reproduce
+// the actual failure modes found: an `unreachable!()` compiler PANIC on
+// tree-LLVM, and a `'v_N' undeclared` `cc` compile failure on tree-C.
+// Verifies both backends now run cleanly and, critically, that the
+// parameter/let correctly shadow the const (using the runtime value, not
+// silently falling back to the const's compile-time value).
+#[test]
+fn let_and_param_shadowing_a_top_level_const_run_correctly_on_tree_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug142-const-shadow-tree",
+        r#"
+const N: i64 = 99;
+
+#[no_mangle]
+fn force_tree_backend() -> i64 {
+  return 0;
+}
+
+fn identity(N: i64) -> i64 {
+  return N;
+}
+
+fn main() -> i64 {
+  let N: i64 = 5;
+  print N, identity(7);
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-142 regression: a let/param shadowing a top-level const \
+             should run cleanly on the tree backends ({:?}), got status {:?}, \
+             stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "5 7",
+            "the let/param should shadow with the RUNTIME value (5, 7), not \
+             the const's compile-time value (99) ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

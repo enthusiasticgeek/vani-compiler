@@ -9821,4 +9821,91 @@ against hand-computed expected values -- not just a clean-exit check).
 Full `cargo test --release` clean (2817 lib tests + 206 end-to-end tests
 + all other integration suites, 0 failed).
 
-Next free bug number is **BUG-142**.
+## BUG-142 (2026-08-08) -- a top-level `const` and a same-named function param/`let` collided in the checker's root scope
+
+Second finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category B
+(same-scope shadowing beyond plain scalar `let`). Systematically checked
+every candidate the category listed:
+
+- `if let` / `while let` payload bindings and `match` arm bindings --
+  confirmed SAFE: each construct calls `env.push_scope()` before inserting
+  its binding, so the binding lives in its own fresh child scope, never
+  the same scope object as anything it might shadow. No same-scope
+  collision is possible by construction.
+- Closure parameters -- confirmed SAFE: closures are lambda-lifted to
+  top-level `__anon_fn_<N>` functions before the main checker runs, each
+  checked with its own brand-new `Env` from scratch. There's no shared
+  scope stack with the enclosing function at all.
+- For-loop induction variables -- confirmed SAFE: same `push_scope()`-
+  before-`insert_current()` pattern as if/while-let.
+- **Function parameters and module-level `const`s -- found genuinely
+  vulnerable.** `check_function` seeds every top-level `const` into the
+  function's ROOT scope (T4.15), then inserts each parameter into that
+  *same* scope with no `push_scope()` in between. Two consequences:
+  1. A parameter sharing a const's name got a spurious "parameter 'N' is
+     already defined" diagnostic (`env.current_has` can't distinguish
+     "another param already claimed this name" from "a const already
+     occupies it") -- rejecting perfectly legal code.
+  2. Worse: since the function BODY's top-level statements are also
+     checked at that same root scope depth (no intervening
+     `push_scope()`), a top-level `let N = 5;` or `let (N, r) = f();`
+     shadowing a same-named const hit `Stmt::Let`/`Stmt::LetTuple`'s
+     `env.current_get(name)` same-scope check (the exact mechanism
+     BUG-137 added the tuple-destructure side of) and emitted
+     `TypedStmt::Reassign` instead of a fresh `TypedStmt::Let` -- but a
+     const has no corresponding backend declaration (it's a compile-time-
+     only env entry), so the Reassign targets a name the backend never
+     declared.
+
+Confirmed via a direct repro (forced onto the tree backends via an
+unrelated `#[no_mangle]` fn, since the SSA path's fresh numeric naming
+happens to sidestep the whole bug class the same way it sidestepped
+BUG-137): tree-LLVM hit an actual Rust **`unreachable!()` panic**
+(`internal error: entered unreachable code: checker: reassign to
+undeclared binding 'N'`) -- a compiler crash, not even a clean
+diagnostic. Tree-C failed to compile (`cc` error: `'v_N' undeclared`).
+Both are more severe than BUG-137's own finding (a clean `cc` "redefinition"
+compile error) precisely because Reassign codegen assumes the name was
+already declared by a prior `Let` in the SAME function body, which was
+never true for a const.
+
+**Fix**, three sites in `checker.rs`, all gated on the existing binding's
+`is_const` flag:
+1. `check_function`'s duplicate-parameter check now only fires when the
+   existing same-scope binding is NOT a const (i.e., is an earlier real
+   parameter) -- `env.current_get(&param.name).is_some_and(|v| !v.is_const)`.
+2. `Stmt::Let`'s same-scope-shadow detection now filters the "real shadow"
+   check through `!old.is_const` before deciding Reassign vs. a fresh Let.
+3. `Stmt::LetTuple`'s mirror of the same check (BUG-137's own fix site)
+   gets the identical filter.
+
+Verified: all three repros (param-name collision, plain `let` shadow,
+tuple `let` shadow) now compile and run correctly on both tree backends
+AND the default SSA-eligible path, using the RUNTIME value (not silently
+falling back to the const's compile-time value). Confirmed a genuine
+duplicate parameter (`fn f(x: i64, x: i64)`, no const involved) is still
+correctly rejected -- the fix narrows the check, it doesn't disable it.
+Re-ran `vanic check examples`: identical 72 pre-existing, unrelated
+failures before and after -- zero regressions.
+
+Added `let_shadowing_a_top_level_const_declares_fresh_not_reassign`,
+`let_tuple_shadowing_a_top_level_const_declares_fresh_not_reassign`,
+`function_param_sharing_a_top_level_const_name_is_accepted`, and
+`real_duplicate_parameter_is_still_rejected` to `src/lib.rs` (the first
+two assert directly on the typed IR shape -- a `TypedStmt::Let` for the
+shadowed name, never a `Reassign`). Added
+`let_and_param_shadowing_a_top_level_const_run_correctly_on_tree_backends`
+to `tests/run_end_to_end.rs` (real subprocess runs on both tree backends,
+asserting the printed output uses the runtime values 5/7, not the const's
+99).
+
+Full `cargo test --release` clean (2821 lib tests + 207 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category B is now closed (all 6 originally-listed candidates triaged: 5
+-- if let, while let, match arms, closure params, for-loop induction
+vars -- confirmed safe by construction; the 6th, function parameters
+vs. module-level consts, confirmed vulnerable and fixed as BUG-142,
+which turned out to have two symptoms sharing one root cause: the
+parameter-diagnostic case and the plain/tuple `let`-Reassign case).
+Next free bug number is **BUG-143**.

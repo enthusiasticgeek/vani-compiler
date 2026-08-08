@@ -154,7 +154,55 @@ exact type mismatch."
 
 </details>
 
-## B. Same-scope shadowing beyond plain scalar `let` (🔴 high)
+## B. Same-scope shadowing beyond plain scalar `let` (🔴 high) -- CLOSED 2026-08-08, BUG-142
+
+**Update (2026-08-08)**: this category is now closed. All 6 originally-
+listed candidates were triaged by reading each construct's own
+scope-handling code in checker.rs (not just testing blind repros):
+
+- `if let` / `while let` payload bindings, `match` arm bindings, for-loop
+  induction variables -- all confirmed SAFE: each calls `env.push_scope()`
+  immediately before inserting its binding via `insert_current`, so the
+  binding lives in a fresh child scope that's never the SAME scope object
+  as anything outside the construct. BUG-137/BUG-141's whole bug class
+  requires a literal same-scope collision; a nested scope's shadow of an
+  outer name is normal, already-correct lexical scoping, unrelated to it.
+- Closure parameters -- confirmed SAFE: closures are lambda-lifted to
+  top-level `__anon_fn_<N>` functions (`lambda_lift_program`) before the
+  main checker ever runs; each gets checked with a brand-new `Env` from
+  scratch, with no shared scope stack with the enclosing function at all.
+- **Function parameters vs. module-level `const`s -- found genuinely
+  vulnerable, fixed as BUG-142.** `check_function` seeds every top-level
+  `const` into the function's root scope (T4.15) and then, with no
+  `push_scope()` in between, inserts each parameter AND checks the
+  function body's own top-level statements at that *same* scope depth.
+  This produced two symptoms sharing one root cause: (a) a parameter
+  sharing a const's name got a spurious "parameter already defined"
+  diagnostic, and (b) worse, a top-level `let`/`let (a, b)` shadowing a
+  same-named const hit the exact same-scope `Reassign` mechanism BUG-137
+  extended to tuple-destructure -- but a const has no backend-emitted
+  declaration to reassign into. Confirmed via a direct repro (forced onto
+  the tree backends, same "SSA's fresh numeric naming sidesteps it"
+  situation as BUG-137) to **panic tree-LLVM outright**
+  (`unreachable!(): checker: reassign to undeclared binding`) and fail to
+  compile on tree-C (`'v_N' undeclared`) -- a more severe failure mode
+  than BUG-137's own "clean cc redefinition error." Fixed by gating all
+  three sites (the duplicate-param check, `Stmt::Let`'s shadow decision,
+  `Stmt::LetTuple`'s shadow decision) on the existing binding's `is_const`
+  flag -- a const-shadow now always produces a fresh declaration, matching
+  `check_function`'s own doc comment's original intent ("function-scoped
+  `let` bindings shadow [consts] naturally").
+
+Regression tests: `let_shadowing_a_top_level_const_declares_fresh_not_
+reassign`, `let_tuple_shadowing_a_top_level_const_declares_fresh_not_
+reassign`, `function_param_sharing_a_top_level_const_name_is_accepted`,
+`real_duplicate_parameter_is_still_rejected` (src/lib.rs);
+`let_and_param_shadowing_a_top_level_const_run_correctly_on_tree_backends`
+(tests/run_end_to_end.rs). Full writeup in `docs/TODO_CURRENT.md`'s
+BUG-142 section.
+
+<details>
+<summary>Original (2026-08-07) category B writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: BUG-137 — `let (q, r) = f(...); let (q, r) =
 f(...);` (tuple-destructure, same names, same scope) compiled fine on
@@ -186,6 +234,8 @@ it):
 - A `for i in 0..3 { ... }` loop's induction variable shadowing an outer
   `let i: i64 = 5;` declared just before it.
 - A function parameter shadowing a module-level `const`.
+
+</details>
 
 ## C. Compiler-emitted-pragma + boundary-value UB audit (🔴 high)
 

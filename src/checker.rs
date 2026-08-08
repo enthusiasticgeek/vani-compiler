@@ -11253,7 +11253,15 @@ fn check_function(
         .iter()
         .map(|param| {
             validate_param_type(&param.ty, param.span, diagnostics);
-            if env.current_has(&param.name) {
+            // BUG-142: top-level `const`s are seeded into this same
+            // root scope just above (T4.15), with no `push_scope()`
+            // in between -- so `current_has` alone can't tell "a
+            // param shares a name with an earlier param" (a real
+            // duplicate) from "a param shares a name with a
+            // module-level const" (legal shadowing, same as a
+            // function-body `let` shadowing a const). Only the
+            // former is an actual duplicate-parameter error.
+            if env.current_get(&param.name).is_some_and(|v| !v.is_const) {
                 diagnostics.push(
                     Diagnostic::new(
                         param.span,
@@ -12702,7 +12710,22 @@ fn check_one_stmt(
                 drop_facts_mentioning(smt_facts, name);
             }
 
-            if let Some(old) = same_scope_existing {
+            // BUG-142: top-level `const`s are seeded into the
+            // function's root scope (T4.15) at the same depth a
+            // top-level-of-body `let` checks here -- a same-scope
+            // `current_get` hit that's actually a const must NOT
+            // become a Reassign: no `TypedStmt::Let`/backend
+            // declaration was ever emitted for a const (it's a
+            // compile-time-only env entry), so a Reassign targets a
+            // name the backend never declared -- confirmed via a
+            // direct repro to `unreachable!()`-panic tree-LLVM and
+            // fail to compile ("'v_N' undeclared") on tree-C. Treat
+            // it as a fresh declaration instead, matching this
+            // function's own doc comment ("function-scoped `let`
+            // bindings shadow [consts] naturally").
+            let real_shadow = same_scope_existing.filter(|old| !old.is_const);
+
+            if let Some(old) = real_shadow {
                 // Same-scope let â†’ Reassign (type must match).
                 if old.ty != var_ty {
                     diagnostics.push(
@@ -15613,8 +15636,15 @@ fn check_one_stmt(
                 // reason (any SSA-unsupported feature anywhere in the
                 // module forces the WHOLE module onto it) determined
                 // whether this shape built at all.
+                // BUG-142: same const-shadowing gap as the plain
+                // `Stmt::Let` handler above -- a same-scope hit that's
+                // actually the T4.15-seeded top-level const must not
+                // become a Reassign (no backend declaration exists for
+                // it). See that handler's BUG-142 comment for the full
+                // writeup.
                 let same_scope_existing = env.current_get(name).cloned();
-                if let Some(old) = same_scope_existing {
+                let real_shadow = same_scope_existing.filter(|old| !old.is_const);
+                if let Some(old) = real_shadow {
                     if old.ty != elt_ty {
                         diagnostics.push(
                             Diagnostic::new(

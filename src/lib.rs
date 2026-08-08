@@ -455,6 +455,7 @@ pub fn compile_to_llvm(source: &str) -> Result<String, Vec<Diagnostic>> {
 mod tests {
     use super::{compile, compile_to_c, compile_to_c_no_std, compile_to_llvm};
     use crate::backend::Backend;
+    use crate::ir::TypedStmt;
 
     #[test]
     fn compiles_basic_program_to_c() {
@@ -1637,6 +1638,112 @@ mod tests {
         assert!(
             ll.contains("zext i16") && ll.contains(" to i64"),
             "expected the u16 index to be zext'd to i64 before the set call, got:\n{ll}"
+        );
+    }
+
+    // BUG-142 (2026-08-08): bug-pattern-audit-round-2, category B. Top-level
+    // `const`s are seeded into a function's root scope (T4.15) at the same
+    // depth a top-level-of-body `let`/`let (a, b)` or the function's own
+    // parameters are checked at, with no `push_scope()` in between --
+    // `env.current_get`/`current_has` couldn't distinguish "shadowing a
+    // const" (legal) from "a real same-scope redeclaration" (BUG-137's
+    // Reassign case) or "a real duplicate parameter." A `let` shadowing a
+    // const emitted a `TypedStmt::Reassign` targeting a name with no
+    // backend-emitted declaration at all -- confirmed to panic tree-LLVM
+    // (`unreachable!(): checker: reassign to undeclared binding`) and fail
+    // to compile on tree-C (`'v_N' undeclared`). A parameter sharing a
+    // const's name got a spurious "parameter already defined" diagnostic
+    // for perfectly legal code.
+    #[test]
+    fn let_shadowing_a_top_level_const_declares_fresh_not_reassign() {
+        let source = r#"
+            const N: i64 = 99;
+            fn main() -> i64 {
+              let N: i64 = 5;
+              return N;
+            }
+        "#;
+        let checked = compile(source).expect("let shadowing a top-level const should compile");
+        let main_fn = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main fn present");
+        assert!(
+            main_fn.body.iter().any(|s| matches!(s, TypedStmt::Let { name, .. } if name == "N")),
+            "expected a fresh TypedStmt::Let for 'N' (shadowing the const), got: {:?}",
+            main_fn.body
+        );
+        assert!(
+            !main_fn.body.iter().any(|s| matches!(s, TypedStmt::Reassign { name, .. } if name == "N")),
+            "a let shadowing a const must never become a Reassign (no backend \
+             declaration exists for a const), got: {:?}",
+            main_fn.body
+        );
+        compile_to_c(source).expect("let shadowing a top-level const should compile to C");
+        compile_to_llvm(source).expect("let shadowing a top-level const should compile to LLVM");
+    }
+
+    #[test]
+    fn let_tuple_shadowing_a_top_level_const_declares_fresh_not_reassign() {
+        let source = r#"
+            const N: i64 = 99;
+            fn pair() -> (i64, i64) { return (5, 6); }
+            fn main() -> i64 {
+              let (N, r) = pair();
+              return N + r;
+            }
+        "#;
+        let checked = compile(source).expect("let-tuple shadowing a top-level const should compile");
+        let main_fn = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main fn present");
+        assert!(
+            main_fn.body.iter().any(|s| matches!(s, TypedStmt::Let { name, .. } if name == "N")),
+            "expected a fresh TypedStmt::Let for 'N' (shadowing the const), got: {:?}",
+            main_fn.body
+        );
+        assert!(
+            !main_fn.body.iter().any(|s| matches!(s, TypedStmt::Reassign { name, .. } if name == "N")),
+            "a let-tuple binding shadowing a const must never become a Reassign, \
+             got: {:?}",
+            main_fn.body
+        );
+        compile_to_c(source).expect("let-tuple shadowing a top-level const should compile to C");
+        compile_to_llvm(source).expect("let-tuple shadowing a top-level const should compile to LLVM");
+    }
+
+    #[test]
+    fn function_param_sharing_a_top_level_const_name_is_accepted() {
+        let source = r#"
+            const N: i64 = 99;
+            fn identity(N: i64) -> i64 { return N; }
+            fn main() -> i64 { return identity(5); }
+        "#;
+        compile(source).expect(
+            "a single, non-duplicate parameter sharing a top-level const's name \
+             must be accepted, not flagged as a duplicate parameter",
+        );
+    }
+
+    #[test]
+    fn real_duplicate_parameter_is_still_rejected() {
+        // BUG-142's fix narrowed the duplicate-parameter check to skip
+        // const-shadowing specifically -- confirm an *actual* duplicate
+        // parameter (no const involved at all) is still caught.
+        let source = r#"
+            fn f(x: i64, x: i64) -> i64 { return x; }
+            fn main() -> i64 { return f(1, 2); }
+        "#;
+        let errors = compile(source).expect_err("a real duplicate parameter must still be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("parameter 'x' is already defined")),
+            "expected a duplicate-parameter diagnostic, got: {:?}",
+            errors
         );
     }
 
