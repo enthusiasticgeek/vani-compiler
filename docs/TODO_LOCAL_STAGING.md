@@ -3598,3 +3598,58 @@ Repro: `tools/localfuzz/findings/20260808-125056-backend-divergence-efabc6f05d/r
 Fix attempt: `tools/localfuzz/findings/20260808-125056-backend-divergence-efabc6f05d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260808-134502-backend-divergence-8133e5bf1e
+
+Repro: `tools/localfuzz/findings/20260808-134502-backend-divergence-8133e5bf1e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260808-134502-backend-divergence-8133e5bf1e/fix_attempt.md`
+
+Vani-compiler localfuzz: Backend-divergence found during main execution.
+
+**Mutation ID:** <insert unique identifier for this mutation>
+
+**Staging Entry:**
+
+### Vani Compiler Localfuzz - Backend-Divergence (for_loops.vani)
+
+#### Summary:
+During the execution of the `main` function in the `examples/language/catalan/for_loops.vani` file, the C backend experienced a backend-divergence error. This led to a program crash with an integer overflow in the `int64_t add` operation.
+
+#### Repro Source:
+```vani
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/for_loops.vani              # LLVM
+//   vanic run examples/language/catalan/for_loops.vani --backend=c  # C
+
+propòsit "Catalan for-range loops — per/des/fins";
+
+funció suma_rang(inici: i64, fi: i64) -> i64 {
+  sigui total: i64 = 0;
+  per i des inici fins fi {
+    total = total + i;
+  }
+  retorna total;
+}
+
+funció compta() -> i64 {
+  sigui n: i64 = 0;
+  per _i des 0 fins 5 {
+    n = n + 9223372036854775807;
+  }
+  retorna n;
+}
+
+fn main() -> i64 {
+  afirma compta() == 5;
+  afirm suma_rang(1, 5) == 10;
+  imprimeix "suma del rang =", suma_rang(1, 5);
+  retorna 0;
+}
+```
+
+#### Observed Symptom:
+The C backend crashed due to an integer overflow in the `
