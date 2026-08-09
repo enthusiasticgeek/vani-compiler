@@ -4457,3 +4457,50 @@ Fix attempt: `tools/localfuzz/findings/20260809-201604-backend-divergence-7b9b35
 VANI Compiler localfuzz: vec_invariants.vani crashed with integer overflow in int64_t mul when run with --backend=c.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-221155-backend-divergence-56467d8c82
+
+Repro: `tools/localfuzz/findings/20260809-221155-backend-divergence-56467d8c82/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-221155-backend-divergence-56467d8c82/fix_attempt.md`
+
+### Staging Entry: `mix_closure_chain.vani` - Backend Divergence
+
+#### Run Information:
+- **Base Corpus File**: `/home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_closure_chain.vani`
+- **Mutant/generated Source**:
+  ```vani
+  // CLO: two closures composed; pins multi-closure in same function.
+  fn main() -> i64 {
+    let add3 = fn(x: i64) -> i64 { return x + 3; };
+    let add3 = fn(x: i64) -> i64 { return x + 3; };
+    let mul2 = fn(x: i64) -> i64 { return x * 9223372036854775807; };
+    let n: i64 = add3(5);
+    return mul2(n);
+  }
+  ```
+
+#### Finding Kind:
+- **Backend-Divergence**
+
+#### Raw Result Data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
+#### Status: Needs Human/Frontier Root-Cause Review.
