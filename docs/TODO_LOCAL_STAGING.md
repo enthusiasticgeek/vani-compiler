@@ -4025,3 +4025,31 @@ Repro: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/r
 Fix attempt: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-062214-backend-divergence-9b38ca1539
+
+Repro: `tools/localfuzz/findings/20260809-062214-backend-divergence-9b38ca1539/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-062214-backend-divergence-9b38ca1539/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
