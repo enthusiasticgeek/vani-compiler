@@ -10657,3 +10657,137 @@ compiler's loop-bound-hoisting check) -- see
 13th was this BUG-149 finding.
 
 Next free bug number is **BUG-150**.
+
+## BUG-150 (2026-08-09) -- struct field double-free when moved on only one incoming control-flow path
+
+Found and fixed same-session while designing round 5's audit theme
+(`docs/BUG_PATTERN_AUDIT_TODO_5.md` category A -- see that file for
+the original repro-first writeup and the two candidate fix shapes it
+left open). This is a genuine, both-backends memory-corruption bug,
+more severe than anything fixed in rounds 1-4 (a real `free(): double
+free detected in tcache 2` abort, not a clean `abort()` trap).
+
+Repro:
+```vani
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1,2,3), b: vec(4,5,6) };
+  if some_condition() {
+    let n: i64 = consume(p.a);   // moves p.a out
+    print n;
+  } else {
+    print len(ref p.b) as i64;   // only borrows p.b, p.a untouched
+  }
+  return 0;                      // <-- p's drop glue lives here
+}
+```
+Compiled with zero diagnostics; crashed with a double-free at runtime
+whenever the move-arm executed.
+
+Root cause: `checker.rs`'s `Stmt::If` handler already had a merge-
+reconciliation mechanism for a binding moved on only one branch --
+"auto-balance by inserting a compensating `Drop` in the non-moving
+branch, so both paths agree the binding is moved" (this is what
+already made `let x = if cond { a } else { b };`-style whole-variable
+divergence safe). But that mechanism only ever looked at
+`VarInfo.moved` (the whole binding). It never consulted
+`VarInfo.moved_fields` (the per-field partial-move tracking), so
+after the merge, `let mut merged = pre_env.clone();` silently reset
+`moved_fields` back to empty regardless of what either branch actually
+did -- the checker forgot field `a` was ever moved. The real end-of-
+scope `Drop` of `p` (already correctly built to skip fields listed in
+`moved_fields`) then freed `a` a second time, since it no longer knew
+to skip it.
+
+Fix (`checker.rs`, `Stmt::If`'s merge logic, ~line 13729 area): added
+a parallel per-field reconciliation pass alongside the existing whole-
+variable one. For each `Type::Struct`-typed pre-branch binding, when a
+field's moved-state diverges between `then`/`else`, insert a
+compensating Drop of JUST that one field (reusing the exact same
+`moved_fields` skip-list mechanism `Drop` already supports for real
+end-of-scope drops -- skip every field except the one being
+compensated, via `env.lookup_struct` to enumerate the struct's full
+field list) into the non-moving branch, and set the merged env's
+`moved_fields` to the union of both branches' field-move sets. No new
+IR node, no backend codegen changes needed -- both backends' existing
+`TypedStmt::Drop` handling already correctly respects a `moved_fields`
+skip-list of any size, confirmed by reading `emit_llvm_struct_field_drops`
+(`backend_llvm.rs`) and its C equivalent (`emit_struct_field_drops`,
+`backend_c.rs`) directly before implementing.
+
+One deliberate, documented limitation: a struct with a user-defined
+by-ref `drop(self: mut ref T)` skips this reconciliation (falls back
+to the pre-fix state for that narrow combination) -- calling a
+compensating PARTIAL drop would wrongly run the user's "whole object
+is dying" cleanup callback while other fields are still live. Rare
+combination (user-drop-by-ref + a conditionally-moved sibling field);
+under-fixes rather than introduces a new unsoundness.
+
+**Loop-safety follow-up, found while verifying the fix**: naively, the
+same compensating-drop trick applied to an `if`/`else` NESTED INSIDE A
+LOOP BODY is unsound -- the checker processes the loop body once, so
+the compensating drop (or the move) fires again on every later
+iteration that takes the other arm, double-freeing the same field a
+second way. Confirmed by direct reproduction (an `if`/`else` inside a
+`while` loop still crashed after the primary fix). The existing
+`validate_loop_balance` function already rejects this exact shape for
+WHOLE-variable moves at compile time ("loop body changes the move
+state") -- extended it to also check `moved_fields` divergence between
+loop start and loop end, so a per-field version of the same unsound
+pattern is now rejected at compile time too, consistent with the
+existing whole-variable safety net, rather than trying to make the
+runtime trick loop-safe (which would need real runtime drop flags, a
+materially bigger feature -- left as a known possible future
+enhancement, not attempted here).
+
+**BUG-151, a second, narrower gap found while verifying BUG-150**:
+`ref t.field` / `mut ref t.field` (unlike plain `t.field`) never
+checked whether THAT SPECIFIC FIELD had been moved -- only the whole-
+binding `.moved` flag, which plain `FieldAccess` on the same field
+already correctly guards against. `ref p.a` after `p.a` was moved
+returned a reference into already-freed heap memory instead of
+erroring (a real, if narrow, use-after-free -- confirmed NOT to crash
+in the specific case tested, since `len(ref p.a)` only reads the Vec
+struct's still-valid stack-resident length/pointer fields without
+dereferencing the freed buffer itself, but a function that indexed
+through such a reference would). Fixed by adding the same
+`moved_fields`-lookup diagnostic plain `FieldAccess` already has, to
+both `RefField` and `RefMutField`'s checking (`checker.rs`, ~line
+21837 and ~21855 areas).
+
+Verified: the original double-free repro, its reverse-direction
+variant (move on the `else` arm instead), and the loop-nested variant
+all behave correctly now -- the first two run cleanly with correct
+output on both backends (no double-free, no crash), the loop variant
+is correctly rejected at compile time with a clear diagnostic. The
+still-live sibling field (`p.b`) remains fully usable after the merge.
+Using the moved field again after the merge (`p.a`, or `ref p.a`) is
+now correctly rejected as a use-after-move, on both the plain-value
+and `ref`/`mut ref` forms.
+
+Added 9 regression tests: 7 to `src/lib.rs`
+(`conditional_field_move_in_if_else_compiles_and_untaken_field_stays_usable`,
+`conditional_field_move_in_if_else_marks_field_moved_after_merge`,
+`conditional_field_move_reverse_direction_compiles`,
+`conditional_field_move_emits_compensating_drop_on_c_backend`,
+`ref_field_after_move_rejected`, `mut_ref_field_after_move_rejected`,
+`conditional_field_move_inside_loop_rejected`), 2 to
+`tests/run_end_to_end.rs`
+(`conditional_field_move_no_longer_double_frees_on_both_backends`,
+`conditional_field_move_reverse_direction_no_double_free_on_both_backends`),
+real subprocess runs asserting clean exit + correct output + absence
+of the double-free message, on both backends.
+
+Full `cargo test --release` clean (2856 lib tests + all other
+integration suites, 0 failed). `vanic check examples` still shows
+exactly 78 errors, matching the established baseline -- no regression.
+
+This closes category A of `docs/BUG_PATTERN_AUDIT_TODO_5.md`. The
+narrow user-drop-by-ref limitation noted above, and whether real
+runtime drop flags are worth the implementation cost to fully close
+the loop-nested case (currently: reject at compile time, which is
+sound but more restrictive than necessary), are both left as documented
+open threads for a future session, not silently unresolved gaps.
+
+Next free bug number is **BUG-152**.

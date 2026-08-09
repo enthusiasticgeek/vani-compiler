@@ -1,9 +1,9 @@
 # vāṇी — Bug-pattern audit, round 5
 
-**STATUS (2026-08-09): opens with a CONFIRMED, HIGH-SEVERITY, unfixed
-lead -- a genuine double-free / memory-corruption bug, reproduces
-identically on both backends. Found by hand this session while
-looking for round 5's theme, not yet fixed.**
+**STATUS (2026-08-09): category A FIXED as BUG-150 (+ a second,
+narrower gap found while verifying it, fixed as BUG-151). Category B
+is still open/unstarted, deliberately left unpopulated (see its own
+note below).**
 
 Sequel to `docs/BUG_PATTERN_AUDIT_TODO_4.md` (round 4, closed
 2026-08-09 as BUG-149 -- see that file's category A for the
@@ -15,7 +15,47 @@ same treatment. Applying the same "what's the parallel shape nobody
 re-checked" instinct to a completely different area -- Drop/RAII
 codegen, untouched by rounds 1-4 -- immediately found something serious.
 
-## A. Struct field double-free when a move happens on only one incoming control-flow path (🔴 CRITICAL, confirmed, unfixed)
+## A. Struct field double-free when a move happens on only one incoming control-flow path (🔴 CRITICAL) -- FIXED 2026-08-09, BUG-150 (+ BUG-151, a second gap found while verifying it)
+
+**Update (2026-08-09)**: fixed as BUG-150. The `Stmt::If` merge in
+`checker.rs` now reconciles per-FIELD move divergence the same way it
+already reconciled whole-variable divergence -- a compensating single-
+field `Drop` (reusing the existing `moved_fields` skip-list mechanism,
+enumerated via `env.lookup_struct`) inserted into the non-moving
+branch, and the merged env's `moved_fields` set to the union of both
+branches. No new IR node or backend codegen changes were needed --
+both backends' `Drop` handling already correctly respected a
+`moved_fields` skip-list of any size; the bug was purely in the
+checker never computing the right skip-list to begin with. Verified:
+the repro below (and its reverse-direction and loop-nested variants)
+no longer double-free; the still-live sibling field stays usable;
+using the moved field again after the merge is correctly rejected.
+
+**A second, narrower gap surfaced while verifying the fix, fixed as
+BUG-151**: `ref t.field` / `mut ref t.field` never checked whether
+that specific field had been moved (only the whole-binding flag,
+which plain `t.field` already correctly guarded against) -- a real,
+if narrow, use-after-free hole, now closed with the same
+`moved_fields` check plain `FieldAccess` already had.
+
+**A loop-safety complication found while verifying the fix**: the
+same compensating-drop trick, applied naively to an `if`/`else`
+NESTED INSIDE A LOOP BODY, is unsound on its own -- the checker
+processes the loop body once, so the compensating drop re-fires every
+iteration that takes the non-moving arm, double-freeing a second way.
+Fixed by extending the pre-existing `validate_loop_balance` (which
+already rejected the equivalent whole-variable pattern at compile
+time) to also check `moved_fields` divergence, rather than trying to
+make the runtime trick itself loop-safe (that would need real runtime
+drop flags -- left as a documented possible future enhancement, not
+attempted).
+
+Full writeup, including the one deliberately-left limitation (structs
+with a user-defined by-ref `drop`, a narrow combination), in
+`docs/TODO_CURRENT.md`'s BUG-150 section.
+
+<details>
+<summary>Original writeup, kept for the reasoning trail</summary>
 
 **Confirmed, unfixed, both backends:** moving a struct field out (by
 passing it by value to a function) inside one arm of an `if`/`else`,
@@ -121,6 +161,8 @@ implementation cost:
    backends' drop-glue codegen and the checker's move-tracking to
    thread the flag through.
 
+</details>
+
 ## Process (mirrors rounds 1 through 4's own process sections)
 
 1. Check `docs/TODO_LOCAL_STAGING.md` (in the `vani-compiler-localfuzz`
@@ -131,25 +173,19 @@ implementation cost:
    of what happens when the nightly refresh silently stalls -- check
    `tools/localfuzz/refresh.log`'s tail for a recent "refresh done"
    line before trusting the harness's current findings at all).
-2. **Work category A first.** This is a real, confirmed, reproducible
-   memory-safety bug on both backends, more severe than anything
-   fixed in rounds 1-4 (double-free / heap corruption, not a clean
-   trap). Start by reading the actual move-tracking code in
-   `checker.rs` (search for where `moved` sets get computed for
-   `TypedStmt::If`/`TypedStmt::Match` and how they're threaded to the
-   post-merge continuation) and the drop-glue emission in both
-   backends, to find the precise point where the two branches'
-   moved-sets should be reconciled but aren't. Decide between the
-   two fix shapes in category A's writeup (or a better one found
-   while reading the real code) -- this is a design decision worth
-   getting right, not a one-line patch like BUG-147/148/149.
-3. Once category A has a fix, sweep the same question across the
-   *other* control-flow-merge shapes explicitly called out above but
-   not yet individually tested: loop bodies (`while`/`for`) with a
-   conditional move inside, `match` arms with different moved-field
-   sets across arms, and nested `if`/`else` (moved three-plus-levels
-   deep in a merge tree) -- confirm the same fix covers all of them,
-   not just the flat two-arm `if`/`else` case tested above.
+2. ~~Work category A first~~ -- done, fixed as BUG-150 (+ BUG-151).
+3. ~~Sweep the other control-flow-merge shapes~~ -- done as part of
+   BUG-150's own verification: `match` arms were already safe (a
+   pre-existing conservative "any-arm-moved counts as moved" strategy,
+   confirmed by direct testing, not a gap); loop-nested `if`/`else`
+   was NOT safe and is now correctly rejected at compile time (see
+   the loop-safety note above) rather than silently reconciled.
+   Nested `if`/`else` three-plus levels deep was not separately
+   tested -- the fix is structurally recursive (each `Stmt::If`
+   reconciles its own immediate branches independently), so it should
+   compose correctly, but this wasn't empirically re-verified with a
+   3-level-deep repro; worth a quick spot-check if this area gets
+   touched again.
 4. Every fix gets a `src/lib.rs` compile-check test (or, if category
    A's fix is a compile-time rejection, a test asserting the
    diagnostic fires) AND a `tests/run_end_to_end.rs` real-subprocess

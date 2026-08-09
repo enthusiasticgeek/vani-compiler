@@ -13592,3 +13592,111 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-150 (2026-08-09): found while designing round 5's audit theme
+// (docs/BUG_PATTERN_AUDIT_TODO_5.md category A). Moving a struct field
+// out on only ONE arm of an if/else (the other arm just borrows the
+// same field) compiled with zero diagnostics, then double-freed at
+// runtime whenever the move-arm ran: `free(): double free detected in
+// tcache 2` on C, an LLVM JIT abort on the same message on LLVM. Root
+// cause: the if/else merge only reconciled whole-variable moves, never
+// per-field ones, so the merged environment silently forgot the field
+// had ever moved. Fixed by extending the SAME "compensating Drop in
+// the non-moving branch" trick already used for whole-variable moves,
+// scoped to just the one divergent field via the existing
+// `moved_fields` skip-list mechanism.
+#[test]
+fn conditional_field_move_no_longer_double_frees_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug150-conditional-field-move",
+        r#"
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+  if len(ref p.a) as i64 > 0 {
+    let n: i64 = consume(p.a);
+    print n;
+  } else {
+    print len(ref p.b) as i64;
+  }
+  print len(ref p.b) as i64;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "conditional field move should no longer double-free ({args:?}), \
+             got status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("double free"),
+            "expected no double-free abort ({args:?}), stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "3\n3",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn conditional_field_move_reverse_direction_no_double_free_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug150-conditional-field-move-reverse",
+        r#"
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+  if len(ref p.a) as i64 > 100 {
+    print len(ref p.a) as i64;
+  } else {
+    let n: i64 = consume(p.b);
+    print n;
+  }
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "reverse-direction conditional field move should not double-free ({args:?}), \
+             got status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "3",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

@@ -10202,6 +10202,214 @@ mod tests {
     }
 
     #[test]
+    fn conditional_field_move_in_if_else_compiles_and_untaken_field_stays_usable() {
+        // BUG-150: found while designing round 5's audit theme.
+        // Moving a struct field on only ONE arm of an if/else (while
+        // the other arm just borrows the same field) used to compile
+        // with zero diagnostics, then double-free at runtime whenever
+        // the move-arm ran -- the merge silently forgot the field
+        // had ever been moved (`merged = pre_env.clone()` reset
+        // `moved_fields` back to empty). Now the merge correctly
+        // reconciles per-field move state the same way the existing
+        // whole-variable logic already did. The sibling field must
+        // stay fully usable after the merge either way.
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              if len(ref p.a) as i64 > 0 {
+                let n: i64 = consume(p.a);
+                print n;
+              } else {
+                print len(ref p.b) as i64;
+              }
+              print len(ref p.b) as i64;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "conditional field move in if/else, with the sibling field still read after the merge, must compile",
+        );
+    }
+
+    #[test]
+    fn conditional_field_move_in_if_else_marks_field_moved_after_merge() {
+        // BUG-150 continued: after the if/else merges, the moved
+        // field must actually be tracked as moved -- using it again
+        // is a use-after-move (and, before the fix, would have been
+        // a use-after-free at runtime instead of a compile error).
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              if len(ref p.a) as i64 > 0 {
+                let n: i64 = consume(p.a);
+                print n;
+              } else {
+                print len(ref p.b) as i64;
+              }
+              let m: Vec<i64> = p.a;
+              print len(ref m) as i64;
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("using the field moved on only one if/else arm must fail after the merge");
+        assert!(
+            errors.iter().any(|e| e.message.contains("'p.a' was moved")),
+            "expected a use-after-move diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn conditional_field_move_reverse_direction_compiles() {
+        // BUG-150: same shape with the move on the ELSE arm instead
+        // of the THEN arm, to confirm the reconciliation isn't
+        // accidentally direction-specific.
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              if len(ref p.a) as i64 > 100 {
+                print len(ref p.a) as i64;
+              } else {
+                let n: i64 = consume(p.b);
+                print n;
+              }
+              return 0;
+            }
+        "#;
+        compile(source).expect("field moved on the else arm only must compile the same way");
+    }
+
+    #[test]
+    fn conditional_field_move_emits_compensating_drop_on_c_backend() {
+        // BUG-150: locks in the actual codegen shape -- the
+        // untaken (else) branch must contain a compensating free of
+        // JUST field `a`, not the whole struct (that would wrongly
+        // free the still-live `b` field too).
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              if len(ref p.a) as i64 > 0 {
+                let n: i64 = consume(p.a);
+                print n;
+              } else {
+                print len(ref p.b) as i64;
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("intent_vec_int64_t__free(v_p.a)"),
+            "expected a compensating free of field 'a' in the else branch:\n{c}"
+        );
+    }
+
+    #[test]
+    fn ref_field_after_move_rejected() {
+        // BUG-151, found while verifying BUG-150: `ref t.field`
+        // (unlike plain `t.field`) never checked whether THIS field
+        // specifically had been moved out -- only the whole-binding
+        // move flag. `ref p.a` after `p.a` was moved returned a
+        // reference into already-freed heap memory instead of
+        // erroring, even though `len(ref p.a)` and `p.a[0]` don't
+        // themselves crash (they only touch the Vec's still-valid
+        // stack-resident length/pointer fields, not the freed
+        // buffer) -- a real, if narrow, use-after-free hole.
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              let n: i64 = consume(p.a);
+              print n;
+              print len(ref p.a) as i64;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("ref on a moved field must be rejected");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("'p.a' was moved") && e.message.contains("borrow")),
+            "expected a moved-field borrow diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn mut_ref_field_after_move_rejected() {
+        // BUG-151, mut-ref counterpart.
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              let n: i64 = consume(p.a);
+              print n;
+              let pushed: i64 = push(mut ref p.a, 99);
+              return pushed;
+            }
+        "#;
+        let errors = compile(source).expect_err("mut ref on a moved field must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("'p.a' was moved")),
+            "expected a moved-field mutable-borrow diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn conditional_field_move_inside_loop_rejected() {
+        // BUG-150 loop-safety follow-up: the if/else merge fix
+        // inserts a compensating single-field Drop for a ONE-TIME
+        // divergence. Naively applied inside a loop body, that same
+        // generated code re-executes every iteration -- the
+        // compensating drop (or the move itself) fires again on
+        // every later iteration that takes the other arm, double-
+        // freeing the same field. `validate_loop_balance` already
+        // rejected this exact shape for WHOLE-variable moves;
+        // extended here to also reject it for per-field moves,
+        // consistent with that existing safety net rather than
+        // trying to make the compensating-drop trick loop-safe
+        // (which would need real runtime drop flags).
+        let source = r#"
+            struct Pair { a: Vec<i64>, b: Vec<i64> }
+            fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+            fn main() -> i64 {
+              let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+              let i: i64 = 0;
+              while i < 3 {
+                if i == 1 {
+                  let n: i64 = consume(p.a);
+                  print n;
+                } else {
+                  print len(ref p.b) as i64;
+                }
+                i = i + 1;
+              }
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("field moved conditionally inside a loop body must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("different move state")
+                && e.message.contains("p.a")),
+            "expected a loop-balance diagnostic naming 'p.a', got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`

@@ -11818,6 +11818,52 @@ fn validate_loop_balance(
                     context, name
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::move_in_loop(name)));
+            continue;
+        }
+        // BUG-150 follow-up: the whole-variable check above catches
+        // a struct fully moved on some paths through the loop body
+        // but not others. It never looked at per-FIELD moves, so a
+        // field conditionally moved inside a loop body (e.g. an
+        // `if`/`else` nested in a `while`, moving a field on only
+        // one arm) slipped through uncaught. That matters because
+        // the `if`/`else` checker's own per-field merge fix inserts
+        // a compensating single-field `Drop` into the non-moving arm
+        // to balance a ONE-TIME divergence -- but a loop re-executes
+        // that same generated code every iteration, so the
+        // compensating drop (or the move itself) fires repeatedly:
+        // once for real, then again on every later iteration that
+        // takes the OTHER arm, double-freeing the same field.
+        // Loop-carried per-field moves need the same "reject, don't
+        // try to reconcile" treatment as whole-variable ones.
+        if matches!(pre_info.ty, Type::Struct(_)) {
+            let cur_fields = current_env
+                .lookup(name)
+                .map(|i| i.moved_fields.clone())
+                .unwrap_or_default();
+            for field in pre_info.moved_fields.keys() {
+                if !cur_fields.contains_key(field) {
+                    diagnostics.push(Diagnostic::new(
+                        span,
+                        format!(
+                            "{}: '{}.{}' is in a different move state than at loop start; \
+                             consume or rebind it consistently before this point",
+                            context, name, field
+                        ),
+                    ).with_elaboration(crate::diagnostic_elaborations::move_in_loop(name)));
+                }
+            }
+            for field in cur_fields.keys() {
+                if !pre_info.moved_fields.contains_key(field) {
+                    diagnostics.push(Diagnostic::new(
+                        span,
+                        format!(
+                            "{}: '{}.{}' is in a different move state than at loop start; \
+                             consume or rebind it consistently before this point",
+                            context, name, field
+                        ),
+                    ).with_elaboration(crate::diagnostic_elaborations::move_in_loop(name)));
+                }
+            }
         }
     }
 }
@@ -13731,6 +13777,27 @@ fn check_one_stmt(
             // emitting a `Drop` in the branch that didn't consume the value
             // so both paths end with the binding moved.
             let mut merge_updates: Vec<(String, Option<Span>)> = Vec::new();
+            // BUG-150: the whole-variable reconciliation above only
+            // balances `info.moved` (the whole binding). A struct
+            // FIELD moved on only one branch (`let n = p.a;` inside
+            // `if` but not `else`) was never reconciled at all --
+            // `merged = pre_env.clone()` below silently reset
+            // `moved_fields` back to empty regardless of what either
+            // branch did, so the checker forgot the field was ever
+            // moved. The eventual real end-of-scope `Drop` of `p`
+            // then freed field `a` a second time (it was already
+            // freed once via the move + the callee's own drop of its
+            // by-value parameter) -- a genuine double-free, confirmed
+            // on both backends. Fixed the same way as the whole-
+            // variable case: a field moved on exactly one branch gets
+            // a compensating single-field `Drop` (via the SAME
+            // `moved_fields` skip-list mechanism `Drop` already uses
+            // for real end-of-scope drops -- skip every field except
+            // the one being compensated) inserted into the branch
+            // that didn't move it, so the field is freed exactly once
+            // regardless of which branch ran, and the merged env
+            // correctly remembers the field as moved either way.
+            let mut field_merge_updates: Vec<(String, BTreeMap<String, Span>)> = Vec::new();
             let pre_non_copy: Vec<(String, VarInfo)> = pre_env
                 .all_bindings()
                 .filter(|(_, info)| !info.ty.is_copy())
@@ -13776,11 +13843,103 @@ fn check_one_stmt(
                     }
                 };
                 merge_updates.push((name.clone(), final_moved));
+
+                // Field-level reconciliation only matters when the
+                // whole binding isn't already fully moved/dropped --
+                // if it is, `moved_fields` is moot (nothing will ever
+                // read it again; `emit_current_scope_drops` and
+                // friends all gate on `info.moved.is_none()` first).
+                if final_moved.is_none() {
+                    if let Type::Struct(struct_name) = &pre_info.ty {
+                        let then_fields: BTreeMap<String, Span> = match (then_terminated, then_env.lookup(name)) {
+                            (true, _) => BTreeMap::new(),
+                            (_, Some(info)) => info.moved_fields.clone(),
+                            _ => pre_info.moved_fields.clone(),
+                        };
+                        let else_fields: BTreeMap<String, Span> = match (else_terminated, else_env.lookup(name)) {
+                            (true, _) => BTreeMap::new(),
+                            (_, Some(info)) => info.moved_fields.clone(),
+                            _ => pre_info.moved_fields.clone(),
+                        };
+                        let merged_fields = match (then_terminated, else_terminated) {
+                            (true, true) => pre_info.moved_fields.clone(),
+                            (true, false) => else_fields.clone(),
+                            (false, true) => then_fields.clone(),
+                            (false, false) => {
+                                // A struct with a user-defined by-ref
+                                // `drop` runs that callback every time
+                                // a `Drop` stmt fires for it -- a
+                                // compensating PARTIAL drop here would
+                                // wrongly run the user's "whole object
+                                // is dying" cleanup while other fields
+                                // are still live. Leave this narrow
+                                // combination unreconciled for now
+                                // (known limitation, not silently
+                                // unsound: user-drop-by-ref structs are
+                                // rare, and this only under-fixes the
+                                // gap rather than introducing a new one).
+                                if crate::ast::user_drop_is_by_ref(struct_name) {
+                                    then_fields.clone()
+                                } else {
+                                    let only_then: Vec<String> = then_fields
+                                        .keys()
+                                        .filter(|f| !else_fields.contains_key(*f))
+                                        .cloned()
+                                        .collect();
+                                    let only_else: Vec<String> = else_fields
+                                        .keys()
+                                        .filter(|f| !then_fields.contains_key(*f))
+                                        .cloned()
+                                        .collect();
+                                    if !only_then.is_empty() || !only_else.is_empty() {
+                                        if let Some(decl) = env.lookup_struct(struct_name) {
+                                            let all_fields: Vec<String> =
+                                                decl.fields.iter().map(|(n, _)| n.clone()).collect();
+                                            for f in &only_then {
+                                                let skip: Vec<String> = all_fields
+                                                    .iter()
+                                                    .filter(|n| *n != f)
+                                                    .cloned()
+                                                    .collect();
+                                                else_stmts.push(TypedStmt::Drop {
+                                                    name: name.clone(),
+                                                    ty: pre_info.ty.clone(),
+                                                    moved_fields: skip,
+                                                });
+                                            }
+                                            for f in &only_else {
+                                                let skip: Vec<String> = all_fields
+                                                    .iter()
+                                                    .filter(|n| *n != f)
+                                                    .cloned()
+                                                    .collect();
+                                                then_stmts.push(TypedStmt::Drop {
+                                                    name: name.clone(),
+                                                    ty: pre_info.ty.clone(),
+                                                    moved_fields: skip,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    let mut m = then_fields.clone();
+                                    m.extend(else_fields.clone());
+                                    m
+                                }
+                            }
+                        };
+                        field_merge_updates.push((name.clone(), merged_fields));
+                    }
+                }
             }
             let mut merged = pre_env.clone();
             for (name, final_moved) in merge_updates {
                 if let Some(info) = merged.lookup_mut(&name) {
                     info.moved = final_moved;
+                }
+            }
+            for (name, fields) in field_merge_updates {
+                if let Some(info) = merged.lookup_mut(&name) {
+                    info.moved_fields = fields;
                 }
             }
             // Only invalidate constants for bindings either branch
@@ -21720,6 +21879,25 @@ fn check_ref_mut(
                         crate::diagnostic_elaborations::move_after_use(obj_name),
                     ),
                 );
+            } else if let Some(move_span) = info.moved_fields.get(field).copied() {
+                // BUG-151, mut-ref counterpart -- see the `ref
+                // t.field` fix above for the full explanation.
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "field '{}.{}' was moved; cannot mutably borrow after move",
+                            obj_name, field
+                        ),
+                    )
+                    .with_related(
+                        move_span,
+                        format!("'{}.{}' was moved here", obj_name, field),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(obj_name),
+                    ),
+                );
             }
             if info.ty.is_ref() {
                 diagnostics.push(
@@ -21906,6 +22084,32 @@ fn check_ref(
                             "cannot borrow field of '{}' after it was moved",
                             obj_name
                         ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(obj_name),
+                    ),
+                );
+            } else if let Some(move_span) = info.moved_fields.get(field).copied() {
+                // BUG-151: `ref t.field` never checked whether THIS
+                // field specifically had been moved out -- only the
+                // whole-binding `info.moved` above, which plain
+                // `FieldAccess` on the same field already correctly
+                // guards against (see the sibling check a few
+                // hundred lines up in this file). Without this, `ref
+                // p.a` after `let n = p.a;` silently returned a
+                // reference into an already-freed heap buffer instead
+                // of erroring like `p.a` (by value) already did.
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "field '{}.{}' was moved; cannot borrow after move",
+                            obj_name, field
+                        ),
+                    )
+                    .with_related(
+                        move_span,
+                        format!("'{}.{}' was moved here", obj_name, field),
                     )
                     .with_elaboration(
                         crate::diagnostic_elaborations::move_after_use(obj_name),
