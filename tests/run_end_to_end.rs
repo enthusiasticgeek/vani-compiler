@@ -13398,3 +13398,197 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-149 (2026-08-09): found via localfuzz (a mutated Iterator-pattern
+// tutorial example that off-by-one'd its cursor past a `[i64; 5]` array
+// field). Fixed-size array (`[T; N]`) indexing with a non-compile-time-
+// provable index had NO bounds check at all on tree-LLVM -- unlike Vec
+// indexing (checked since BUG-108) and unlike tree-C (which has always
+// bounds-checked `Type::Array` reads/writes). An out-of-bounds index
+// silently read/wrote garbage stack memory on LLVM while C correctly
+// trapped -- a genuine, general backend divergence covering plain
+// local arrays, struct-field arrays, and array writes alike.
+#[test]
+fn array_index_read_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug149-array-read-oob",
+        r#"
+fn get_idx() -> i64 { return 5; }
+fn main() -> i64 {
+  let data: [i64; 5] = [10, 20, 30, 40, 50];
+  let idx: i64 = get_idx();
+  let v: i64 = data[idx];
+  print v;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds array read should trap on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds array read should also trap cleanly on LLVM instead \
+         of silently reading garbage; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn array_field_index_read_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug149-array-field-read-oob",
+        r#"
+struct S { data: [i64; 5] }
+fn get_idx() -> i64 { return 5; }
+fn getit(s: ref S, idx: i64) -> i64 {
+  return s.data[idx];
+}
+fn main() -> i64 {
+  let s: S = S { data: [10, 20, 30, 40, 50] };
+  let idx: i64 = get_idx();
+  let v: i64 = getit(ref s, idx);
+  print v;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds struct-field array read should trap on C, got status \
+         {:?}, stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds struct-field array read should also trap cleanly on \
+         LLVM; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn array_index_write_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug149-array-write-oob",
+        r#"
+fn get_idx() -> i64 { return 5; }
+fn main() -> i64 {
+  let data: [i64; 5] = [10, 20, 30, 40, 50];
+  let idx: i64 = get_idx();
+  data[idx] = 99;
+  print data[0];
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds array write should trap on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds array write should also trap cleanly on LLVM instead \
+         of silently corrupting memory; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn array_index_in_bounds_still_works_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug149-array-in-bounds",
+        r#"
+fn get_idx() -> i64 { return 2; }
+fn main() -> i64 {
+  let data: [i64; 5] = [10, 20, 30, 40, 50];
+  let idx: i64 = get_idx();
+  data[idx] = 99;
+  print data[2];
+  print data[idx];
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "in-bounds array read/write should still run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "99\n99",
+            "wrong array read/write result ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

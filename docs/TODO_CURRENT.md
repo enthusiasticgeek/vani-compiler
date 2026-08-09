@@ -10555,3 +10555,105 @@ No code changes -- this pass's value was confirming the rest of the
 surface is safe rather than assuming it. `docs/BUG_PATTERN_AUDIT_TODO_4.md`
 category A is now fully closed; round 4 is done. A future session
 should pick a new audit theme.
+
+## BUG-149 (2026-08-09) -- fixed-size array indexing had NO bounds check at all on tree-LLVM
+
+Found via localfuzz (nightly refresh had silently stalled since
+2026-08-09T07:03 on a dirty `Cargo.lock` -- see below -- so this had
+been sitting untriaged in `docs/TODO_LOCAL_STAGING.md` for hours).
+Candidate `20260809-063729-backend-divergence-660f217404` mutated the
+Iterator-pattern tutorial's manual iterator to increment its cursor
+*before* reading (`self.cursor = self.cursor + 1; let v = self.data[self.cursor];`),
+walking one past a `[i64; 5]` struct field on the fifth call.
+
+Repro (minimized):
+```vani
+fn get_idx() -> i64 { return 5; }
+fn main() -> i64 {
+  let data: [i64; 5] = [10, 20, 30, 40, 50];
+  let idx: i64 = get_idx();
+  let v: i64 = data[idx];
+  print v;
+  return 0;
+}
+```
+- C: `index out of bounds: 5, len 5`, exit 134 (correct).
+- LLVM (before fix): printed a garbage stack value, exit 0 -- no trap
+  at all.
+
+Root cause: unlike `Vec<T>` indexing (bounds-checked via
+`@__intent_bounds_check` since BUG-108, on both the plain-`Var`-base
+and struct-`FieldAccess`-base arms), the sibling `Type::Array` arms in
+`backend_llvm.rs`'s `emit_expr`'s `Index` match and `IndexAssign`
+handling never called the check at all -- three separate call sites:
+plain-local array reads (`data[i]`, ~line 16874), struct-field array
+reads (`s.data[i]`, ~line 16927), and array writes (`data[i] = v`,
+~line 4665). Only caught for *provably* out-of-range constant indices
+(SMT rejects those at compile time on both backends identically);
+anything the SMT layer couldn't prove in-range at compile time fell
+through with zero runtime protection on LLVM specifically, while
+tree-C's matching `Type::Array` arm in `backend_c.rs`'s `emit_index`
+has always wrapped the index in `intent_check_bounds` unconditionally.
+This was a genuine, general C-vs-LLVM behavioral divergence, not a
+narrow gap in one builtin -- plain `xs[i]` reads, struct-field array
+reads, and array writes were all affected. `struct.array_field[i] = v`
+(writing into an array-typed struct field) turned out not to be valid
+syntax at all (parse error), so that specific write-side combination
+doesn't exist as reachable code -- confirmed empirically, not assumed.
+SSA backends don't apply here: `src/main.rs`'s `ssa_type_supported`
+already excludes `Type::Array` outright, routing any program
+containing one to the tree backends unconditionally.
+
+Fix: added `call void @__intent_bounds_check(i64 <idx>, i64 <length>)`
+before the GEP at all three sites in `backend_llvm.rs`, using the
+`Type::Array`'s compile-time `length` field as the bound (mirroring
+the Vec arms' runtime `.len` load, just simpler since array length is
+a constant). Verified: all three OOB shapes (plain-local read,
+struct-field read, plain-local write) now trap identically on both
+backends (C exit 134 with `"index out of bounds: N, len N"`, LLVM
+exit 3) instead of silently reading/corrupting stack memory. In-bounds
+read+write sanity check still returns/stores the correct values on
+both backends.
+
+Added 3 tests to `src/lib.rs`
+(`array_index_read_on_plain_local_emits_bounds_check_on_llvm`,
+`array_field_index_read_emits_bounds_check_on_llvm`,
+`array_index_write_emits_bounds_check_on_llvm`), each asserting the
+emitted LLVM IR contains the bounds-check call. Added 4 to
+`tests/run_end_to_end.rs`
+(`array_index_read_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_field_index_read_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_index_write_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_index_in_bounds_still_works_correctly_on_both_backends`), real
+subprocess runs on both backends.
+
+Full `cargo test --release` clean (0 failed). `vanic check examples`
+still shows exactly 78 errors, matching the established baseline
+(unrelated to codegen; `check` doesn't run codegen).
+
+**Separately**, this finding surfaced an unrelated infrastructure gap:
+the `vani-compiler-localfuzz` worktree's nightly refresh
+(`tools/localfuzz/refresh.sh`, timer-driven) aborted on 2026-08-09 at
+07:03 UTC because `Cargo.lock` had a harmless `0.9.1-dev` ->
+`0.9.2-dev` version-string diff from a prior build, tripping the
+script's dirty-worktree safety check (which already excludes
+`allowed_paths.conf`/`allowed_readonly_paths.conf` but not
+`Cargo.lock`). The harness kept fuzzing against a vanic binary that
+was missing everything landed on `main` since 2026-08-08 for the rest
+of the day -- including this session's own BUG-147/BUG-148 fixes --
+so every candidate logged 2026-08-09T04:00 onward through the refresh
+worktree's stale build needed re-verification against a freshly
+rebuilt binary before trusting any of them (per
+`feedback_vani_localfuzz_staleness`). Resolved by hand: `git checkout
+-- Cargo.lock` in the worktree, then `tools/localfuzz/refresh.sh` ran
+clean (merged 13 commits, rebuilt, restarted the harness). All of the
+day's untriaged candidates were re-run against the fresh build; 12 of
+13 reproduced identically on the fresh binary and were genuine non-bugs
+(mutation-stripped loop increments causing infinite loops, a
+double-lock-same-mutex deadlock matching real non-reentrant `Mutex`
+semantics, and an off-by-one loop bound correctly caught by the
+compiler's loop-bound-hoisting check) -- see
+`docs/TODO_LOCAL_STAGING.md` for the individual STATUS entries. The
+13th was this BUG-149 finding.
+
+Next free bug number is **BUG-150**.

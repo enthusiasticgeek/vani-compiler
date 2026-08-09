@@ -6785,6 +6785,81 @@ mod tests {
     }
 
     #[test]
+    fn array_index_read_on_plain_local_emits_bounds_check_on_llvm() {
+        // BUG-149: fixed-size array (`[T; N]`) reads on a plain
+        // `Var`-base local had NO bounds check at all on tree-LLVM
+        // -- unlike the sibling Vec arm right above it in
+        // backend_llvm.rs (checked since BUG-108), and unlike tree-C
+        // (backend_c.rs's `Type::Array` arm has always wrapped the
+        // index in `intent_check_bounds`). A non-compile-time-
+        // provable OOB index silently read past the array with no
+        // trap on LLVM while C correctly aborted -- a genuine
+        // backend divergence, found by localfuzz.
+        let source = r#"
+            fn get_idx() -> i64 { return 5; }
+            fn main() -> i64 {
+              let data: [i64; 5] = [10, 20, 30, 40, 50];
+              let idx: i64 = get_idx();
+              return data[idx];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected tree-LLVM array read to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn array_field_index_read_emits_bounds_check_on_llvm() {
+        // BUG-149, struct-field variant: `t.data[i]` where `data`
+        // is an array-typed struct field had the same missing
+        // check on the FieldAccess-base arm of the same match.
+        let source = r#"
+            struct S { data: [i64; 5] }
+            fn get_idx() -> i64 { return 5; }
+            fn getit(s: ref S, idx: i64) -> i64 {
+              return s.data[idx];
+            }
+            fn main() -> i64 {
+              let s: S = S { data: [10, 20, 30, 40, 50] };
+              let idx: i64 = get_idx();
+              return getit(ref s, idx);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected tree-LLVM struct-field array read to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn array_index_write_emits_bounds_check_on_llvm() {
+        // BUG-149, write side: `data[i] = v` on a fixed-size array
+        // had no bounds check either -- worse than the read-side
+        // gap since an OOB write silently corrupts adjacent
+        // stack/heap memory instead of just returning a bad value.
+        let source = r#"
+            fn get_idx() -> i64 { return 5; }
+            fn main() -> i64 {
+              let data: [i64; 5] = [10, 20, 30, 40, 50];
+              let idx: i64 = get_idx();
+              data[idx] = 99;
+              return data[0];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected tree-LLVM array write to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn match_returning_struct_via_arms_compiles() {
         // Match arms returning fresh struct literals
         // compose with field access on the result.
