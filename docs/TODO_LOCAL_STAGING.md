@@ -4437,3 +4437,12 @@ defect. Closing.**
 }
 ```
 
+
+---
+
+### Candidate: 20260809-192216-backend-divergence-77aaa194ce
+
+Repro: `tools/localfuzz/findings/20260809-192216-backend-divergence-77aaa194ce/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-192216-backend-divergence-77aaa194ce/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
