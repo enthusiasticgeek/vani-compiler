@@ -4239,3 +4239,31 @@ Fix attempt: `tools/localfuzz/findings/20260809-104210-run-crash-1fa5999c7c/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260809-123951-backend-divergence-e39031b262
+
+Repro: `tools/localfuzz/findings/20260809-123951-backend-divergence-e39031b262/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-123951-backend-divergence-e39031b262/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
