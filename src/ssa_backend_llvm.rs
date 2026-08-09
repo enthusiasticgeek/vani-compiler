@@ -3488,14 +3488,27 @@ fn emit_instr(
                         // matching helper is emitted into the
                         // module preamble; the rest aren't, so a
                         // wrong-script call wouldn't link.
-                        if let Some(s) = crate::backend_llvm::brahmi_suffix() {
-                            out.push_str(&format!(
-                                "  call void @intent_print_int_{}(i64 {})\n",
-                                s, widened
-                            ));
-                            return Ok(());
+                        //
+                        // BUG-152: only signed types route through
+                        // this dialect helper -- it formats via
+                        // `%lld` internally (signed decimal), so an
+                        // unsigned value with the high bit set
+                        // printed as negative. Unsigned types fall
+                        // straight to the `%llu` ASCII path below
+                        // instead (matches tree-C's convention,
+                        // which never routed unsigned types through
+                        // the dialect helper to begin with).
+                        if is_signed_int(&aty) {
+                            if let Some(s) = crate::backend_llvm::brahmi_suffix() {
+                                out.push_str(&format!(
+                                    "  call void @intent_print_int_{}(i64 {})\n",
+                                    s, widened
+                                ));
+                                return Ok(());
+                            }
                         }
-                        ("%lld", "i64".to_string(), widened)
+                        let fmt = if is_signed_int(&aty) { "%lld" } else { "%llu" };
+                        (fmt, "i64".to_string(), widened)
                     }
                 };
                 let n = STR_COUNTER.with(|c| {

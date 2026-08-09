@@ -1795,10 +1795,21 @@ fn emit_instr(
                 // ASCII; only integer width gets the dialect
                 // numerals (digit-by-digit mapping doesn't
                 // generalize cleanly to floats in v1).
-                if matches!(aty,
-                    Type::I8 | Type::I16 | Type::I32 | Type::I64
-                  | Type::U8 | Type::U16 | Type::U32 | Type::U64)
-                {
+                //
+                // BUG-152: unsigned types used to reach this
+                // branch too, casting through `(long long)` into
+                // `intent_print_int_<suffix>` -- a helper that
+                // formats via `%lld` internally. A u64 value with
+                // the high bit set (or a u8/u16/u32 whose
+                // zero-extended-to-i64 form still fit i64 fine, so
+                // that part was accidentally OK) printed as a
+                // negative number. Signed types alone can safely
+                // use this signed-only helper; unsigned types now
+                // fall straight through to the `%llu` ASCII path
+                // below instead (matches tree-C's existing
+                // convention, which never routed unsigned types
+                // through the dialect helper to begin with).
+                if matches!(aty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
                     // Phase 6 (2026-06-07): one suffix per script.
                     let suffix = match crate::lexer::current_print_lang_mode() {
                         crate::lexer::PrintLangMode::Devanagari => Some("dev"),
@@ -1828,11 +1839,13 @@ fn emit_instr(
                 let fmt = match aty {
                     Type::F32 | Type::F64 => "%g",
                     Type::Str | Type::OwnedStr => "%s",
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => "%llu",
                     _ => "%lld",
                 };
                 let cast = match aty {
                     Type::F32 | Type::F64 => "(double)",
                     Type::Str | Type::OwnedStr => "",
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => "(unsigned long long)",
                     _ => "(long long)",
                 };
                 writeln!(

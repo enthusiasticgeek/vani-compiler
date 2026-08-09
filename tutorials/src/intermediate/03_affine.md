@@ -247,6 +247,73 @@ fn main() -> i64 {
 > by value multiple times without a move error. The affine rule
 > only applies to heap-owning types.
 
+### Moving a struct field on only one branch of an `if`/`else`
+
+A field moved out on just one arm — while the other arm only reads
+it — is fine. The compiler tracks the field's move state through
+both arms and reconciles them: after the `if`/`else`, the field is
+correctly considered moved either way, and using it again is a
+compile error, not a runtime hazard:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+  if some_condition() {
+    let n: i64 = consume(p.a);   // moves p.a on this arm only
+    print n;
+  } else {
+    print len(ref p.b) as i64;   // p.a untouched here
+  }
+  print len(ref p.b) as i64;     // fine: b was never moved
+  return 0;
+}
+```
+
+Using `p.a` again after the merge — on either arm's outcome — is
+correctly rejected, the same "was moved" diagnostic as the plain
+whole-value case above.
+
+**The one place this pattern isn't allowed**: inside a loop body.
+Moving a field on only one path through a `while`/`for` body would
+mean the field's ownership state differs from one iteration to the
+next, which the loop-balance check already rejects for whole-value
+moves — and now rejects for field moves the same way:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1, 2, 3), b: vec(4, 5, 6) };
+  let i: i64 = 0;
+  while i < 3 {
+    if i == 1 {
+      let n: i64 = consume(p.a);   // moves p.a on some iterations only
+      print n;
+    } else {
+      print len(ref p.b) as i64;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+```
+
+```
+error: loop body changes the move state: 'p.a' is in a different move state
+than at loop start; consume or rebind it consistently before this point
+```
+
+**Fix**: move the field consistently on every path through the loop
+body, or move it out before the loop entirely.
+
 ---
 
 ## Challenge

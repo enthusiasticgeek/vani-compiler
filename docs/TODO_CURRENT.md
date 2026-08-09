@@ -10791,3 +10791,100 @@ sound but more restrictive than necessary), are both left as documented
 open threads for a future session, not silently unresolved gaps.
 
 Next free bug number is **BUG-152**.
+
+## BUG-152 (2026-08-09) -- print(u64) displayed large values as negative on SSA-C/SSA-LLVM (+ a latent tree-LLVM dialect-mode instance)
+
+Found while designing round 6's audit theme. After confirming round
+5's fix (BUG-150) composed correctly across nested if/else, `for`
+loops, tuple elements (not reachable), and closures (separately
+Drop-tracked, not affected), spot-checked a genuinely fresh area
+-- integer print/formatting -- and found a real, previously-
+undiscovered correctness bug on both SSA backends.
+
+Repro:
+```vani
+fn main() -> i64 {
+  let y: u64 = 18446744073709551615;  // u64::MAX
+  print y;
+  return 0;
+}
+```
+Printed `-1` instead of `18446744073709551615` on both SSA-C and
+SSA-LLVM (the default dispatch path for a program this simple).
+Confirmed the bug was isolated purely to print FORMATTING, not to
+u64 semantics generally: comparisons (`y > z`, `y > 5`) and arithmetic
+(`y - z`) on the same values were already correctly unsigned
+throughout on both backends.
+
+Root cause: `ssa_backend_c.rs`'s and `ssa_backend_llvm.rs`'s
+`intent_print_item` handling both hardcoded `%lld`/signed decimal
+formatting for every integer type reaching their fallback branch --
+neither ever special-cased unsigned types the way tree-C's
+`emit_print_expr_no_newline` already did (`Type::U8 | U16 | U32 | U64
+=> ... %llu ...`, correct since it was written). SSA-LLVM's fallback
+had ALREADY been partially fixed once before (a prior fix,
+referenced in its own comments, correctly zero-extends narrow
+unsigned types like u8/u16/u32 instead of sign-extending them) --
+but that fix only touched the VALUE's bit pattern, never the FORMAT
+STRING, so a narrow unsigned value still "accidentally" printed
+correctly (zero-extension can never set bit 63), while a native u64
+value >= 2^63 (no extension needed, passes straight through) still
+hit the same signed-format bug.
+
+While tracing this, found a second, narrower, LATENT instance:
+`intent_print_int_<suffix>` (the shared Devanagari/Bengali/Tamil/...
+dialect digit-translation helper, used by BOTH tree-LLVM and both SSA
+backends) formats via `%lld` internally on both the C and LLVM sides.
+Tree-C's unsigned-print branch never routed through this helper at
+all (unsigned values always print in plain ASCII, regardless of
+dialect -- a pre-existing, unrelated completeness gap, not touched
+here). Tree-LLVM's unsigned branch, by contrast, DID route through
+this signed-only helper whenever a dialect was active -- reachable,
+just needing a dialect pragma + a large u64 to trigger, a narrower
+combination than the main ASCII-mode bug.
+
+Fix, applied consistently across all three affected sites (no fix
+needed in tree-C, which was already correct):
+- `ssa_backend_c.rs`: unsigned types no longer route through the
+  dialect-suffix helper (only `I8|I16|I32|I64` do now); the fallback
+  `fmt`/`cast` selection gained a `U8|U16|U32|U64 => ("%llu",
+  "(unsigned long long)")` arm.
+- `ssa_backend_llvm.rs`: the dialect-suffix call is now gated on
+  `is_signed_int(&aty)`; the fallback format string is `%llu` for
+  unsigned types, `%lld` for signed (the zero-extension widening
+  logic from the prior fix is unchanged, still correct).
+- `backend_llvm.rs` (tree-LLVM): the unsigned-integer print branch no
+  longer attempts dialect-suffix dispatch at all -- always the plain
+  `@.fmt.llu` ASCII path, matching tree-C's existing convention
+  exactly (dialect digit translation only ever applies to signed
+  integer prints, consistently across all four codegen paths now).
+
+Verified: the repro prints correctly on all four codegen paths now
+(SSA-C, SSA-LLVM via default dispatch; tree-C, tree-LLVM via a
+`vec_remove_at`-forced non-SSA program). A dialect-mode sanity check
+(`// vani-lang: hindi`, printing both a signed i64 and a large u64)
+confirms signed dialect translation still works correctly (४२ for 42)
+while the large u64 correctly falls back to plain ASCII with the
+right value, on both backends. Swept every `.vani` example under
+`examples/language/{hindi,mandarin,tamil}/` at runtime on both
+backends afterward as an extra safety net (not just the two direct
+repros) -- one unrelated, pre-existing `assert` failure in
+`mandarin/iterate.vani` (identical on both backends, no mention of
+u64/print in that file -- confirmed unrelated, not a regression);
+everything else ran clean with matching output across backends.
+
+Added 5 regression tests: 3 to `src/lib.rs`
+(`ssa_c_prints_large_u64_unsigned`, `ssa_llvm_prints_large_u64_unsigned`,
+`tree_llvm_dialect_print_skips_broken_unsigned_helper`), 2 to
+`tests/run_end_to_end.rs`
+(`large_u64_prints_correctly_unsigned_on_both_backends`,
+`large_u64_prints_correctly_on_tree_backends_too`), the latter pair
+real subprocess runs on both backends via both dispatch paths.
+
+Full `cargo test --release` clean (0 failed). `vanic check examples`
+still shows exactly 78 errors, matching the established baseline
+(unrelated to codegen).
+
+This closes `docs/BUG_PATTERN_AUDIT_TODO_6.md` category A.
+
+Next free bug number is **BUG-153**.

@@ -13700,3 +13700,97 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-152 (2026-08-09): found while designing round 6's audit theme.
+// `print` on a `u64` value with the high bit set (>= 2^63) displayed
+// it as a signed negative number instead of its correct unsigned
+// decimal value, on the SSA-C and SSA-LLVM backends (the default
+// dispatch path for simple programs) -- e.g. u64::MAX printed as
+// `-1`. Arithmetic and comparisons on the same values were already
+// correctly unsigned throughout; the bug was isolated purely to
+// decimal-string formatting at the print call site. Tree-C was
+// already correct; tree-LLVM's dialect (Devanagari/...) print path
+// had the same latent bug for large unsigned values, fixed alongside.
+#[test]
+fn large_u64_prints_correctly_unsigned_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug152-u64-print",
+        r#"
+fn main() -> i64 {
+  let y: u64 = 18446744073709551615;
+  let z: u64 = 10000000000000000000;
+  print y;
+  print z;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "printing a large u64 should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "18446744073709551615\n10000000000000000000",
+            "u64 printed as a signed/negative value instead of unsigned ({args:?}), \
+             got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn large_u64_prints_correctly_on_tree_backends_too() {
+    // Same repro, but forced onto the TREE backends (vec_remove_at
+    // is excluded from SSA dispatch) -- tree-C was already correct;
+    // this locks that in and exercises tree-LLVM's now-fixed
+    // unsigned print branch on the same non-SSA dispatch path.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug152-u64-print-tree",
+        r#"
+fn main() -> i64 {
+  let y: u64 = 18446744073709551615;
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: i64 = vec_remove_at(mut ref xs, 0);
+  print r;
+  print y;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "printing a large u64 on the tree backends should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1\n18446744073709551615",
+            "wrong output on tree backends ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
