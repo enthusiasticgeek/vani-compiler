@@ -3937,3 +3937,31 @@ Repro: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-011704-backend-divergence-ab0a0218fa
+
+Repro: `tools/localfuzz/findings/20260809-011704-backend-divergence-ab0a0218fa/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-011704-backend-divergence-ab0a0218fa/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "0\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 139,
+    "stdout": "",
+    "stderr": "PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.\nStack dump:\n0.\tProgram arguments: lli -load=/usr/lib/x86_64-linux-gnu/libgomp.so.1 -load=/tmp/vanic-sortlib-2484025-1786238223039706646.so -load=/tmp/vanic-parlib-2484025-1786238224312504087.so /tmp/vanic-candidate-2484025-1786238223039620720.ll\n #0 0x00007f75fabf36ba llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) (/usr/lib/llvm-19/bin/../lib/libLLVM.so.19.1+0xeb06ba)\n #1 0x00007f75fabf1264 llvm::sys::RunSignalHandlers() (/usr/lib/llvm-19/bin/../lib/libLLVM.so.19.1+0xeae264)\n #2 0x00007f75fabf3d7b (/usr/lib/llvm-19/bin/../lib/libLLVM.so.19.1+0xeb0d7b)\n #3 0x00007f75f97e0df0 (/lib/x86_64-linux-gnu/libc.so.6+0x3fdf0)\n #4 0x00007f75f9903b49 __memcpy_avx_unaligned_erms ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:265:0\n #5 0x00007f75f9d33c87 \n #6 0x00007f75f9d3551e \n #7 0x00007f75f9d355ba \n #8 0x00007f75fca1396e llvm::orc::runAsMain(int (*)(int, char**), llvm::ArrayRef<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, std::optional<llvm::StringRef>) (/usr/lib/llvm-19/bin/../lib/libLLVM.so.19.1+0x2cd096e)\n #9 0x000055b060e4a892 runOrcJIT(char const*) (/usr/lib/llvm-19/bin/lli+0x18892)\n#10 0x000055b060e45bac main (/usr/lib/llvm-19/bin/lli+0x13bac)\n#11 0x00007f75f97caca8 __libc_start_call_main ./csu/../sysdeps/nptl/libc_start_call_main.h:74:3\n#12 0x00007f75f97cad65 call_init ./csu/../csu/libc-start.c:128:20\n#13 0x00007f75f97cad65 __libc_start_main ./csu/../csu/libc-start.c:347:5\n#14 0x000055b060e429c1 _start (/usr/lib/llvm-19/bin/lli+0x109c1)\n",
+    "timed_out": false
+  }
+}
+```
+
