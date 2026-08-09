@@ -4183,3 +4183,31 @@ Fix attempt: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e
 }
 ```
 
+
+---
+
+### Candidate: 20260809-095157-run-crash-a4ac5df327
+
+Repro: `tools/localfuzz/findings/20260809-095157-run-crash-a4ac5df327/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-095157-run-crash-a4ac5df327/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
