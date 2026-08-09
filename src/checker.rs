@@ -10903,6 +10903,12 @@ fn dyn_src_synth_name() -> String {
     format!("__dyn_src_{}", DYN_SRC_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+fn owned_str_coerce_synth_name() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static OWNED_STR_COERCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("__owned_str_coerce_{}", OWNED_STR_COERCE_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
 fn fresh_loop_val_name() -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static LOOP_VAL_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -12910,13 +12916,104 @@ fn check_one_stmt(
                     elaborated
                 } else {
                     let raw = check_expr(expr, env, signatures, diagnostics);
-                    coerce_checked(
-                        raw,
-                        annotation,
-                        expr.span,
-                        "let initializer",
-                        diagnostics,
-                    )
+                    // BUG-157 (2026-08-09): `can_assign`'s
+                    // `OwnedStr -> Str` auto-borrow assumes an
+                    // already-live OwnedStr binding is doing the
+                    // owning ("the OwnedStr binding stays live; its
+                    // drop fires at the original scope's end") --
+                    // true for `let label: Str = some_owned_var;`
+                    // (confirmed leak-free: `some_owned_var` keeps
+                    // its own scope-exit Drop), false when the RHS
+                    // is a fresh, never-bound OwnedStr-producing
+                    // expression like `let label: Str =
+                    // i64_to_str(42);` -- nothing ever owns THAT
+                    // allocation, so it leaks (found via a
+                    // corpus-wide ASan/LeakSanitizer sweep, round
+                    // 8; confirmed general, not async-specific).
+                    // Fix: synthesize a real sibling `let` for the
+                    // OwnedStr result, registered in `env` exactly
+                    // like an ordinary binding so it gets a real
+                    // scope-exit Drop through the normal machinery,
+                    // then bind `name` to a `Str` view of that
+                    // temp. `coerce_checked`'s own generic fallback
+                    // can't do this itself -- it has no access to
+                    // `body`/`env` to introduce a sibling
+                    // statement, only to a single expression slot --
+                    // so this has to happen here, at the one call
+                    // site that owns both. Only fires when the RHS
+                    // isn't already a `Var`; an existing binding
+                    // already owns its allocation correctly, and
+                    // wrapping it here would just add a needless
+                    // extra temp.
+                    //
+                    // EXCLUDED for `__poll_*` functions (the v3.1
+                    // async state-machine transform's output,
+                    // `parser.rs`'s `try_v31_transform`, which runs
+                    // at PARSE time -- well before this checker
+                    // pass ever sees the body). That transform
+                    // hoists the user's own named `let`s it knows
+                    // about into a persistent per-coroutine state
+                    // struct so their values survive across
+                    // separate `poll()` calls (separate C function
+                    // invocations); a synthetic temp introduced
+                    // HERE, after the transform already ran, is
+                    // invisible to that hoisting pass and stays an
+                    // ordinary per-call local instead -- freed at
+                    // the end of THIS `poll()` call while `label`'s
+                    // pointer (correctly hoisted) is read on a
+                    // LATER call. Confirmed by direct testing: this
+                    // turns the original leak into a heap-use-
+                    // after-free on both round-8 flagged async
+                    // examples (`echo_p3_locals_stress.vani`,
+                    // `echo_p3b_str_local.vani`) -- strictly worse
+                    // than the leak it replaces. Async/coroutine
+                    // bodies keep the original (leaky but safe)
+                    // fallback until the async transform itself
+                    // learns to hoist checker-synthesized temps.
+                    if matches!(raw.ty(), Type::OwnedStr)
+                        && matches!(annotation, Type::Str)
+                        && !matches!(raw.expr.kind, TypedExprKind::Var(_))
+                        && !function.name.starts_with("__poll_")
+                    {
+                        let synth = owned_str_coerce_synth_name();
+                        let synth_span = raw.expr.span;
+                        body.push(TypedStmt::Let {
+                            name: synth.clone(),
+                            ty: Type::OwnedStr,
+                            expr: raw.expr,
+                        });
+                        env.insert_current(
+                            synth.clone(),
+                            VarInfo {
+                                ty: Type::OwnedStr,
+                                constant: None,
+                                moved: None,
+                                decl_span: synth_span,
+                                vec_literal_elements: None,
+                                array_version: 0,
+                                guarded_mutex: None,
+                                no_drop: false,
+                                is_const: false,
+                                struct_literal_fields: None,
+                                moved_fields: std::collections::BTreeMap::new(),
+                                ref_aliases: Vec::new(),
+                            },
+                        );
+                        CheckedExpr::new(
+                            TypedExprKind::Var(synth),
+                            Type::Str,
+                            None,
+                            synth_span,
+                        )
+                    } else {
+                        coerce_checked(
+                            raw,
+                            annotation,
+                            expr.span,
+                            "let initializer",
+                            diagnostics,
+                        )
+                    }
                 }
             } else {
                 check_expr(expr, env, signatures, diagnostics)

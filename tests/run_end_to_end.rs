@@ -13975,3 +13975,47 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn fresh_owned_str_narrowed_to_str_runs_correctly_on_both_backends() {
+    // BUG-157 (2026-08-09): `let label: Str = i64_to_str(42);` --
+    // narrowing a fresh, never-bound OwnedStr call result straight to
+    // a Str-typed let -- used to leak the OwnedStr allocation (found
+    // via a corpus-wide ASan/LeakSanitizer sweep). The fix
+    // synthesizes a real sibling `let` for the OwnedStr result so it
+    // gets a genuine scope-exit Drop; this test just confirms the
+    // program still runs and prints correctly on both backends.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug157-owned-str-narrow-to-str",
+        r#"
+fn main() -> i64 {
+  let label: Str = i64_to_str(42);
+  print label;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "fresh OwnedStr narrowed to Str should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

@@ -10646,6 +10646,98 @@ mod tests {
     }
 
     #[test]
+    fn fresh_owned_str_narrowed_to_str_gets_a_real_owning_temp() {
+        // BUG-157 (2026-08-09): `can_assign`'s `OwnedStr -> Str`
+        // auto-borrow assumes an already-live OwnedStr binding does
+        // the owning ("its drop fires at the original scope's
+        // end") -- true for `let label: Str = some_owned_var;`
+        // (the RHS is a `Var`; that binding keeps its own
+        // scope-exit Drop, confirmed leak-free separately), but
+        // false when the RHS is a fresh, never-bound
+        // OwnedStr-producing expression like `i64_to_str(42)`:
+        // nothing ever owned that allocation, so it leaked --
+        // found general-purpose (not async-specific) via a
+        // corpus-wide ASan/LeakSanitizer sweep (round 8). Fix:
+        // synthesize a real sibling `let` for the OwnedStr result
+        // so it gets a real scope-exit Drop, then bind the
+        // original name to a `Str` view of that temp.
+        let source = r#"
+            fn main() -> i64 {
+              let label: Str = i64_to_str(42);
+              print label;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("__owned_str_coerce_") && c.contains("free((void*)v___owned_str_coerce_"),
+            "expected a synthetic OwnedStr temp with its own free:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn async_poll_owned_str_narrowing_keeps_original_leaky_but_safe_form() {
+        // BUG-157 follow-up: the general fix above is deliberately
+        // EXCLUDED for `__poll_*` functions (the v3.1 async
+        // state-machine transform's output, `parser.rs`'s
+        // `try_v31_transform`, which runs at PARSE time -- before
+        // this checker pass ever sees the body). That transform
+        // hoists the user's own named `let`s into a persistent
+        // per-coroutine state struct so values survive across
+        // separate `poll()` calls; a synthetic temp introduced
+        // AFTER the transform ran is invisible to that hoisting
+        // pass and gets freed at the end of the CURRENT `poll()`
+        // call while the hoisted `Str` view is read on a LATER
+        // call -- confirmed via direct ASan testing to turn the
+        // original leak into a heap-use-after-free. Assert the
+        // synthetic-temp rewrite does NOT fire inside a `__poll_`
+        // function, so async bodies keep the original (leaky but
+        // safe) codegen until the async transform itself learns to
+        // hoist checker-synthesized temps.
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: Str = i64_to_str(mode);
+              let n: i64 = match label {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+              while true {
+                let r: i64 = __poll_pick(t);
+                if r != 0 - 2 { return r; }
+                let _ = epoll_wait_one(ep, 1000);
+              }
+              return 0;
+            }
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let server: i64 = tcp_listen(0);
+              let cfd: i64 = tcp_accept(server);
+              let _ = tcp_set_nonblocking(cfd);
+              let _ = epoll_add_read(ep, cfd);
+              let t0: Task__pick = pick(cfd, 1);
+              let r0: i64 = drive(ep, mut ref t0);
+              print "mode=1:", r0;
+              let _ = tcp_close(cfd);
+              let _ = tcp_close(server);
+              let _ = epoll_close(ep);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            !c.contains("__owned_str_coerce_"),
+            "the OwnedStr->Str synthetic-temp rewrite must not fire inside a __poll_ function \
+             (it would free the buffer at the wrong scope and cause a use-after-free):\n{}",
+            c
+        );
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`

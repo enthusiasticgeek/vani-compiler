@@ -11180,17 +11180,60 @@ incidentally masked by BUG-156's fix.
 This closes the first of round 8's two documented open leaks. The
 second was re-investigated the same day and turns out NOT to be
 async-specific at all -- a plain `let label: Str = i64_to_str(42);`
-with no async/await/coroutine anywhere leaks identically. Root cause:
-`coerce_checked`'s final fallback (`cast_expr`, checker.rs ~line
-35944) silently relabels a fresh `OwnedStr` as `Str` when narrowing,
-with no code generated to track or free the original allocation.
-Deliberately NOT fixed yet -- both candidate fixes (reject the
-coercion at compile time, which is a breaking change for existing
-example programs; or materialize a hidden drop-tracked temp, which
-touches a pervasive coercion path and risks a worse UAF/double-free
-bug if the hidden temp's lifetime is scoped wrong) need more care than
-this session's time budget allows. Full writeup, minimal repro, and
-both candidate fix shapes are in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
-"Confirmed, unfixed leak" section.
+with no async/await/coroutine anywhere leaks identically.
 
-Next free bug number is **BUG-157**.
+## BUG-157 (2026-08-09) -- fresh `OwnedStr` narrowed straight to `Str` leaked; general, not async-specific
+
+Root cause: `can_assign`'s `OwnedStr -> Str` auto-borrow comment
+says "the OwnedStr binding stays live; its drop fires at the original
+scope's end" -- true for `let label: Str = some_owned_var;` (the RHS
+is a `Var`; that binding keeps its own scope-exit Drop), but false
+when the RHS is a fresh, never-bound `OwnedStr`-producing expression
+like `i64_to_str(42)`: nothing ever owned that allocation, so
+`coerce_checked`'s generic `cast_expr` fallback just relabeled it as
+`Str` with no free anywhere.
+
+Fix: at the one `Stmt::Let` call site in `checker.rs` that has access
+to both the output statement list and `env` (`coerce_checked` itself
+has neither, so it can't do this), detect `OwnedStr -> Str` narrowing
+of a non-`Var` RHS and synthesize a real sibling `let` for the
+`OwnedStr` result -- registered in `env` exactly like an ordinary
+binding, so it gets a genuine scope-exit Drop through the normal
+machinery -- then bind the original name to a `Str` view of that
+temp. Exactly mirrors the already-correct two-`let` form a user could
+write by hand.
+
+**Near-miss worth recording**: the first version of this fix applied
+unconditionally and turned the leak into a heap-use-after-free inside
+async `__poll_*` functions (confirmed via direct ASan testing on both
+round-8-flagged examples). Root cause: `parser.rs`'s `try_v31_transform`
+(the async state-machine desugar) runs at PARSE time, before the
+checker ever sees the body, and hoists the user's own named `let`s it
+recognizes into a persistent per-coroutine state struct so their
+values survive across separate `poll()` calls (separate C function
+invocations). A synthetic temp introduced by the checker AFTER that
+transform already ran is invisible to its hoisting pass and stays an
+ordinary per-call local -- freed at the end of THIS `poll()` call,
+while the `Str` view (correctly hoisted) gets read on a LATER call
+after the buffer is gone. The fix now explicitly excludes any
+function whose name starts with `__poll_`, so async/coroutine bodies
+keep the original (leaky but safe) codegen; a real fix there needs
+the async transform itself to learn about checker-synthesized temps,
+which is out of scope here. This is exactly the risk this fix was
+flagged for before attempting it -- worth remembering next time a fix
+touches a pervasive coercion path: test the async/coroutine corpus
+specifically, not just the common case, before calling it done.
+
+2 regression tests added to `src/lib.rs`
+(`fresh_owned_str_narrowed_to_str_gets_a_real_owning_temp` asserts the
+synthetic temp + its free appear in the C output;
+`async_poll_owned_str_narrowing_keeps_original_leaky_but_safe_form`
+asserts the rewrite does NOT fire inside a `__poll_` function), 1 to
+`tests/run_end_to_end.rs`
+(`fresh_owned_str_narrowed_to_str_runs_correctly_on_both_backends`,
+real-subprocess, both backends). Full `cargo test --release` clean
+(3380 lines, 13/13 test-binary results ok, 0 FAILED). Corpus-wide
+ASan/LeakSanitizer sweep re-run after the fix to confirm no other
+regressions -- see `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+Next free bug number is **BUG-158**.
