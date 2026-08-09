@@ -1,10 +1,10 @@
 # vāṇी — Bug-pattern audit, round 8
 
-**STATUS (2026-08-09): 2 real bugs FIXED (BUG-153, BUG-154 -- the
-latter general and severe). 6 more findings triaged: 2 false
-positives of the sweep's own methodology, 2 low-severity UB findings,
-2 confirmed-but-unfixed leaks left as documented open leads for a
-future session.**
+**STATUS (2026-08-09): 4 real bugs FIXED (BUG-153, BUG-154 -- the
+latter general and severe -- plus BUG-155/156, fixed in a same-day
+follow-up session at direct request). 1 confirmed-but-unfixed leak
+cluster remains open; 2 false positives and 2 low-severity UB
+findings triaged, not fixed (see below for why).**
 
 Directly requested: "pick a round-8 theme... my worry is always
 memory and leaks - this is absolutely uncompromised requirement for
@@ -142,39 +142,42 @@ examples` unchanged at the 78-error baseline. Full writeup in
   undone this round given the two real, higher-severity bugs already
   found and fixed ate the round's time budget.
 
+## Fixed in a same-day follow-up (BUG-155 + BUG-156)
+
+**Closure returned from a factory function leaks its env struct** --
+fixed. Turned out to be TWO bugs, not one:
+```vani
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+  let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+  return g;
+}
+fn main() -> i64 {
+  let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+  say_hi(5);
+  return 0;
+}
+```
+BUG-155: `say_hi` (bound via a function call, not a direct closure
+literal) was never registered in `CLOSURE_AFF_REGISTRY` at all --
+fixed with a new `FN_RETURN_VAR_NAME` registry, populated once
+program-wide right after `lambda_lift_program`, propagating a
+callee's own affine-closure registration to the caller's binding.
+BUG-156, found while verifying BUG-155's fix didn't actually stop the
+leak: an EVEN MORE GENERAL gap underneath -- `say_hi(5);` (a
+discarded call, no `let`) never freed the env struct at the call site
+AT ALL, for ANY affine closure regardless of provenance (confirmed
+with a minimal repro: a closure constructed directly in `main`, never
+returned from anywhere, called once, leaked identically).
+`TypedStmt::Discard`'s C emission had no handling for calling an
+affine closure -- that logic only ever existed in `TypedStmt::Let`'s
+emission (`let r = f(args);`). Fixed by adding the missing intercept
+to Discard's emission too. LLVM confirmed unaffected by either gap
+(valgrind clean, no LLVM changes needed). Full writeup in
+`docs/TODO_CURRENT.md`'s BUG-155/156 section; 4 regression tests
+added, verified via ASan + valgrind on both backends.
+
 ## Confirmed, unfixed leaks (open leads for a future session)
 
-- **Closure returned from a factory function leaks its env struct**
-  (8 bytes, confirmed via LeakSanitizer):
-  ```vani
-  fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
-    let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
-    return g;
-  }
-  fn main() -> i64 {
-    let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
-    say_hi(5);
-    return 0;
-  }
-  ```
-  The closure's captured `OwnedStr` IS correctly freed (by the
-  closure's own call implementation, matching the documented FnOnce-
-  style guard-and-free-on-call pattern) -- what leaks is the heap-
-  allocated ENV STRUCT itself (the `malloc`'d container holding the
-  captured field), which never gets freed because `say_hi` -- bound
-  via a function CALL returning a closure, not a direct `let g =
-  fn(...) {...};` literal in the current scope -- never appears to
-  get registered in `CLOSURE_AFF_REGISTRY` the way a directly-
-  constructed closure literal does. Root-caused to roughly this level
-  by reading the generated C directly; NOT fixed, since properly
-  extending the registry to cover call-returned closures without
-  breaking the existing (already fairly delicate) FnOnce free-guard
-  logic needs more investigation than remaining time allowed. Start
-  here: find where `CLOSURE_AFF_REGISTRY` gets populated in
-  `checker.rs` and check whether it's keyed by "a closure literal was
-  directly constructed in this exact binding" vs. something that
-  would also cover "this binding's type is an affine closure,
-  regardless of how the value arrived."
 - **Four leaks sharing one likely root cause, all through
   `intent_i64_to_str`** inside async-generated `fn___poll_*`
   functions: `examples/language/english/echo_p3_locals_stress.vani`,

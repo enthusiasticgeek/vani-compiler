@@ -775,6 +775,25 @@ fn check_impl(
     // in the next closure under Level 3).
     lambda_lift_program(&mut program);
 
+    // BUG-155 (2026-08-09): record, for every function, which local
+    // variable (if any) its body returns directly as a bare `Var`
+    // that `lambda_lift_program` just registered as an affine
+    // closure. Must run here -- right after the lift, before any
+    // function body is type-checked -- so a CALLER function checked
+    // before its CALLEE (source order doesn't guarantee producers
+    // are checked before consumers) can still find the callee's
+    // affine-closure info via `FN_RETURN_VAR_NAME` +
+    // `CLOSURE_AFF_REGISTRY`, both fully populated for the whole
+    // program by this point. See `FN_RETURN_VAR_NAME`'s doc comment
+    // in ast.rs for the full leak this closes.
+    for function in &program.functions {
+        if let Some(returned_name) = find_returned_affine_closure_var(&function.body) {
+            crate::ast::FN_RETURN_VAR_NAME.with(|r| {
+                r.borrow_mut().insert(function.name.clone(), returned_name);
+            });
+        }
+    }
+
     // Closure #318: auto-fuse adjacent `let m = xs.map(f);
     // let t = m.fold(init, g);` patterns into a single
     // `vec_map_fold(ref xs, init, f, g)` call when `m` has
@@ -2263,6 +2282,44 @@ fn validate_main(
 ///   enforcement layer lands in a follow-up commit; this
 ///   first cut establishes the name-flow infrastructure.
 /// - Cross-module impl orphan rules unchecked in v1.
+/// BUG-155: does this statement list contain a `return <var>;`
+/// (at the top level, or one `if`/`else` level deep -- the common
+/// factory-function shapes) where `<var>` is a local binding
+/// `lambda_lift_program` already registered as an affine closure?
+/// Returns the first such variable name found. Deliberately doesn't
+/// chase every possible nesting (`while`/`for`/`match` bodies,
+/// deeper `if` nesting) -- a narrower, safer fix than a fully
+/// general control-flow walk; see `FN_RETURN_VAR_NAME`'s doc comment
+/// in ast.rs for why this is safe to under-detect (a missed case
+/// just leaves the existing leak in place, not a new bug) but must
+/// not over-detect (never fabricate a name that isn't a real,
+/// registered affine closure).
+fn find_returned_affine_closure_var(stmts: &[Stmt]) -> Option<String> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Return { expr, .. } => {
+                if let ExprKind::Var(name) = &expr.kind {
+                    let is_affine = crate::ast::CLOSURE_AFF_REGISTRY
+                        .with(|r| r.borrow().contains_key(name.as_str()));
+                    if is_affine {
+                        return Some(name.clone());
+                    }
+                }
+            }
+            Stmt::If { then_body, else_body, .. } => {
+                if let Some(name) = find_returned_affine_closure_var(then_body) {
+                    return Some(name);
+                }
+                if let Some(name) = find_returned_affine_closure_var(else_body) {
+                    return Some(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Closure #308 â€” lambda-lift anonymous fn expressions.
 ///
 /// Walks each top-level function's body / requires / ensures
@@ -12884,6 +12941,35 @@ fn check_one_stmt(
             }
 
             consume_if_moved_var(expr, &checked, env);
+
+            // BUG-155: `let x = some_fn(...);` where `some_fn` returns
+            // an affine closure (a closure literal with non-Copy
+            // captures, constructed and returned from INSIDE
+            // `some_fn`'s own body) needs `x` registered in
+            // `CLOSURE_AFF_REGISTRY` too, under the same env-struct-
+            // name/fields `some_fn`'s own returned variable carries --
+            // otherwise `x`'s scope-exit Drop never frees the env
+            // struct (confirmed leak via a systematic ASan sweep).
+            // `FN_RETURN_VAR_NAME` was fully populated for the whole
+            // program before any function body was checked, so this
+            // works regardless of whether `some_fn` happens to be
+            // checked before or after the current function.
+            if matches!(checked.ty(), Type::Closure(_, _)) {
+                if let TypedExprKind::Call { name: callee_name, .. } = &checked.expr.kind {
+                    let returned_var = crate::ast::FN_RETURN_VAR_NAME
+                        .with(|r| r.borrow().get(callee_name).cloned());
+                    if let Some(returned_var) = returned_var {
+                        let aff_info = crate::ast::CLOSURE_AFF_REGISTRY
+                            .with(|r| r.borrow().get(&returned_var).cloned());
+                        if let Some(aff_info) = aff_info {
+                            crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                                r.borrow_mut().insert(name.clone(), aff_info);
+                            });
+                        }
+                    }
+                }
+            }
+
             // After the conservative move marks all branch
             // Vars as moved, rewrite the typed expr to drop
             // the unchosen branches' Vars inline so the heap

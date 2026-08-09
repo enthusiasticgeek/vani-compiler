@@ -13890,3 +13890,88 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-155/BUG-156 (2026-08-09): found while fixing round 8's two
+// documented open leaks. As with BUG-153/154, only exit status +
+// stdout are checked here (a leak doesn't crash a plain `run`) --
+// the actual leak verification was ASan/LeakSanitizer on native C
+// builds and valgrind on native LLVM AOT builds; see
+// docs/TODO_CURRENT.md's BUG-155/156 section for that output.
+#[test]
+fn closure_returned_from_factory_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug155-closure-factory",
+        r#"
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+  let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+  return g;
+}
+fn main() -> i64 {
+  let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+  say_hi(5);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "closure returned from a factory function should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "hello, alice 5",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn directly_called_closure_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug156-closure-direct-call",
+        r#"
+fn main() -> i64 {
+  let name: OwnedStr = "bob" + "";
+  let g = fn(x: i64) -> i64 { print "hi,", name, x; return 0; };
+  g(1);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "directly-called closure should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "hi, bob 1",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

@@ -14407,7 +14407,48 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 // drop.
             }
         },
-        TypedStmt::Discard { expr } => match &expr.ty {
+        TypedStmt::Discard { expr } => {
+            // BUG-156 (2026-08-09): `f(args);` (a discarded call,
+            // no `let` binding) to an affine closure never freed
+            // its env struct -- the "save env, null it, call, free
+            // env" sequence a few lines up (the `TypedStmt::Let`
+            // emission path, for `let r = f(args);`) was never
+            // mirrored here for the bare-statement-call shape.
+            // Confirmed a real leak via a systematic ASan sweep
+            // (round 8): `say_hi(5);` where `say_hi` is a factory-
+            // returned affine closure leaked its 8-byte env struct
+            // on every call, since `expr.ty` here is the CALL'S
+            // RETURN type (whatever the closure itself returns),
+            // not `Type::Closure(..)` -- the type-dispatch match
+            // below can't see the callee's own closure-ness at all,
+            // so this needs to intercept before it, on `expr.kind`
+            // instead of `expr.ty`.
+            if let TypedExprKind::CallIndirect { callee, args: call_args } = &expr.kind {
+                if let TypedExprKind::Var(callee_name) = &callee.kind {
+                    if matches!(callee.ty, Type::Closure(_, _)) {
+                        let is_aff = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                            r.borrow().contains_key(callee_name.as_str())
+                        });
+                        if is_aff {
+                            let cv = local_name(callee_name);
+                            let arg_strs: Vec<String> = call_args.iter().map(emit_expr).collect();
+                            let mut all_args: Vec<String> =
+                                vec!["__env_sv_discard".to_string()];
+                            all_args.extend(arg_strs);
+                            out.push_str(&format!(
+                                "  {{\n    uint64_t __env_sv_discard = {cv}.env;\n\
+                                 \x20   {cv}.env = 0;\n\
+                                 \x20   (void)({cv}.call({args}));\n\
+                                 \x20   free((void*)(uintptr_t)__env_sv_discard);\n  }}\n",
+                                cv = cv,
+                                args = all_args.join(", "),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+            match &expr.ty {
                 // BUG found auditing tutorials/src/advanced/05_simd.md
                 // (2026-08-01): simd_store/simd256_store/simd512_store
                 // mutate the target Vec THROUGH its ref/pointer and
@@ -14605,7 +14646,8 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&emit_expr(expr));
                 out.push_str(");\n");
             }
-        },
+            }
+        }
         TypedStmt::Return { expr } => {
             // Closure #239: when returning an array-typed
             // value, wrap it in the per-shape struct wrapper.

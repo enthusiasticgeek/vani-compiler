@@ -296,6 +296,28 @@ thread_local! {
     ///   3. Emit env-save + free after each indirect call.
     pub(crate) static CLOSURE_AFF_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, Vec<(String, Type)>)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// BUG-155 (2026-08-09): `CLOSURE_AFF_REGISTRY` is keyed by the
+    /// LOCAL binding name a closure literal was directly constructed
+    /// at (populated by `lambda_lift_program`, which runs once, over
+    /// the whole program, before any function body is type-checked).
+    /// A closure that ESCAPES via a function's return value and gets
+    /// bound to a DIFFERENT name in the caller (`let say_hi =
+    /// make_greeter(...);`) was never registered under `say_hi` at
+    /// all, so its heap-allocated env struct leaked at the caller's
+    /// scope exit -- confirmed via a systematic ASan/LeakSanitizer
+    /// sweep (round 8). This registry closes that gap: function name
+    /// -> the name of the affine-closure-registered LOCAL variable
+    /// its body returns (when it returns one directly as a bare
+    /// `Var`). Populated once, right after `lambda_lift_program`
+    /// (so every function's own closure literals are already
+    /// registered in `CLOSURE_AFF_REGISTRY` by the time this runs --
+    /// no ordering dependence on which function gets type-checked
+    /// first). Consulted when checking `let x = some_fn(...);` where
+    /// `some_fn`'s return type is `Closure(..)`, to also register
+    /// `x` in `CLOSURE_AFF_REGISTRY` under the SAME env-struct-name/
+    /// fields as whatever `some_fn` itself returns.
+    pub(crate) static FN_RETURN_VAR_NAME: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// L5: set of env struct names whose closure binding has non-Copy
     /// captures. The C constructor checks this to choose malloc vs
     /// static __thread allocation.

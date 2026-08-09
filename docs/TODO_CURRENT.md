@@ -11086,3 +11086,99 @@ Full triage in `docs/BUG_PATTERN_AUDIT_TODO_8.md`. Summary:
   drop-tracking. Not investigated in depth this session.
 
 Next free bug number is **BUG-155**.
+
+## BUG-155 + BUG-156 (2026-08-09) -- closure returned from a function, or simply called, leaked its env struct
+
+Fixes the first of round 8's two documented open leaks. Turned out to
+be TWO separate bugs, not one -- the original round-8 finding (a
+closure returned from a factory function leaks) was real, but fixing
+it exposed a second, more general gap underneath.
+
+### BUG-155 -- `CLOSURE_AFF_REGISTRY` never propagated across a function-call boundary
+
+`CLOSURE_AFF_REGISTRY` (env_struct_name + non-Copy captured fields,
+for closures whose captures need scope-exit freeing) is keyed by the
+LOCAL BINDING NAME a closure literal was directly constructed at --
+populated once, program-wide, by `lambda_lift_program` (which runs
+before any function body is type-checked, so there's no ordering
+dependency on which function gets checked first). A closure that
+escapes via a function's RETURN VALUE and gets bound to a DIFFERENT
+name in the caller (`let say_hi = make_greeter(...);` -- the literal
+itself was bound to `g` inside `make_greeter`) was never registered
+under `say_hi` at all, so `say_hi`'s scope-exit Drop never fired.
+
+Fix: added `FN_RETURN_VAR_NAME: HashMap<FunctionName, LocalVarName>`
+(ast.rs), populated once, right after `lambda_lift_program` (so
+`CLOSURE_AFF_REGISTRY` is already complete for every function's own
+closure literals by the time this runs), by scanning each function's
+body for `return <var>;` where `<var>` is affine-closure-registered
+(`find_returned_affine_closure_var`, checker.rs -- handles the
+top-level and one level of `if`/`else` nesting, not a fully general
+control-flow walk). Consulted when checking `let x = some_fn(...);`:
+if `some_fn`'s return type is `Closure(..)` and `some_fn` is in
+`FN_RETURN_VAR_NAME`, register `x` under the SAME env-struct-name/
+fields the callee's own returned variable carries.
+
+### BUG-156 -- discarded closure calls (`g(1);`, no `let`) never freed the env struct at all, for ANY closure
+
+Found while verifying BUG-155's fix didn't actually stop the leak --
+it turned out BUG-155 alone wasn't sufficient, for a more fundamental
+reason unrelated to cross-function propagation. `say_hi(5);` (used as
+a bare statement, not bound to a `let`) lowers to `TypedStmt::Discard`.
+Calling an affine closure correctly marks the binding `moved`
+(protecting against a dangerous second call -- the captured field
+gets freed by the closure's OWN body at the end of its first call, so
+calling it again would read already-freed memory; this protection is
+real and was NOT touched). But nothing at the call site ever freed
+the ENV STRUCT itself. That free logic only ever existed in
+`TypedStmt::Let`'s C emission (`let r = f(args);` -- save `.env`, null
+it, call, then `free()` the saved pointer) -- `TypedStmt::Discard`'s
+C emission had NO `Type::Closure` handling at all. Confirmed via a
+minimal repro with NO factory function involved -- a closure
+constructed directly in `main` and called once, with no return-value
+escape anywhere, leaked identically. This is the REAL reason BUG-155's
+registration alone didn't fix the round-8 finding: `say_hi` WAS
+correctly registered by BUG-155's fix, but `say_hi(5);` still
+discarded the call's result, and the Discard path had no free logic
+to consult that registration in the first place.
+
+Fix: `TypedStmt::Discard`'s C emission couldn't gain a `Type::Closure`
+match ARM the way `Let`'s dispatch has one, because the match there
+switches on `expr.ty` -- the CALL'S OWN return type (e.g. `i64`), not
+the callee's type. Instead, added an early intercept (mirroring the
+`Let` path's own structure) that checks `expr.kind` directly for
+`CallIndirect` with a `Var` callee registered in
+`CLOSURE_AFF_REGISTRY`, and if so emits the same "save env, null it,
+call, free env" sequence, brace-scoped so consecutive discards in the
+same block don't collide on the temp name.
+
+LLVM backend: confirmed NOT affected by either gap -- valgrind clean
+on native LLVM AOT builds of both repros, both BEFORE (BUG-155 only)
+and after the C-side BUG-156 fix, using only the checker-level
+BUG-155 fix (no LLVM backend code was touched). LLVM's own call-site
+codegen for affine closures apparently already frees the env struct
+correctly on the discard path; the gap was specific to tree-C.
+
+Verified: both the "returned from a factory function, then called"
+repro (round 8's original finding) and a "constructed directly,
+called once, never returned anywhere" repro are clean (0 leaks, 0
+errors) via ASan/LeakSanitizer on C and valgrind on native LLVM AOT
+builds. A "never called" variant (closure returned but the caller
+never invokes it) was also verified clean, confirming BUG-155's
+registration fix is independently correct/needed, not just
+incidentally masked by BUG-156's fix.
+
+4 regression tests added: 2 `src/lib.rs` compile-checks
+(`closure_returned_from_factory_function_frees_env_on_scope_exit`,
+`discarded_call_to_affine_closure_frees_env_on_c_backend`), 2
+`tests/run_end_to_end.rs` real-subprocess tests on both backends
+(`closure_returned_from_factory_runs_correctly_on_both_backends`,
+`directly_called_closure_runs_correctly_on_both_backends`). Full
+`cargo test --release` clean, `vanic check examples` unchanged at the
+78-error baseline.
+
+This closes the first of round 8's two documented open leaks. The
+second (the `intent_i64_to_str`-inside-`fn___poll_*` cluster, 4
+files) remains open -- see `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+Next free bug number is **BUG-157**.

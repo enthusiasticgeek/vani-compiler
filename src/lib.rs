@@ -10578,6 +10578,74 @@ mod tests {
     }
 
     #[test]
+    fn closure_returned_from_factory_function_frees_env_on_scope_exit() {
+        // BUG-155: found via the round-8 systematic ASan sweep. A
+        // closure with non-Copy captures gets registered in
+        // `CLOSURE_AFF_REGISTRY` -- keyed by the LOCAL binding name
+        // it was directly constructed at (`g` inside `make_greeter`,
+        // populated by `lambda_lift_program`, which runs once over
+        // the whole program before any type-checking). A closure
+        // that ESCAPES via a function's return value and gets bound
+        // to a DIFFERENT name in the caller (`say_hi`) was never
+        // registered under THAT name, so `say_hi`'s scope-exit Drop
+        // never freed the env struct -- confirmed a real 8-byte leak.
+        // Fixed via `FN_RETURN_VAR_NAME`: populated once, right after
+        // `lambda_lift_program`, mapping a function name to the
+        // affine-closure-registered local it returns; consulted when
+        // checking `let x = some_fn(...)` to also register `x`.
+        let source = r#"
+            fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+              let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+              return g;
+            }
+            fn main() -> i64 {
+              let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("v_say_hi") && c.contains("free("),
+            "expected say_hi's env struct to be freed at scope exit:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn discarded_call_to_affine_closure_frees_env_on_c_backend() {
+        // BUG-156, found while verifying BUG-155: a MORE GENERAL,
+        // more fundamental gap than the factory-function case above.
+        // Calling an affine closure (`g(1);`, no `let` binding --
+        // lowers to `TypedStmt::Discard`) marks the binding "moved"
+        // (correctly rejecting a second call, which would read the
+        // already-freed captured field -- a real use-after-free that
+        // protection prevents). But nothing at the call site ever
+        // freed the ENV STRUCT itself -- that free only ever existed
+        // in the `TypedStmt::Let` emission path (`let r = g(1);`),
+        // for when the call's result is actually bound to a name.
+        // `TypedStmt::Discard`'s C emission had no `Type::Closure`
+        // handling at all (impossible to add one the same way as
+        // Let's, since `expr.ty` there is the CALL'S RETURN type,
+        // not the callee's type) -- confirmed a real leak, on a
+        // closure that was never even returned from another
+        // function, just constructed and called directly.
+        let source = r#"
+            fn main() -> i64 {
+              let name: OwnedStr = "bob" + "";
+              let g = fn(x: i64) -> i64 { print "hi,", name, x; return 0; };
+              g(1);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("__env_sv_discard") && c.contains("free((void*)(uintptr_t)__env_sv_discard)"),
+            "expected the discarded closure call to free its env struct:\n{}",
+            c
+        );
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`
