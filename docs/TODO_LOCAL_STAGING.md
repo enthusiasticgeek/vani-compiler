@@ -3928,3 +3928,12 @@ Repro: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-005918-run-crash-4cbc9d45a9
+
+Repro: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
