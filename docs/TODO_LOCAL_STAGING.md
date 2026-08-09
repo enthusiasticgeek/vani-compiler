@@ -4155,3 +4155,31 @@ Fix attempt: `tools/localfuzz/findings/20260809-090623-backend-divergence-8b1690
 }
 ```
 
+
+---
+
+### Candidate: 20260809-092734-backend-divergence-81c70e84b2
+
+Repro: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e84b2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e84b2/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
