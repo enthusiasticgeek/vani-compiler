@@ -10410,6 +10410,92 @@ mod tests {
     }
 
     #[test]
+    fn ssa_c_prints_large_u64_unsigned() {
+        // BUG-152: found while designing round 6's audit theme.
+        // SSA-C's `intent_print_item` codegen hardcoded `%lld`
+        // (signed decimal) for every integer type except F32/F64/
+        // Str/OwnedStr -- a u64 value with the high bit set (e.g.
+        // u64::MAX) printed as `-1` instead of its correct unsigned
+        // decimal value. Tree-C already special-cased U8/U16/U32/U64
+        // with `%llu`; SSA-C never did. This program is simple
+        // enough to route through SSA-C by default.
+        let source = r#"
+            fn main() -> i64 {
+              let y: u64 = 18446744073709551615;
+              print y;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("%llu") && c.contains("unsigned long long"),
+            "expected u64 print to use unsigned formatting:\n{}",
+            c
+        );
+        assert!(
+            !c.contains("printf(\"%lld\""),
+            "did not expect a signed printf for this u64-only program:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn ssa_llvm_prints_large_u64_unsigned() {
+        // BUG-152, SSA-LLVM side: same root shape as the SSA-C
+        // case -- the fallback integer-print format string was
+        // hardcoded to `%lld` regardless of signedness.
+        let source = r#"
+            fn main() -> i64 {
+              let y: u64 = 18446744073709551615;
+              print y;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            ll.contains("%llu"),
+            "expected u64 print to use an unsigned format string:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn tree_llvm_dialect_print_skips_broken_unsigned_helper() {
+        // BUG-152, tree-LLVM dialect follow-up: `intent_print_int_
+        // <suffix>` (the Devanagari/Bengali/... digit-translation
+        // helper) formats via `%lld` internally. Tree-LLVM's
+        // unsigned-integer print branch used to route through it
+        // unconditionally whenever a dialect was active, which
+        // would misprint a large u64 the same way the ASCII path
+        // did. Tree-C never routed unsigned types through this
+        // helper at all; tree-LLVM's unsigned branch now matches
+        // that convention -- always plain `%llu` ASCII for unsigned
+        // prints, dialect translation only applies to signed types.
+        let source = r#"
+            fn main() -> i64 {
+              let y: u64 = 18446744073709551615;
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let r: i64 = vec_remove_at(mut ref xs, 0);
+              print r;
+              print y;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@.fmt.llu"),
+            "expected the u64 print to use the plain unsigned format global:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`

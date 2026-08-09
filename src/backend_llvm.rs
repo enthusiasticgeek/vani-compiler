@@ -18776,27 +18776,22 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
         }
         ty if ty.is_unsigned_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, false);
-            // Phase 1.1 + 5b + 6: dispatch to one of N Brahmi
-            // helpers by suffix. The matching helper is the only
-            // one emitted into the module preamble; the others
-            // are absent so a wrong-script call would not link.
-            let suffix = brahmi_suffix();
-            if let Some(s) = suffix {
-                out.push_str(&format!(
-                    "  call void @intent_print_int_{}(i64 {})\n",
-                    s, widened
-                ));
-            } else {
-                let fmt = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
-                    fmt
-                ));
-                out.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
-                    fmt, widened
-                ));
-            }
+            // BUG-152: `intent_print_int_<suffix>` formats via
+            // `%lld` (signed decimal) internally -- routing an
+            // unsigned value with the high bit set through it
+            // (e.g. a u64 >= 2^63) printed as negative. Unsigned
+            // types always use the plain `%llu` ASCII path instead,
+            // matching tree-C's convention (which never routed
+            // unsigned types through the dialect helper either).
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
+                fmt, widened
+            ));
         }
         ty if ty.is_signed_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, true);
