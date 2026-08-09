@@ -4007,3 +4007,12 @@ Repro: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-044813-run-crash-ee47f053b7
+
+Repro: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
