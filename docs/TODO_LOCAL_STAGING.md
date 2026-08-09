@@ -4405,6 +4405,18 @@ BUG-149, fixed same-session.**
 Repro: `tools/localfuzz/findings/20260809-153057-backend-divergence-c50ab84d11/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-153057-backend-divergence-c50ab84d11/fix_attempt.md`
 
+**STATUS: BENIGN (2026-08-09) -- re-verified after refreshing this
+worktree to main `3a175be` (picks up BUG-150/151; the worktree had
+gone stale again since the last refresh at 15:15 UTC, missing those
+fixes -- checked first per [[feedback_vani_localfuzz_staleness]]).
+Reproduces identically: `integer overflow in i64 add` on stderr, C
+exit 134, LLVM exit 3. The Armenian keyword smoke-test's mutation sets
+`k.x = 9223372036854775807` (i64::MAX); `գումար(k.x, k.y)` (i64 add)
+overflows immediately. Same C-134-vs-LLVM-3 trap-code convention as
+every other closed overflow candidate in this backlog -- both
+backends correctly trap a genuine i64 overflow. Not a compiler
+defect. Closing.**
+
 (ollama unavailable -- raw finding only)
 
 ```json
