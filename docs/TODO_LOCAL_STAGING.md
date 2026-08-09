@@ -4118,3 +4118,12 @@ Fix attempt: `tools/localfuzz/findings/20260809-082932-backend-divergence-f743c4
 }
 ```
 
+
+---
+
+### Candidate: 20260809-084440-run-crash-d8f20b7050
+
+Repro: `tools/localfuzz/findings/20260809-084440-run-crash-d8f20b7050/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-084440-run-crash-d8f20b7050/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
