@@ -3998,3 +3998,12 @@ Fix attempt: `tools/localfuzz/findings/20260809-012913-run-crash-6259331a36/fix_
 
 
 **STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on current main (commit 230687e), timed out (rc=124) as expected. `n` starts at 0 and is never incremented anywhere in the `while n < 100 { if n == 5 { break; } }` body -- mutation stripped the increment from the original `early_exit.vani` tutorial, leaving a genuine source-level infinite loop (`n == 5` can never become true). Same shape as 20260808-230959-run-crash-740941fdd1. Not a compiler defect. Closing.**
+
+---
+
+### Candidate: 20260809-042549-run-crash-035f697a8d
+
+Repro: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
