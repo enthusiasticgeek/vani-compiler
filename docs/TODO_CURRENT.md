@@ -10888,3 +10888,201 @@ still shows exactly 78 errors, matching the established baseline
 This closes `docs/BUG_PATTERN_AUDIT_TODO_6.md` category A.
 
 Next free bug number is **BUG-153**.
+
+## BUG-153 + BUG-154 (2026-08-09) -- systematic ASan/LeakSanitizer sweep of the full example corpus
+
+Requested directly: "not sure if you have asan and/or valgrind or
+similar tools check for all examples or libs for any potential
+leaks." No such systematic sweep existed before this -- `valgrind`
+had only ever been used manually, one test at a time, and explicitly
+"not wired into CI" (per `docs/TESTING_MATRIX_TODO.md`'s own note on
+an earlier one-off check).
+
+**Methodology**: every `.vani` file that passes `vanic check` (1148
+total: all 1040 files under `examples/`, plus 108 unique inline test
+programs extracted from `tests/run_end_to_end.rs`'s `write_tmp_vani`
+calls) was compiled via `vanic emit-c`, built with `gcc
+-fsanitize=address,leak,undefined -fno-sanitize-recover=all`, and run
+with a short timeout, classifying any AddressSanitizer/
+LeakSanitizer/UndefinedBehaviorSanitizer report. ASan can't
+instrument already-emitted LLVM IR after the fact, so the LLVM
+backend was separately spot-checked with `valgrind --leak-check=full`
+on native `vanic build` binaries for every confirmed finding (and
+both fixes below were verified clean on both backends this way).
+1008 of 1148 compiled and ran clean; 9 were flagged after both fixes
+below (down from 12 before them) -- see the "Remaining findings"
+section for the full triage of what's left.
+
+### BUG-153 -- mixed-payload enum with a `Box<T>` variant leaked its payload
+
+A mixed-payload enum (variants with genuinely different payload
+types, e.g. `Int(Box<i64>)` and `Shape(Box<dyn Drawable>)`) never
+freed a `Box<T>`-payload variant at scope exit. Confirmed a real
+16-byte leak (2 allocations) via LeakSanitizer on
+`examples/edge_cases/mix_box_enum_payload.vani` (a program whose own
+source comment explicitly, and incorrectly, claimed "Scope-exit Drop
+frees each Box payload... Now compiles + runs on both backends").
+
+Root cause: `backend_c.rs`'s `emit_enum_value_drop` has two branches
+-- a legacy single-payload path (`ENUM_PAYLOAD_REGISTRY`) that
+already correctly handled `Type::Box(inner)` with sub-cases for
+`Object`/`Vec`/`OwnedStr`/`Struct` (including the box-recursive-
+struct deep-drop helper), and a newer mixed-payload path
+(`ENUM_VARIANT_PAYLOADS_REGISTRY`, per-variant union member access)
+whose per-variant match only ever handled `OwnedStr`/`Vec<T>` --
+`Type::Box(_)` fell to `_ => None`, silently emitting no free call.
+The gap was even explicitly documented in a code comment ("BUG-97
+note: mixed-payload enums with a Box<Struct>-shaped variant payload
+remain a deferred gap") but never actually closed.
+
+Fix: factored the single-payload path's Box-handling logic out into
+a new shared `box_payload_free_expr(payload_path, inner) -> String`
+helper (parameterized on the payload's full lvalue path, so it works
+for both the single-payload `.payload` field and the mixed-payload
+`.u.v_<Variant>` union member), and called it from both branches.
+The single-payload branch is now a one-line call to the shared
+helper instead of duplicating the whole match; the mixed-payload
+branch gained a `Type::Box(inner)` arm it never had.
+
+LLVM backend: **not affected** -- confirmed via `valgrind
+--leak-check=full` on the native LLVM AOT build of the exact same
+repro (0 leaks, 0 errors, before AND after the C-side fix), so no
+LLVM code changes were needed. (Tree-LLVM's own mixed-payload enum
+Drop codegen has the analogous `Type::OwnedStr | Vec(_) => ...,
+_ => continue` gap for `Type::Box` on direct code inspection, but the
+`Box<i64>`/`Box<dyn Drawable>` shapes in this repro apparently don't
+route through it the same way C's does -- not fully root-caused given
+time constraints, flagged as a documented open question in
+`docs/BUG_PATTERN_AUDIT_TODO_8.md` rather than either fixed blind or
+silently ignored.)
+
+Verified: the leak is gone (confirmed via both ASan/LeakSanitizer on
+C and valgrind on both backends), both Box variants' free calls now
+appear in the generated C (`free(v_a.u.v_Int)`, `free(v_a.u.v_Shape.data)`),
+program output/exit code unchanged (still `42`).
+
+### BUG-154 -- scope-exit drops ran in alphabetical-by-name order instead of reverse declaration order
+
+Far more general and severe than BUG-153: `Env::scopes` is
+`Vec<BTreeMap<String, VarInfo>>` -- every scope-exit drop site
+iterated that map directly, meaning bindings were dropped in
+**alphabetical order by variable name**, not reverse declaration
+order, silently contradicting the "Rust RAII convention" this
+codebase's own comments claim everywhere (and correctly implement
+for STRUCT FIELDS specifically, which iterate an ordered
+`Vec<(String, Type)>` rather than a name-keyed map).
+
+Confirmed via a genuine, reproducible heap-use-after-free (not a
+leak) caught by AddressSanitizer:
+```vani
+fn main() -> i64 {
+  let r1: RwLock<i64> = rwlock_new(100);
+  let locks: Vec<RwLock<i64>> = vec(r1);
+  let rg = rwlock_read(mut ref locks[0]);
+  print read_guard_get(ref rg);
+  return 0;
+}
+```
+`rg` (a `ReadGuard`) holds a pointer back into `locks`'s heap buffer
+(to unlock the RwLock it borrowed). At scope exit, `locks` was freed
+BEFORE `rg` tried to unlock through it -- purely because `"locks" <
+"rg"` alphabetically -- a real, name-dependent use-after-free.
+AddressSanitizer's exact report: `WRITE of size 4` into memory
+`freed by` the Vec's own free call, executed one call earlier in
+`fn_main`. This is a NAME-DEPENDENT bug -- it doesn't reproduce for
+every combination of dependent bindings, only when the dependent
+binding's name happens to alphabetically precede what it depends on
+-- which is precisely why a hand-written test suite, however large,
+was unlikely to ever stumble onto it by chance; a systematic sweep
+across hundreds of real programs with varied naming did.
+
+Root cause confirmed directly (not inferred) by reading `checker.rs`:
+`Env::current_scope()` and `Env::all_bindings()` both return/iterate
+the `BTreeMap` in its natural (alphabetical) key order, with no
+re-sorting applied anywhere downstream.
+
+Fix: added a `sort_by_reverse_decl_order` helper (sorts a
+`(String, T)` list by a caller-supplied `decl_span.start` extractor,
+descending -- later source position drops first) and applied it at
+every bulk scope-exit drop-list site found:
+- `emit_current_scope_drops` (fall-off-the-end-of-a-block case)
+- the return-statement's main non-Copy-binding drop list
+- the return-statement's separate affine-closure drop list
+- `emit_drops_through_loop` (break/continue -- already correctly
+  ordered scope-to-scope across nested blocks, just needed the same
+  fix WITHIN each individual scope's binding list)
+
+`VarInfo.decl_span: Span` (an existing, always-populated field --
+"Source span where this binding was declared") was reused directly
+as the sort key; no new field was needed. Every site was already
+computing an intermediate `Vec` before this fix (to filter/collect
+bindings into a drop list), so adding a sort in front of the existing
+collection was a small, localized, easy-to-review change at each
+site rather than restructuring `Env`'s own storage.
+
+One deliberate, documented limitation: the return-statement's two
+drop lists (regular non-Copy bindings, and affine closures) are each
+independently sorted correctly WITHIN themselves, but still run as
+two separate back-to-back loops -- so a closure whose drop depends on
+a non-closure binding declared AFTER it (or vice versa) wouldn't get
+correctly interleaved. Not confirmed to be reachable (closures'
+`CLOSURE_AFF_REGISTRY`-gated drops are narrower in scope than general
+bindings), flagged as a residual limitation rather than silently
+assumed fixed.
+
+Verified on both backends: the repro now runs cleanly and prints
+`100` (confirmed via ASan on C, valgrind on native LLVM AOT -- 0
+leaks, 0 errors, correct output on both). Generated C confirms
+correct order: `intent_read_guard_int64_t_unlock(&v_rg);` now
+precedes `intent_vec_intent_rwlock_i64__free(v_locks);`.
+
+### Regression tests
+
+4 added: 2 to `src/lib.rs`
+(`mixed_payload_enum_box_variant_emits_free_on_c_backend`,
+`scope_exit_drops_run_in_reverse_declaration_order_not_alphabetical`),
+2 to `tests/run_end_to_end.rs`
+(`mixed_payload_enum_with_box_variant_runs_correctly_on_both_backends`,
+`read_guard_into_vec_of_rwlock_runs_correctly_on_both_backends`), the
+latter pair real subprocess runs on both backends. Full `cargo test
+--release` clean (0 failed). `vanic check examples` unchanged at the
+78-error baseline.
+
+### Remaining findings from the sweep (not fixed this session)
+
+Full triage in `docs/BUG_PATTERN_AUDIT_TODO_8.md`. Summary:
+- **2 false positives of the sweep's own methodology**, not compiler
+  bugs: a bare-metal/MMIO example correctly SEGVs when run as a
+  native userspace binary instead of on real hardware/QEMU (expected
+  -- it reads a hardcoded STM32 GPIO address); a channel round-trip
+  example's legitimate return value (`99`) collided with the sweep
+  harness's own `ASAN_OPTIONS exitcode=99` convention.
+- **2 low-severity UndefinedBehaviorSanitizer findings**: an i64::MIN
+  literal represented in generated C as `-(int64_t)9223372036854775808LL`
+  (technically UB by the C standard's letter -- both the huge-
+  unsigned-to-int64_t conversion and the subsequent negation of an
+  unrepresentable value -- but implemented identically to the
+  intended two's-complement value by every real compiler/CPU) and a
+  signed left-shift whose result doesn't fit (same "technically UB,
+  universally well-defined in practice" class). Neither produced
+  observably wrong output. Not fixed this session; a proper fix would
+  emit `INT64_MIN`-style literals and treat `<<` as an explicitly
+  wrapping/unsigned operation in the generated C.
+- **1 confirmed, unfixed leak**: a closure returned from a factory
+  function (`fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64`)
+  leaks its heap-allocated env struct (8 bytes) -- the closure's
+  `CLOSURE_AFF_REGISTRY` affine-tracking appears to only register
+  closures constructed via a direct literal in the CURRENT scope,
+  not closures that arrive as a function's return value. Root-caused
+  to that level but not fixed -- properly extending the registry
+  without breaking the existing FnOnce-style call-time free guard
+  needs more investigation than remaining session time allowed.
+- **4 confirmed, unfixed leaks sharing one root cause**: `echo_p3_
+  locals_stress.vani`, `echo_p3b_str_local.vani`, `hashmap_strstr.vani`,
+  `hashmap_strv.vani` all leak through `intent_i64_to_str` calls made
+  from `fn___poll_*`-named functions -- almost certainly the v3.1
+  async state-machine transform's generated polling functions not
+  correctly routing a temporary `OwnedStr` result through the normal
+  drop-tracking. Not investigated in depth this session.
+
+Next free bug number is **BUG-155**.

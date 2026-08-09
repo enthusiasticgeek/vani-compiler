@@ -12531,12 +12531,40 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
     walk(body, diagnostics);
 }
 
+/// BUG-154 (2026-08-09): `Env::scopes` is `Vec<BTreeMap<String,
+/// VarInfo>>` -- keyed (and therefore iterated) by BINDING NAME,
+/// alphabetically, not by declaration order. Every scope-exit drop
+/// site used to iterate a scope's bindings directly and emit `Drop`
+/// statements in that alphabetical order, silently violating the
+/// "reverse declaration order" RAII convention this codebase's own
+/// comments claim everywhere (and correctly implement for STRUCT
+/// FIELDS, which iterate an ordered `Vec<(String, Type)>` instead of
+/// a name-keyed map). Confirmed via a systematic ASan/LeakSanitizer
+/// sweep: `let locks: Vec<RwLock<i64>> = ...; let rg =
+/// rwlock_read(mut ref locks[0]); ...` dropped `locks` (freeing the
+/// RwLock's storage) BEFORE `rg` (whose drop unlocks that same
+/// storage) purely because `"locks" < "rg"` alphabetically -- a
+/// real, name-dependent heap-use-after-free, not a hypothetical.
+/// Every bulk drop-list site now sorts by `decl_span.start`
+/// (descending -- later-declared, i.e. larger byte offset, drops
+/// first) before emitting, restoring true reverse-declaration order
+/// regardless of what the bindings happen to be named.
+fn sort_by_reverse_decl_order<T>(items: &mut [(String, T)], decl_span_of: impl Fn(&T) -> Span) {
+    items.sort_by(|(_, a), (_, b)| decl_span_of(b).start.cmp(&decl_span_of(a).start));
+}
+
 fn emit_current_scope_drops(
     env: &Env,
     body: &mut Vec<TypedStmt>,
     _diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for (name, info) in env.current_scope().iter() {
+    let mut scope_entries: Vec<(String, VarInfo)> = env
+        .current_scope()
+        .iter()
+        .map(|(n, i)| (n.clone(), i.clone()))
+        .collect();
+    sort_by_reverse_decl_order(&mut scope_entries, |info| info.decl_span);
+    for (name, info) in scope_entries.iter().map(|(n, i)| (n, i)) {
         if matches!(info.ty, Type::Task | Type::TaskR(_)) {
             // Task/Task<R> handles are affine but have no
             // runtime resource to free in v1 (sequential
@@ -13453,16 +13481,27 @@ fn check_one_stmt(
                 body,
             );
 
-            let drop_names: Vec<(String, Type, Vec<String>)> = env
+            // BUG-154: sort by reverse declaration order (see
+            // `sort_by_reverse_decl_order`'s doc comment) instead of
+            // trusting `all_bindings()`'s alphabetical-by-name
+            // iteration -- a later-declared binding's drop can
+            // depend on an earlier one still being alive (e.g. a
+            // `ReadGuard` unlocking storage owned by the `Vec` it
+            // was borrowed from).
+            let mut drop_names: Vec<(String, (Type, Vec<String>, Span))> = env
                 .all_bindings()
                 .filter(|(_, info)| !info.ty.is_copy() && info.moved.is_none() && !info.no_drop)
                 .map(|(name, info)| (
                     name.clone(),
-                    info.ty.clone(),
-                    info.moved_fields.keys().cloned().collect::<Vec<_>>(),
+                    (
+                        info.ty.clone(),
+                        info.moved_fields.keys().cloned().collect::<Vec<_>>(),
+                        info.decl_span,
+                    ),
                 ))
                 .collect();
-            for (drop_name, drop_ty, moved_fields) in drop_names {
+            sort_by_reverse_decl_order(&mut drop_names, |(_, _, span)| *span);
+            for (drop_name, (drop_ty, moved_fields, _)) in drop_names {
                 body.push(TypedStmt::Drop {
                     name: drop_name,
                     ty: drop_ty,
@@ -13497,7 +13536,7 @@ fn check_one_stmt(
                 ExprKind::Var(name) => Some(name.as_str()),
                 _ => None,
             };
-            let aff_drops: Vec<(String, Type)> = env
+            let mut aff_drops: Vec<(String, (Type, Span))> = env
                 .all_bindings()
                 .filter(|(n, info)| {
                     matches!(info.ty, Type::Closure(_, _))
@@ -13505,9 +13544,10 @@ fn check_one_stmt(
                         && Some(n.as_str()) != returned_var_name
                         && crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().contains_key(n.as_str()))
                 })
-                .map(|(n, info)| (n.clone(), info.ty.clone()))
+                .map(|(n, info)| (n.clone(), (info.ty.clone(), info.decl_span)))
                 .collect();
-            for (drop_name, drop_ty) in aff_drops {
+            sort_by_reverse_decl_order(&mut aff_drops, |(_, span)| *span);
+            for (drop_name, (drop_ty, _)) in aff_drops {
                 body.push(TypedStmt::Drop {
                     name: drop_name,
                     ty: drop_ty,
@@ -16216,7 +16256,12 @@ fn emit_drops_through_loop(env: &Env, loop_body_depth: usize, body: &mut Vec<Typ
         if scope_index >= env.scopes.len() {
             continue;
         }
-        for (name, info) in env.scopes[scope_index].iter() {
+        let mut scope_entries: Vec<(String, VarInfo)> = env.scopes[scope_index]
+            .iter()
+            .map(|(n, i)| (n.clone(), i.clone()))
+            .collect();
+        sort_by_reverse_decl_order(&mut scope_entries, |info| info.decl_span);
+        for (name, info) in &scope_entries {
             if !info.ty.is_copy() && info.moved.is_none() {
                 body.push(TypedStmt::Drop {
                     name: name.clone(),

@@ -10496,6 +10496,88 @@ mod tests {
     }
 
     #[test]
+    fn mixed_payload_enum_box_variant_emits_free_on_c_backend() {
+        // BUG-153: found via a systematic ASan/LeakSanitizer sweep of
+        // the full example corpus (round 8 -- "not sure if you have
+        // asan and/or valgrind... check for all examples or libs for
+        // any potential leaks"). A mixed-payload enum (variants with
+        // DIFFERENT payload types, e.g. `Int(Box<i64>)` and
+        // `Shape(Box<dyn Drawable>)`) never freed a `Box<T>`-payload
+        // variant at scope exit -- `emit_enum_value_drop`'s mixed-
+        // payload switch only ever handled `OwnedStr`/`Vec<T>`
+        // payloads, silently emitting no free call for Box (the
+        // single-payload/legacy path already correctly handled Box;
+        // the mixed-payload path just never got the same treatment).
+        // Confirmed a real 16-byte leak (2 allocations) on the exact
+        // shape below before the fix.
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+            fn main() -> i64 {
+              let a: Val = Val.Int(box(42));
+              let c: Circle = Circle { r: 7 };
+              let b: Val = Val.Shape(box(c as dyn Drawable));
+              let e: Val = Val.Empty;
+              print 42;
+              return 42;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("free(v_a.u.v_Int)"),
+            "expected a free call for the Box<i64> variant:\n{}",
+            c
+        );
+        assert!(
+            c.contains("free(v_a.u.v_Shape.data)") || c.contains("free(v_b.u.v_Shape.data)"),
+            "expected a free call for the Box<dyn Drawable> variant's .data slot:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn scope_exit_drops_run_in_reverse_declaration_order_not_alphabetical() {
+        // BUG-154: found via the same systematic ASan sweep. `Env`
+        // stores each scope as a `BTreeMap<String, VarInfo>` --
+        // iterated (and therefore dropped) alphabetically by binding
+        // NAME, not by declaration order. A `ReadGuard` obtained
+        // from a `RwLock` stored inside a `Vec` depends on that
+        // Vec's storage staying alive until the guard itself is
+        // dropped -- but `"locks" < "rg"` alphabetically, so `locks`
+        // (the Vec) was freed BEFORE `rg` (the guard) tried to
+        // unlock through it: a real, name-dependent heap-use-after-
+        // free, confirmed via AddressSanitizer before this fix (not
+        // hypothetical). Every scope-exit drop site now sorts by
+        // `decl_span.start` descending (later-declared drops first)
+        // instead of trusting the map's natural iteration order.
+        let source = r#"
+            fn main() -> i64 {
+              let r1: RwLock<i64> = rwlock_new(100);
+              let locks: Vec<RwLock<i64>> = vec(r1);
+              let rg = rwlock_read(mut ref locks[0]);
+              print read_guard_get(ref rg);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        let unlock_pos = c
+            .find("intent_read_guard_int64_t_unlock(&v_rg)")
+            .expect("expected rg to be unlocked at scope exit");
+        let free_pos = c
+            .find("intent_vec_intent_rwlock_i64__free(v_locks)")
+            .expect("expected locks to be freed at scope exit");
+        assert!(
+            unlock_pos < free_pos,
+            "rg must unlock BEFORE locks is freed (reverse declaration order), \
+             got unlock at {unlock_pos}, free at {free_pos}:\n{c}"
+        );
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`

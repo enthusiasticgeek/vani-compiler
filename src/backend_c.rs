@@ -15226,6 +15226,80 @@ fn emit_for_iter(
     }
 }
 
+/// Build the free-expression for a `Box<T>` enum-variant payload
+/// already located at `payload_path` (a full, valid C lvalue
+/// expression -- e.g. `foo.payload` for the legacy single-payload
+/// enum representation, or `foo.u.v_Variant` for the mixed-payload
+/// union representation). Factored out of `emit_enum_value_drop`
+/// (BUG-153, 2026-08-09) so the mixed-payload switch-case branch
+/// below can share it instead of only ever handling `OwnedStr`/
+/// `Vec<T>` payloads and silently leaking every `Box<T>`-payload
+/// variant of a mixed-payload enum -- confirmed via a systematic
+/// ASan/LeakSanitizer sweep of the example corpus, not a hypothetical.
+fn box_payload_free_expr(payload_path: &str, inner: &Type) -> String {
+    match inner {
+        // Box<dyn Iface>: fat-pointer struct; free the
+        // owning .data field (the concrete heap slot).
+        Type::Object(_iface) => format!("free({path}.data)", path = payload_path),
+        // Box<Vec<T>>: free Vec's data buffer, then
+        // free the Box's heap slot for the Vec struct.
+        Type::Vec(element) => format!(
+            "{{ {helper}(*{path}); free({path}); }}",
+            helper = vec_helper(element, "free"),
+            path = payload_path
+        ),
+        // Box<OwnedStr>: free the string buffer, then
+        // free the Box's heap slot for the i8* pointer.
+        Type::OwnedStr => format!(
+            "{{ free((void*)*{path}); free({path}); }}",
+            path = payload_path
+        ),
+        // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
+        // payload -- the `Option<Box<Node>>` recursive-struct
+        // shape. A box-recursive inner struct calls its
+        // generated iterative deep-drop helper (inlining would
+        // need infinitely much C text to unroll the cycle); a
+        // non-recursive inner struct's owning fields are freed
+        // inline before the box's own slot.
+        Type::Struct(inner_name) => {
+            if crate::ast::struct_is_box_recursive(inner_name) {
+                format!(
+                    "__box_deep_drop_{}({path})",
+                    struct_c_name(inner_name),
+                    path = payload_path
+                )
+            } else {
+                let inner_fields = STRUCT_FIELDS_REGISTRY
+                    .with(|r| r.borrow().get(inner_name).cloned())
+                    .unwrap_or_default();
+                if inner_fields.is_empty() {
+                    format!("free({path})", path = payload_path)
+                } else {
+                    let deref_path = format!("(*{})", payload_path);
+                    let mut field_drops = String::new();
+                    let empty: std::collections::HashSet<&String> =
+                        std::collections::HashSet::new();
+                    emit_struct_field_drops(
+                        &deref_path,
+                        inner_name,
+                        &inner_fields,
+                        &empty,
+                        &mut field_drops,
+                    );
+                    format!(
+                        "{{ {} free({path}); }}",
+                        field_drops.trim(),
+                        path = payload_path
+                    )
+                }
+            }
+        }
+        // Box<T> for scalar T: payload is T*;
+        // simply free the heap slot.
+        _ => format!("free({path})", path = payload_path),
+    }
+}
+
 /// Emit scope-exit drop code for an enum-typed value at `path`
 /// (already a valid C lvalue -- a bare local name or a `foo.field`
 /// chain): frees/recurses into whichever variant's payload owns
@@ -15264,11 +15338,16 @@ fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
                     vec_helper(element, "free"),
                     path, enum_variant_member(vname)
                 )),
-                // BUG-97 note: mixed-payload enums with a
-                // Box<Struct>-shaped variant payload remain a
-                // deferred gap (not needed by the recursive-struct
-                // shape this fix targets, which is single-payload);
-                // see docs/TODO_CURRENT.md.
+                // BUG-153 (2026-08-09): mixed-payload enums with a
+                // Box<T>-shaped variant payload used to be a
+                // deferred gap here (this arm fell to `_ => None`,
+                // silently emitting no free call at all) -- now
+                // shares the same Box-payload logic the single-
+                // payload path below already had.
+                Type::Box(inner) => Some(box_payload_free_expr(
+                    &format!("{}.u.{}", path, enum_variant_member(vname)),
+                    inner,
+                )),
                 _ => None,
             };
             if let Some(call) = free_for_variant {
@@ -15299,70 +15378,10 @@ fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
             vec_helper(element, "free"),
             path
         )),
-        Some(Type::Box(inner)) => Some(match &**inner {
-            // Box<dyn Iface>: fat-pointer struct; free the
-            // owning .data field (the concrete heap slot).
-            Type::Object(_iface) => format!(
-                "free({path}.payload.data)",
-                path = path
-            ),
-            // Box<Vec<T>>: free Vec's data buffer, then
-            // free the Box's heap slot for the Vec struct.
-            Type::Vec(element) => format!(
-                "{{ {helper}(*{path}.payload); free({path}.payload); }}",
-                helper = vec_helper(element, "free"),
-                path = path
-            ),
-            // Box<OwnedStr>: free the string buffer, then
-            // free the Box's heap slot for the i8* pointer.
-            Type::OwnedStr => format!(
-                "{{ free((void*)*{path}.payload); free({path}.payload); }}",
-                path = path
-            ),
-            // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
-            // payload -- the `Option<Box<Node>>` recursive-struct
-            // shape. A box-recursive inner struct calls its
-            // generated iterative deep-drop helper (inlining would
-            // need infinitely much C text to unroll the cycle); a
-            // non-recursive inner struct's owning fields are freed
-            // inline before the box's own slot.
-            Type::Struct(inner_name) => {
-                if crate::ast::struct_is_box_recursive(inner_name) {
-                    format!(
-                        "__box_deep_drop_{}({path}.payload)",
-                        struct_c_name(inner_name),
-                        path = path
-                    )
-                } else {
-                    let inner_fields = STRUCT_FIELDS_REGISTRY
-                        .with(|r| r.borrow().get(inner_name).cloned())
-                        .unwrap_or_default();
-                    if inner_fields.is_empty() {
-                        format!("free({path}.payload)", path = path)
-                    } else {
-                        let deref_path = format!("(*{}.payload)", path);
-                        let mut field_drops = String::new();
-                        let empty: std::collections::HashSet<&String> =
-                            std::collections::HashSet::new();
-                        emit_struct_field_drops(
-                            &deref_path,
-                            inner_name,
-                            &inner_fields,
-                            &empty,
-                            &mut field_drops,
-                        );
-                        format!(
-                            "{{ {} free({path}.payload); }}",
-                            field_drops.trim(),
-                            path = path
-                        )
-                    }
-                }
-            }
-            // Box<T> for scalar T: payload is T*;
-            // simply free the heap slot.
-            _ => format!("free({path}.payload)", path = path),
-        }),
+        Some(Type::Box(inner)) => Some(box_payload_free_expr(
+            &format!("{}.payload", path),
+            inner,
+        )),
         _ => None,
     };
     if let Some(free_call) = free_expr {

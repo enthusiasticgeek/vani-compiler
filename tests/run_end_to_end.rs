@@ -13794,3 +13794,99 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-153/BUG-154 (2026-08-09): found via a systematic ASan/
+// LeakSanitizer sweep of the full example corpus (round 8, requested
+// after the user asked "not sure if you have asan and/or valgrind...
+// check for all examples or libs for any potential leaks"). Both are
+// real memory-safety bugs, not just output-correctness bugs -- these
+// tests only check exit status + stdout (a leak or a use-after-free
+// doesn't always crash a plain `run`), the actual verification was
+// done separately with ASan/LeakSanitizer and valgrind on native
+// builds of both backends; see docs/TODO_CURRENT.md's BUG-153/154
+// sections for the full sanitizer output.
+#[test]
+fn mixed_payload_enum_with_box_variant_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug153-mixed-enum-box",
+        r#"
+interface Drawable { fn area(self: ref Self) -> i64; }
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+fn main() -> i64 {
+  let a: Val = Val.Int(box(42));
+  let c: Circle = Circle { r: 7 };
+  let b: Val = Val.Shape(box(c as dyn Drawable));
+  let e: Val = Val.Empty;
+  print 42;
+  return 42;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(42),
+            "mixed-payload enum with Box variants should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn read_guard_into_vec_of_rwlock_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug154-drop-order-rwlock",
+        r#"
+fn main() -> i64 {
+  let r1: RwLock<i64> = rwlock_new(100);
+  let locks: Vec<RwLock<i64>> = vec(r1);
+  let rg = rwlock_read(mut ref locks[0]);
+  print read_guard_get(ref rg);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "ReadGuard into a Vec<RwLock<T>> should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "100",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
