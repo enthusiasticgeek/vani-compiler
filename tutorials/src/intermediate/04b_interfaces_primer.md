@@ -346,6 +346,24 @@ implement Eq for BigInt {
 `vani-bignum` Kosh package, which compares magnitude digit-by-digit
 via its own `bn_cmp` rather than field equality directly.)
 
+An interface's self-type isn't limited to structs -- an `enum` works
+exactly the same way:
+
+```vani
+enum Color { Red, Green, Blue }
+
+interface Eq { fn eq(self: Color, other: Color) -> bool; }
+implement Eq for Color {
+  fn eq(self: Color, other: Color) -> bool {
+    return (self as i32) == (other as i32);
+  }
+}
+```
+
+(See [`examples/language/english/enum_eq.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/enum_eq.vani)
+for the full worked example, including a payload-bearing variant
+compared via `match`.)
+
 **Why no derive**: it's the same "opt-in only" philosophy this
 chapter already covers for interfaces generally -- a type never gains
 a capability just because its shape happens to match one. Generating

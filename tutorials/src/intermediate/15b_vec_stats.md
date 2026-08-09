@@ -359,6 +359,14 @@ fn main() -> i64 {
 | `swap_remove(mut ref xs, i)` | Remove at i by swapping with last; O(1) |
 | `clear(mut ref xs)` | Remove all elements (keeps allocation) |
 
+**Out-of-bounds `i`:** all four index-taking mutators above
+(`vec_remove_at`, `insert`, `swap_remove`, and `clone_at` from
+elsewhere in this guide) trap cleanly and consistently on both
+backends when `i` is out of range -- the same convention plain
+indexing (`xs[i]`) uses. There's no silent garbage read and no
+undefined behavior to worry about; an out-of-range index is a hard
+stop, not a value you have to defensively check for.
+
 ---
 
 ## Putting it together: frequency analysis

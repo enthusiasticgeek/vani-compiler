@@ -9746,4 +9746,812 @@ Full `cargo test --release` clean (2815 lib tests + all integration suites, 0
 failed).
 
 This closes out the last of the 4 findings from the 2026-08-07 localfuzz backlog
-triage. Next free bug number is **BUG-141**.
+triage.
+
+## BUG-141 (2026-08-08) -- `set`/`set_mut` with a narrower-than-i64 index produced a mismatched LLVM call
+
+First finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category A (index-
+parameter type-width audit). Grounded in BUG-138's exact shape but a
+different mechanism: BUG-138 was a GEP whose hard-coded index type didn't
+match the operand; this one is a *call* whose callee has a hard-coded `i64
+%i` parameter.
+
+`check_set_builtin` (checker.rs) validated the index argument with only
+`index.ty().is_integer()` and left its raw checked width untouched --
+unlike every sibling mutator reachable through the same
+`backend_llvm.rs` vec-builtin dispatch (`swap_remove`/`insert`/`vec_swap`/
+`vec_take`/`vec_drop`), all of which run their index/count argument
+through `coerce_checked(..., &Type::I64` or `&Type::U64, ...)` in the
+checker, inserting an actual widening cast into the typed IR before
+codegen ever sees it. Confirmed via a systematic grep of every
+`.is_integer()`-style check in checker.rs (11 hits): all index/bound-
+shaped ones except `clone_at` (already fixed as BUG-138) and `set`/
+`set_mut` funnel through `coerce_checked`. `Index`/`IndexAssign` (the
+`xs[i]` read/write path) already widen at the *backend* level via the
+pre-existing `widen_index_to_64` helper, so those were confirmed safe
+independently.
+
+Concretely: `set(mut ref xs, i, v)` with `i: u32` emitted `call i64
+@intent_vec_i64__set_mut(%intent_vec_i64* %xs.addr, i32 %t10, i64 99)` --
+the callee's declared signature is `i64 @intent_vec_i64__set_mut(...,
+i64 %i, ...)`. Confirmed via `opt -passes=verify` that LLVM's verifier
+does NOT reject this (a same-named direct-call signature mismatch is
+legal IR -- the callee is implicitly treated as bitcast to the call
+site's own inferred function type), and confirmed via direct execution
+on both the LLVM JIT (`lli`) and AOT `llc`-lowered paths that small
+positive index values happened to still produce correct results on this
+x86-64 host (32-bit register writes zero-extend the upper 32 bits per
+the ISA, and LLVM's own calling-convention lowering for narrower types
+still emits a correctly-signed extend based on the call site's own
+operand type) -- so this was not a confirmed wrong-answer bug in
+practice on this platform, but a genuinely invalid declared-vs-actual
+IR shape that's fragile against a different LLVM version/target/
+optimization pipeline, and matches BUG-138's exact root-cause category
+closely enough to fix on the same footing rather than leave open.
+
+The C backend was checked and confirmed NOT vulnerable to this specific
+shape: `backend_c.rs`'s `set_mut` helper takes a plain C `int64_t i`
+parameter, and C's implicit integer promotion at the call site correctly
+widens a `uint32_t`/`uint8_t`/etc. argument -- there's no equivalent to
+LLVM IR's strict textual-type-matching requirement.
+
+**Fix**: `backend_llvm.rs`'s generic vec-builtin call-site loop (the one
+BUG-138 already documented, immediately before it) now special-cases
+`set`/`set_mut`'s index argument (position 1), routing it through the
+same `widen_index_to_i64` helper BUG-138 introduced, before it's folded
+into `arg_strs`.
+
+Verified: `opt -passes=verify` now accepts the emitted IR; the call site
+correctly reads `call i64 @intent_vec_i64__set_mut(..., i64 %t11, ...)`
+with an explicit `zext i32 ... to i64` feeding `%t11`. Re-ran `vanic
+check examples` before and after (via `git stash`) to confirm identical
+72 pre-existing, unrelated failures either way (labeled-break edge
+cases and a couple of known generic-inference gaps) -- zero regressions
+introduced.
+
+Added `set_mut_with_u32_index_widens_to_i64_in_llvm_ir` and
+`set_consuming_with_u16_index_widens_to_i64_in_llvm_ir` (checks the
+`zext` is present and, for the mut-ref form, that no raw-`i32` call
+remains) to `src/lib.rs`. Added
+`set_mut_with_narrow_index_types_writes_the_correct_slot_on_both_backends`
+to `tests/run_end_to_end.rs` (real subprocess runs on both backends,
+several distinct `u8` index values, comparing actual printed output
+against hand-computed expected values -- not just a clean-exit check).
+
+Full `cargo test --release` clean (2817 lib tests + 206 end-to-end tests
++ all other integration suites, 0 failed).
+
+## BUG-142 (2026-08-08) -- a top-level `const` and a same-named function param/`let` collided in the checker's root scope
+
+Second finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category B
+(same-scope shadowing beyond plain scalar `let`). Systematically checked
+every candidate the category listed:
+
+- `if let` / `while let` payload bindings and `match` arm bindings --
+  confirmed SAFE: each construct calls `env.push_scope()` before inserting
+  its binding, so the binding lives in its own fresh child scope, never
+  the same scope object as anything it might shadow. No same-scope
+  collision is possible by construction.
+- Closure parameters -- confirmed SAFE: closures are lambda-lifted to
+  top-level `__anon_fn_<N>` functions before the main checker runs, each
+  checked with its own brand-new `Env` from scratch. There's no shared
+  scope stack with the enclosing function at all.
+- For-loop induction variables -- confirmed SAFE: same `push_scope()`-
+  before-`insert_current()` pattern as if/while-let.
+- **Function parameters and module-level `const`s -- found genuinely
+  vulnerable.** `check_function` seeds every top-level `const` into the
+  function's ROOT scope (T4.15), then inserts each parameter into that
+  *same* scope with no `push_scope()` in between. Two consequences:
+  1. A parameter sharing a const's name got a spurious "parameter 'N' is
+     already defined" diagnostic (`env.current_has` can't distinguish
+     "another param already claimed this name" from "a const already
+     occupies it") -- rejecting perfectly legal code.
+  2. Worse: since the function BODY's top-level statements are also
+     checked at that same root scope depth (no intervening
+     `push_scope()`), a top-level `let N = 5;` or `let (N, r) = f();`
+     shadowing a same-named const hit `Stmt::Let`/`Stmt::LetTuple`'s
+     `env.current_get(name)` same-scope check (the exact mechanism
+     BUG-137 added the tuple-destructure side of) and emitted
+     `TypedStmt::Reassign` instead of a fresh `TypedStmt::Let` -- but a
+     const has no corresponding backend declaration (it's a compile-time-
+     only env entry), so the Reassign targets a name the backend never
+     declared.
+
+Confirmed via a direct repro (forced onto the tree backends via an
+unrelated `#[no_mangle]` fn, since the SSA path's fresh numeric naming
+happens to sidestep the whole bug class the same way it sidestepped
+BUG-137): tree-LLVM hit an actual Rust **`unreachable!()` panic**
+(`internal error: entered unreachable code: checker: reassign to
+undeclared binding 'N'`) -- a compiler crash, not even a clean
+diagnostic. Tree-C failed to compile (`cc` error: `'v_N' undeclared`).
+Both are more severe than BUG-137's own finding (a clean `cc` "redefinition"
+compile error) precisely because Reassign codegen assumes the name was
+already declared by a prior `Let` in the SAME function body, which was
+never true for a const.
+
+**Fix**, three sites in `checker.rs`, all gated on the existing binding's
+`is_const` flag:
+1. `check_function`'s duplicate-parameter check now only fires when the
+   existing same-scope binding is NOT a const (i.e., is an earlier real
+   parameter) -- `env.current_get(&param.name).is_some_and(|v| !v.is_const)`.
+2. `Stmt::Let`'s same-scope-shadow detection now filters the "real shadow"
+   check through `!old.is_const` before deciding Reassign vs. a fresh Let.
+3. `Stmt::LetTuple`'s mirror of the same check (BUG-137's own fix site)
+   gets the identical filter.
+
+Verified: all three repros (param-name collision, plain `let` shadow,
+tuple `let` shadow) now compile and run correctly on both tree backends
+AND the default SSA-eligible path, using the RUNTIME value (not silently
+falling back to the const's compile-time value). Confirmed a genuine
+duplicate parameter (`fn f(x: i64, x: i64)`, no const involved) is still
+correctly rejected -- the fix narrows the check, it doesn't disable it.
+Re-ran `vanic check examples`: identical 72 pre-existing, unrelated
+failures before and after -- zero regressions.
+
+Added `let_shadowing_a_top_level_const_declares_fresh_not_reassign`,
+`let_tuple_shadowing_a_top_level_const_declares_fresh_not_reassign`,
+`function_param_sharing_a_top_level_const_name_is_accepted`, and
+`real_duplicate_parameter_is_still_rejected` to `src/lib.rs` (the first
+two assert directly on the typed IR shape -- a `TypedStmt::Let` for the
+shadowed name, never a `Reassign`). Added
+`let_and_param_shadowing_a_top_level_const_run_correctly_on_tree_backends`
+to `tests/run_end_to_end.rs` (real subprocess runs on both tree backends,
+asserting the printed output uses the runtime values 5/7, not the const's
+99).
+
+Full `cargo test --release` clean (2821 lib tests + 207 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category B is now closed (all 6 originally-listed candidates triaged: 5
+-- if let, while let, match arms, closure params, for-loop induction
+vars -- confirmed safe by construction; the 6th, function parameters
+vs. module-level consts, confirmed vulnerable and fixed as BUG-142,
+which turned out to have two symptoms sharing one root cause: the
+parameter-diagnostic case and the plain/tuple `let`-Reassign case).
+Next free bug number is **BUG-143**.
+
+## BUG-143 (2026-08-08) -- `while` loop indexing a fixed-size array with the loop var hit a nonexistent `.len` field in tree-C
+
+Third finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category C
+(compiler-emitted-pragma + boundary-value UB audit) -- found incidentally
+while investigating the category's own primary question, not what the
+investigation set out to find.
+
+**Category C's primary question, answered first**: does `_Pragma("GCC
+ivdep")` (the sibling pragma to BUG-140's fixed `#pragma omp parallel
+for` site, emitted for every non-parallel `for`/`while` loop) share
+BUG-140's GCC-internal signed-overflow UB for extreme loop bounds?
+Answer: **no** -- confirmed via a standalone C probe (the same technique
+BUG-140 itself used) that a plain `for (T i = start; i < end; i++)` loop
+re-evaluates its exit condition fresh every iteration; there's no
+equivalent "precompute the total trip count via signed subtraction"
+step for `ivdep` (a vectorization hint) the way `#pragma omp parallel
+for` needs one to partition work across threads ahead of time. Verified
+directly through `vanic` too: the real BUG-140 repro reshaped as a
+non-parallel `for` loop traps correctly on the very first iteration (a
+genuine out-of-bounds access, via the ordinary per-element runtime
+bounds check) on both backends -- exit 134 on C, exit 3 on LLVM. A grep
+of `backend_c.rs` confirmed exactly 3 `_Pragma` sites total (while-ivdep,
+for-ivdep, for-omp-parallel) -- no other pragma/GCC-transform-triggering
+site exists to audit. `#[bounded(N)]`'s depth counter (the audit's other
+named candidate) uses a plain runtime `int` comparison with no
+pragma/transform involvement -- not a candidate. Category C's primary
+question is closed with no fix needed; locked in with
+`non_parallel_for_with_extreme_start_bound_traps_correctly_on_both_backends`
+in `tests/run_end_to_end.rs` (a "clean pass still gets a regression
+test," per this project's convention).
+
+**The incidental finding**: while constructing repros to probe the ivdep
+question, forcing an EXTREME start bound through a `while`-loop shape
+(rather than `for`) hit an entirely unrelated, more severe bug. Minimal
+repro (no extreme values needed at all):
+```
+fn main() -> i64 {
+  let xs: [i64; 4] = [10, 20, 30, 40];
+  let i: i64 = 0;
+  let sum: i64 = 0;
+  while i < 4 {
+    sum = sum + xs[i];
+    i = i + 1;
+  }
+  return sum;
+}
+```
+This is a completely ordinary idiom, yet `cc` failed outright: `request
+for member 'len' in something not a structure or union`.
+
+Root cause: `backend_c.rs`'s `while_bounds_hints` optimizer aid hoists a
+single bounds assertion before a `while var < upper`/`var <= upper` loop
+when the body indexes a Vec by the loop var, letting gcc's VRP prove the
+per-element check redundant. Its collector, `collect_vec_idx_in_expr`,
+recorded ANY `Var`-based `Index` access keyed by the loop variable with
+NO check that the indexed value is actually a `Vec<T>` -- a fixed-size
+`[T; N]` array's `Index` access matches the exact same AST shape. The
+hint's emission side (`while_bounds_hints` itself) unconditionally
+renders `{name}.len` (or `{name}->len` for a ref), assuming a `Vec<T>`
+struct's `.len` field -- but a `[T; N]` lowers to a raw C array with no
+`.len` member at all, so `v_xs.len` is simply invalid C.
+
+Fix: gated `collect_vec_idx_in_expr`'s `Index` branch on the underlying
+(Ref/RefMut-stripped) type actually being `Type::Vec`, matching the
+project's established pattern for this exact class of "one lowering
+mistakenly treats an array the same as a Vec" bug. Skipping the hint for
+arrays costs nothing but a missed optimizer hint -- every indexed access
+is still bounds-checked per-element at runtime regardless, confirmed by
+re-running the extreme-bound version of this same repro through a
+`while` loop after the fix: correctly traps (134 on C, 3 on LLVM) instead
+of failing to compile.
+
+Verified the fix doesn't over-narrow: the original Vec-shaped case
+(`while i < 4 { sum = sum + xs[i]; }` where `xs: Vec<i64>`) still gets
+the hint emitted (`_ihi`/`loop bound out of vec range` present in the
+tree-C output). Re-ran `vanic check examples`: identical 72 pre-existing,
+unrelated failures before and after -- zero regressions. (Both repro
+paths only reach tree-C -- forced here via an unrelated `#[no_mangle]`
+fn, same "SSA's own emission path never had this bug in the first place"
+situation as BUG-137/BUG-142 -- so nothing in the default SSA-eligible
+corpus was ever exposed to this bug, which is presumably why it went
+unnoticed.)
+
+Added `while_loop_indexing_a_fixed_array_compiles_and_runs_on_tree_c`
+and `while_loop_indexing_a_vec_still_gets_the_bounds_hint_on_tree_c` to
+`src/lib.rs`. Added
+`while_loop_indexing_a_fixed_array_runs_correctly_on_c_backend` (real
+subprocess run, asserts the correct sum 100) to
+`tests/run_end_to_end.rs`.
+
+Full `cargo test --release` clean (2823 lib tests + 209 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category C is now closed. Next free bug number is **BUG-144**.
+
+## BUG-144 (2026-08-08) -- interface method signatures and local `let` annotations never got BUG-139's type-existence check
+
+Fourth finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category D
+(type-existence validation gaps beyond BUG-139's three sites). Systematically
+checked all 4 originally-listed candidates.
+
+**Confirmed SAFE (2 of 4)**:
+- Generic `Type::Apply` instantiation names -- the validator's `Apply` arm
+  already checks `name` against `struct_names`/`enum_names`; confirmed via
+  a direct repro (`fn make() -> BogusGeneric<i64>`) that this fires
+  correctly for a never-declared generic name.
+- `methods on`/`implement` blocks -- confirmed SAFE for both forms; both
+  get hoisted into `program.functions` (via `hoist_methods_into_functions`
+  / `hoist_impls_into_functions`) BEFORE BUG-139's validator loop runs, so
+  they're already covered as ordinary function declarations.
+
+**Confirmed VULNERABLE (2 of 4), fixed as BUG-144**:
+- **Bare `interface` declarations.** `interface Foo { fn bar(self:
+  BogusType) -> BogusType; }` with no `implement` block anywhere passed
+  `vanic check` clean and ran 0-exit on both backends -- BUG-139's exact
+  "declared but never constructed -> silently dead" shape, just one level
+  up (the interface DECLARATION itself, as opposed to a struct/enum/fn
+  declaration). `program.interfaces` was never iterated by BUG-139's fix
+  at all -- only consulted as a lookup TARGET for `Type::Object`
+  validation elsewhere.
+- **Local `let`/`let (a, b)` type annotations.** BUG-139 wired the
+  validator into top-level struct fields/enum variants/fn signatures
+  only; local annotations were untouched. Confirmed via `let xs:
+  Vec<TotallyMadeUpType> = vec();` (the empty-vec-inference path takes
+  the element type straight from the annotation, so there's no
+  initializer-side type mismatch to accidentally catch it) -- passed
+  `vanic check` clean, then failed VERY late with a wall of dozens of
+  cryptic backend errors instead of one diagnostic (`cc`: repeated
+  "unknown type name 'Struct_TotallyMadeUpType'"; `lli`: "base element of
+  getelementptr must be sized"). Same shape for `let (a, b): (Bogus,
+  i64) = ...;`.
+
+**Fix, mechanical part**: hoisted BUG-139's `type_references_unknown_name`
+/ `validate_type_reference_exists` out of their original home nested
+inside `check_impl` to module level in `checker.rs`, so `check_one_stmt`'s
+`Stmt::Let`/`Stmt::LetTuple` handlers could call them too (a function-local
+`fn` item isn't visible outside its enclosing function). Added an
+`interfaces: HashSet<String>` field to `Env`, populated in `check_function`
+(threaded in as a new parameter) the same way `structs`/`enums` already
+are, so the per-statement checker has interface names on hand without
+adding yet another function parameter everywhere. Wired the validator
+into: a new loop over `program.interfaces` (right after the existing
+`program.functions` loop); `Stmt::Let`'s annotation (deriving
+`struct_names`/`enum_names` from `env.structs.keys()`/`env.enums.keys()`
+rather than storing yet more redundant Env state); `Stmt::LetTuple`'s
+annotation (mirroring BUG-137/BUG-142's own precedent of keeping
+`LetTuple` in lockstep with plain `Let`).
+
+**Fix, the interesting part**: the interface-validation loop's first
+build against the full example corpus surfaced 3 categories of false
+positive, each a genuine pre-existing gap the new, stricter check simply
+made visible for the first time:
+1. **`Self` placeholder.** `interface Describable { fn name(self: Self)
+   -> i64; }` -- a completely ordinary interface declaration pattern
+   (confirmed in `examples/language/english/default_method_inherited_
+   self_type.vani` and 9 other corpus files) -- parses `Self` as the
+   parser's default bare-identifier stamp, `Type::Struct("Self")`, which
+   stays un-substituted until a concrete `implement` block provides the
+   real type. `Self` can never itself be a declared struct/enum name.
+   Fixed by special-casing `name == "Self"` in `type_references_unknown_
+   name`'s `Type::Struct` arm, the same way `Type::Param` is always
+   accepted.
+2. **A real enum used as an interface method's self-type.**
+   `interface Eq { fn eq(self: Color, other: Color) -> bool; }` where
+   `Color` is a genuinely declared enum (`examples/language/english/
+   enum_eq.vani`'s own documented pattern) -- `resolve_enum_types_in_
+   program` (the pass that re-stamps the parser's default `Type::
+   Struct(name)` to `Type::Enum(name)` once a name is confirmed to be an
+   enum) processes `program.impls` but never the sibling `program.
+   interfaces`, so the bare interface declaration's own copy of the
+   signature stayed `Type::Struct("Color")` forever, even though the
+   matching `implement Eq for Color` block's copy of the identical
+   signature correctly resolved. Fixed by adding a `program.interfaces`
+   loop to `resolve_enum_types_in_program`, mirroring the existing
+   `program.impls` loop.
+3. **A generic template name in a blanket-impl-targeting interface.**
+   `interface Labeled { fn get_label(self: Wrap<i64>) -> i64; }` paired
+   with `implement<T> Labeled for Wrap<T> { ... }` (caught by two
+   existing tests, `blanket_impl_expands_for_concrete_type` and
+   `generic_struct_methods_and_iface_impl_compile`, which is how this
+   one surfaced -- `cargo test`, not the corpus sweep) -- `program.
+   interfaces` is never a monomorphization target at all, so `Wrap`
+   (the bare generic template name) never gets expanded/replaced the
+   way `program.structs`/`program.impls` do, and `struct_names_for_
+   type_check` is deliberately built AFTER monomorphization has already
+   dropped that template in favor of its concrete `Wrap__i64`
+   expansions. Fixed -- scoped to JUST the interface-validation loop, not
+   the general-purpose validator used everywhere else -- by reusing the
+   same "bare generic name resolves to its instantiation" prefix-match
+   heuristic `Env::resolve_struct_name`/`resolve_enum_name` already use
+   elsewhere in this file for the identical ambiguity: derive a
+   `struct_names_for_iface_check`/`enum_names_for_iface_check` pair that
+   additionally contains each existing struct/enum's `__`-split base
+   name.
+
+Deliberately did NOT loosen the general-purpose validator itself for any
+of these three cases -- non-interface declarations (struct fields, enum
+variants, fn signatures, local annotations) DO get properly monomorphized
+and enum-resolved, so they should stay strict; only the interface
+declaration's mirror of the exact same signature has this gap, because
+interfaces sit outside every one of those passes.
+
+Verified: `vanic check examples` before/after (`git stash`) shows exactly
+0 new distinct failing files -- the only diff is 2 extra diagnostic lines
+on `examples/language/mandarin/async_cancel_auto.vani`, a file already in
+the pre-existing 72-error baseline (confirmed during BUG-139's own
+investigation to be an unrelated Mandarin-async-keyword parse ordering
+quirk); the new "let annotation" check just fires an earlier, more
+specific diagnostic alongside the pre-existing "let initializer" mismatch
+for the same 2 already-broken lines -- not a regression. Full `cargo test
+--release` also clean after the false-positive fixes (initially caught 2
+real regressions here, both fixed by the generic-blanket prefix-match
+before commit).
+
+Added 6 tests to `src/lib.rs`: `interface_method_signature_with_unknown_
+type_is_rejected`, `interface_method_self_typed_as_self_keyword_is_
+accepted`, `interface_method_self_typed_as_a_real_enum_is_accepted`,
+`interface_method_self_typed_as_generic_blanket_target_is_accepted`,
+`let_annotation_with_unknown_type_is_rejected_even_via_empty_vec_
+inference`, `let_tuple_annotation_with_unknown_type_is_rejected`. Added 2
+to `tests/run_end_to_end.rs`: `interface_method_with_unknown_type_
+rejected_by_vanic_check` (real subprocess, checks stderr) and
+`interface_method_self_typed_as_real_enum_runs_correctly_on_both_
+backends` (real subprocess runs on both backends, not just a compile
+check).
+
+Full `cargo test --release` clean (2829 lib tests + 211 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category D is now closed. Next free bug number is **BUG-145**.
+
+## BUG-145 (2026-08-08) -- LLVM's `parallel for` GOMP trip-count math had NO overflow guard for any reduction operator, and mostly SIGSEGV'd
+
+Fifth finding from `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s category E
+(`parallel for`/`reduce` correctness beyond BUG-140's one fixed shape).
+Systematically tested all 4 originally-listed candidates across all 9
+`ReductionOp` variants (Add, Mul, BitAnd, BitOr, BitXor, Min, Max, And,
+Or) with hand-computed expected values, on both backends.
+
+**Confirmed SAFE (3 of 4)**:
+- **Empty range** (`from 5 to 5` and the descending `from 5 to 3` shape)
+  -- every reduction operator correctly leaves the accumulator at its
+  identity value (0 for `+`, 1 for `*`, -1/all-ones for `&`, 0 for `|`/
+  `^`, i64::MAX for `min`, i64::MIN for `max`, `true` for `&&`, `false`
+  for `||`) on both backends. No garbage, no spurious trap.
+- **Single-iteration range** -- correctly combines the accumulator with
+  exactly that one element, confirmed against hand-computed values, both
+  backends.
+- **Nested `parallel for`** -- tested all 3 nesting shapes (parallel-in-
+  parallel, parallel-in-plain-for, plain-for-in-parallel) with a real
+  cross-product reduction (sum of 0..11 = 66); all compute the correct
+  answer on both backends.
+
+**Confirmed VULNERABLE (1 of 4), fixed as BUG-145 -- the most severe
+finding of this whole audit round**: "was BUG-140's fix applied
+unconditionally regardless of reduction operator?" Answer: **BUG-140's
+fix was never applied to the LLVM backend AT ALL.** Its GOMP-outlining
+path (`emit_parallel_for_via_gomp` in `backend_llvm.rs`) computes the
+trip count for manual thread-chunk partitioning via a raw, unchecked
+`sub i64 %end_v, %start_v` -- GOMP's own hand-rolled equivalent of the
+exact GCC OpenMP canonical-loop trip-count precompute BUG-140 fixed on
+the C backend, just via manual chunk math instead of a compiler pragma.
+Testing the extreme-start-bound repro (`i64::MIN` start) across every
+reduction operator revealed the guard's total absence had been masked:
+`Add`/`Mul` happened to still exit with code 3 (matching the expected
+"clean trap" convention) purely by COINCIDENCE -- their own checked-
+arithmetic reduction step (`llvm.sadd.with.overflow.i64` etc., the
+ordinary per-operation overflow check every arithmetic op gets)
+happened to catch a garbage value read via the GEP that the corrupted
+`%chunk`/`%my_lo`/`%my_hi` math produced. Every OTHER operator --
+`BitAnd`, `BitOr`, `BitXor`, `Min`, `Max`, `And`, `Or` -- **SIGSEGV'd
+outright (exit 139)** on the identical repro shape, just swapping the
+reduction operator. Both outcomes are undefined behavior stemming from
+the same corrupted trip-count computation; the "working" two were never
+actually protected, just lucky. This means BUG-140's own regression
+tests (which only exercised `Mul` on LLVM) accidentally validated a
+non-existent guard.
+
+**Fix**: added the LLVM-IR equivalent of BUG-140's C fix --
+`llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)` computed before
+GOMP's chunk-math, branching to a clean `exit(3)` on overflow. Scoped to
+signed loop types only, mirroring BUG-140's own reasoning (an unsigned
+range's `end - start` can never overflow i64). Hit one implementation
+snag worth noting: the fix's first version drew its SSA temp names from
+`ctx.fresh_tmp()` (the parent function's counter) but landed inside the
+OUTLINED function's own body text, which gets its numbering from a
+SEPARATE, independently-reset `outlined_ctx` created later in the same
+function -- producing a `multiple definition of local value` LLVM
+verifier error the moment both counters independently reached the same
+number. Fixed by switching to hard-coded SSA names, matching this whole
+preamble's own established convention (every other name in it --
+`%start_v`, `%end_v`, `%tid`, `%nt`, etc. -- is already hard-coded, not
+counter-generated).
+
+Verified: `opt -passes=verify` accepts the emitted IR; all 9 reduction
+operators now trap identically (exit 3 on LLVM, exit 134 on C) instead
+of a mix of coincidental-trap/SIGSEGV; re-ran the empty-range and
+single-iteration battery (18 cases) plus 3 nesting shapes to confirm the
+fix introduced no regressions; re-ran every existing `parallel for`
+example in `examples/language/english/` (`atomics.vani`,
+`fn_pointers.vani`, `memory_safety.vani`, `parallel_for_jit_run.vani`,
+`parallel_for_mul_reduction.vani`, `parallel.vani`, `tasks.vani`) --
+all still exit 0 with correct output. `vanic check examples` unchanged
+from the post-BUG-144 baseline (74, zero new failures).
+
+Added `parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_
+llvm` and `parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_
+in_llvm` to `src/lib.rs` (mirroring BUG-140's own C-backend test pair
+exactly, LLVM-IR-shaped). Added
+`parallel_for_extreme_start_bound_traps_cleanly_for_every_reduction_op_
+on_llvm` (real subprocess runs across all 9 reduction operators,
+asserting exit code 3 -- not 139 -- for each) and
+`nested_parallel_for_computes_correct_answer_on_both_backends` (real
+subprocess runs, hand-computed expected value 66) to
+`tests/run_end_to_end.rs`.
+
+Full `cargo test --release` clean (2831 lib tests + 213 end-to-end tests
++ all other integration suites, 0 failed).
+
+Category E is now closed. Next free bug number is **BUG-146**.
+
+## Localfuzz harness hardening (2026-08-08) -- category F, no BUG-N (process improvement, not a compiler bug)
+
+Sixth and final item from `docs/BUG_PATTERN_AUDIT_TODO_2.md`. Per the
+audit doc's own framing this was explicitly not a compiler defect --
+`tools/localfuzz/harness.py`'s `CRASH_MARKERS` substring-match heuristic
+had a confirmed false-positive (the bare identifier `RUST_BACKTRACE`
+appearing as literal DATA inside a qwen-generated candidate's own source
+text, echoed back verbatim by vanic's normal, non-crashing parse-error
+diagnostic -- not an actual Rust panic).
+
+**Fix, two independent hardenings**:
+1. Tightened the `RUST_BACKTRACE` marker from the bare env-var name to
+   the full, specific phrase Rust's panic runtime actually appends after
+   a real panic (`"run with `RUST_BACKTRACE=1`"`) -- a fuzzer
+   coincidentally generating that exact multi-word phrase as ordinary
+   program text is astronomically less likely than the single word
+   alone matching by chance.
+2. Added a signal-based crash check to `is_crash()`: on POSIX,
+   `subprocess.Popen`'s `returncode` is negative when the child died by
+   signal (e.g. -11 for SIGSEGV) -- a reliable, text-content-independent
+   signal that was sitting unused in `result["rc"]` already. Added as an
+   ADDITIONAL check alongside the text markers, not a replacement:
+   confirmed this project's default Rust panic strategy is unwind (no
+   `panic = "abort"` in `Cargo.toml`), so an ordinary panic reaching
+   `main()` exits with a normal positive code (101), not a signal death
+   -- text-matching stays the only way to catch that class of crash;
+   the signal check mainly catches `vanic`'s own process dying by signal
+   (e.g. a genuine stack-overflow SIGSEGV in the compiler itself that
+   the panic runtime can't turn into a clean unwind).
+
+Verified with a standalone ad-hoc script (no formal pytest harness
+exists anywhere in this repo for Python tooling, so didn't invent one
+for a single low-priority fix) covering 5 cases: the original false
+positive (now correctly NOT flagged), a genuine panic with the full
+anchored phrase (still correctly flagged), a signal-killed child with
+no text markers at all (newly correctly flagged), a clean run (still
+correctly not flagged), and a timeout (still correctly flagged
+regardless of `rc`). Confirmed via grep that no other script in
+`tools/localfuzz/` references `CRASH_MARKERS`/`is_crash` directly, so
+this change has no cross-file blast radius.
+
+Deliberately did NOT harden every other `CRASH_MARKERS` entry
+speculatively -- the other 9 markers are all multi-word phrases already
+(the same "coincidental match" risk class this fix targets), except
+`SIGSEGV`/`SIGABRT`, which are lower-risk bare tokens a fuzzer is much
+less likely to type verbatim than a plausible-sounding env-var name.
+Left as a possible future follow-up, not chased now, matching this
+item's own explicitly-stated low priority.
+
+This closes out `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s full scope -- all 6
+categories (A-F) are now closed. The next bug hunt needs a genuinely new
+theme, not a category G, per that document's own closing note.
+
+## BUG-146 (2026-08-08) -- both findings from `docs/BUG_PATTERN_AUDIT_TODO_3.md`: `Box<dyn Iface>` forward-declaration gap and shift-amount width mismatch
+
+Both categories from round 3 of the bug-pattern audit (built from a fresh
+localfuzz backlog triage, not from round 2's own bug shapes). Both were
+already root-caused in the audit doc before this session started fixing
+them; this section covers the actual fix + verification.
+
+**Category A -- `Box<dyn Iface>` payload/field never registers its
+interface for forward-declaration.** `collect_used_dyn_ifaces`
+(`backend_c.rs`) walks the program collecting every `dyn Iface` it finds
+so `emit_dyn_iface_typedefs` can forward-declare `intent_dyn_<Iface>`
+before anything references it. Its `walk_type` helper had arms for
+`Vec`/`Atomic`/`Mutex`/`Guard`/`Ref`/`RefMut`/`Channel`/`Tuple`/`FnPtr`/
+`Array` but not `Box` -- a `Box<dyn Iface>` enum-variant payload or
+struct field that's never actually constructed anywhere in the program
+never registered its interface, but the enum/struct's own eager C
+emission unconditionally references `intent_dyn_<Iface>` regardless of
+construction (`error: unknown type name 'intent_dyn_Drawable'`).
+Confirmed this also breaks LLVM for the struct-field shape specifically
+(`backend_llvm.rs`'s `collect_used_dyn_ifaces_llvm` is a literal
+passthrough to the same function) -- `error: use of undefined type named
+'intent_dyn_Drawable'`.
+
+Fix: widened `walk_type`'s match arms to cover every "wraps exactly one
+inner type" `Type` variant `type_references_unknown_name` already
+enumerates (from BUG-139/BUG-144's own audits) -- `Box`, `Vec128/256/
+512`, `TaskR`, `RwLock`, `ReadGuard`, `WriteGuard`, `Deque`, `HashSet`,
+`BTreeSet`, `BinaryHeap`, `Bst`, `Ptr`, `PtrMut`, `Pool`, `Handle`,
+`Tainted`, `BoundedPtr`, `ArenaRef`, plus `HashMap`/`BTreeMap` (both key
+and value) and `Closure` (alongside the existing `FnPtr` arm) -- not
+just `Box` alone, since the identical gap could hit any of them.
+
+Verified: both the original enum-payload repro and the struct-field
+repro now compile and run correctly on both backends (exit 0, correct
+printed output). Re-confirmed the ALREADY-fixed `Vec<Box<dyn Iface>>`
+case (fixed via a sibling function, `vec_element_has_user_struct`, per
+the comment describing that earlier fix) still works -- the widened
+match arms don't interact badly with it. `vanic check examples`
+unchanged (74, same as the post-BUG-144/145 baseline).
+
+**Category B -- compound shift-amount expressions produce a width-
+mismatched LLVM operand.** `bits << 3 + 0` (`bits: u8`) produced `shl i8
+%v_0, %v_1` where `%v_1` was genuinely i64-typed -- `lli` rejected it
+outright. `bits << 3` (a bare literal) worked fine. Root cause,
+confirmed via direct IR-diffing between the two cases: the checker
+(`check_shift`) deliberately never unifies the shift's LHS/RHS widths --
+a shift count is intentionally allowed a different width than the value
+being shifted, so this is NOT a checker bug (a fix there would have
+broken the working bare-literal case, which relies on exactly this
+flexibility). The actual gap was codegen-only, and only on ONE of the
+LLVM backend's TWO separate lowering paths: tree-LLVM (`backend_llvm.rs`)
+already had a correct width-adjustment fix for this exact class; SSA-
+LLVM (`ssa_backend_llvm.rs`, the path a simple, SSA-eligible program
+like this one actually takes by default) did not -- `emit_binary` derived
+a single shared `op_ty` from the LEFT operand only and used it
+unconditionally for the RHS too. A `Const` RHS (bare literal) renders as
+untyped text with no possible mismatch; a `Value` RHS (a genuinely-typed
+SSA register, from evaluating a compound expression like `3 + 0`)
+exposed the assumption.
+
+Took real debugging to find, not just reading: initially placed a debug
+`eprintln!` inside tree-LLVM's own (already-correct, pre-existing)
+width-adjustment code expecting it to explain the bug, and it never
+fired at all -- the missing piece was realizing the CLI's default `vanic
+run`/`vanic emit --backend=llvm` routes an SSA-eligible program through
+SSA-LLVM, not tree-LLVM, the same "which of the two lowering paths does
+this actually reach" trap several bugs this session already hit (BUG-137/
+BUG-142/BUG-143 needed forcing tree-C via `#[no_mangle]`; this is the
+LLVM-side mirror of that same class of confusion).
+
+Fix: at `InstrKind::Binary`'s one call site in `ssa_backend_llvm.rs`,
+look up the RHS operand's own type separately (`operand_type(r,
+value_types)`) and pass it into `emit_binary` as a new `rhs_ty: Option<&
+Type>` parameter; inside `emit_binary`, for `Shl`/`Shr` specifically,
+trunc/sext/zext the RHS to match `op_ty` (the LHS's type) BEFORE either
+downstream use (the `@__intent_checked_shift_*` helper call when
+`checked: true`, or the raw `shl`/`ashr`/`lshr` instruction) -- mirrors
+the pattern tree-LLVM's own fix already established, just applied to the
+path that was actually missing it.
+
+Verified across width/operator combinations: `u8`/`Shl`, `u8`/`Shr`,
+`u32`/`Shl`, all producing hand-computed-correct results on the LLVM
+backend (the C backend was never affected -- C's implicit integer
+promotion sidesteps this whole class, matching BUG-141's own earlier
+finding about C's structural immunity to width-mismatch bugs). Confirmed
+the bare-literal case still produces no unnecessary adjustment
+(`.shwidth` temp absent).
+
+Added 5 tests to `src/lib.rs`: `box_dyn_iface_enum_payload_never_
+constructed_compiles_on_c`, `box_dyn_iface_struct_field_never_
+constructed_compiles_on_both_backends`, `shl_with_compound_shift_
+amount_expression_compiles_and_runs_correctly`, `shr_with_compound_
+shift_amount_expression_compiles_on_ssa_llvm` (both shift tests route
+through `crate::ssa::lower_program` + `crate::ssa_backend_llvm::emit`
+directly, since the library's own `compile_to_llvm` helper always goes
+through tree-LLVM and can't exercise the SSA-specific fix),
+`shl_with_bare_literal_shift_amount_gets_no_width_adjustment_temp`.
+Added 3 to `tests/run_end_to_end.rs`: `box_dyn_iface_enum_payload_
+never_constructed_runs_correctly_on_c`, `box_dyn_iface_struct_field_
+never_constructed_runs_correctly_on_both_backends`,
+`compound_shift_amount_expressions_compute_correct_values_on_llvm`
+(3 width/op combinations in one test, real subprocess runs, hand-
+computed expected values).
+
+Full `cargo test --release` clean (2836 lib tests + 216 end-to-end tests
++ all other integration suites, 0 failed).
+
+This closes out `docs/BUG_PATTERN_AUDIT_TODO_3.md`'s full scope -- both
+categories now fixed. Next free bug number is **BUG-147**.
+
+## BUG-147 (2026-08-09) -- clone_at() never bounds-checked its index
+
+Found via a fresh localfuzz sweep (post round-3 closeout) triaging 4
+unreviewed candidates from 2026-08-08/09: 1 benign (the documented
+C-134-vs-LLVM-3 trap-code convention, on an i64::MIN-to-limit loop
+whose body genuinely overflows `i * 2` -- correct trap, not a bug), 2
+non-bugs (a source-level infinite loop from mutation with no loop-body
+increment; the already-characterized `sleep_ms(9223372036854775807,
+...)` absurd-duration async pattern), and 1 REAL finding.
+
+The real finding: `clone_at(xs, i)` is the only indexed-access builtin
+in the whole codebase that never ran its index through the bounds-check
+convention every other indexed access uses (`emit_index`'s
+`intent_check_bounds` on C, `@__intent_bounds_check` on LLVM, both via
+`checked` mode). localfuzz's repro was `clone_at(ref empty_nodes, 0)`
+on a `Vec<Node>` where `Node` has a nested `Vec<i64>` field, called on
+an EMPTY Vec: C silently read garbage out of the zero-length buffer and
+returned 0 (wrong but not a crash); LLVM's JIT segfaulted inside
+`memcpy` because the garbage `children` field's deep-clone tried to
+copy a garbage length. A genuine out-of-bounds safety hole, not just a
+backend-divergence cosmetic issue.
+
+Root cause: `clone_at`'s slot-address computation (`xs.data[i]` / GEP)
+was written before the project's general indexing bounds-check
+convention existed and was never retrofitted, unlike `emit_index`,
+`set_mut`'s slot_lvalue, etc. Four call sites needed the same fix, one
+per backend x codegen-path combination:
+
+- `src/backend_c.rs`, `"clone_at" =>` arm: wrapped both the Array and
+  Vec index expressions in `intent_check_bounds((int64_t)(idx),
+  (int64_t)<length-or-.len>)`, matching the exact idiom `emit_index`
+  already uses for both storage shapes.
+- `src/backend_llvm.rs`, tree-LLVM's `clone_at` handling (two branches
+  -- array and Vec): added a `call void @__intent_bounds_check(i64
+  <idx>, i64 <len>)` before each GEP, loading the Vec's `len` field (GEP
+  index 1) or using the array's static length constant, mirroring the
+  existing idiom at e.g. line 4625 (an array-write bounds check).
+- `src/ssa_backend_llvm.rs`, SSA-LLVM's `clone_at` handling (Vec only --
+  SSA doesn't support array clone_at): same `@__intent_bounds_check`
+  call, loading `len` via GEP field 1 on the materialized struct
+  pointer.
+- `src/ssa_backend_c.rs`, SSA-C's `clone_at` handling: same
+  `intent_check_bounds` wrap as tree-C.
+
+Verified: the original localfuzz repro now traps cleanly and
+consistently on both backends (C exit 134 with an "index out of
+bounds" message, LLVM exit 3 -- the same convention as every other
+bounds trap) instead of C returning silent garbage and LLVM
+segfaulting. A hand-written in-bounds sanity check (`clone_at` on a
+non-empty Vec, index within range) still returns the correct value on
+both backends -- confirms the fix doesn't over-trigger.
+
+Added 4 tests to `src/lib.rs` (one per codegen path -- `compile_to_c`,
+`compile_to_llvm` for the array branch, and the direct-SSA
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit` /
+`crate::ssa_backend_llvm::emit` pattern for the SSA paths, since SSA
+lowering doesn't support structs so those two tests use `Vec<i64>` /
+`Vec<Vec<i64>>` instead of the original struct-with-nested-Vec repro
+shape), each asserting the emitted code contains the bounds-check call.
+Added 2 to `tests/run_end_to_end.rs`: a real subprocess test
+reproducing the exact localfuzz shape and asserting both backends now
+trap with the expected exit codes/messages, plus a same-shape in-bounds
+test asserting correct output on both backends.
+
+Full `cargo test --release` clean (2840 lib tests + 218 end-to-end
+tests + all other integration suites, 0 failed). `vanic check examples`
+unaffected (bounds-check codegen doesn't run during static
+type-checking).
+
+## BUG-148 (2026-08-09) -- vec_remove_at() never bounds-checked its index
+
+Same shape as BUG-147, and the confirmed lead category A of
+`docs/BUG_PATTERN_AUDIT_TODO_4.md` was already tracking: `vec_remove_at
+(mut ref xs, i)` was written as one-off inline codegen (Closure #388)
+that bypassed the project's bounds-check convention -- `swap_remove`
+and `insert` on the identical shape correctly trap on an out-of-bounds
+index, but `vec_remove_at` silently read/shifted garbage past the
+buffer and returned it instead. Confirmed by direct reproduction before
+the fix: `vec_remove_at(mut ref xs, 99)` on a 3-element Vec printed `4`
+(garbage) on LLVM and `0` (different garbage) on C, both exiting 0.
+
+Only two codegen sites needed the fix (there's no SSA-backend
+`vec_remove_at` at all -- `src/main.rs`'s `ssa_path_supports` already
+excludes it by name, forcing tree-backend dispatch unconditionally):
+
+- `src/backend_c.rs`, `"vec_remove_at" =>` arm (~line 18386): wrapped
+  the index in `intent_check_bounds((int64_t)(i), (int64_t)xs->len)`,
+  same idiom as every other C bounds-check site.
+- `src/backend_llvm.rs`, `if name == "vec_remove_at"` arm (~line 7992):
+  added a `call void @__intent_bounds_check(i64 <idx>, i64 <len>)`
+  right after the existing `len` load (which was already there for the
+  shift loop but never used to guard the initial read) and before the
+  unguarded GEP/load of the removed element.
+
+Verified: the repro above now traps cleanly and consistently on both
+backends (C exit 134 with `"index out of bounds: 99, len 3"` on
+stderr, LLVM exit 3) instead of silently returning garbage. A
+hand-written in-bounds sanity check (`vec_remove_at` on a 4-element
+Vec, removing index 1) still returns the correct removed value, new
+length, and correctly shifts the remaining elements left on both
+backends -- confirms the fix doesn't over-trigger.
+
+Added 2 tests to `src/lib.rs` (`vec_remove_at_on_c_emits_bounds_check`,
+`vec_remove_at_on_llvm_emits_bounds_check`), each asserting the emitted
+code contains the bounds-check call. Added 2 to
+`tests/run_end_to_end.rs`
+(`vec_remove_at_out_of_bounds_traps_cleanly_on_both_backends`,
+`vec_remove_at_in_bounds_still_shifts_correctly_on_both_backends`),
+real subprocess runs on both backends.
+
+Full `cargo test --release` clean (2842 lib tests + 220 end-to-end
+tests + all other integration suites, 0 failed).
+
+This closes category A's confirmed lead in
+`docs/BUG_PATTERN_AUDIT_TODO_4.md` -- the systematic sweep of the rest
+of the index-taking builtin surface (bucket classification: should-be-
+checked-and-isn't / intentionally-caller-responsible / already-safe-by-
+a-different-mechanism) is still open for a future session.
+
+Next free bug number is **BUG-149**.
+
+## Systematic bounds-check sweep (2026-08-09) -- category A closed, clean negative result
+
+Follow-up to BUG-147/BUG-148: swept the rest of the index-taking
+builtin surface per `docs/BUG_PATTERN_AUDIT_TODO_4.md` category A's
+open item. Grepped every `_at`/`_nth` string literal across
+`backend_c.rs`, `backend_llvm.rs`, `ssa_backend_c.rs`,
+`ssa_backend_llvm.rs` (exhaustive set: `clone_at`, `vec_remove_at`
+-- both already fixed -- plus `i64_byte_at`, `str_byte_at`, neither
+new), then read every implementation on the doc's "Builtins worth
+checking next" list directly:
+
+- `deque_pop_back`/`_front`/`peek_back`/`_front`, `heap_pop`/`peek`,
+  `binary_heap_pop`/`peek`, `bst_min`/`max`, `skiplist_min`/`max` --
+  all return `Enum_Option__i64` with an explicit `len == 0` guard on
+  both backends. Already safe.
+- `pool_get`/`pool_free` -- handle carries `(slot_idx, generation)`;
+  both backends check `slot_idx >= len` OR stale generation before
+  touching memory. Already safe, verified identical on C and LLVM.
+- `aref_load`/`aref_store` -- no length is even passed (bare pointer
+  arg); code comment states this deliberately mirrors raw
+  load/store's caller-responsible contract. Not a bug, by design.
+- `simd_load`/`simd_store` (128/256/512-bit) -- deliberately
+  unchecked by design, and explicitly documented as such in
+  `tutorials/src/advanced/05_simd.md` ("no bounds checking, no copy
+  of the fat pointer"). Not a bug.
+- `intent_vec_bool__get` (found while grepping, not on the original
+  list) -- the raw helper has no internal check, but every call site
+  (`emit_index`) wraps the index in `intent_check_bounds(...)` before
+  calling it. Already safe via caller-wraps-callee, same net effect
+  as `vec_remove_at`'s fix just structured the other way.
+
+None of these builtins exist in either SSA backend (confirmed via
+grep -- no match arms), so programs using them always fall back to
+the tree backend, meaning the sites read above are the only sites
+that exist for this family; no third/fourth site was missed.
+
+No code changes -- this pass's value was confirming the rest of the
+surface is safe rather than assuming it. `docs/BUG_PATTERN_AUDIT_TODO_4.md`
+category A is now fully closed; round 4 is done. A future session
+should pick a new audit theme.

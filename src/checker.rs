@@ -122,6 +122,11 @@ struct Env {
     structs: BTreeMap<String, StructInfo>,
     /// Registry of user-declared enum types. T1.3.
     enums: BTreeMap<String, EnumInfo>,
+    /// Names of user-declared interfaces (BUG-144). Just the name
+    /// set, not full `InterfaceDecl`s -- the only current consumer
+    /// is `type_references_unknown_name`'s `Type::Object` arm, via
+    /// `Stmt::Let`'s annotation validation.
+    interfaces: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +164,7 @@ impl Env {
             scopes: vec![BTreeMap::new()],
             structs: BTreeMap::new(),
             enums: BTreeMap::new(),
+            interfaces: std::collections::HashSet::new(),
         }
     }
 
@@ -614,6 +620,127 @@ pub fn check_library_with_kosh_boundary(
     kosh_boundary_names: &std::collections::HashSet<String>,
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
     check_impl(program, false, kosh_boundary_names)
+}
+
+/// Recursively walks `ty`, returning the first name it finds that
+/// doesn't resolve against the program's own struct/enum/interface
+/// declarations. `Type::Param` is always accepted -- the parser
+/// already distinguishes a genuine in-scope generic parameter from
+/// an ordinary name reference at parse time (see `parse_type`), so
+/// by the time a name reaches here as `Type::Struct`/`Type::Enum`
+/// it was never recognized as a generic parameter in the first
+/// place.
+///
+/// Module-level (not nested in `check_impl`) since BUG-144's fix
+/// needs to call this from `check_one_stmt`'s `Stmt::Let` handling
+/// too, and a function-local `fn` item isn't visible outside its
+/// enclosing function.
+fn type_references_unknown_name(
+    ty: &Type,
+    struct_names: &std::collections::HashSet<String>,
+    enum_names: &std::collections::HashSet<String>,
+    interface_names: &std::collections::HashSet<String>,
+) -> Option<String> {
+    match ty {
+        Type::I8 | Type::I16 | Type::I32 | Type::I64
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64
+        | Type::F32 | Type::F64 | Type::Bool
+        | Type::Str | Type::OwnedStr
+        | Type::Task | Type::Condvar | Type::Barrier | Type::FileHandle
+        | Type::UnionFind | Type::Graph | Type::Trie | Type::SkipList
+        | Type::BloomFilter | Type::Region
+        | Type::Param(_) => None,
+
+        Type::Struct(name) => {
+            // BUG-144: the parser stamps every bare user-typed
+            // identifier as `Type::Struct(name)` at parse time --
+            // including the literal `Self` placeholder used inside a
+            // bare `interface` declaration's own method signatures
+            // (`fn eq(self: Self, ...) -> Self;`), which stays
+            // un-substituted until a concrete `implement` block
+            // provides the real type (see the `Type::Struct(n) if n
+            // == "Self"` substitution elsewhere in this file). `Self`
+            // is never itself a declared struct/enum name, so it can
+            // never legitimately appear in `struct_names` -- treat it
+            // as always valid here, the same way `Type::Param` always
+            // is.
+            if name == "Self" || struct_names.contains(name) { None } else { Some(name.clone()) }
+        }
+        Type::Enum(name) => {
+            if enum_names.contains(name) { None } else { Some(name.clone()) }
+        }
+        Type::Object(name) => {
+            if interface_names.contains(name) { None } else { Some(name.clone()) }
+        }
+
+        Type::Vec(inner) | Type::Vec128(inner) | Type::Vec256(inner) | Type::Vec512(inner)
+        | Type::Ref(inner) | Type::RefMut(inner)
+        | Type::TaskR(inner) | Type::Atomic(inner)
+        | Type::Mutex(inner) | Type::Guard(inner)
+        | Type::RwLock(inner) | Type::ReadGuard(inner) | Type::WriteGuard(inner)
+        | Type::Deque(inner) | Type::HashSet(inner)
+        | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner)
+        | Type::Box(inner) | Type::Ptr(inner) | Type::PtrMut(inner)
+        | Type::Pool(inner) | Type::Handle(inner) | Type::Tainted(inner)
+        | Type::BoundedPtr(inner) | Type::ArenaRef(inner)
+        | Type::Channel(inner, _) => {
+            type_references_unknown_name(inner, struct_names, enum_names, interface_names)
+        }
+
+        Type::Array { element, .. } => {
+            type_references_unknown_name(element, struct_names, enum_names, interface_names)
+        }
+
+        Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+            type_references_unknown_name(k, struct_names, enum_names, interface_names)
+                .or_else(|| type_references_unknown_name(v, struct_names, enum_names, interface_names))
+        }
+
+        Type::Tuple(elements) => elements
+            .iter()
+            .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names)),
+
+        Type::FnPtr(params, ret) | Type::Closure(params, ret) => params
+            .iter()
+            .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
+            .or_else(|| type_references_unknown_name(ret, struct_names, enum_names, interface_names)),
+
+        // `Apply` (unexpanded generic instantiation) shouldn't
+        // survive past monomorphization, but if one somehow does,
+        // check the base name plus every type argument rather
+        // than silently passing it.
+        Type::Apply { name, args } => {
+            if !struct_names.contains(name) && !enum_names.contains(name) {
+                return Some(name.clone());
+            }
+            args.iter()
+                .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
+        }
+    }
+}
+
+fn validate_type_reference_exists(
+    ty: &Type,
+    span: Span,
+    context: &str,
+    struct_names: &std::collections::HashSet<String>,
+    enum_names: &std::collections::HashSet<String>,
+    interface_names: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(unknown_name) =
+        type_references_unknown_name(ty, struct_names, enum_names, interface_names)
+    {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("unknown type '{}' referenced in {}", unknown_name, context),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::unknown_type_in_declaration(
+                &unknown_name,
+            )),
+        );
+    }
 }
 
 fn check_impl(
@@ -1081,110 +1208,6 @@ fn check_impl(
     let interface_names_for_type_check: std::collections::HashSet<String> =
         program.interfaces.iter().map(|d| d.name.clone()).collect();
 
-    /// Recursively walks `ty`, returning the first name it finds that
-    /// doesn't resolve against the program's own struct/enum/interface
-    /// declarations. `Type::Param` is always accepted -- the parser
-    /// already distinguishes a genuine in-scope generic parameter from
-    /// an ordinary name reference at parse time (see `parse_type`), so
-    /// by the time a name reaches here as `Type::Struct`/`Type::Enum`
-    /// it was never recognized as a generic parameter in the first
-    /// place.
-    fn type_references_unknown_name(
-        ty: &Type,
-        struct_names: &std::collections::HashSet<String>,
-        enum_names: &std::collections::HashSet<String>,
-        interface_names: &std::collections::HashSet<String>,
-    ) -> Option<String> {
-        match ty {
-            Type::I8 | Type::I16 | Type::I32 | Type::I64
-            | Type::U8 | Type::U16 | Type::U32 | Type::U64
-            | Type::F32 | Type::F64 | Type::Bool
-            | Type::Str | Type::OwnedStr
-            | Type::Task | Type::Condvar | Type::Barrier | Type::FileHandle
-            | Type::UnionFind | Type::Graph | Type::Trie | Type::SkipList
-            | Type::BloomFilter | Type::Region
-            | Type::Param(_) => None,
-
-            Type::Struct(name) => {
-                if struct_names.contains(name) { None } else { Some(name.clone()) }
-            }
-            Type::Enum(name) => {
-                if enum_names.contains(name) { None } else { Some(name.clone()) }
-            }
-            Type::Object(name) => {
-                if interface_names.contains(name) { None } else { Some(name.clone()) }
-            }
-
-            Type::Vec(inner) | Type::Vec128(inner) | Type::Vec256(inner) | Type::Vec512(inner)
-            | Type::Ref(inner) | Type::RefMut(inner)
-            | Type::TaskR(inner) | Type::Atomic(inner)
-            | Type::Mutex(inner) | Type::Guard(inner)
-            | Type::RwLock(inner) | Type::ReadGuard(inner) | Type::WriteGuard(inner)
-            | Type::Deque(inner) | Type::HashSet(inner)
-            | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner)
-            | Type::Box(inner) | Type::Ptr(inner) | Type::PtrMut(inner)
-            | Type::Pool(inner) | Type::Handle(inner) | Type::Tainted(inner)
-            | Type::BoundedPtr(inner) | Type::ArenaRef(inner)
-            | Type::Channel(inner, _) => {
-                type_references_unknown_name(inner, struct_names, enum_names, interface_names)
-            }
-
-            Type::Array { element, .. } => {
-                type_references_unknown_name(element, struct_names, enum_names, interface_names)
-            }
-
-            Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
-                type_references_unknown_name(k, struct_names, enum_names, interface_names)
-                    .or_else(|| type_references_unknown_name(v, struct_names, enum_names, interface_names))
-            }
-
-            Type::Tuple(elements) => elements
-                .iter()
-                .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names)),
-
-            Type::FnPtr(params, ret) | Type::Closure(params, ret) => params
-                .iter()
-                .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
-                .or_else(|| type_references_unknown_name(ret, struct_names, enum_names, interface_names)),
-
-            // `Apply` (unexpanded generic instantiation) shouldn't
-            // survive past monomorphization, but if one somehow does,
-            // check the base name plus every type argument rather
-            // than silently passing it.
-            Type::Apply { name, args } => {
-                if !struct_names.contains(name) && !enum_names.contains(name) {
-                    return Some(name.clone());
-                }
-                args.iter()
-                    .find_map(|t| type_references_unknown_name(t, struct_names, enum_names, interface_names))
-            }
-        }
-    }
-
-    fn validate_type_reference_exists(
-        ty: &Type,
-        span: Span,
-        context: &str,
-        struct_names: &std::collections::HashSet<String>,
-        enum_names: &std::collections::HashSet<String>,
-        interface_names: &std::collections::HashSet<String>,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        if let Some(unknown_name) =
-            type_references_unknown_name(ty, struct_names, enum_names, interface_names)
-        {
-            diagnostics.push(
-                Diagnostic::new(
-                    span,
-                    format!("unknown type '{}' referenced in {}", unknown_name, context),
-                )
-                .with_elaboration(crate::diagnostic_elaborations::unknown_type_in_declaration(
-                    &unknown_name,
-                )),
-            );
-        }
-    }
-
     for function in &program.functions {
         for param in &function.params {
             validate_type_reference_exists(
@@ -1206,6 +1229,76 @@ fn check_impl(
             &interface_names_for_type_check,
             &mut diagnostics,
         );
+    }
+
+    // BUG-144 (2026-08-08): bug-pattern-audit-round-2, category D.
+    // `implement`/`methods on` blocks get this same validation for
+    // free (they're hoisted into `program.functions` before this
+    // point, by `hoist_impls_into_functions`/`hoist_methods_into_
+    // functions`) -- but a bare `interface` DECLARATION's own method
+    // signatures were never validated at all. Confirmed silent: an
+    // `interface Foo { fn bar(self: BogusType) -> BogusType; }` with
+    // no `implement` block anywhere passed `vanic check` clean and
+    // ran 0-exit on both backends, the same "declared but never
+    // constructed -> silently dead" shape BUG-139 found for struct
+    // fields/enum variants.
+    //
+    // Interfaces are never touched by monomorphization's name-
+    // mangling (`struct Wrap<T>` -> `Wrap__i64`) -- confirmed via
+    // `blanket_impl_expands_for_concrete_type` failing against a
+    // strict check: a blanket-impl-targeting interface's self-type
+    // (`interface Labeled { fn get_label(self: Wrap<i64>) -> i64; }`)
+    // still names the ORIGINAL generic template, since
+    // `struct_names_for_type_check` is built AFTER monomorphization
+    // has already dropped that template in favor of its concrete
+    // expansions. Reuse the same "bare generic name resolves to its
+    // instantiation" heuristic `Env::resolve_struct_name`/
+    // `resolve_enum_name` already use elsewhere in this file for the
+    // identical ambiguity, scoped to JUST this loop (not the general
+    // validator, which must stay strict for non-interface
+    // declarations that DO get properly monomorphized).
+    let struct_names_for_iface_check: std::collections::HashSet<String> =
+        struct_names_for_type_check
+            .iter()
+            .cloned()
+            .chain(struct_names_for_type_check.iter().filter_map(|n| {
+                n.split_once("__").map(|(base, _)| base.to_string())
+            }))
+            .collect();
+    let enum_names_for_iface_check: std::collections::HashSet<String> =
+        enum_names_for_type_check
+            .iter()
+            .cloned()
+            .chain(enum_names_for_type_check.iter().filter_map(|n| {
+                n.split_once("__").map(|(base, _)| base.to_string())
+            }))
+            .collect();
+    for iface in &program.interfaces {
+        for method in &iface.methods {
+            for param in &method.params {
+                validate_type_reference_exists(
+                    &param.ty,
+                    param.span,
+                    &format!(
+                        "interface '{}' method '{}' parameter '{}'",
+                        iface.name, method.name, param.name
+                    ),
+                    &struct_names_for_iface_check,
+                    &enum_names_for_iface_check,
+                    &interface_names_for_type_check,
+                    &mut diagnostics,
+                );
+            }
+            validate_type_reference_exists(
+                &method.return_type,
+                method.span,
+                &format!("interface '{}' method '{}' return type", iface.name, method.name),
+                &struct_names_for_iface_check,
+                &enum_names_for_iface_check,
+                &interface_names_for_type_check,
+                &mut diagnostics,
+            );
+        }
     }
 
     let mut struct_registry: BTreeMap<String, StructInfo> = BTreeMap::new();
@@ -1678,6 +1771,7 @@ fn check_impl(
             &signatures,
             &struct_registry,
             &enum_registry,
+            &interface_names_for_type_check,
             &const_registry,
             &mut diagnostics,
         ));
@@ -5418,6 +5512,32 @@ fn resolve_enum_types_in_program(
             }
             for s in &mut method.body {
                 resolve_enum_types_in_stmt(s, enums);
+            }
+        }
+    }
+    // BUG-144 (2026-08-08): the bare `interface` DECLARATION itself
+    // was never in scope for this pass -- only its `implement`
+    // counterpart was (the loop just above). A self-typed interface
+    // method (`interface Eq { fn eq(self: Color, other: Color) ->
+    // bool; }`, a real, deliberate v1 pattern per
+    // `examples/language/english/enum_eq.vani`) kept the parser's
+    // default `Type::Struct("Color")` stamp forever, never resolving
+    // to `Type::Enum("Color")` the way the identical `implement Eq
+    // for Color` block's OWN copy of the same signature already did.
+    // Surfaced by BUG-144's new interface-method type-existence
+    // validator: it correctly rejects a genuinely-unknown name, but
+    // without this fix it also rejected `Color` (a real, declared
+    // enum) as "unknown" purely because it arrived un-resolved.
+    for iface in &mut program.interfaces {
+        for method in &mut iface.methods {
+            resolve_enum_types_in_type(&mut method.return_type, enums);
+            for p in &mut method.params {
+                resolve_enum_types_in_type(&mut p.ty, enums);
+            }
+            if let Some(body) = &mut method.default_body {
+                for s in body {
+                    resolve_enum_types_in_stmt(s, enums);
+                }
             }
         }
     }
@@ -11090,6 +11210,7 @@ fn check_function(
     signatures: &HashMap<String, Signature>,
     structs: &BTreeMap<String, StructInfo>,
     enums: &BTreeMap<String, EnumInfo>,
+    interface_names: &std::collections::HashSet<String>,
     consts: &BTreeMap<String, (Type, TypedConst, Span)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> TypedFunction {
@@ -11208,6 +11329,7 @@ fn check_function(
     let mut env = Env::new();
     env.structs = structs.clone();
     env.enums = enums.clone();
+    env.interfaces = interface_names.clone();
 
     // T4.15: seed each top-level `const` into the root
     // scope as an immutable VarInfo carrying its
@@ -11253,7 +11375,15 @@ fn check_function(
         .iter()
         .map(|param| {
             validate_param_type(&param.ty, param.span, diagnostics);
-            if env.current_has(&param.name) {
+            // BUG-142: top-level `const`s are seeded into this same
+            // root scope just above (T4.15), with no `push_scope()`
+            // in between -- so `current_has` alone can't tell "a
+            // param shares a name with an earlier param" (a real
+            // duplicate) from "a param shares a name with a
+            // module-level const" (legal shadowing, same as a
+            // function-body `let` shadowing a const). Only the
+            // former is an actual duplicate-parameter error.
+            if env.current_get(&param.name).is_some_and(|v| !v.is_const) {
                 diagnostics.push(
                     Diagnostic::new(
                         param.span,
@@ -12577,6 +12707,36 @@ fn check_one_stmt(
             verify_call_args_in_expr(expr, smt_facts, env, signatures, diagnostics);
             let mut checked = if let Some(annotation) = annotation {
                 validate_array_element_type(annotation, *span, diagnostics);
+                // BUG-144 (2026-08-08): bug-pattern-audit-round-2,
+                // category D. BUG-139's validator was wired into
+                // top-level struct fields/enum variants/fn signatures
+                // only -- a local `let` annotation never got the same
+                // check. Confirmed silent + late-and-confusing on the
+                // exact BUG-139 shape: `let xs: Vec<Bogus> = vec();`
+                // (the empty-vec-inference path takes the element
+                // type straight from the annotation, with no
+                // initializer-side mismatch to accidentally catch it)
+                // passed `vanic check` clean, then produced a wall of
+                // dozens of cryptic backend errors instead of one
+                // clean diagnostic (`cc`: repeated "unknown type name
+                // 'Struct_Bogus'"; `lli`: "base element of
+                // getelementptr must be sized"). `env.structs`/
+                // `env.enums` are BTreeMaps keyed by name already --
+                // reuse their key sets directly rather than adding
+                // yet more Env fields.
+                let struct_names: std::collections::HashSet<String> =
+                    env.structs.keys().cloned().collect();
+                let enum_names: std::collections::HashSet<String> =
+                    env.enums.keys().cloned().collect();
+                validate_type_reference_exists(
+                    annotation,
+                    *span,
+                    "let annotation",
+                    &struct_names,
+                    &enum_names,
+                    &env.interfaces,
+                    diagnostics,
+                );
                 // L4 (B) Phase 1 (2026-06-08): ref types in let
                 // annotations were rejected by validate_no_ref.
                 // Now accepted because every ESCAPE vector
@@ -12702,7 +12862,22 @@ fn check_one_stmt(
                 drop_facts_mentioning(smt_facts, name);
             }
 
-            if let Some(old) = same_scope_existing {
+            // BUG-142: top-level `const`s are seeded into the
+            // function's root scope (T4.15) at the same depth a
+            // top-level-of-body `let` checks here -- a same-scope
+            // `current_get` hit that's actually a const must NOT
+            // become a Reassign: no `TypedStmt::Let`/backend
+            // declaration was ever emitted for a const (it's a
+            // compile-time-only env entry), so a Reassign targets a
+            // name the backend never declared -- confirmed via a
+            // direct repro to `unreachable!()`-panic tree-LLVM and
+            // fail to compile ("'v_N' undeclared") on tree-C. Treat
+            // it as a fresh declaration instead, matching this
+            // function's own doc comment ("function-scoped `let`
+            // bindings shadow [consts] naturally").
+            let real_shadow = same_scope_existing.filter(|old| !old.is_const);
+
+            if let Some(old) = real_shadow {
                 // Same-scope let â†’ Reassign (type must match).
                 if old.ty != var_ty {
                     diagnostics.push(
@@ -15500,6 +15675,22 @@ fn check_one_stmt(
             let elem_types = match (&annotation, checked.ty()) {
                 (Some(ann), _) => {
                     validate_no_ref(ann, *span, "destructure-let annotation", diagnostics);
+                    // BUG-144: same gap as the plain `Stmt::Let`
+                    // handler's annotation -- see its comment for
+                    // the full writeup.
+                    let struct_names: std::collections::HashSet<String> =
+                        env.structs.keys().cloned().collect();
+                    let enum_names: std::collections::HashSet<String> =
+                        env.enums.keys().cloned().collect();
+                    validate_type_reference_exists(
+                        ann,
+                        *span,
+                        "destructure-let annotation",
+                        &struct_names,
+                        &enum_names,
+                        &env.interfaces,
+                        diagnostics,
+                    );
                     match ann {
                         Type::Tuple(elements) => elements.clone(),
                         other => {
@@ -15613,8 +15804,15 @@ fn check_one_stmt(
                 // reason (any SSA-unsupported feature anywhere in the
                 // module forces the WHOLE module onto it) determined
                 // whether this shape built at all.
+                // BUG-142: same const-shadowing gap as the plain
+                // `Stmt::Let` handler above -- a same-scope hit that's
+                // actually the T4.15-seeded top-level const must not
+                // become a Reassign (no backend declaration exists for
+                // it). See that handler's BUG-142 comment for the full
+                // writeup.
                 let same_scope_existing = env.current_get(name).cloned();
-                if let Some(old) = same_scope_existing {
+                let real_shadow = same_scope_existing.filter(|old| !old.is_const);
+                if let Some(old) = real_shadow {
                     if old.ty != elt_ty {
                         diagnostics.push(
                             Diagnostic::new(

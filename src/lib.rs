@@ -455,6 +455,7 @@ pub fn compile_to_llvm(source: &str) -> Result<String, Vec<Diagnostic>> {
 mod tests {
     use super::{compile, compile_to_c, compile_to_c_no_std, compile_to_llvm};
     use crate::backend::Backend;
+    use crate::ir::TypedStmt;
 
     #[test]
     fn compiles_basic_program_to_c() {
@@ -1589,6 +1590,360 @@ mod tests {
         assert!(
             ll.contains("zext i32") && ll.contains(" to i64"),
             "expected the u32 index to be zext'd to i64 before the GEP, got:\n{ll}"
+        );
+    }
+
+    // BUG-141 (2026-08-08): bug-pattern-audit-round-2, category A. Unlike
+    // every sibling mutator on this dispatch path (`swap_remove`/`insert`/
+    // `vec_swap`/`vec_take`/`vec_drop`, all of which run their index/count
+    // arg through `coerce_checked(..., I64/U64, ...)` in checker.rs),
+    // `check_set_builtin` only validated `index.ty().is_integer()` and let
+    // the raw checked type through -- `set(mut ref xs, i, v)` with a
+    // `u32`-typed `i` produced `call i64 @intent_vec_i64__set_mut(...,
+    // i32 %t, i64 %v)`, a declared-vs-actual argument type mismatch against
+    // the callee's hard-coded `i64 %i` parameter. Same root-cause shape as
+    // BUG-138, just at a call site instead of a GEP.
+    #[test]
+    fn set_mut_with_u32_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u32 = 1;
+              let r: i64 = set(mut ref xs, i, 99);
+              return xs[1];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("set(mut ref) with u32 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i32") && ll.contains(" to i64"),
+            "expected the u32 index to be zext'd to i64 before the set_mut call, got:\n{ll}"
+        );
+        assert!(
+            !ll.contains("call i64 @intent_vec_i64__set_mut(%intent_vec_i64* %xs.addr, i32"),
+            "the set_mut call must not pass a raw i32 for the i64 index parameter, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn set_consuming_with_u16_index_widens_to_i64_in_llvm_ir() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let i: u16 = 1;
+              let ys: Vec<i64> = set(xs, i, 99);
+              return ys[1];
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("set(consuming) with u16 index compiles to LLVM");
+        assert!(
+            ll.contains("zext i16") && ll.contains(" to i64"),
+            "expected the u16 index to be zext'd to i64 before the set call, got:\n{ll}"
+        );
+    }
+
+    // BUG-142 (2026-08-08): bug-pattern-audit-round-2, category B. Top-level
+    // `const`s are seeded into a function's root scope (T4.15) at the same
+    // depth a top-level-of-body `let`/`let (a, b)` or the function's own
+    // parameters are checked at, with no `push_scope()` in between --
+    // `env.current_get`/`current_has` couldn't distinguish "shadowing a
+    // const" (legal) from "a real same-scope redeclaration" (BUG-137's
+    // Reassign case) or "a real duplicate parameter." A `let` shadowing a
+    // const emitted a `TypedStmt::Reassign` targeting a name with no
+    // backend-emitted declaration at all -- confirmed to panic tree-LLVM
+    // (`unreachable!(): checker: reassign to undeclared binding`) and fail
+    // to compile on tree-C (`'v_N' undeclared`). A parameter sharing a
+    // const's name got a spurious "parameter already defined" diagnostic
+    // for perfectly legal code.
+    #[test]
+    fn let_shadowing_a_top_level_const_declares_fresh_not_reassign() {
+        let source = r#"
+            const N: i64 = 99;
+            fn main() -> i64 {
+              let N: i64 = 5;
+              return N;
+            }
+        "#;
+        let checked = compile(source).expect("let shadowing a top-level const should compile");
+        let main_fn = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main fn present");
+        assert!(
+            main_fn.body.iter().any(|s| matches!(s, TypedStmt::Let { name, .. } if name == "N")),
+            "expected a fresh TypedStmt::Let for 'N' (shadowing the const), got: {:?}",
+            main_fn.body
+        );
+        assert!(
+            !main_fn.body.iter().any(|s| matches!(s, TypedStmt::Reassign { name, .. } if name == "N")),
+            "a let shadowing a const must never become a Reassign (no backend \
+             declaration exists for a const), got: {:?}",
+            main_fn.body
+        );
+        compile_to_c(source).expect("let shadowing a top-level const should compile to C");
+        compile_to_llvm(source).expect("let shadowing a top-level const should compile to LLVM");
+    }
+
+    #[test]
+    fn let_tuple_shadowing_a_top_level_const_declares_fresh_not_reassign() {
+        let source = r#"
+            const N: i64 = 99;
+            fn pair() -> (i64, i64) { return (5, 6); }
+            fn main() -> i64 {
+              let (N, r) = pair();
+              return N + r;
+            }
+        "#;
+        let checked = compile(source).expect("let-tuple shadowing a top-level const should compile");
+        let main_fn = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main fn present");
+        assert!(
+            main_fn.body.iter().any(|s| matches!(s, TypedStmt::Let { name, .. } if name == "N")),
+            "expected a fresh TypedStmt::Let for 'N' (shadowing the const), got: {:?}",
+            main_fn.body
+        );
+        assert!(
+            !main_fn.body.iter().any(|s| matches!(s, TypedStmt::Reassign { name, .. } if name == "N")),
+            "a let-tuple binding shadowing a const must never become a Reassign, \
+             got: {:?}",
+            main_fn.body
+        );
+        compile_to_c(source).expect("let-tuple shadowing a top-level const should compile to C");
+        compile_to_llvm(source).expect("let-tuple shadowing a top-level const should compile to LLVM");
+    }
+
+    #[test]
+    fn function_param_sharing_a_top_level_const_name_is_accepted() {
+        let source = r#"
+            const N: i64 = 99;
+            fn identity(N: i64) -> i64 { return N; }
+            fn main() -> i64 { return identity(5); }
+        "#;
+        compile(source).expect(
+            "a single, non-duplicate parameter sharing a top-level const's name \
+             must be accepted, not flagged as a duplicate parameter",
+        );
+    }
+
+    #[test]
+    fn real_duplicate_parameter_is_still_rejected() {
+        // BUG-142's fix narrowed the duplicate-parameter check to skip
+        // const-shadowing specifically -- confirm an *actual* duplicate
+        // parameter (no const involved at all) is still caught.
+        let source = r#"
+            fn f(x: i64, x: i64) -> i64 { return x; }
+            fn main() -> i64 { return f(1, 2); }
+        "#;
+        let errors = compile(source).expect_err("a real duplicate parameter must still be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("parameter 'x' is already defined")),
+            "expected a duplicate-parameter diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    // BUG-143 (2026-08-08): bug-pattern-audit-round-2, category C. Found
+    // incidentally while probing the `_Pragma("GCC ivdep")` non-parallel
+    // for-loop site for BUG-140-style boundary-value UB (confirmed that
+    // site is safe -- see run_end_to_end.rs's ivdep regression test).
+    // `while_bounds_hints`'s helper `collect_vec_idx_in_expr` recorded
+    // ANY `Var`-based `Index` access keyed by the while-loop's own
+    // variable, with no check that the indexed value is actually a
+    // `Vec<T>` -- a fixed-size `[T; N]` array matches identically. The
+    // hint's emission side (`while_bounds_hints`) unconditionally renders
+    // `{name}.len`, assuming a Vec's `.len` struct field; a `[T; N]`
+    // lowers to a raw C array with no such member, so indexing one inside
+    // a `while i < N { xs[i] } ` loop -- a completely ordinary idiom --
+    // produced `v_xs.len`, a hard `cc` failure ("request for member 'len'
+    // in something not a structure or union"). Fixed by gating the hint
+    // on the underlying (Ref/RefMut-stripped) type actually being
+    // `Type::Vec`.
+    #[test]
+    fn while_loop_indexing_a_fixed_array_compiles_and_runs_on_tree_c() {
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn main() -> i64 {
+              let xs: [i64; 4] = [10, 20, 30, 40];
+              let i: i64 = 0;
+              let sum: i64 = 0;
+              while i < 4 {
+                sum = sum + xs[i];
+                i = i + 1;
+              }
+              return sum;
+            }
+        "#;
+        let c = compile_to_c(source).expect(
+            "while-loop indexing a fixed array by the loop var must compile to tree-C",
+        );
+        assert!(
+            !c.contains("v_xs.len") && !c.contains("v_xs->len"),
+            "must not emit a Vec-shaped bounds hint (`{{name}}.len`) for a \
+             fixed-size array (no such struct field exists in C), got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn while_loop_indexing_a_vec_still_gets_the_bounds_hint_on_tree_c() {
+        // Companion to the array test above: confirm the fix didn't
+        // over-narrow the hint and disable it for the Vec case it was
+        // originally written for.
+        let source = r#"
+            #[no_mangle]
+            fn keep_alive() -> i64 { return 0; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30, 40);
+              let i: i64 = 0;
+              let sum: i64 = 0;
+              while i < 4 {
+                sum = sum + xs[i];
+                i = i + 1;
+              }
+              return sum;
+            }
+        "#;
+        let c = compile_to_c(source).expect("while-loop indexing a Vec must compile to tree-C");
+        assert!(
+            c.contains("_ihi") && c.contains("loop bound out of vec range"),
+            "expected the Vec bounds hint to still be emitted, got:\n{c}"
+        );
+    }
+
+    // BUG-144 (2026-08-08): bug-pattern-audit-round-2, category D. BUG-139's
+    // type-existence validator (`type_references_unknown_name` in
+    // checker.rs) was wired into struct fields / enum variants / function
+    // params+return only. Two more sites silently accepted a reference to
+    // a type that was never declared anywhere: (1) a bare `interface`
+    // declaration's own method signatures (never validated at all,
+    // `implement`/`methods on` blocks get it for free via hoisting into
+    // `program.functions`, but the interface DECLARATION itself never
+    // routes through that), and (2) a local `let`/`let (a, b)` type
+    // annotation (BUG-139 only wired top-level declarations). Both were
+    // confirmed silent at `vanic check` time and then failed late with a
+    // wall of cryptic backend errors instead of one clean diagnostic --
+    // the exact "declared but never constructed" shape BUG-139 itself
+    // found. Fixing the interface case surfaced two more pre-existing,
+    // unrelated gaps as false positives during the fix: interface method
+    // self-params can legitimately be `Self` (the un-substituted
+    // placeholder keyword, parser-stamped as `Type::Struct("Self")`) or a
+    // real declared enum/struct name that a resolution pass just never
+    // touched for `program.interfaces` (`resolve_enum_types_in_program`
+    // processes `program.impls` but not the sibling `program.interfaces`),
+    // or a generic template name in a blanket-impl-targeting interface
+    // (`self: Wrap<i64>`) that monomorphization's name-mangling never
+    // touches since interfaces aren't a monomorphization target at all.
+    #[test]
+    fn interface_method_signature_with_unknown_type_is_rejected() {
+        let source = r#"
+            interface Foo {
+                fn bar(self: BogusType) -> BogusType;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("interface method with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'BogusType'")
+                && e.message.contains("interface 'Foo' method 'bar'")),
+            "expected an unknown-type diagnostic naming the interface method, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_self_keyword_is_accepted() {
+        let source = r#"
+            interface Describable {
+                fn name(self: Self) -> i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect(
+            "the un-substituted `Self` placeholder in a bare interface \
+             declaration must never be flagged as an unknown type",
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_a_real_enum_is_accepted() {
+        let source = r#"
+            enum Color { Red, Green, Blue }
+            interface Eq {
+                fn eq(self: Color, other: Color) -> bool;
+            }
+            implement Eq for Color {
+                fn eq(self: Color, other: Color) -> bool {
+                    return (self as i32) == (other as i32);
+                }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect(
+            "a real declared enum used as an interface method's self-type \
+             must resolve correctly, not be flagged as unknown",
+        );
+    }
+
+    #[test]
+    fn interface_method_self_typed_as_generic_blanket_target_is_accepted() {
+        let source = r#"
+            struct Wrap<T> { val: T }
+            interface Labeled {
+                fn get_label(self: Wrap<i64>) -> i64;
+            }
+            implement<T> Labeled for Wrap<T> {
+                fn get_label(self: Wrap<T>) -> i64 { return 99; }
+            }
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { val: 0 };
+                return w.get_label();
+            }
+        "#;
+        compile(source).expect(
+            "a blanket-impl-targeting interface's generic self-type must \
+             resolve against the monomorphized instantiation, not be \
+             flagged as an unknown bare generic template name",
+        );
+    }
+
+    #[test]
+    fn let_annotation_with_unknown_type_is_rejected_even_via_empty_vec_inference() {
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<TotallyMadeUpType> = vec();
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("let annotation with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'TotallyMadeUpType'")
+                && e.message.contains("let annotation")),
+            "expected an unknown-type diagnostic naming the let annotation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn let_tuple_annotation_with_unknown_type_is_rejected() {
+        let source = r#"
+            fn pair() -> (i64, i64) { return (1, 2); }
+            fn main() -> i64 {
+                let (a, b): (TotallyBogusType, i64) = pair();
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("let-tuple annotation with unknown type should fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("unknown type 'TotallyBogusType'")
+                && e.message.contains("destructure-let annotation")),
+            "expected an unknown-type diagnostic naming the destructure-let \
+             annotation, got: {:?}",
+            errors
         );
     }
 
@@ -6328,6 +6683,105 @@ mod tests {
             }
         "#;
         compile(source).expect("clone_at Vec<Struct> should compile");
+    }
+
+    #[test]
+    fn clone_at_on_c_emits_bounds_check() {
+        // BUG-147: clone_at(xs, i) never ran its index through
+        // intent_check_bounds, unlike every other indexed access
+        // (emit_index, set_mut). An out-of-bounds clone_at on an
+        // empty/short Vec silently read garbage on C and
+        // segfaulted the LLVM JIT (found by localfuzz: a struct
+        // with a nested Vec<i64> field, clone_at'd at index 0 on
+        // an empty Vec -- the garbage `children` field's deep
+        // clone then memcpy'd a garbage length).
+        let source = r#"
+            struct Node { value: i64 }
+            fn main() -> i64 {
+              let ns: Vec<Node> = vec(Node { value: 1 });
+              return clone_at(ref ns, 0).value;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected clone_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn clone_at_on_ssa_c_emits_bounds_check() {
+        // BUG-147, SSA-C side (ssa_backend_c.rs) -- same gap,
+        // exercised via a parallel-for body so the program routes
+        // through SSA-C rather than tree-C. SSA lowering doesn't
+        // support structs yet, so this uses a Vec<i64> (SSA-C
+        // clone_at is not type-specific to structs -- the bounds
+        // gap is in the shared index-emission code).
+        let source = r#"
+            fn main() -> i64 {
+              let ns: Vec<i64> = vec(1, 2, 3);
+              parallel for i from 0 to 1 {
+                let n: i64 = clone_at(ref ns, 0);
+              }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected SSA-C clone_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn clone_at_on_tree_llvm_emits_bounds_check() {
+        // BUG-147, tree-LLVM side (backend_llvm.rs). Array
+        // clone_at only exists in the tree backends, so use it
+        // to exercise the array-branch fix specifically.
+        let source = r#"
+            fn main() -> i64 {
+              let arr: [i64; 3] = [10, 20, 30];
+              return clone_at(ref arr, 0);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected tree-LLVM clone_at's index to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn clone_at_on_ssa_llvm_emits_bounds_check() {
+        // BUG-147, SSA-LLVM side (ssa_backend_llvm.rs). SSA
+        // lowering doesn't support structs yet, so this uses
+        // clone_at on a Vec<Vec<i64>> -- still a non-Copy element
+        // type (routes through the inner-Vec __clone helper, the
+        // same class as the struct-with-nested-Vec repro
+        // localfuzz found, just without the struct wrapper).
+        let source = r#"
+            fn main() -> i64 {
+              let inner: Vec<i64> = vec(9);
+              let ns: Vec<Vec<i64>> = vec(inner);
+              let n: Vec<i64> = clone_at(ref ns, 0);
+              return clone_at(ref n, 0);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected SSA-LLVM clone_at's index to be bounds-checked:\n{}",
+            ll
+        );
     }
 
     #[test]
@@ -13925,6 +14379,215 @@ fn main() -> i64 {
         assert!(
             !c.contains("intent_check_u64_sub("),
             "expected NO overflow guard for an unsigned loop variable, got:\n{c}"
+        );
+    }
+
+    // BUG-145 (2026-08-08): bug-pattern-audit-round-2, category E. The LLVM
+    // backend's `parallel for` never got BUG-140's fix at all -- its GOMP-
+    // outlining path (`emit_parallel_for_via_gomp`) computes the trip count
+    // via a raw, unchecked `sub i64 %end_v, %start_v` (GOMP's own manual
+    // chunk-math equivalent of GCC's OpenMP canonical-loop trip-count
+    // precompute) with nothing guarding it, for ANY reduction operator.
+    // Confirmed via direct execution across all 9 `ReductionOp` variants on
+    // the extreme-bound repro: `Add`/`Mul` happened to still trap (their
+    // OWN checked-arithmetic reduction step coincidentally caught the
+    // garbage value read via the resulting out-of-bounds GEP), but
+    // `BitAnd`/`BitOr`/`BitXor`/`Min`/`Max`/`And`/`Or` SIGSEGV'd outright --
+    // both are undefined behavior from the same corrupted chunk computation,
+    // not a real guard. Fixed with the LLVM-IR equivalent of BUG-140's C fix:
+    // `llvm.ssub.with.overflow.i64` before GOMP's chunk math ever runs.
+    #[test]
+    fn parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let acc: i64 = -1;
+              parallel for i from -9223372036854775808 to 4
+              reduce acc with &;
+              {
+                acc = acc & xs[i];
+              }
+              return acc;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM");
+        assert!(
+            ll.contains("llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)"),
+            "expected a checked-subtraction guard on the GOMP trip-count \
+             computation, got:\n{ll}"
+        );
+        // The guard must come BEFORE GOMP's own chunk-math (%r1/%chunk/
+        // %my_lo/%my_hi), not after -- otherwise the corrupted value still
+        // feeds the loop bounds.
+        let guard_pos = ll.find("llvm.ssub.with.overflow.i64").unwrap();
+        let chunk_pos = ll.find("%chunk = sdiv").unwrap();
+        assert!(
+            guard_pos < chunk_pos,
+            "expected the overflow guard before GOMP's chunk-size division, \
+             got guard at {guard_pos}, chunk math at {chunk_pos} in:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn parallel_for_with_unsigned_loop_var_gets_no_overflow_guard_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let acc: i64 = -1;
+              parallel for i from 0 as u64 to 4 as u64
+              reduce acc with &;
+              {
+                acc = acc & xs[i];
+              }
+              return acc;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM");
+        assert!(
+            !ll.contains("llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)"),
+            "expected NO overflow guard for an unsigned loop variable, got:\n{ll}"
+        );
+    }
+
+    // BUG-146 (2026-08-08): bug-pattern-audit-round-3, category A. Found via
+    // localfuzz. `collect_used_dyn_ifaces` (backend_c.rs, shared by both
+    // backends -- `collect_used_dyn_ifaces_llvm` is a literal passthrough)
+    // walked Vec/Atomic/Mutex/Guard/Ref/RefMut/Channel/Tuple/FnPtr/Array
+    // looking for a nested `dyn Iface` marker type to forward-declare, but
+    // had no arm for `Box`. A `Box<dyn Iface>` enum-variant payload or
+    // struct field that's never actually CONSTRUCTED anywhere in the
+    // program never registered its interface, so `intent_dyn_<Iface>`'s
+    // typedef never got forward-declared -- but the enum/struct's own
+    // eager emission unconditionally references it regardless of
+    // construction. Confirmed C-only for the enum-payload shape (LLVM's
+    // on-demand lowering never touches the unconstructed variant) but
+    // BOTH backends for the struct-field shape. Widened the fix to match
+    // every "wraps exactly one inner type" `Type` variant `type_
+    // references_unknown_name` already enumerates (BUG-139/BUG-144),
+    // not just `Box`, since the identical gap could hit any of them.
+    #[test]
+    fn box_dyn_iface_enum_payload_never_constructed_compiles_on_c() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: u32 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+            fn main() -> i64 {
+              let a: Val = Val.Int(box(42));
+              let e: Val = Val.Empty;
+              return 42;
+            }
+        "#;
+        let c = compile_to_c(source).expect(
+            "an unconstructed Box<dyn Iface> enum variant payload must still compile to C",
+        );
+        assert!(
+            c.contains("intent_dyn_Drawable"),
+            "expected the forward-declared intent_dyn_Drawable typedef, got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn box_dyn_iface_struct_field_never_constructed_compiles_on_both_backends() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: u32 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            struct Holder { shape: Box<dyn Drawable>, tag: i64 }
+            fn main() -> i64 { return 42; }
+        "#;
+        compile_to_c(source).expect(
+            "an unconstructed Box<dyn Iface> struct field must still compile to C",
+        );
+        compile_to_llvm(source).expect(
+            "an unconstructed Box<dyn Iface> struct field must still compile to LLVM",
+        );
+    }
+
+    // BUG-146 (2026-08-08): bug-pattern-audit-round-3, category B. Found via
+    // localfuzz. `bits << 3 + 0` (a COMPOUND shift-amount expression)
+    // produced a width-mismatched `shl i8 ..., %v_N` where `%v_N` was
+    // genuinely i64-typed, rejected outright by `lli`; `bits << 3` (a bare
+    // literal) worked fine. Root cause: the checker deliberately never
+    // unifies a shift's LHS/RHS widths (a shift count legitimately may
+    // differ in width from the shifted value), and SSA-LLVM's `emit_binary`
+    // assumed both operands shared one `op_ty` derived from the LEFT
+    // operand only -- a bare-literal RHS renders as untyped text (no
+    // mismatch possible), but a compound RHS lowers to a genuinely-typed
+    // SSA register, exposing the assumption. Fixed by looking up the RHS
+    // operand's own type separately and trunc/sext/zext-ing it to match
+    // before either downstream use (the checked-shift-helper call or the
+    // raw shl/ashr/lshr instruction).
+    #[test]
+    fn shl_with_compound_shift_amount_expression_compiles_and_runs_correctly() {
+        // `compile_to_llvm` always goes through tree-LLVM directly
+        // (`backend_llvm::LlvmBackend.emit`), bypassing the SSA-
+        // eligibility dispatch the CLI does in main.rs -- tree-LLVM
+        // already had a correct width-adjustment fix for this exact
+        // shape (a pre-existing, unrelated piece of code), so it can't
+        // exercise THIS fix. Go through `crate::ssa::lower_program` +
+        // `crate::ssa_backend_llvm::emit` directly instead, matching
+        // this file's own established pattern for SSA-specific
+        // regression tests.
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 1 as u8;
+              let shifted: u8 = bits << 3 + 0;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("a compound shift-amount expression must compile via SSA-LLVM");
+        assert!(
+            ll.contains(".shwidth"),
+            "expected the RHS width-adjustment temp to appear, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn shr_with_compound_shift_amount_expression_compiles_on_ssa_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 128 as u8;
+              let shifted: u8 = bits >> 3 + 0;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_llvm::emit(&module)
+            .expect("a compound Shr shift-amount expression must compile via SSA-LLVM");
+    }
+
+    #[test]
+    fn shl_with_bare_literal_shift_amount_gets_no_width_adjustment_temp() {
+        // Companion to the compound-expression test above: confirm the
+        // fix doesn't insert an unnecessary adjustment for the already-
+        // working bare-literal case (a Const operand has no separately-
+        // tracked width to mismatch in the first place).
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 1 as u8;
+              let shifted: u8 = bits << 3;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("bare-literal shift compiles via SSA-LLVM");
+        assert!(
+            !ll.contains(".shwidth"),
+            "a bare-literal shift amount should need no width-adjustment temp, got:\n{ll}"
         );
     }
 
@@ -22224,6 +22887,45 @@ fn main() -> i64 {
         "#;
         compile_to_c(source).expect("vec_remove_at must type-check");
         compile_to_llvm(source).expect("vec_remove_at must compile to LLVM");
+    }
+
+    #[test]
+    fn vec_remove_at_on_c_emits_bounds_check() {
+        // BUG-148: mirrors BUG-147's clone_at fix. vec_remove_at
+        // was written as one-off inline codegen that bypassed the
+        // project's bounds-check convention -- an out-of-bounds
+        // index silently read/shifted garbage past the buffer
+        // instead of trapping (confirmed: swap_remove/insert on
+        // the same shape correctly trap; vec_remove_at didn't).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              return vec_remove_at(mut ref xs, 1);
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected vec_remove_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn vec_remove_at_on_llvm_emits_bounds_check() {
+        // BUG-148, LLVM side (backend_llvm.rs).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              return vec_remove_at(mut ref xs, 1);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected vec_remove_at's index to be bounds-checked:\n{}",
+            ll
+        );
     }
 
     #[test]

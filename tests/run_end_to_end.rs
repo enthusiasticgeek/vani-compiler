@@ -12572,3 +12572,829 @@ fn main() -> i64 {
         String::from_utf8_lossy(&output_normal.stdout)
     );
 }
+
+// BUG-141 (2026-08-08): bug-pattern-audit-round-2, category A. `set(mut
+// ref xs, i, v)` / `set(xs, i, v)` with a narrower-than-i64 index type
+// (`u8`/`u16`/`u32`) reached backend_llvm.rs's generic vec-mutator call
+// site with its raw checked width, producing a `call` whose argument
+// type (e.g. `i32`) didn't match the callee's hard-coded `i64 %i`
+// parameter -- unlike every sibling mutator on the same dispatch path
+// (`swap_remove`/`insert`/`vec_swap`/`vec_take`/`vec_drop`), which all
+// coerce their index/count arg to a fixed width in checker.rs. Verifies
+// both backends compute the correct answer for a `u8`-typed index across
+// several distinct index values, not just that it doesn't crash.
+#[test]
+fn set_mut_with_narrow_index_types_writes_the_correct_slot_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug141-set-mut-narrow-index",
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40, 50, 60, 70, 80, 90, 100);
+  let i0: u8 = 0;
+  let i3: u8 = 3;
+  let i9: u8 = 9;
+  let r0: i64 = set(mut ref xs, i0, 1000);
+  let r3: i64 = set(mut ref xs, i3, 1003);
+  let r9: i64 = set(mut ref xs, i9, 1009);
+  assert r0 == 0;
+  assert r3 == 0;
+  assert r9 == 0;
+  assert xs[0] == 1000;
+  assert xs[1] == 20;
+  assert xs[3] == 1003;
+  assert xs[8] == 90;
+  assert xs[9] == 1009;
+  print xs[0], xs[1], xs[3], xs[8], xs[9];
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-141 regression: set() with a u8 index should run cleanly \
+             ({:?}), got status {:?}, stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "1000 20 1003 90 1009",
+            "wrong values written via a u8 index ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-142 (2026-08-08): bug-pattern-audit-round-2, category B. A top-level
+// `const` is seeded into a function's root scope at the same depth its
+// top-level-of-body `let` bindings and parameters are checked at -- a
+// `let` shadowing a const's name used to emit a `TypedStmt::Reassign`
+// targeting a name with no backend-emitted declaration at all. Forced onto
+// the tree backends (via an unrelated `#[no_mangle]` fn, since the SSA
+// path's fresh numeric naming happens to sidestep the bug) to reproduce
+// the actual failure modes found: an `unreachable!()` compiler PANIC on
+// tree-LLVM, and a `'v_N' undeclared` `cc` compile failure on tree-C.
+// Verifies both backends now run cleanly and, critically, that the
+// parameter/let correctly shadow the const (using the runtime value, not
+// silently falling back to the const's compile-time value).
+#[test]
+fn let_and_param_shadowing_a_top_level_const_run_correctly_on_tree_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug142-const-shadow-tree",
+        r#"
+const N: i64 = 99;
+
+#[no_mangle]
+fn force_tree_backend() -> i64 {
+  return 0;
+}
+
+fn identity(N: i64) -> i64 {
+  return N;
+}
+
+fn main() -> i64 {
+  let N: i64 = 5;
+  print N, identity(7);
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-142 regression: a let/param shadowing a top-level const \
+             should run cleanly on the tree backends ({:?}), got status {:?}, \
+             stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "5 7",
+            "the let/param should shadow with the RUNTIME value (5, 7), not \
+             the const's compile-time value (99) ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-143 (2026-08-08): bug-pattern-audit-round-2, category C. Found while
+// probing the `_Pragma("GCC ivdep")` non-parallel for-loop site for a
+// BUG-140-style boundary-value UB. `while_bounds_hints`'s Vec-index
+// collector recorded a fixed-size `[T; N]` array the same as a `Vec<T>`,
+// but its emission side always renders `{name}.len` -- a real struct
+// field on `Vec<T>`, nonexistent on a raw C array -- producing a hard
+// `cc` failure ("request for member 'len' in something not a structure
+// or union") for the completely ordinary `while i < N { xs[i] }` idiom
+// over a fixed array. Real subprocess run, not just a compile check:
+// confirms the loop actually computes the correct sum.
+#[test]
+fn while_loop_indexing_a_fixed_array_runs_correctly_on_c_backend() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug143-while-array-index",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [10, 20, 30, 40];
+  let i: i64 = 0;
+  let sum: i64 = 0;
+  while i < 4 {
+    sum = sum + xs[i];
+    i = i + 1;
+  }
+  print sum;
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output.status.success(),
+        "BUG-143 regression: a while-loop indexing a fixed array by its own \
+         loop var should compile and run cleanly on the C backend, got \
+         status {:?}, stdout: {}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "100",
+        "expected the correct sum 100, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+// Category C's other half: confirmed via a standalone C probe (matching
+// BUG-140's own investigative technique) that `_Pragma("GCC ivdep")` --
+// the sibling pragma to the one BUG-140 fixed, emitted for every
+// non-parallel `for`/`while` loop -- does NOT share BUG-140's GCC-
+// internal signed-overflow UB. Unlike `#pragma omp parallel for`, which
+// needs GCC to precompute a trip count (`end - start`) ahead of time to
+// partition work across threads, a plain `for (T i = start; i < end;
+// i++)`/`while` loop's exit condition is re-evaluated fresh every
+// iteration -- there's no equivalent precompute step for `ivdep` (a
+// vectorization hint, not a parallelization directive) to get wrong.
+// This test locks in a clean-pass result on the exact repro shape BUG-140
+// used, per this project's "a clean pass still gets a regression test"
+// convention -- confirms the loop traps correctly (via the ordinary
+// per-element bounds check, on the very first iteration) rather than
+// silently computing zero iterations or something else wrong.
+#[test]
+fn non_parallel_for_with_extreme_start_bound_traps_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug-pattern-c-ivdep-extreme-bound",
+        r#"
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let prod: i64 = 1;
+  for i from -9223372036854775808 to 4
+  {
+    prod = prod * xs[i];
+  }
+  print prod;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "the ivdep-pragma'd non-parallel for-loop should trap on the first \
+         out-of-bounds access (same as a plain loop would), got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "LLVM should also trap on this same program; status {:?}",
+        output_llvm.status
+    );
+}
+
+// BUG-144 (2026-08-08): bug-pattern-audit-round-2, category D. A bare
+// `interface` declaration's own method signatures were never validated
+// against the program's declared struct/enum/interface names -- an
+// `interface Foo { fn bar(self: BogusType) -> BogusType; }` with no
+// `implement` block anywhere passed `vanic check` clean and ran 0-exit on
+// BOTH backends (confirmed the same "silently dead" shape BUG-139 found).
+#[test]
+fn interface_method_with_unknown_type_rejected_by_vanic_check() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug144-interface-unknown-type",
+        r#"
+interface Foo {
+    fn bar(self: BogusType) -> BogusType;
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc check should execute: {e}"));
+    assert!(
+        !output.status.success(),
+        "BUG-144 regression: an interface method signature naming a \
+         nonexistent type should be rejected by `vanic check`, got status {:?}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown type 'BogusType'") && stderr.contains("interface 'Foo'"),
+        "expected an unknown-type diagnostic naming the interface, got: {stderr}"
+    );
+}
+
+// Companion to the rejection test above: confirm the fix's three
+// exceptions (the `Self` placeholder, a real enum used as a self-type,
+// and a blanket-impl-targeting generic self-type) don't just type-check
+// but actually RUN correctly end to end on both backends -- real
+// subprocess runs, not just a compile check.
+#[test]
+fn interface_method_self_typed_as_real_enum_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug144-interface-enum-self",
+        r#"
+enum Color { Red, Green, Blue }
+
+interface Eq {
+    fn eq(self: Color, other: Color) -> bool;
+}
+
+implement Eq for Color {
+    fn eq(self: Color, other: Color) -> bool {
+        return (self as i32) == (other as i32);
+    }
+}
+
+fn main() -> i64 {
+    let a: Color = Color.Red;
+    let b: Color = Color.Red;
+    let c: Color = Color.Blue;
+    assert a.eq(b) == true;
+    assert a.eq(c) == false;
+    print "ok";
+    return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-144 regression: a real enum used as an interface method's \
+             self-type should compile and run cleanly ({:?}), got status {:?}, \
+             stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "ok",
+            "wrong output ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-145 (2026-08-08): bug-pattern-audit-round-2, category E. Unlike
+// BUG-140's C-backend fix, NOTHING guarded the LLVM backend's `parallel
+// for` GOMP-outlining trip-count computation against an extreme start
+// bound, for any reduction operator. `Add`/`Mul` happened to still trap
+// (their own checked-arithmetic reduction step coincidentally caught a
+// garbage value read via the resulting corrupted, out-of-bounds GEP),
+// but every other reduction operator SIGSEGV'd outright (exit 139) --
+// both were undefined behavior from the same corrupted GOMP chunk
+// computation, not real protection. Verifies every one of the 9
+// `ReductionOp` variants now traps cleanly (not a signal-terminated
+// crash) on the LLVM backend for the exact extreme-bound shape that used
+// to SIGSEGV most of them.
+#[test]
+fn parallel_for_extreme_start_bound_traps_cleanly_for_every_reduction_op_on_llvm() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let cases: &[(&str, &str, &str, &str)] = &[
+        ("add", "+", "0", "acc = acc + xs[i];"),
+        ("mul", "*", "1", "acc = acc * xs[i];"),
+        ("band", "&", "-1", "acc = acc & xs[i];"),
+        ("bor", "|", "0", "acc = acc | xs[i];"),
+        ("bxor", "^", "0", "acc = acc ^ xs[i];"),
+        ("min", "min", "9223372036854775807", "acc = min(acc, xs[i]);"),
+        ("max", "max", "-9223372036854775808", "acc = max(acc, xs[i]);"),
+    ];
+    for (label, op_sym, init, body_stmt) in cases {
+        let src = write_tmp_vani(
+            &format!("bug145-parallel-extreme-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let acc: i64 = {init};
+  parallel for i from -9223372036854775808 to 4
+  reduce acc with {op_sym};
+  {{
+    {body_stmt}
+  }}
+  print acc;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-145 regression: reduction op '{label}' should trap cleanly \
+             (exit 3) on LLVM for an extreme start bound instead of \
+             SIGSEGV-ing (exit 139) or silently computing a wrong answer, \
+             got status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // bool-typed reductions (&&/||) use a different element/init shape.
+    let bool_cases: &[(&str, &str, &str, &str)] = &[
+        ("and", "&&", "true", "acc = acc && xs[i];"),
+        ("or", "||", "false", "acc = acc || xs[i];"),
+    ];
+    for (label, op_sym, init, body_stmt) in bool_cases {
+        let src = write_tmp_vani(
+            &format!("bug145-parallel-extreme-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  let xs: [bool; 4] = [true, true, true, true];
+  let acc: bool = {init};
+  parallel for i from -9223372036854775808 to 4
+  reduce acc with {op_sym};
+  {{
+    {body_stmt}
+  }}
+  print acc;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-145 regression: bool reduction op '{label}' should trap \
+             cleanly (exit 3) on LLVM for an extreme start bound, got \
+             status {:?}, stdout: {}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+// Companion to the crash-fix test above: confirms nested `parallel for`
+// (both orderings -- parallel-in-parallel and parallel-in-plain) still
+// computes the mathematically correct answer, closing out category E's
+// last untested candidate. Real subprocess run, hand-computed expected
+// value (sum of 0..11 = 66).
+#[test]
+fn nested_parallel_for_computes_correct_answer_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug-pattern-e-nested-parallel-for",
+        r#"
+fn main() -> i64 {
+  let total: i64 = 0;
+  parallel for i from 0 to 3
+  reduce total with +;
+  {
+    let row_sum: i64 = 0;
+    parallel for j from 0 to 4
+    reduce row_sum with +;
+    {
+      row_sum = row_sum + (i * 4 + j);
+    }
+    total = total + row_sum;
+  }
+  print total;
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "nested parallel for should run cleanly ({:?}), got status {:?}, \
+             stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "66",
+            "wrong nested-reduction result ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-146 (2026-08-08): bug-pattern-audit-round-3, category A. Found via
+// localfuzz. `collect_used_dyn_ifaces` (backend_c.rs, shared by both
+// backends) never recursed into `Type::Box`, so a `Box<dyn Iface>` enum-
+// variant payload or struct field that's never actually constructed
+// anywhere in the program never registered its interface for forward-
+// declaration -- but the enum/struct's own eager emission unconditionally
+// references `intent_dyn_<Iface>` regardless of construction. Confirmed
+// via real subprocess runs on both backends (not just a compile check)
+// that a program using the OTHER, constructed variants/fields still runs
+// correctly, i.e. the fix doesn't just silence the compile error, the
+// whole program behaves correctly.
+#[test]
+fn box_dyn_iface_enum_payload_never_constructed_runs_correctly_on_c() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug146-box-dyn-enum-payload",
+        r#"
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+struct Circle { r: u32 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+enum Val {
+  Int(Box<i64>),
+  Shape(Box<dyn Drawable>),
+  Empty,
+}
+fn main() -> i64 {
+  let a: Val = Val.Int(box(42));
+  let e: Val = Val.Empty;
+  print 42;
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output.status.success(),
+        "BUG-146 regression: an enum with an unconstructed Box<dyn Iface> \
+         variant should compile and run cleanly on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "42",
+        "expected printed 42, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn box_dyn_iface_struct_field_never_constructed_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug146-box-dyn-struct-field",
+        r#"
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+struct Circle { r: u32 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+struct Holder { shape: Box<dyn Drawable>, tag: i64 }
+fn main() -> i64 {
+  print 42;
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-146 regression: a struct with an unconstructed Box<dyn \
+             Iface> field should compile and run cleanly ({:?}), got \
+             status {:?}, stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "expected printed 42 ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-146 (2026-08-08): bug-pattern-audit-round-3, category B. Found via
+// localfuzz. `bits << 3 + 0` (a compound shift-amount expression) produced
+// a width-mismatched `shl` operand on the LLVM backend's default SSA-
+// eligible path; a bare-literal shift amount worked fine. Real subprocess
+// runs, hand-computed expected values, across several distinct width/op
+// combinations -- not just a compile check.
+#[test]
+fn compound_shift_amount_expressions_compute_correct_values_on_llvm() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let cases: &[(&str, &str, &str)] = &[
+        ("shl-u8", "let bits: u8 = 1 as u8; let shifted: u8 = bits << 3 + 0;", "8"),
+        ("shr-u8", "let bits: u8 = 128 as u8; let shifted: u8 = bits >> 3 + 0;", "16"),
+        ("shl-u32", "let bits: u32 = 1 as u32; let shifted: u32 = bits << 2 + 1;", "8"),
+    ];
+    for (label, decls, expected) in cases {
+        let src = write_tmp_vani(
+            &format!("bug146-shift-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  {decls}
+  print shifted;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert!(
+            output.status.success(),
+            "BUG-146 regression: compound shift-amount expression '{label}' \
+             should run cleanly on LLVM, got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            *expected,
+            "wrong shift result for '{label}', got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-147 (2026-08-09): found via localfuzz. `clone_at(xs, i)` never ran
+// its index through the ordinary bounds-check convention that every other
+// indexed access (plain `xs[i]`, `set_mut`, ...) uses. The original repro
+// was a `Vec<Node>` where `Node` has a nested `Vec<i64>` field, cloned at
+// index 0 of an EMPTY Vec: the C backend silently read garbage and
+// returned 0, while the LLVM JIT segfaulted inside memcpy when the
+// garbage `children` field's deep-clone tried to copy a garbage length.
+// Both backends must now trap cleanly and consistently instead.
+#[test]
+fn clone_at_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug147-clone-at-oob",
+        r#"
+struct Node { value: i32, children: Vec<i64> }
+fn main() -> i64 {
+  let empty_children: Vec<i64> = vec();
+  let empty_nodes: Vec<Node> = vec();
+  let node0: Node = clone_at(ref empty_nodes, 0 as u64);
+  print node0.value;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds clone_at should trap on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds clone_at should also trap cleanly on LLVM instead \
+         of segfaulting; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn clone_at_in_bounds_still_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug147-clone-at-in-bounds",
+        r#"
+struct Node { value: i32, children: Vec<i64> }
+fn main() -> i64 {
+  let cs: Vec<i64> = vec(1, 2, 3);
+  let ns: Vec<Node> = vec(Node { value: 42, children: cs });
+  let n: Node = clone_at(ref ns, 0 as u64);
+  print n.value;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "in-bounds clone_at should still run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong clone_at result ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-148 (2026-08-09): docs/BUG_PATTERN_AUDIT_TODO_4.md category A --
+// same shape as BUG-147's clone_at fix. vec_remove_at(mut ref xs, i)
+// never bounds-checked its index (unlike swap_remove/insert on the
+// identical shape, which correctly trap): an out-of-bounds index
+// silently read/shifted garbage past the buffer instead of trapping.
+#[test]
+fn vec_remove_at_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug148-vec-remove-at-oob",
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: i64 = vec_remove_at(mut ref xs, 99);
+  print r;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds vec_remove_at should trap on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds vec_remove_at should also trap cleanly on LLVM \
+         instead of reading garbage; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn vec_remove_at_in_bounds_still_shifts_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug148-vec-remove-at-in-bounds",
+        r#"
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40);
+  let r: i64 = vec_remove_at(mut ref xs, 1);
+  print r;
+  print len(xs);
+  print xs[1];
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "in-bounds vec_remove_at should still run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "20\n3\n30",
+            "wrong vec_remove_at result ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

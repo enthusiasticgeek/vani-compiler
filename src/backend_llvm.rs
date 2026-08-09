@@ -8011,6 +8011,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = load i64, i64* {}\n", len, lp
                 ));
+                // BUG-148: mirrors BUG-147's clone_at fix -- the
+                // read below was never bounds-checked, unlike
+                // swap_remove/insert on the same shape.
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx, len
+                ));
                 let removed_p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr i64, i64* {}, i64 {}\n",
@@ -9908,6 +9915,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     };
                     let idx_raw = emit_expr(&args[1], ctx, out);
                 let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
+                    // BUG-147: bounds-check the array index too --
+                    // see the Vec branch above for the rationale.
+                    let arr_len = match xs_arg.ty.deref() {
+                        Type::Array { length, .. } => *length as i64,
+                        _ => unreachable!(),
+                    };
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx, arr_len
+                    ));
                     let slot_p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
@@ -9993,6 +10010,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let idx_raw = emit_expr(&args[1], ctx, out);
                 let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
+                // BUG-147: clone_at never bounds-checked its
+                // index -- unlike every other Vec index path --
+                // so `clone_at(empty_vec, 0)` walked off the end
+                // of the buffer, feeding a non-Copy element's
+                // deep-clone (e.g. a nested Vec field) a garbage
+                // length and segfaulting in memcpy. Bring it in
+                // line with the read/write index paths.
+                let len_pp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    len_pp, struct_ty, struct_ty, xs_ptr
+                ));
+                let len_v = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_pp));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx, len_v
+                ));
                 let slot_p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 {}\n",
@@ -16588,10 +16623,38 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 };
                 let helper_name =
                     format!("@intent_vec_{}__{}", vec_struct_tag(&elt), helper_op);
+                // BUG-141: `set`/`set_mut`'s index arg (position 1) is
+                // the one builtin in this dispatch that check_set_builtin
+                // never coerces to a fixed width (unlike swap_remove/
+                // insert/vec_swap/vec_take/vec_drop, which all run their
+                // index/count arg through `coerce_checked(..., I64/U64,
+                // ...)` in checker.rs) -- a narrower-than-i64 index (e.g.
+                // `u32`) reaches here with its raw checked type and gets
+                // passed to a callee whose `%i` parameter is hard-coded
+                // `i64`, producing a declared-vs-actual argument type
+                // mismatch. Same root-cause shape as BUG-138's GEP-index
+                // mismatch, just at a call site instead of a GEP.
+                let index_arg_pos = if matches!(name.as_str(), "set" | "set_mut") {
+                    Some(1)
+                } else {
+                    None
+                };
                 let arg_strs: Vec<String> = args
                     .iter()
-                    .map(|a| {
-                        format!("{} {}", llvm_type_string(&a.ty), emit_expr(a, ctx, out))
+                    .enumerate()
+                    .map(|(i, a)| {
+                        let v = emit_expr(a, ctx, out);
+                        let v = if Some(i) == index_arg_pos {
+                            widen_index_to_i64(a, v, ctx, out)
+                        } else {
+                            v
+                        };
+                        let ty_str = if Some(i) == index_arg_pos {
+                            "i64".to_string()
+                        } else {
+                            llvm_type_string(&a.ty)
+                        };
+                        format!("{} {}", ty_str, v)
                     })
                     .collect();
                 let dest = ctx.fresh_tmp();
@@ -46453,7 +46516,53 @@ fn emit_parallel_for_via_gomp(
         deferred.push_str("  %nt = sext i32 %nt32 to i64\n");
     }
     // chunk = ceil((end - start) / nt) = (end - start + nt - 1) / nt
-    deferred.push_str("  %range = sub i64 %end_v, %start_v\n");
+    //
+    // BUG-145: this trip-count computation is GOMP's own equivalent of
+    // the GCC OpenMP canonical-loop trip-count precompute BUG-140 fixed
+    // on the C backend -- an extreme start bound (e.g. `i64::MIN`) makes
+    // `end - start` overflow i64. Unlike BUG-140's C fix, NOTHING
+    // guarded this on the LLVM side at all: a raw, unchecked `sub`
+    // silently wrapped, corrupting `%chunk`/`%my_lo`/`%my_hi` into
+    // garbage that the loop below then used as real bounds for an
+    // unchecked fixed-array GEP. Confirmed via direct testing across
+    // every reduction operator: `Add`/`Mul` happened to still trap
+    // (their reduction step's OWN checked-arithmetic intrinsic caught
+    // the garbage value read from the resulting out-of-bounds GEP) but
+    // `BitAnd`/`BitOr`/`BitXor`/`Min`/`Max`/`And`/`Or` SIGSEGV'd outright
+    // -- both are undefined behavior from the same corrupted computation,
+    // not a real guard; the "working" operators were just lucky. Fixed
+    // the same way BUG-140 was: trap cleanly via a checked-subtraction
+    // intrinsic (mirroring the identical `llvm.ssub.with.overflow.i64`
+    // pattern the general checked-`Sub` expression path already uses)
+    // before GOMP's chunk math ever sees a corrupted value. Scoped to
+    // signed loop types only, mirroring BUG-140's own reasoning: an
+    // unsigned range's `end - start` can never overflow i64 in the
+    // first place.
+    // Hard-coded SSA names here (not `ctx.fresh_tmp()`/`fresh_label()`)
+    // to match this whole preamble's existing convention -- the loop
+    // BODY below gets its own independent, restart-from-0 numbering via
+    // a fresh `outlined_ctx` created later (this is one LLVM function,
+    // `@__intent_par_<id>`, but two separate Rust counters feed into
+    // it; drawing from the parent `ctx`'s counter here previously
+    // produced names like `%t6` that collided with `outlined_ctx`'s own
+    // independently-numbered `%t6`).
+    if ty.is_signed_integer() {
+        deferred.push_str(
+            "  %range_pair = call {i64, i1} @llvm.ssub.with.overflow.i64(i64 %end_v, i64 %start_v)\n",
+        );
+        deferred.push_str("  %range = extractvalue {i64, i1} %range_pair, 0\n");
+        deferred.push_str("  %range_of = extractvalue {i64, i1} %range_pair, 1\n");
+        deferred.push_str("  %range_no_of = xor i1 %range_of, true\n");
+        deferred.push_str(
+            "  br i1 %range_no_of, label %par_range_ok, label %par_range_fail\n",
+        );
+        deferred.push_str("par_range_fail:\n");
+        deferred.push_str("  call void @exit(i32 3)\n");
+        deferred.push_str("  unreachable\n");
+        deferred.push_str("par_range_ok:\n");
+    } else {
+        deferred.push_str("  %range = sub i64 %end_v, %start_v\n");
+    }
     deferred.push_str("  %r1 = add i64 %range, %nt\n");
     deferred.push_str("  %r2 = sub i64 %r1, 1\n");
     deferred.push_str("  %chunk = sdiv i64 %r2, %nt\n");

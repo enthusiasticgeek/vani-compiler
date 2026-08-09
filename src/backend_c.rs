@@ -13552,8 +13552,33 @@ fn collect_vec_idx_in_expr(
         E::Index { array, index, .. } => {
             if let E::Var(vec_name) = &array.kind {
                 if expr_is_loop_var(index, loop_var) {
-                    let is_ref = matches!(&array.ty, Type::Ref(_) | Type::RefMut(_));
-                    out.entry(vec_name.clone()).or_insert(is_ref);
+                    // BUG-143: this hint's emission side
+                    // (`while_bounds_hints`) always renders
+                    // `{local}.len` / `{local}->len`, assuming a
+                    // `Vec<T>`'s `.len` struct field -- but `array`
+                    // can just as easily be a fixed-size `[T; N]`,
+                    // which lowers to a raw C array with no `.len`
+                    // member at all. Indexing a `[T; N]` inside a
+                    // `while i < N { xs[i] }`/`while i <= N-1 { .. }`
+                    // loop (an extremely ordinary idiom) hit this and
+                    // produced `v_xs.len` -- a hard `cc` failure
+                    // ("request for member 'len' in something not a
+                    // structure or union"). Gate on the underlying
+                    // (Ref/RefMut-stripped) type actually being
+                    // `Type::Vec` before recording it; a bare array
+                    // is still bounds-checked per-element at runtime
+                    // regardless (this hint is purely an optimizer
+                    // aid), so skipping it here just means gcc's VRP
+                    // doesn't get the hoisted assertion -- correct
+                    // either way.
+                    let inner_ty = match &array.ty {
+                        Type::Ref(inner) | Type::RefMut(inner) => inner.as_ref(),
+                        other => other,
+                    };
+                    if matches!(inner_ty, Type::Vec(_)) {
+                        let is_ref = matches!(&array.ty, Type::Ref(_) | Type::RefMut(_));
+                        out.entry(vec_name.clone()).or_insert(is_ref);
+                    }
                 }
             }
             collect_vec_idx_in_expr(array, loop_var, out);
@@ -18359,8 +18384,14 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         // Closure #388: vec_remove_at(mut ref xs, i) -> i64.
         "vec_remove_at" => {
+            // BUG-148: mirrors BUG-147's clone_at fix -- this was
+            // written as one-off inline codegen that bypassed the
+            // project's bounds-check convention (`intent_check_
+            // bounds`), unlike swap_remove/insert on the same
+            // shape. An out-of-bounds index silently read/shifted
+            // garbage past the buffer instead of trapping.
             format!(
-                "({{ intent_vec_int64_t* __vra_xs = ({xs}); int64_t __vra_i = ({i}); int64_t __vra_r = __vra_xs->data[__vra_i]; for (uint64_t __k = (uint64_t)__vra_i; __k + 1 < __vra_xs->len; __k++) {{ __vra_xs->data[__k] = __vra_xs->data[__k + 1]; }} __vra_xs->len--; __vra_r; }})",
+                "({{ intent_vec_int64_t* __vra_xs = ({xs}); int64_t __vra_i = intent_check_bounds((int64_t)({i}), (int64_t)__vra_xs->len); int64_t __vra_r = __vra_xs->data[__vra_i]; for (uint64_t __k = (uint64_t)__vra_i; __k + 1 < __vra_xs->len; __k++) {{ __vra_xs->data[__k] = __vra_xs->data[__k + 1]; }} __vra_xs->len--; __vra_r; }})",
                 xs = emit_expr(&args[0]),
                 i = emit_expr(&args[1]),
             )
@@ -21121,9 +21152,9 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // Closure #291: `clone_at(ref [T; N], i)` accepts
             // arrays alongside Vec. Arrays index directly as
             // `xs[i]` (C array decay); Vec uses `.data[i]`.
-            let element_ty = match underlying {
-                Type::Vec(element) => &**element,
-                Type::Array { element, .. } => &**element,
+            let (element_ty, array_len) = match underlying {
+                Type::Vec(element) => (&**element, None),
+                Type::Array { element, length } => (&**element, Some(*length)),
                 other => {
                     unreachable!("clone_at requires Vec or Array, got {:?}", other)
                 }
@@ -21134,6 +21165,24 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 &xs_arg.ty,
                 Type::Ref(_) | Type::RefMut(_)
             );
+            let index_str = emit_expr(&args[1]);
+            // BUG-147: unlike every other indexing path
+            // (emit_index, set_mut's slot_lvalue, ...), clone_at
+            // never ran the index through intent_check_bounds --
+            // an out-of-bounds `clone_at(empty_vec, 0)` walked off
+            // the end of the (possibly null/zero-len) buffer,
+            // reading garbage that a nested-Vec field's deep-clone
+            // then memcpy'd with a garbage length, segfaulting the
+            // LLVM JIT while the C backend silently returned junk.
+            // Bring clone_at's bounds discipline in line with
+            // every other indexed access.
+            let checked_index = if let Some(length) = array_len {
+                format!("intent_check_bounds((int64_t)({}), (int64_t){})", index_str, length)
+            } else if access_via_ref {
+                format!("intent_check_bounds((int64_t)({}), (int64_t)({})->len)", index_str, xs_str)
+            } else {
+                format!("intent_check_bounds((int64_t)({}), (int64_t)({}).len)", index_str, xs_str)
+            };
             // Wrap xs_str in parens so `&xs->data[i]`
             // parses as `(&xs)->data[i]` — `->` binds
             // tighter than unary `&` so naked
@@ -21144,11 +21193,11 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 // ref-of-array passes the decayed pointer)
                 // index the same way. No `*` indirection
                 // needed.
-                format!("({})[{}]", xs_str, emit_expr(&args[1]))
+                format!("({})[{}]", xs_str, checked_index)
             } else if access_via_ref {
-                format!("({})->data[{}]", xs_str, emit_expr(&args[1]))
+                format!("({})->data[{}]", xs_str, checked_index)
             } else {
-                format!("({}).data[{}]", xs_str, emit_expr(&args[1]))
+                format!("({}).data[{}]", xs_str, checked_index)
             };
             // Element-aware deep-clone: recurse through
             // `c_element_deep_clone` so a `Vec<Vec<U>>` slot
@@ -22588,11 +22637,41 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             Type::Object(name) => {
                 set.insert(name.clone());
             }
-            Type::Vec(inner) | Type::Atomic(inner) | Type::Mutex(inner)
-            | Type::Guard(inner) | Type::Ref(inner) | Type::RefMut(inner) => walk_type(inner, set),
+            // BUG-146: this match arm list used to cover only Vec/
+            // Atomic/Mutex/Guard/Ref/RefMut/Channel/Tuple/FnPtr/Array --
+            // a `Box<dyn Iface>` (or any of the other single-inner-type
+            // wrappers below) that's never actually CONSTRUCTED never
+            // registered its interface here, so `emit_dyn_iface_typedefs`
+            // never forward-declared `intent_dyn_<Iface>` before the
+            // enum-union/struct-field emission that unconditionally
+            // references it -- "unknown type name" on the C backend,
+            // "use of undefined type" on LLVM (this function is shared
+            // by both backends via `collect_used_dyn_ifaces_llvm`'s
+            // passthrough). Confirmed via a direct repro: an enum
+            // variant payloaded `Box<dyn Iface>`, never constructed,
+            // broke the C backend; a struct field of the same type,
+            // never constructed, broke BOTH backends. Widened to match
+            // `type_references_unknown_name`'s own exhaustive "wraps
+            // exactly one inner type" list (checker.rs, audited during
+            // BUG-139/BUG-144) rather than just adding `Box` alone --
+            // the identical gap could hit any of these wrapper types.
+            Type::Vec(inner) | Type::Vec128(inner) | Type::Vec256(inner) | Type::Vec512(inner)
+            | Type::Ref(inner) | Type::RefMut(inner)
+            | Type::TaskR(inner) | Type::Atomic(inner)
+            | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::RwLock(inner) | Type::ReadGuard(inner) | Type::WriteGuard(inner)
+            | Type::Deque(inner) | Type::HashSet(inner)
+            | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner)
+            | Type::Box(inner) | Type::Ptr(inner) | Type::PtrMut(inner)
+            | Type::Pool(inner) | Type::Handle(inner) | Type::Tainted(inner)
+            | Type::BoundedPtr(inner) | Type::ArenaRef(inner) => walk_type(inner, set),
             Type::Channel(inner, _) => walk_type(inner, set),
+            Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+                walk_type(k, set);
+                walk_type(v, set);
+            }
             Type::Tuple(elements) => elements.iter().for_each(|t| walk_type(t, set)),
-            Type::FnPtr(params, ret) => {
+            Type::FnPtr(params, ret) | Type::Closure(params, ret) => {
                 params.iter().for_each(|t| walk_type(t, set));
                 walk_type(ret, set);
             }
