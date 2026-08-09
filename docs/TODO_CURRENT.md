@@ -10555,3 +10555,239 @@ No code changes -- this pass's value was confirming the rest of the
 surface is safe rather than assuming it. `docs/BUG_PATTERN_AUDIT_TODO_4.md`
 category A is now fully closed; round 4 is done. A future session
 should pick a new audit theme.
+
+## BUG-149 (2026-08-09) -- fixed-size array indexing had NO bounds check at all on tree-LLVM
+
+Found via localfuzz (nightly refresh had silently stalled since
+2026-08-09T07:03 on a dirty `Cargo.lock` -- see below -- so this had
+been sitting untriaged in `docs/TODO_LOCAL_STAGING.md` for hours).
+Candidate `20260809-063729-backend-divergence-660f217404` mutated the
+Iterator-pattern tutorial's manual iterator to increment its cursor
+*before* reading (`self.cursor = self.cursor + 1; let v = self.data[self.cursor];`),
+walking one past a `[i64; 5]` struct field on the fifth call.
+
+Repro (minimized):
+```vani
+fn get_idx() -> i64 { return 5; }
+fn main() -> i64 {
+  let data: [i64; 5] = [10, 20, 30, 40, 50];
+  let idx: i64 = get_idx();
+  let v: i64 = data[idx];
+  print v;
+  return 0;
+}
+```
+- C: `index out of bounds: 5, len 5`, exit 134 (correct).
+- LLVM (before fix): printed a garbage stack value, exit 0 -- no trap
+  at all.
+
+Root cause: unlike `Vec<T>` indexing (bounds-checked via
+`@__intent_bounds_check` since BUG-108, on both the plain-`Var`-base
+and struct-`FieldAccess`-base arms), the sibling `Type::Array` arms in
+`backend_llvm.rs`'s `emit_expr`'s `Index` match and `IndexAssign`
+handling never called the check at all -- three separate call sites:
+plain-local array reads (`data[i]`, ~line 16874), struct-field array
+reads (`s.data[i]`, ~line 16927), and array writes (`data[i] = v`,
+~line 4665). Only caught for *provably* out-of-range constant indices
+(SMT rejects those at compile time on both backends identically);
+anything the SMT layer couldn't prove in-range at compile time fell
+through with zero runtime protection on LLVM specifically, while
+tree-C's matching `Type::Array` arm in `backend_c.rs`'s `emit_index`
+has always wrapped the index in `intent_check_bounds` unconditionally.
+This was a genuine, general C-vs-LLVM behavioral divergence, not a
+narrow gap in one builtin -- plain `xs[i]` reads, struct-field array
+reads, and array writes were all affected. `struct.array_field[i] = v`
+(writing into an array-typed struct field) turned out not to be valid
+syntax at all (parse error), so that specific write-side combination
+doesn't exist as reachable code -- confirmed empirically, not assumed.
+SSA backends don't apply here: `src/main.rs`'s `ssa_type_supported`
+already excludes `Type::Array` outright, routing any program
+containing one to the tree backends unconditionally.
+
+Fix: added `call void @__intent_bounds_check(i64 <idx>, i64 <length>)`
+before the GEP at all three sites in `backend_llvm.rs`, using the
+`Type::Array`'s compile-time `length` field as the bound (mirroring
+the Vec arms' runtime `.len` load, just simpler since array length is
+a constant). Verified: all three OOB shapes (plain-local read,
+struct-field read, plain-local write) now trap identically on both
+backends (C exit 134 with `"index out of bounds: N, len N"`, LLVM
+exit 3) instead of silently reading/corrupting stack memory. In-bounds
+read+write sanity check still returns/stores the correct values on
+both backends.
+
+Added 3 tests to `src/lib.rs`
+(`array_index_read_on_plain_local_emits_bounds_check_on_llvm`,
+`array_field_index_read_emits_bounds_check_on_llvm`,
+`array_index_write_emits_bounds_check_on_llvm`), each asserting the
+emitted LLVM IR contains the bounds-check call. Added 4 to
+`tests/run_end_to_end.rs`
+(`array_index_read_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_field_index_read_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_index_write_out_of_bounds_traps_cleanly_on_both_backends`,
+`array_index_in_bounds_still_works_correctly_on_both_backends`), real
+subprocess runs on both backends.
+
+Full `cargo test --release` clean (0 failed). `vanic check examples`
+still shows exactly 78 errors, matching the established baseline
+(unrelated to codegen; `check` doesn't run codegen).
+
+**Separately**, this finding surfaced an unrelated infrastructure gap:
+the `vani-compiler-localfuzz` worktree's nightly refresh
+(`tools/localfuzz/refresh.sh`, timer-driven) aborted on 2026-08-09 at
+07:03 UTC because `Cargo.lock` had a harmless `0.9.1-dev` ->
+`0.9.2-dev` version-string diff from a prior build, tripping the
+script's dirty-worktree safety check (which already excludes
+`allowed_paths.conf`/`allowed_readonly_paths.conf` but not
+`Cargo.lock`). The harness kept fuzzing against a vanic binary that
+was missing everything landed on `main` since 2026-08-08 for the rest
+of the day -- including this session's own BUG-147/BUG-148 fixes --
+so every candidate logged 2026-08-09T04:00 onward through the refresh
+worktree's stale build needed re-verification against a freshly
+rebuilt binary before trusting any of them (per
+`feedback_vani_localfuzz_staleness`). Resolved by hand: `git checkout
+-- Cargo.lock` in the worktree, then `tools/localfuzz/refresh.sh` ran
+clean (merged 13 commits, rebuilt, restarted the harness). All of the
+day's untriaged candidates were re-run against the fresh build; 12 of
+13 reproduced identically on the fresh binary and were genuine non-bugs
+(mutation-stripped loop increments causing infinite loops, a
+double-lock-same-mutex deadlock matching real non-reentrant `Mutex`
+semantics, and an off-by-one loop bound correctly caught by the
+compiler's loop-bound-hoisting check) -- see
+`docs/TODO_LOCAL_STAGING.md` for the individual STATUS entries. The
+13th was this BUG-149 finding.
+
+Next free bug number is **BUG-150**.
+
+## BUG-150 (2026-08-09) -- struct field double-free when moved on only one incoming control-flow path
+
+Found and fixed same-session while designing round 5's audit theme
+(`docs/BUG_PATTERN_AUDIT_TODO_5.md` category A -- see that file for
+the original repro-first writeup and the two candidate fix shapes it
+left open). This is a genuine, both-backends memory-corruption bug,
+more severe than anything fixed in rounds 1-4 (a real `free(): double
+free detected in tcache 2` abort, not a clean `abort()` trap).
+
+Repro:
+```vani
+struct Pair { a: Vec<i64>, b: Vec<i64> }
+fn consume(v: Vec<i64>) -> i64 { return len(ref v) as i64; }
+fn main() -> i64 {
+  let p: Pair = Pair { a: vec(1,2,3), b: vec(4,5,6) };
+  if some_condition() {
+    let n: i64 = consume(p.a);   // moves p.a out
+    print n;
+  } else {
+    print len(ref p.b) as i64;   // only borrows p.b, p.a untouched
+  }
+  return 0;                      // <-- p's drop glue lives here
+}
+```
+Compiled with zero diagnostics; crashed with a double-free at runtime
+whenever the move-arm executed.
+
+Root cause: `checker.rs`'s `Stmt::If` handler already had a merge-
+reconciliation mechanism for a binding moved on only one branch --
+"auto-balance by inserting a compensating `Drop` in the non-moving
+branch, so both paths agree the binding is moved" (this is what
+already made `let x = if cond { a } else { b };`-style whole-variable
+divergence safe). But that mechanism only ever looked at
+`VarInfo.moved` (the whole binding). It never consulted
+`VarInfo.moved_fields` (the per-field partial-move tracking), so
+after the merge, `let mut merged = pre_env.clone();` silently reset
+`moved_fields` back to empty regardless of what either branch actually
+did -- the checker forgot field `a` was ever moved. The real end-of-
+scope `Drop` of `p` (already correctly built to skip fields listed in
+`moved_fields`) then freed `a` a second time, since it no longer knew
+to skip it.
+
+Fix (`checker.rs`, `Stmt::If`'s merge logic, ~line 13729 area): added
+a parallel per-field reconciliation pass alongside the existing whole-
+variable one. For each `Type::Struct`-typed pre-branch binding, when a
+field's moved-state diverges between `then`/`else`, insert a
+compensating Drop of JUST that one field (reusing the exact same
+`moved_fields` skip-list mechanism `Drop` already supports for real
+end-of-scope drops -- skip every field except the one being
+compensated, via `env.lookup_struct` to enumerate the struct's full
+field list) into the non-moving branch, and set the merged env's
+`moved_fields` to the union of both branches' field-move sets. No new
+IR node, no backend codegen changes needed -- both backends' existing
+`TypedStmt::Drop` handling already correctly respects a `moved_fields`
+skip-list of any size, confirmed by reading `emit_llvm_struct_field_drops`
+(`backend_llvm.rs`) and its C equivalent (`emit_struct_field_drops`,
+`backend_c.rs`) directly before implementing.
+
+One deliberate, documented limitation: a struct with a user-defined
+by-ref `drop(self: mut ref T)` skips this reconciliation (falls back
+to the pre-fix state for that narrow combination) -- calling a
+compensating PARTIAL drop would wrongly run the user's "whole object
+is dying" cleanup callback while other fields are still live. Rare
+combination (user-drop-by-ref + a conditionally-moved sibling field);
+under-fixes rather than introduces a new unsoundness.
+
+**Loop-safety follow-up, found while verifying the fix**: naively, the
+same compensating-drop trick applied to an `if`/`else` NESTED INSIDE A
+LOOP BODY is unsound -- the checker processes the loop body once, so
+the compensating drop (or the move) fires again on every later
+iteration that takes the other arm, double-freeing the same field a
+second way. Confirmed by direct reproduction (an `if`/`else` inside a
+`while` loop still crashed after the primary fix). The existing
+`validate_loop_balance` function already rejects this exact shape for
+WHOLE-variable moves at compile time ("loop body changes the move
+state") -- extended it to also check `moved_fields` divergence between
+loop start and loop end, so a per-field version of the same unsound
+pattern is now rejected at compile time too, consistent with the
+existing whole-variable safety net, rather than trying to make the
+runtime trick loop-safe (which would need real runtime drop flags, a
+materially bigger feature -- left as a known possible future
+enhancement, not attempted here).
+
+**BUG-151, a second, narrower gap found while verifying BUG-150**:
+`ref t.field` / `mut ref t.field` (unlike plain `t.field`) never
+checked whether THAT SPECIFIC FIELD had been moved -- only the whole-
+binding `.moved` flag, which plain `FieldAccess` on the same field
+already correctly guards against. `ref p.a` after `p.a` was moved
+returned a reference into already-freed heap memory instead of
+erroring (a real, if narrow, use-after-free -- confirmed NOT to crash
+in the specific case tested, since `len(ref p.a)` only reads the Vec
+struct's still-valid stack-resident length/pointer fields without
+dereferencing the freed buffer itself, but a function that indexed
+through such a reference would). Fixed by adding the same
+`moved_fields`-lookup diagnostic plain `FieldAccess` already has, to
+both `RefField` and `RefMutField`'s checking (`checker.rs`, ~line
+21837 and ~21855 areas).
+
+Verified: the original double-free repro, its reverse-direction
+variant (move on the `else` arm instead), and the loop-nested variant
+all behave correctly now -- the first two run cleanly with correct
+output on both backends (no double-free, no crash), the loop variant
+is correctly rejected at compile time with a clear diagnostic. The
+still-live sibling field (`p.b`) remains fully usable after the merge.
+Using the moved field again after the merge (`p.a`, or `ref p.a`) is
+now correctly rejected as a use-after-move, on both the plain-value
+and `ref`/`mut ref` forms.
+
+Added 9 regression tests: 7 to `src/lib.rs`
+(`conditional_field_move_in_if_else_compiles_and_untaken_field_stays_usable`,
+`conditional_field_move_in_if_else_marks_field_moved_after_merge`,
+`conditional_field_move_reverse_direction_compiles`,
+`conditional_field_move_emits_compensating_drop_on_c_backend`,
+`ref_field_after_move_rejected`, `mut_ref_field_after_move_rejected`,
+`conditional_field_move_inside_loop_rejected`), 2 to
+`tests/run_end_to_end.rs`
+(`conditional_field_move_no_longer_double_frees_on_both_backends`,
+`conditional_field_move_reverse_direction_no_double_free_on_both_backends`),
+real subprocess runs asserting clean exit + correct output + absence
+of the double-free message, on both backends.
+
+Full `cargo test --release` clean (2856 lib tests + all other
+integration suites, 0 failed). `vanic check examples` still shows
+exactly 78 errors, matching the established baseline -- no regression.
+
+This closes category A of `docs/BUG_PATTERN_AUDIT_TODO_5.md`. The
+narrow user-drop-by-ref limitation noted above, and whether real
+runtime drop flags are worth the implementation cost to fully close
+the loop-nested case (currently: reject at compile time, which is
+sound but more restrictive than necessary), are both left as documented
+open threads for a future session, not silently unresolved gaps.
+
+Next free bug number is **BUG-152**.

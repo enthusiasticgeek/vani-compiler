@@ -4662,7 +4662,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str(&format!("  store {} {}, {}* {}\n", store_ty, val_v, store_ty, p));
                 return;
             }
-            if let Type::Array { element, .. } = &underlying {
+            if let Type::Array { element, length } = &underlying {
                 let agg = llvm_type_string(&underlying);
                 // String form so struct / tuple
                 // elements render their full LLVM
@@ -4681,6 +4681,16 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     ));
                     dest
                 };
+                // BUG-149: array-index WRITES had no bounds check
+                // at all (unlike Vec writes just above, checked
+                // since BUG-108) -- worse than the matching read-
+                // side gap since an OOB write silently corrupts
+                // adjacent stack/heap memory instead of just
+                // returning a bad value.
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx_i64, length
+                ));
                 let mut p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
@@ -16871,7 +16881,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         ));
                         return v;
                     }
-                    if let Type::Array { element, .. } = &underlying {
+                    if let Type::Array { element, length } = &underlying {
                         let agg = llvm_type_string(&underlying);
                         // String form so struct / tuple
                         // elements render their full
@@ -16891,6 +16901,23 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             ));
                             dest
                         };
+                        // BUG-149: fixed-size array reads via a
+                        // plain local (`Var`) base had no bounds
+                        // check at all -- unlike the Vec arm right
+                        // above, which has called
+                        // `@__intent_bounds_check` since BUG-108. A
+                        // non-compile-time-provable out-of-range
+                        // index silently GEP'd past the array with
+                        // no trap on either backend... except C
+                        // *did* trap here (its `Type::Array` arm in
+                        // `emit_index` always wraps the index in
+                        // `intent_check_bounds`), so this was a
+                        // genuine C-vs-LLVM behavioral divergence,
+                        // not just a missing check.
+                        out.push_str(&format!(
+                            "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                            idx_i64, length
+                        ));
                         let p = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
@@ -16907,12 +16934,22 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // field's array aggregate, then GEP into it. T1.2
             // phase 2b.
             if let TypedExprKind::FieldAccess { .. } = &array.kind {
-                if let Type::Array { element, .. } = array.ty.deref().clone() {
+                if let Type::Array { element, length } = array.ty.deref().clone() {
                     let agg = llvm_type_string(array.ty.deref());
                     let elt_ty = llvm_type_string(&element);
                     let base_addr = emit_lvalue_addr(array, ctx, out);
                     let idx_v = emit_expr(index, ctx, out);
                     let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                    // BUG-149: array-typed struct-field reads
+                    // (`t.data[i]`) had no bounds check either --
+                    // same gap as the Var-base arm above, just on
+                    // the struct-field path instead of a plain
+                    // local. Mirrors the Vec-typed struct-field
+                    // arm below, which already checks.
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx_i64, length
+                    ));
                     let p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
