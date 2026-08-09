@@ -4006,7 +4006,16 @@ Fix attempt: `tools/localfuzz/findings/20260809-012913-run-crash-6259331a36/fix_
 Repro: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-042549-run-crash-035f697a8d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified after refreshing
+this worktree to main commit `2c08603` (the nightly refresh had stalled
+on a dirty `Cargo.lock` since 2026-08-09T07:03, see the entry at the end
+of this backlog for the full incident writeup). `find_first_negative`'s
+loop body has an unconditional `i = i + 0;` at line 19 (mutated from
+`i = i + 1`) -- `xs[0] = 1` is never negative, so the loop spins at
+i=0 forever without ever reaching the actual negative element. Genuine
+source-level infinite loop from mutation stripping the increment, same
+class as several already-closed candidates in this backlog (e.g.
+20260809-005918, 20260809-012913). Not a compiler defect. Closing.**
 
 ---
 
@@ -4015,7 +4024,14 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on the freshly
+refreshed worktree (main `2c08603`). Same shape as 20260809-042549
+above (identical `find_first_negative`/`count_positive` tutorial
+pair, different language translation), except here the increment
+statement is missing entirely from `find_first_negative`'s loop body
+(lines 14-19) rather than reduced to `+ 0`. Same result: `xs[0] = 1`
+is never negative, `i` never advances, infinite loop. Not a compiler
+defect. Closing.**
 
 ---
 
@@ -4024,7 +4040,18 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on the freshly
+refreshed worktree (main `2c08603`). This is a mutated version of the
+BUG-131 sort regression test; line 41's `while j < n - -1` (`n - -1` =
+`n + 1`) is an off-by-one that lets the post-sort verification loop
+read one past the array (`xs[j+1]` when `j = n-1` reads `xs[n]`).
+Correctly caught by the compiler's own loop-bound-hoisting
+optimization (the `"loop bound out of vec range"` check in
+`backend_c.rs`/`backend_llvm.rs`, distinct from the plain per-index
+bounds check) on both backends: C aborts with that message (exit
+134), LLVM traps (exit 3) -- same trap, different exit-code
+convention, not a semantic divergence. A genuine source-level
+off-by-one, correctly caught. Not a compiler defect. Closing.**
 
 ---
 
@@ -4032,6 +4059,15 @@ STATUS: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260809-062214-backend-divergence-9b38ca1539/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-062214-backend-divergence-9b38ca1539/fix_attempt.md`
+
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`), reproduces identically:
+`integer overflow in i64 add` on stderr, C exit 134, LLVM exit 3. Same
+documented C-134-vs-LLVM-3 trap-code convention as the other benign
+overflow candidates this backlog has already closed (e.g.
+20260808-214622) -- both backends correctly trap a genuine i64
+overflow via checked/trapping arithmetic, just with different exit
+codes; not a semantic divergence. Not a compiler defect. Closing.**
 
 (ollama unavailable -- raw finding only)
 
@@ -4061,7 +4097,29 @@ Fix attempt: `tools/localfuzz/findings/20260809-062214-backend-divergence-9b38ca
 Repro: `tools/localfuzz/findings/20260809-063729-backend-divergence-660f217404/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-063729-backend-divergence-660f217404/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: REAL FINDING, FIXED (2026-08-09) -- confirmed and fixed as
+BUG-149 in the main vani-compiler repo (commit `ac4be0d`, see
+`docs/TODO_CURRENT.md`). This is a mutated version of the Iterator-
+pattern tutorial: `ManualIter::next` increments `self.cursor` BEFORE
+reading (`self.cursor = self.cursor + 1; let v = self.data[self.cursor];`,
+mutated from read-then-increment), off-by-one'ing the 5th call into
+`self.data[5]` on a `[i64; 5]` struct field. Root cause turned out to
+be much more general than this one repro: fixed-size array (`[T; N]`)
+indexing with a non-compile-time-provable index had NO bounds check
+at all on tree-LLVM (`backend_llvm.rs`) -- affecting plain local
+array reads, struct-field array reads, AND array writes, all three
+missing the `@__intent_bounds_check` call that the sibling `Vec<T>`
+arms have had since BUG-108. Tree-C's matching `Type::Array` arm has
+always bounds-checked correctly, so this was a genuine C-vs-LLVM
+divergence, not a narrow single-builtin gap: C traps (`"index out of
+bounds: 5, len 5"`, exit 134), LLVM silently read/could-write garbage
+stack memory and exited 0. Fixed by adding the check at all three
+LLVM sites. Verified: all three shapes (plain-local read, struct-
+field read, plain-local write) now trap identically on both backends
+(C 134, LLVM 3); in-bounds read+write still works correctly. 7
+regression tests added (3 `src/lib.rs` compile-checks + 4
+`tests/run_end_to_end.rs` subprocess tests). Full `cargo test
+--release` clean. Closing.**
 
 ---
 
@@ -4069,6 +4127,13 @@ STATUS: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260809-064729-backend-divergence-619af5c85c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-064729-backend-divergence-619af5c85c/fix_attempt.md`
+
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`), reproduces identically: `integer overflow
+in int64_t mul` on stderr, C exit 134, LLVM exit 3. Same
+C-134-vs-LLVM-3 trap-code convention as 20260809-062214 and other
+already-closed overflow candidates -- both backends correctly trap a
+genuine i64 multiplication overflow. Not a compiler defect. Closing.**
 
 (ollama unavailable -- raw finding only)
 
@@ -4098,6 +4163,12 @@ Fix attempt: `tools/localfuzz/findings/20260809-064729-backend-divergence-619af5
 Repro: `tools/localfuzz/findings/20260809-082932-backend-divergence-f743c464db/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-082932-backend-divergence-f743c464db/fix_attempt.md`
 
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`), reproduces identically: `integer overflow
+in int64_t add` on stderr, C exit 134, LLVM exit 3. Same
+C-134-vs-LLVM-3 trap-code convention as the other closed overflow
+candidates. Not a compiler defect. Closing.**
+
 (ollama unavailable -- raw finding only)
 
 ```json
@@ -4126,7 +4197,17 @@ Fix attempt: `tools/localfuzz/findings/20260809-082932-backend-divergence-f743c4
 Repro: `tools/localfuzz/findings/20260809-084440-run-crash-d8f20b7050/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-084440-run-crash-d8f20b7050/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on the freshly
+refreshed worktree (main `2c08603`), both backends still time out
+(rc=124 under a 5s `timeout` wrapper). The repro locks the same
+`Mutex<i64>` struct field twice in a row without releasing
+(`let g = mutex_lock(ref s.m); let g = mutex_lock(ref s.m);`) --
+shadowing `g` doesn't drop the first `Guard` early (RAII drop still
+happens at end of scope, same as real Rust `std::sync::Mutex`), so
+the second `mutex_lock` deadlocks against the still-held first lock.
+This is standard non-reentrant-mutex semantics working exactly as
+designed, not a compiler defect -- the deadlock is a genuine
+source-level double-lock bug. Closing.**
 
 ---
 
@@ -4134,6 +4215,17 @@ STATUS: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260809-090623-backend-divergence-8b1690dbb2/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-090623-backend-divergence-8b1690dbb2/fix_attempt.md`
+
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`). `sucet_rozsah(-9223372036854775808, 5)`
+(line 28) deliberately starts the accumulator at `i64::MIN` and sums
+upward -- the second loop iteration already overflows past
+`i64::MIN`. Both backends print the partial `"sluckovy sucet = "`
+prefix then correctly trap: C `integer overflow in int64_t add`, exit
+134; LLVM exit 3. Same C-134-vs-LLVM-3 convention as the other closed
+overflow candidates -- a genuine, deliberately-extreme source-level
+overflow, correctly caught by both backends' checked arithmetic. Not
+a compiler defect. Closing.**
 
 (ollama unavailable -- raw finding only)
 
@@ -4163,6 +4255,12 @@ Fix attempt: `tools/localfuzz/findings/20260809-090623-backend-divergence-8b1690
 Repro: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e84b2/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e84b2/fix_attempt.md`
 
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`), reproduces identically: `integer overflow
+in i64 add` on stderr, C exit 134, LLVM exit 3. Same C-134-vs-LLVM-3
+convention as the other closed overflow candidates. Not a compiler
+defect. Closing.**
+
 (ollama unavailable -- raw finding only)
 
 ```json
@@ -4190,6 +4288,14 @@ Fix attempt: `tools/localfuzz/findings/20260809-092734-backend-divergence-81c70e
 
 Repro: `tools/localfuzz/findings/20260809-095157-run-crash-a4ac5df327/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-095157-run-crash-a4ac5df327/fix_attempt.md`
+
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on the freshly
+refreshed worktree (main `2c08603`), still times out (rc=124). This is
+the Hindi translation of `control_flow.vani`'s `sum` function; line 17
+(`i = i + 0;`, mutated from `i = i + 1;`) leaves `i` at 0 forever
+inside `while i < n`. Same mutation-stripped-increment class as
+several other candidates in this backlog. Not a compiler defect.
+Closing.**
 
 (ollama unavailable -- raw finding only)
 
@@ -4219,6 +4325,15 @@ Fix attempt: `tools/localfuzz/findings/20260809-095157-run-crash-a4ac5df327/fix_
 Repro: `tools/localfuzz/findings/20260809-104210-run-crash-1fa5999c7c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-104210-run-crash-1fa5999c7c/fix_attempt.md`
 
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on the freshly
+refreshed worktree (main `2c08603`), still times out (rc=124). This is
+the Thai translation of `early_exit.vani`'s break smoke-test; the
+`while n < 100 { if n == 5 { break; } }` body never increments `n`, so
+`n` stays 0 forever -- `n == 5` never fires and `n < 100` never
+becomes false. Same mutation-stripped-increment class as
+20260809-012913 (already closed) and several others in this backlog.
+Not a compiler defect. Closing.**
+
 (ollama unavailable -- raw finding only)
 
 ```json
@@ -4246,6 +4361,21 @@ Fix attempt: `tools/localfuzz/findings/20260809-104210-run-crash-1fa5999c7c/fix_
 
 Repro: `tools/localfuzz/findings/20260809-123951-backend-divergence-e39031b262/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-123951-backend-divergence-e39031b262/fix_attempt.md`
+
+**STATUS: BENIGN (2026-08-09) -- re-verified on the freshly refreshed
+worktree (main `2c08603`), reproduces identically: `integer overflow
+in int64_t add` on stderr, C exit 134, LLVM exit 3. Same
+C-134-vs-LLVM-3 convention as the other closed overflow candidates in
+this backlog. Not a compiler defect. Closing.**
+
+**This closes the day's entire 2026-08-09 untriaged backlog (13
+candidates: 20260809-042549 through this entry). All 13 were
+re-verified against a freshly rebuilt `main` after discovering the
+nightly refresh had stalled on a dirty `Cargo.lock` since 07:03 UTC
+that day (see `docs/TODO_CURRENT.md`'s BUG-149 section for the full
+incident writeup) -- resolved by hand, worktree now tracks main
+`2c08603`. 12 of 13 were non-bugs; the 13th (20260809-063729) is
+BUG-149, fixed same-session.**
 
 (ollama unavailable -- raw finding only)
 
