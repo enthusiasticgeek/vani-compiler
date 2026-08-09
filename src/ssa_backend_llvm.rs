@@ -4525,6 +4525,21 @@ fn emit_instr(
                     "  {} = load {}*, {}** {}\n",
                     data_p, elt_ty, elt_ty, data_pp
                 ));
+                // BUG-147: clone_at never bounds-checked its
+                // index in SSA-LLVM either -- mirrors the fix in
+                // tree-LLVM's clone_at (backend_llvm.rs) and
+                // C's (backend_c.rs, via intent_check_bounds).
+                let len_pp = format!("%v_{}.cat_lp", result.0);
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    len_pp, struct_ty, struct_ty, xs_ptr
+                ));
+                let len_v = format!("%v_{}.cat_len", result.0);
+                out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_pp));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    operand_str(&args[1]), len_v
+                ));
                 let slot_p = format!("%v_{}.cat_sp", result.0);
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 {}\n",

@@ -21146,9 +21146,9 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // Closure #291: `clone_at(ref [T; N], i)` accepts
             // arrays alongside Vec. Arrays index directly as
             // `xs[i]` (C array decay); Vec uses `.data[i]`.
-            let element_ty = match underlying {
-                Type::Vec(element) => &**element,
-                Type::Array { element, .. } => &**element,
+            let (element_ty, array_len) = match underlying {
+                Type::Vec(element) => (&**element, None),
+                Type::Array { element, length } => (&**element, Some(*length)),
                 other => {
                     unreachable!("clone_at requires Vec or Array, got {:?}", other)
                 }
@@ -21159,6 +21159,24 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 &xs_arg.ty,
                 Type::Ref(_) | Type::RefMut(_)
             );
+            let index_str = emit_expr(&args[1]);
+            // BUG-147: unlike every other indexing path
+            // (emit_index, set_mut's slot_lvalue, ...), clone_at
+            // never ran the index through intent_check_bounds --
+            // an out-of-bounds `clone_at(empty_vec, 0)` walked off
+            // the end of the (possibly null/zero-len) buffer,
+            // reading garbage that a nested-Vec field's deep-clone
+            // then memcpy'd with a garbage length, segfaulting the
+            // LLVM JIT while the C backend silently returned junk.
+            // Bring clone_at's bounds discipline in line with
+            // every other indexed access.
+            let checked_index = if let Some(length) = array_len {
+                format!("intent_check_bounds((int64_t)({}), (int64_t){})", index_str, length)
+            } else if access_via_ref {
+                format!("intent_check_bounds((int64_t)({}), (int64_t)({})->len)", index_str, xs_str)
+            } else {
+                format!("intent_check_bounds((int64_t)({}), (int64_t)({}).len)", index_str, xs_str)
+            };
             // Wrap xs_str in parens so `&xs->data[i]`
             // parses as `(&xs)->data[i]` — `->` binds
             // tighter than unary `&` so naked
@@ -21169,11 +21187,11 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 // ref-of-array passes the decayed pointer)
                 // index the same way. No `*` indirection
                 // needed.
-                format!("({})[{}]", xs_str, emit_expr(&args[1]))
+                format!("({})[{}]", xs_str, checked_index)
             } else if access_via_ref {
-                format!("({})->data[{}]", xs_str, emit_expr(&args[1]))
+                format!("({})->data[{}]", xs_str, checked_index)
             } else {
-                format!("({}).data[{}]", xs_str, emit_expr(&args[1]))
+                format!("({}).data[{}]", xs_str, checked_index)
             };
             // Element-aware deep-clone: recurse through
             // `c_element_deep_clone` so a `Vec<Vec<U>>` slot

@@ -10393,3 +10393,74 @@ Full `cargo test --release` clean (2836 lib tests + 216 end-to-end tests
 
 This closes out `docs/BUG_PATTERN_AUDIT_TODO_3.md`'s full scope -- both
 categories now fixed. Next free bug number is **BUG-147**.
+
+## BUG-147 (2026-08-09) -- clone_at() never bounds-checked its index
+
+Found via a fresh localfuzz sweep (post round-3 closeout) triaging 4
+unreviewed candidates from 2026-08-08/09: 1 benign (the documented
+C-134-vs-LLVM-3 trap-code convention, on an i64::MIN-to-limit loop
+whose body genuinely overflows `i * 2` -- correct trap, not a bug), 2
+non-bugs (a source-level infinite loop from mutation with no loop-body
+increment; the already-characterized `sleep_ms(9223372036854775807,
+...)` absurd-duration async pattern), and 1 REAL finding.
+
+The real finding: `clone_at(xs, i)` is the only indexed-access builtin
+in the whole codebase that never ran its index through the bounds-check
+convention every other indexed access uses (`emit_index`'s
+`intent_check_bounds` on C, `@__intent_bounds_check` on LLVM, both via
+`checked` mode). localfuzz's repro was `clone_at(ref empty_nodes, 0)`
+on a `Vec<Node>` where `Node` has a nested `Vec<i64>` field, called on
+an EMPTY Vec: C silently read garbage out of the zero-length buffer and
+returned 0 (wrong but not a crash); LLVM's JIT segfaulted inside
+`memcpy` because the garbage `children` field's deep-clone tried to
+copy a garbage length. A genuine out-of-bounds safety hole, not just a
+backend-divergence cosmetic issue.
+
+Root cause: `clone_at`'s slot-address computation (`xs.data[i]` / GEP)
+was written before the project's general indexing bounds-check
+convention existed and was never retrofitted, unlike `emit_index`,
+`set_mut`'s slot_lvalue, etc. Four call sites needed the same fix, one
+per backend x codegen-path combination:
+
+- `src/backend_c.rs`, `"clone_at" =>` arm: wrapped both the Array and
+  Vec index expressions in `intent_check_bounds((int64_t)(idx),
+  (int64_t)<length-or-.len>)`, matching the exact idiom `emit_index`
+  already uses for both storage shapes.
+- `src/backend_llvm.rs`, tree-LLVM's `clone_at` handling (two branches
+  -- array and Vec): added a `call void @__intent_bounds_check(i64
+  <idx>, i64 <len>)` before each GEP, loading the Vec's `len` field (GEP
+  index 1) or using the array's static length constant, mirroring the
+  existing idiom at e.g. line 4625 (an array-write bounds check).
+- `src/ssa_backend_llvm.rs`, SSA-LLVM's `clone_at` handling (Vec only --
+  SSA doesn't support array clone_at): same `@__intent_bounds_check`
+  call, loading `len` via GEP field 1 on the materialized struct
+  pointer.
+- `src/ssa_backend_c.rs`, SSA-C's `clone_at` handling: same
+  `intent_check_bounds` wrap as tree-C.
+
+Verified: the original localfuzz repro now traps cleanly and
+consistently on both backends (C exit 134 with an "index out of
+bounds" message, LLVM exit 3 -- the same convention as every other
+bounds trap) instead of C returning silent garbage and LLVM
+segfaulting. A hand-written in-bounds sanity check (`clone_at` on a
+non-empty Vec, index within range) still returns the correct value on
+both backends -- confirms the fix doesn't over-trigger.
+
+Added 4 tests to `src/lib.rs` (one per codegen path -- `compile_to_c`,
+`compile_to_llvm` for the array branch, and the direct-SSA
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit` /
+`crate::ssa_backend_llvm::emit` pattern for the SSA paths, since SSA
+lowering doesn't support structs so those two tests use `Vec<i64>` /
+`Vec<Vec<i64>>` instead of the original struct-with-nested-Vec repro
+shape), each asserting the emitted code contains the bounds-check call.
+Added 2 to `tests/run_end_to_end.rs`: a real subprocess test
+reproducing the exact localfuzz shape and asserting both backends now
+trap with the expected exit codes/messages, plus a same-shape in-bounds
+test asserting correct output on both backends.
+
+Full `cargo test --release` clean (2840 lib tests + 218 end-to-end
+tests + all other integration suites, 0 failed). `vanic check examples`
+unaffected (bounds-check codegen doesn't run during static
+type-checking).
+
+Next free bug number is **BUG-148**.

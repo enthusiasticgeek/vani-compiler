@@ -6686,6 +6686,105 @@ mod tests {
     }
 
     #[test]
+    fn clone_at_on_c_emits_bounds_check() {
+        // BUG-147: clone_at(xs, i) never ran its index through
+        // intent_check_bounds, unlike every other indexed access
+        // (emit_index, set_mut). An out-of-bounds clone_at on an
+        // empty/short Vec silently read garbage on C and
+        // segfaulted the LLVM JIT (found by localfuzz: a struct
+        // with a nested Vec<i64> field, clone_at'd at index 0 on
+        // an empty Vec -- the garbage `children` field's deep
+        // clone then memcpy'd a garbage length).
+        let source = r#"
+            struct Node { value: i64 }
+            fn main() -> i64 {
+              let ns: Vec<Node> = vec(Node { value: 1 });
+              return clone_at(ref ns, 0).value;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected clone_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn clone_at_on_ssa_c_emits_bounds_check() {
+        // BUG-147, SSA-C side (ssa_backend_c.rs) -- same gap,
+        // exercised via a parallel-for body so the program routes
+        // through SSA-C rather than tree-C. SSA lowering doesn't
+        // support structs yet, so this uses a Vec<i64> (SSA-C
+        // clone_at is not type-specific to structs -- the bounds
+        // gap is in the shared index-emission code).
+        let source = r#"
+            fn main() -> i64 {
+              let ns: Vec<i64> = vec(1, 2, 3);
+              parallel for i from 0 to 1 {
+                let n: i64 = clone_at(ref ns, 0);
+              }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected SSA-C clone_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn clone_at_on_tree_llvm_emits_bounds_check() {
+        // BUG-147, tree-LLVM side (backend_llvm.rs). Array
+        // clone_at only exists in the tree backends, so use it
+        // to exercise the array-branch fix specifically.
+        let source = r#"
+            fn main() -> i64 {
+              let arr: [i64; 3] = [10, 20, 30];
+              return clone_at(ref arr, 0);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected tree-LLVM clone_at's index to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn clone_at_on_ssa_llvm_emits_bounds_check() {
+        // BUG-147, SSA-LLVM side (ssa_backend_llvm.rs). SSA
+        // lowering doesn't support structs yet, so this uses
+        // clone_at on a Vec<Vec<i64>> -- still a non-Copy element
+        // type (routes through the inner-Vec __clone helper, the
+        // same class as the struct-with-nested-Vec repro
+        // localfuzz found, just without the struct wrapper).
+        let source = r#"
+            fn main() -> i64 {
+              let inner: Vec<i64> = vec(9);
+              let ns: Vec<Vec<i64>> = vec(inner);
+              let n: Vec<i64> = clone_at(ref ns, 0);
+              return clone_at(ref n, 0);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected SSA-LLVM clone_at's index to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn match_returning_struct_via_arms_compiles() {
         // Match arms returning fresh struct literals
         // compose with field access on the result.

@@ -13207,3 +13207,101 @@ fn main() -> i64 {{
         );
     }
 }
+
+// BUG-147 (2026-08-09): found via localfuzz. `clone_at(xs, i)` never ran
+// its index through the ordinary bounds-check convention that every other
+// indexed access (plain `xs[i]`, `set_mut`, ...) uses. The original repro
+// was a `Vec<Node>` where `Node` has a nested `Vec<i64>` field, cloned at
+// index 0 of an EMPTY Vec: the C backend silently read garbage and
+// returned 0, while the LLVM JIT segfaulted inside memcpy when the
+// garbage `children` field's deep-clone tried to copy a garbage length.
+// Both backends must now trap cleanly and consistently instead.
+#[test]
+fn clone_at_out_of_bounds_traps_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug147-clone-at-oob",
+        r#"
+struct Node { value: i32, children: Vec<i64> }
+fn main() -> i64 {
+  let empty_children: Vec<i64> = vec();
+  let empty_nodes: Vec<Node> = vec();
+  let node0: Node = clone_at(ref empty_nodes, 0 as u64);
+  print node0.value;
+  return 0;
+}
+"#,
+    );
+    let output_c = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert_eq!(
+        output_c.status.code(),
+        Some(134),
+        "out-of-bounds clone_at should trap on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output_c.status,
+        String::from_utf8_lossy(&output_c.stdout),
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output_c.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds message on stderr, got: {}",
+        String::from_utf8_lossy(&output_c.stderr)
+    );
+
+    let output_llvm = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run should execute: {e}"));
+    assert_eq!(
+        output_llvm.status.code(),
+        Some(3),
+        "out-of-bounds clone_at should also trap cleanly on LLVM instead \
+         of segfaulting; status {:?}, stdout: {}, stderr: {}",
+        output_llvm.status,
+        String::from_utf8_lossy(&output_llvm.stdout),
+        String::from_utf8_lossy(&output_llvm.stderr)
+    );
+}
+
+#[test]
+fn clone_at_in_bounds_still_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug147-clone-at-in-bounds",
+        r#"
+struct Node { value: i32, children: Vec<i64> }
+fn main() -> i64 {
+  let cs: Vec<i64> = vec(1, 2, 3);
+  let ns: Vec<Node> = vec(Node { value: 42, children: cs });
+  let n: Node = clone_at(ref ns, 0 as u64);
+  print n.value;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "in-bounds clone_at should still run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong clone_at result ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

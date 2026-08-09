@@ -9908,6 +9908,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     };
                     let idx_raw = emit_expr(&args[1], ctx, out);
                 let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
+                    // BUG-147: bounds-check the array index too --
+                    // see the Vec branch above for the rationale.
+                    let arr_len = match xs_arg.ty.deref() {
+                        Type::Array { length, .. } => *length as i64,
+                        _ => unreachable!(),
+                    };
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx, arr_len
+                    ));
                     let slot_p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
@@ -9993,6 +10003,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let idx_raw = emit_expr(&args[1], ctx, out);
                 let idx = widen_index_to_i64(&args[1], idx_raw, ctx, out);
+                // BUG-147: clone_at never bounds-checked its
+                // index -- unlike every other Vec index path --
+                // so `clone_at(empty_vec, 0)` walked off the end
+                // of the buffer, feeding a non-Copy element's
+                // deep-clone (e.g. a nested Vec field) a garbage
+                // length and segfaulting in memcpy. Bring it in
+                // line with the read/write index paths.
+                let len_pp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    len_pp, struct_ty, struct_ty, xs_ptr
+                ));
+                let len_v = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_pp));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx, len_v
+                ));
                 let slot_p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i64 {}\n",

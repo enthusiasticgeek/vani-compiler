@@ -2474,10 +2474,19 @@ fn emit_instr(
                 };
                 let xs_str = c_operand(xs_arg);
                 let i_str = c_operand(i_arg);
-                let slot = if via_ref {
-                    format!("({})->data[{}]", xs_str, i_str)
+                // BUG-147: bounds-check the index -- mirrors
+                // tree-C's clone_at fix (backend_c.rs) so an
+                // out-of-bounds `clone_at(empty_vec, 0)` traps
+                // cleanly instead of reading garbage.
+                let checked_i = if via_ref {
+                    format!("intent_check_bounds((int64_t)({}), (int64_t)({})->len)", i_str, xs_str)
                 } else {
-                    format!("({}).data[{}]", xs_str, i_str)
+                    format!("intent_check_bounds((int64_t)({}), (int64_t)({}).len)", i_str, xs_str)
+                };
+                let slot = if via_ref {
+                    format!("({})->data[{}]", xs_str, checked_i)
+                } else {
+                    format!("({}).data[{}]", xs_str, checked_i)
                 };
                 let cloned = crate::backend_c::c_element_deep_clone(
                     &slot,
