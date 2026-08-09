@@ -3920,6 +3920,8 @@ função main() -> i64 {
 
 **Backends Affected**: The crash occurred in both LLVM and C
 
+**STATUS: BENIGN (2026-08-09) -- re-verified on current main (commit 230687e). The loop starts at i64::MIN; `i * 2` on that first iteration genuinely overflows int64 by design (this is checked/trapping arithmetic, not wraparound) -- both backends correctly trap: C exits 134 (`integer overflow in int64_t mul` on stderr), LLVM exits 3. Same documented C-134-vs-LLVM-3 trap-code convention as the other benign candidates this round -- not a compiler defect, the source itself deliberately overflows. Closing.**
+
 ---
 
 ### Candidate: 20260808-230959-run-crash-740941fdd1
@@ -3927,7 +3929,7 @@ função main() -> i64 {
 Repro: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-230959-run-crash-740941fdd1/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on current main (commit 230687e), timed out (rc=124) as expected. The repro's `enquanto i < 5 { }` while-loop body is EMPTY -- no increment of `i` anywhere in the loop -- a genuine source-level infinite loop introduced by mutation of the original `control_flow.vani` tutorial example (which does increment `i` in the real file). Not a compiler defect. Closing.**
 
 ---
 
@@ -3936,7 +3938,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260809-005918-run-crash-4cbc9d45a9/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on current main (commit 230687e). Same `sleep_ms(9223372036854775807, ...)` absurd-duration async pattern as 20260806-162420-run-crash-3b08e2a115 and 20260808-201651-run-crash-b756331010 -- see those entries. Not a compiler defect. Closing.**
 
 ---
 
@@ -3965,6 +3967,7 @@ Fix attempt: `tools/localfuzz/findings/20260809-011704-backend-divergence-ab0a02
 }
 ```
 
+**STATUS: REAL FINDING, FIXED (2026-08-09) -- confirmed and fixed as BUG-147 in the main vani-compiler repo (commit pending push, see docs/TODO_CURRENT.md). Root cause: `clone_at(xs, i)` was the only indexed-access builtin that never ran its index through the project's bounds-check convention (`intent_check_bounds` on C / `@__intent_bounds_check` on LLVM) that every other indexed access uses. `clone_at(ref empty_nodes, 0)` on an EMPTY `Vec<Node>` (where `Node` has a nested `Vec<i64>` field) walked off the end of the buffer: C silently read garbage and returned 0, LLVM's JIT segfaulted in `memcpy` when the garbage `children` field's deep-clone tried to copy a garbage length. Fixed by adding the standard bounds-check call at all four codegen sites: `backend_c.rs` and `ssa_backend_c.rs` (both `clone_at` arms, wrapped the index in `intent_check_bounds`), `backend_llvm.rs` (tree-LLVM, both the array and Vec branches) and `ssa_backend_llvm.rs` (SSA-LLVM, Vec only), both adding a `@__intent_bounds_check` call before the GEP. Both backends now trap cleanly and consistently (C exit 134 with an "index out of bounds" message, LLVM exit 3) instead of one returning silent garbage and the other segfaulting. Verified in-bounds clone_at still works correctly on both backends (no over-triggering). Regression tests added to both `src/lib.rs` (4 tests, one per codegen path) and `tests/run_end_to_end.rs` (2 tests: OOB-traps-cleanly and in-bounds-still-works, both real subprocess runs on both backends). Full `cargo test --release` clean (2840 lib + 218 e2e tests). Closing.**
 
 ---
 
@@ -3993,3 +3996,5 @@ Fix attempt: `tools/localfuzz/findings/20260809-012913-run-crash-6259331a36/fix_
 }
 ```
 
+
+**STATUS: NOT A COMPILER BUG (2026-08-09) -- re-verified on current main (commit 230687e), timed out (rc=124) as expected. `n` starts at 0 and is never incremented anywhere in the `while n < 100 { if n == 5 { break; } }` body -- mutation stripped the increment from the original `early_exit.vani` tutorial, leaving a genuine source-level infinite loop (`n == 5` can never become true). Same shape as 20260808-230959-run-crash-740941fdd1. Not a compiler defect. Closing.**
