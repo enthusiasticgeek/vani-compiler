@@ -1,6 +1,7 @@
 # vāṇी — Bug-pattern audit, round 4
 
-**STATUS (2026-08-09): OPEN, one confirmed unfixed lead ready to go.**
+**STATUS (2026-08-09): category A's confirmed lead FIXED as BUG-148;
+the systematic sweep of the rest of the builtin surface is still OPEN.**
 Sequel to `docs/BUG_PATTERN_AUDIT_TODO_3.md` (round 3, closed 2026-08-08
 as BUG-146). This round's localfuzz backlog triage (5 fresh candidates,
 2026-08-08 through 2026-08-09) found only one genuine bug --
@@ -9,7 +10,8 @@ as BUG-146). This round's localfuzz backlog triage (5 fresh candidates,
 source-level infinite loops from mutation stripping a loop's increment,
 one more instance of the already-characterized `sleep_ms(i64::MAX)`
 pattern). See `docs/TODO_CURRENT.md`'s BUG-147 section for the full
-fix writeup.
+fix writeup. `vec_remove_at`'s matching gap (below) was then fixed the
+same day as **BUG-148** -- see `docs/TODO_CURRENT.md`'s BUG-148 section.
 
 Rather than derive round 4's theme from a shape localfuzz hasn't found
 yet, this file follows round 3's other lesson: BUG-147 itself pointed
@@ -20,7 +22,22 @@ exact same class. That's category A below, and it's a running head
 start, not a cold lead -- the next session should be able to open with
 a fix, the same way round 3 did for its two categories.
 
-## A. Bounds-check coverage audit across indexed-access builtins (🔴 high) -- one CONFIRMED unfixed lead, rest needs a systematic sweep
+## A. Bounds-check coverage audit across indexed-access builtins (🔴 high) -- confirmed lead FIXED 2026-08-09, BUG-148; systematic sweep still OPEN
+
+**Update (2026-08-09)**: the confirmed lead is fixed. `vec_remove_at`'s
+index is now routed through `intent_check_bounds` (`backend_c.rs`) /
+`@__intent_bounds_check` (`backend_llvm.rs`), the same two sites this
+category's writeup below already pinpointed. Verified: the OOB repro
+below now traps cleanly on both backends (C exit 134 with `"index out
+of bounds: 99, len 3"`, LLVM exit 3) instead of returning garbage; an
+in-bounds sanity check still shifts elements correctly. Full writeup in
+`docs/TODO_CURRENT.md`'s BUG-148 section. The systematic sweep of the
+rest of the builtin surface (the three-bucket classification below) is
+still open for a future session -- this only closed the one confirmed
+instance.
+
+<details>
+<summary>Original writeup, kept for the reasoning trail</summary>
 
 **Confirmed, unfixed:** `vec_remove_at(mut ref xs, i)` never bounds-checks
 `i` on either backend -- exactly the same gap BUG-147 fixed for
@@ -115,17 +132,20 @@ as this round's `clone_at`/`vec_remove_at` pair demonstrates: BUG-138
 was a width bug, BUG-147 is a presence bug, on largely disjoint
 builtin sets).
 
+</details>
+
 ## Process (mirrors rounds 1 through 3's own process sections)
 
 1. Check `docs/TODO_LOCAL_STAGING.md` (in the `vani-compiler-localfuzz`
    worktree) for anything landed since this file's creation
    (2026-08-09) -- re-verify each against a freshly rebuilt `main`
    before trusting it (see `feedback_vani_localfuzz_staleness`).
-2. Work category A's confirmed lead first (`vec_remove_at`) -- it's a
-   same-shape sequel to BUG-147, should be fast.
-3. Do the systematic sweep second -- grep every index-taking builtin
-   across all four codegen files, classify into the three buckets
-   above, fix anything in bucket 1.
+2. ~~Work category A's confirmed lead first (`vec_remove_at`)~~ --
+   done, fixed as BUG-148.
+3. Do the systematic sweep -- grep every index-taking builtin across
+   all four codegen files, classify into the three buckets above, fix
+   anything in bucket 1. The "Builtins worth checking next" list above
+   is a starting point, not exhaustive.
 4. Every fix gets a `src/lib.rs` compile-check test (one per affected
    codegen path) AND a `tests/run_end_to_end.rs` real-subprocess test
    (OOB traps cleanly + in-bounds still works, both backends) --

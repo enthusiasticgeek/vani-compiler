@@ -18384,8 +18384,14 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         // Closure #388: vec_remove_at(mut ref xs, i) -> i64.
         "vec_remove_at" => {
+            // BUG-148: mirrors BUG-147's clone_at fix -- this was
+            // written as one-off inline codegen that bypassed the
+            // project's bounds-check convention (`intent_check_
+            // bounds`), unlike swap_remove/insert on the same
+            // shape. An out-of-bounds index silently read/shifted
+            // garbage past the buffer instead of trapping.
             format!(
-                "({{ intent_vec_int64_t* __vra_xs = ({xs}); int64_t __vra_i = ({i}); int64_t __vra_r = __vra_xs->data[__vra_i]; for (uint64_t __k = (uint64_t)__vra_i; __k + 1 < __vra_xs->len; __k++) {{ __vra_xs->data[__k] = __vra_xs->data[__k + 1]; }} __vra_xs->len--; __vra_r; }})",
+                "({{ intent_vec_int64_t* __vra_xs = ({xs}); int64_t __vra_i = intent_check_bounds((int64_t)({i}), (int64_t)__vra_xs->len); int64_t __vra_r = __vra_xs->data[__vra_i]; for (uint64_t __k = (uint64_t)__vra_i; __k + 1 < __vra_xs->len; __k++) {{ __vra_xs->data[__k] = __vra_xs->data[__k + 1]; }} __vra_xs->len--; __vra_r; }})",
                 xs = emit_expr(&args[0]),
                 i = emit_expr(&args[1]),
             )

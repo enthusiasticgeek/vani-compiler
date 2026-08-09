@@ -8011,6 +8011,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = load i64, i64* {}\n", len, lp
                 ));
+                // BUG-148: mirrors BUG-147's clone_at fix -- the
+                // read below was never bounds-checked, unlike
+                // swap_remove/insert on the same shape.
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    idx, len
+                ));
                 let removed_p = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr i64, i64* {}, i64 {}\n",

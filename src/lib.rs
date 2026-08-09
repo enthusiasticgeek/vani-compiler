@@ -22890,6 +22890,45 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_remove_at_on_c_emits_bounds_check() {
+        // BUG-148: mirrors BUG-147's clone_at fix. vec_remove_at
+        // was written as one-off inline codegen that bypassed the
+        // project's bounds-check convention -- an out-of-bounds
+        // index silently read/shifted garbage past the buffer
+        // instead of trapping (confirmed: swap_remove/insert on
+        // the same shape correctly trap; vec_remove_at didn't).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              return vec_remove_at(mut ref xs, 1);
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles");
+        assert!(
+            c.contains("intent_check_bounds"),
+            "expected vec_remove_at's index to be routed through intent_check_bounds:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn vec_remove_at_on_llvm_emits_bounds_check() {
+        // BUG-148, LLVM side (backend_llvm.rs).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              return vec_remove_at(mut ref xs, 1);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles");
+        assert!(
+            ll.contains("@__intent_bounds_check"),
+            "expected vec_remove_at's index to be bounds-checked:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn vec_swap_rejects_by_value() {
         let source = r#"
             fn main() -> i64 {

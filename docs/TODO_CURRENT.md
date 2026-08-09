@@ -10463,4 +10463,54 @@ tests + all other integration suites, 0 failed). `vanic check examples`
 unaffected (bounds-check codegen doesn't run during static
 type-checking).
 
-Next free bug number is **BUG-148**.
+## BUG-148 (2026-08-09) -- vec_remove_at() never bounds-checked its index
+
+Same shape as BUG-147, and the confirmed lead category A of
+`docs/BUG_PATTERN_AUDIT_TODO_4.md` was already tracking: `vec_remove_at
+(mut ref xs, i)` was written as one-off inline codegen (Closure #388)
+that bypassed the project's bounds-check convention -- `swap_remove`
+and `insert` on the identical shape correctly trap on an out-of-bounds
+index, but `vec_remove_at` silently read/shifted garbage past the
+buffer and returned it instead. Confirmed by direct reproduction before
+the fix: `vec_remove_at(mut ref xs, 99)` on a 3-element Vec printed `4`
+(garbage) on LLVM and `0` (different garbage) on C, both exiting 0.
+
+Only two codegen sites needed the fix (there's no SSA-backend
+`vec_remove_at` at all -- `src/main.rs`'s `ssa_path_supports` already
+excludes it by name, forcing tree-backend dispatch unconditionally):
+
+- `src/backend_c.rs`, `"vec_remove_at" =>` arm (~line 18386): wrapped
+  the index in `intent_check_bounds((int64_t)(i), (int64_t)xs->len)`,
+  same idiom as every other C bounds-check site.
+- `src/backend_llvm.rs`, `if name == "vec_remove_at"` arm (~line 7992):
+  added a `call void @__intent_bounds_check(i64 <idx>, i64 <len>)`
+  right after the existing `len` load (which was already there for the
+  shift loop but never used to guard the initial read) and before the
+  unguarded GEP/load of the removed element.
+
+Verified: the repro above now traps cleanly and consistently on both
+backends (C exit 134 with `"index out of bounds: 99, len 3"` on
+stderr, LLVM exit 3) instead of silently returning garbage. A
+hand-written in-bounds sanity check (`vec_remove_at` on a 4-element
+Vec, removing index 1) still returns the correct removed value, new
+length, and correctly shifts the remaining elements left on both
+backends -- confirms the fix doesn't over-trigger.
+
+Added 2 tests to `src/lib.rs` (`vec_remove_at_on_c_emits_bounds_check`,
+`vec_remove_at_on_llvm_emits_bounds_check`), each asserting the emitted
+code contains the bounds-check call. Added 2 to
+`tests/run_end_to_end.rs`
+(`vec_remove_at_out_of_bounds_traps_cleanly_on_both_backends`,
+`vec_remove_at_in_bounds_still_shifts_correctly_on_both_backends`),
+real subprocess runs on both backends.
+
+Full `cargo test --release` clean (2842 lib tests + 220 end-to-end
+tests + all other integration suites, 0 failed).
+
+This closes category A's confirmed lead in
+`docs/BUG_PATTERN_AUDIT_TODO_4.md` -- the systematic sweep of the rest
+of the index-taking builtin surface (bucket classification: should-be-
+checked-and-isn't / intentionally-caller-responsible / already-safe-by-
+a-different-mechanism) is still open for a future session.
+
+Next free bug number is **BUG-149**.
