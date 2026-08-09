@@ -176,21 +176,80 @@ to Discard's emission too. LLVM confirmed unaffected by either gap
 `docs/TODO_CURRENT.md`'s BUG-155/156 section; 4 regression tests
 added, verified via ASan + valgrind on both backends.
 
-## Confirmed, unfixed leaks (open leads for a future session)
+## Confirmed, unfixed leak -- root-caused precisely, deliberately NOT fixed yet (open lead for a future session)
 
-- **Four leaks sharing one likely root cause, all through
-  `intent_i64_to_str`** inside async-generated `fn___poll_*`
-  functions: `examples/language/english/echo_p3_locals_stress.vani`,
-  `echo_p3b_str_local.vani`, `hashmap_strstr.vani`, `hashmap_strv.vani`.
-  Leaked byte counts (2/9/18/12 bytes across 1/4/6/3 allocations)
-  scale with how many times the polling function's body runs, which
-  is consistent with a per-poll-iteration temporary `OwnedStr` (from
-  `i64_to_str`) not being freed when the coroutine state machine
-  re-enters. Not investigated beyond identifying the common call site
-  and the async-transform connection -- start here: the v3.1 async
-  state-machine transform in `parser.rs` (`try_v31_transform`) and
-  how it lowers a `let` binding's temporary expression results across
-  a suspend point.
+**Not async-specific after all.** The four flagged files
+(`echo_p3_locals_stress.vani`, `echo_p3b_str_local.vani`,
+`hashmap_strstr.vani`, `hashmap_strv.vani`) all happen to be async
+examples, which is what round 8's first pass assumed was the common
+thread. It isn't. Minimal, fully general, non-async repro that
+reproduces the identical leak:
+```vani
+fn main() -> i64 {
+  let label: Str = i64_to_str(42);
+  print label;
+  return 0;
+}
+```
+Confirmed leaking (`Direct leak of 3 byte(s)... in intent_i64_to_str`)
+with NO async, NO await, NO coroutine involved at all.
+
+**Root cause** (confirmed by reading `checker.rs` directly, not
+inferred): `i64_to_str` returns `Type::OwnedStr` (a fresh heap
+allocation). `let label: Str = i64_to_str(42);` needs to coerce that
+`OwnedStr` down to `Str` (a non-owning view type). `coerce_checked`
+has no dedicated arm for this pair at all -- it falls through every
+special case (array literals, `Vec<T> -> Vec<dyn Iface>`, `T -> dyn
+Iface`) all the way to its generic final fallback,
+`cast_expr(checked, target.clone(), ...)`, which just RELABELS the
+expression's type as `Str` without generating any code to track or
+eventually free the original heap allocation. Since `Type::Str` is
+Copy (a plain view, correctly no-drop for the COMMON case of viewing
+a string literal or an already-owned binding elsewhere), `label`
+itself never gets a scope-exit Drop -- and since the ORIGINAL
+`OwnedStr` value from the `i64_to_str()` call was never bound to any
+OwnedStr-typed variable either (it was narrowed away immediately,
+inside the very same `let`'s own type-checking), NOTHING in the
+program is ever responsible for freeing it. This is likely reachable
+through any `OwnedStr`-returning builtin/function assigned to a
+`Str`-typed `let`, not just `i64_to_str` -- `f64_to_str`,
+`bool_to_str`, and any user function declared `-> OwnedStr` are
+probably equally affected (not individually confirmed this session).
+
+**Why this is NOT fixed here, deliberately**: this coercion shape is
+almost certainly pervasive (assigning a freshly-computed owned string
+to a read-only-view-typed binding is an extremely natural, common
+pattern) -- a rushed fix in this specific area risks being WORSE than
+the current narrow leak, not better. Two candidate fix shapes, neither
+attempted:
+1. **Reject the implicit coercion at compile time** (matches this
+   codebase's general preference for compile-time rejection over
+   unsound/leaky runtime behavior elsewhere -- see round 5/6's own
+   fixes). Simplest, but a real breaking change: rejects a pattern
+   multiple EXISTING example programs already use and expect to
+   compile (all four flagged files, plus presumably others not
+   flagged only because their leaked byte count happened to be too
+   small or the process too short-lived for THIS sweep's timeout/
+   sensitivity to catch). Would need a clear diagnostic pointing at
+   the fix ("bind the OwnedStr result to its own `let` first, then
+   take a `Str` view of THAT binding").
+2. **Materialize a hidden, properly drop-tracked `OwnedStr` temp**
+   automatically wherever this coercion fires, with the `Str`-typed
+   binding becoming a view into that temp (preserves every existing
+   program's behavior, no source changes needed anywhere). More
+   permissive, but touches `coerce_checked`'s generic fallback path --
+   used FAR more broadly than just this one type pair -- and a subtly
+   wrong version of "when does the hidden temp go out of scope" could
+   easily introduce a new double-free or a genuine use-after-free
+   (freeing the temp too early, while `label` is still in use) that
+   would be WORSE than today's leak. Needs careful scoping (the
+   hidden temp's own lifetime must exactly match every place the
+   `Str` view could still be read) before attempting.
+
+Start here for a future session: `coerce_checked`'s final fallback in
+`checker.rs` (~line 35944-35947, the unconditional `cast_expr(...)`
+call after every special-cased coercion shape has been tried and
+failed to match) is where the ownership tracking silently vanishes.
 
 ## Worth doing next (not a confirmed lead, a process improvement)
 

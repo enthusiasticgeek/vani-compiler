@@ -11178,7 +11178,19 @@ incidentally masked by BUG-156's fix.
 78-error baseline.
 
 This closes the first of round 8's two documented open leaks. The
-second (the `intent_i64_to_str`-inside-`fn___poll_*` cluster, 4
-files) remains open -- see `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+second was re-investigated the same day and turns out NOT to be
+async-specific at all -- a plain `let label: Str = i64_to_str(42);`
+with no async/await/coroutine anywhere leaks identically. Root cause:
+`coerce_checked`'s final fallback (`cast_expr`, checker.rs ~line
+35944) silently relabels a fresh `OwnedStr` as `Str` when narrowing,
+with no code generated to track or free the original allocation.
+Deliberately NOT fixed yet -- both candidate fixes (reject the
+coercion at compile time, which is a breaking change for existing
+example programs; or materialize a hidden drop-tracked temp, which
+touches a pervasive coercion path and risks a worse UAF/double-free
+bug if the hidden temp's lifetime is scoped wrong) need more care than
+this session's time budget allows. Full writeup, minimal repro, and
+both candidate fix shapes are in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
+"Confirmed, unfixed leak" section.
 
 Next free bug number is **BUG-157**.
