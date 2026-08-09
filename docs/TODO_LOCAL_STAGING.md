@@ -4446,3 +4446,14 @@ Repro: `tools/localfuzz/findings/20260809-192216-backend-divergence-77aaa194ce/r
 Fix attempt: `tools/localfuzz/findings/20260809-192216-backend-divergence-77aaa194ce/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-201604-backend-divergence-7b9b35c019
+
+Repro: `tools/localfuzz/findings/20260809-201604-backend-divergence-7b9b35c019/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-201604-backend-divergence-7b9b35c019/fix_attempt.md`
+
+VANI Compiler localfuzz: vec_invariants.vani crashed with integer overflow in int64_t mul when run with --backend=c.
+
+STATUS: needs human/frontier root-cause review.
