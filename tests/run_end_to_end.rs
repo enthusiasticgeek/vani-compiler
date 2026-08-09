@@ -13057,3 +13057,153 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-146 (2026-08-08): bug-pattern-audit-round-3, category A. Found via
+// localfuzz. `collect_used_dyn_ifaces` (backend_c.rs, shared by both
+// backends) never recursed into `Type::Box`, so a `Box<dyn Iface>` enum-
+// variant payload or struct field that's never actually constructed
+// anywhere in the program never registered its interface for forward-
+// declaration -- but the enum/struct's own eager emission unconditionally
+// references `intent_dyn_<Iface>` regardless of construction. Confirmed
+// via real subprocess runs on both backends (not just a compile check)
+// that a program using the OTHER, constructed variants/fields still runs
+// correctly, i.e. the fix doesn't just silence the compile error, the
+// whole program behaves correctly.
+#[test]
+fn box_dyn_iface_enum_payload_never_constructed_runs_correctly_on_c() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug146-box-dyn-enum-payload",
+        r#"
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+struct Circle { r: u32 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+enum Val {
+  Int(Box<i64>),
+  Shape(Box<dyn Drawable>),
+  Empty,
+}
+fn main() -> i64 {
+  let a: Val = Val.Int(box(42));
+  let e: Val = Val.Empty;
+  print 42;
+  return 0;
+}
+"#,
+    );
+    let output = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
+    assert!(
+        output.status.success(),
+        "BUG-146 regression: an enum with an unconstructed Box<dyn Iface> \
+         variant should compile and run cleanly on C, got status {:?}, \
+         stdout: {}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "42",
+        "expected printed 42, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn box_dyn_iface_struct_field_never_constructed_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug146-box-dyn-struct-field",
+        r#"
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+struct Circle { r: u32 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+struct Holder { shape: Box<dyn Drawable>, tag: i64 }
+fn main() -> i64 {
+  print 42;
+  return 0;
+}
+"#,
+    );
+    for backend_args in [vec!["run", src.to_str().unwrap()], vec!["run", src.to_str().unwrap(), "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-146 regression: a struct with an unconstructed Box<dyn \
+             Iface> field should compile and run cleanly ({:?}), got \
+             status {:?}, stdout: {}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "expected printed 42 ({:?}), got stdout: {}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-146 (2026-08-08): bug-pattern-audit-round-3, category B. Found via
+// localfuzz. `bits << 3 + 0` (a compound shift-amount expression) produced
+// a width-mismatched `shl` operand on the LLVM backend's default SSA-
+// eligible path; a bare-literal shift amount worked fine. Real subprocess
+// runs, hand-computed expected values, across several distinct width/op
+// combinations -- not just a compile check.
+#[test]
+fn compound_shift_amount_expressions_compute_correct_values_on_llvm() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let cases: &[(&str, &str, &str)] = &[
+        ("shl-u8", "let bits: u8 = 1 as u8; let shifted: u8 = bits << 3 + 0;", "8"),
+        ("shr-u8", "let bits: u8 = 128 as u8; let shifted: u8 = bits >> 3 + 0;", "16"),
+        ("shl-u32", "let bits: u32 = 1 as u32; let shifted: u32 = bits << 2 + 1;", "8"),
+    ];
+    for (label, decls, expected) in cases {
+        let src = write_tmp_vani(
+            &format!("bug146-shift-{}", label),
+            &format!(
+                r#"
+fn main() -> i64 {{
+  {decls}
+  print shifted;
+  return 0;
+}}
+"#
+            ),
+        );
+        let output = Command::new(binary)
+            .args(["run", src.to_str().unwrap()])
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({label}): {e}"));
+        assert!(
+            output.status.success(),
+            "BUG-146 regression: compound shift-amount expression '{label}' \
+             should run cleanly on LLVM, got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            *expected,
+            "wrong shift result for '{label}', got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

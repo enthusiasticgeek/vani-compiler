@@ -1,10 +1,13 @@
 # vāṇी — Bug-pattern audit, round 3
 
-**STATUS (2026-08-08): NOT STARTED.** Created for a fresh session to pick
-up. Sequel to `docs/BUG_PATTERN_AUDIT_TODO_2.md` (round 2, fully closed
-the same day this file was created — categories A through F, BUG-141
-through BUG-145, plus a localfuzz harness hardening). Round 2's own
-closing note said the next hunt needs a genuinely new theme, not a
+**STATUS (2026-08-08): CLOSED.** Both categories fixed same day as
+creation — category A (`Box<dyn Iface>` forward-declaration gap) and
+category B (shift-amount width mismatch) both landed as BUG-146. See
+`docs/TODO_CURRENT.md`'s BUG-146 section for the full fix + verification
+writeup. Sequel to `docs/BUG_PATTERN_AUDIT_TODO_2.md` (round 2, fully
+closed the same day this file was created — categories A through F,
+BUG-141 through BUG-145, plus a localfuzz harness hardening). Round 2's
+own closing note said the next hunt needs a genuinely new theme, not a
 category G — this file **is** that new theme, but built differently
 than round 2 was: instead of deriving categories from round 2's own
 fixed bugs' shapes, this round comes from a full triage of the
@@ -61,7 +64,20 @@ mechanism still needs runtime investigation).
 
 ---
 
-## A. `Box<dyn Iface>` payload/field never registers its interface for C/LLVM forward-declaration (🔴 high — root cause fully identified, close to a one-line fix)
+## A. `Box<dyn Iface>` payload/field never registers its interface for C/LLVM forward-declaration (🔴 high) -- CLOSED 2026-08-08, BUG-146
+
+**Update (2026-08-08)**: fixed. Widened `walk_type`'s match arms in
+`collect_used_dyn_ifaces` to cover every "wraps exactly one inner type"
+`Type` variant, not just `Box` alone (`Vec128/256/512`, `TaskR`,
+`RwLock`, `ReadGuard`, `WriteGuard`, `Deque`, `HashSet`, `BTreeSet`,
+`BinaryHeap`, `Bst`, `Ptr`, `PtrMut`, `Pool`, `Handle`, `Tainted`,
+`BoundedPtr`, `ArenaRef`, `HashMap`/`BTreeMap`, `Closure`). Verified both
+the enum-payload and struct-field repros on both backends, and that the
+already-fixed `Vec<Box<dyn Iface>>` case still works. Full writeup in
+`docs/TODO_CURRENT.md`'s BUG-146 section.
+
+<details>
+<summary>Original writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: localfuzz candidate
 `20260808-150021-backend-divergence-65faa42884` — an `enum` with a
@@ -177,7 +193,23 @@ needed.
   wrapping a `dyn Iface` and never constructed could hit the identical
   gap.
 
-## B. Shift-amount width mismatch for compound RHS expressions (🟡 medium — root cause narrowed, exact mechanism still open)
+</details>
+
+## B. Shift-amount width mismatch for compound RHS expressions (🟡 medium) -- CLOSED 2026-08-08, BUG-146
+
+**Update (2026-08-08)**: fixed. The checker was correct to leave the
+shift-count's width unconstrained (a shift amount is deliberately
+allowed a different width than the shifted value) -- the actual gap was
+codegen-only, and only on the SSA-LLVM path specifically (tree-LLVM
+already had a correct fix for this class; a simple, SSA-eligible program
+takes the SSA path by default via the CLI, which is why this went
+undetected). Fixed by looking up the RHS operand's own type separately
+in `ssa_backend_llvm.rs` and trunc/sext/zext-ing it to match before use.
+Verified across `u8`/`Shl`, `u8`/`Shr`, `u32`/`Shl`. Full writeup in
+`docs/TODO_CURRENT.md`'s BUG-146 section.
+
+<details>
+<summary>Original writeup, kept for the reasoning trail</summary>
 
 **Where this comes from**: localfuzz candidate
 `20260808-141920-backend-divergence-fc33c7c09f`, minimized:
@@ -240,6 +272,8 @@ backend (C's implicit integer promotion may make this a non-issue there,
 matching BUG-141's finding that the C backend was structurally immune
 to its analogous call-signature-width class), and does `Shr` share the
 exact same gap as `Shl`, or diverge from it?
+
+</details>
 
 ---
 

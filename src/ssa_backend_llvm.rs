@@ -3343,7 +3343,24 @@ fn emit_instr(
                         instr.ty.clone()
                     }
                 });
-            emit_binary(*op, l, r, &lhs_ty, &instr.ty, instr.result, *checked, out)?;
+            // BUG-146: Shl/Shr are the one binary-op class where the
+            // checker deliberately does NOT unify `l`'s and `r`'s
+            // types -- a shift count is allowed a different width
+            // than the value being shifted (`bits << 3` needs no
+            // cast even though `bits: u8` and `3`'s natural type is
+            // i64). `lhs_ty` above only reflects the LEFT operand (or
+            // a fallback); a `Value` RHS (a genuinely i64-typed SSA
+            // register, e.g. from a compound shift-amount expression
+            // like `3 + 0` -- unlike a bare `Const` literal, which
+            // renders as untyped text and needs no adjustment) must
+            // have its own width looked up separately so
+            // `emit_binary` can trunc/sext/zext it to match before
+            // it reaches the `shl`/`ashr`/`lshr` instruction (or the
+            // checked-shift-helper call) -- confirmed via a direct
+            // repro that `lli` otherwise rejects the mismatched-width
+            // operand outright.
+            let rhs_ty = operand_type(r, value_types);
+            emit_binary(*op, l, r, &lhs_ty, rhs_ty.as_ref(), &instr.ty, instr.result, *checked, out)?;
         }
         InstrKind::Cast { x, to } => {
             // BUG-111: `operand_type` returns `None` for a bare
@@ -5377,6 +5394,7 @@ fn emit_binary(
     l: &Operand,
     r: &Operand,
     op_ty: &Type,
+    rhs_ty: Option<&Type>,
     result_ty: &Type,
     result: ValueId,
     checked: bool,
@@ -5389,6 +5407,37 @@ fn emit_binary(
     let ty_str = llvm_type(op_ty)?;
     let l_s = operand_str(l);
     let mut r_s = operand_str(r);
+    // BUG-146: `r`'s width can legitimately differ from `op_ty` (the
+    // shifted value's type) for Shl/Shr specifically -- the checker
+    // never requires a shift count to match the shifted value's
+    // width. Widen/truncate it to `op_ty` here, before it reaches
+    // EITHER downstream use below (the `@__intent_checked_shift_*`
+    // helper call or the raw `shl`/`ashr`/`lshr` instruction) --
+    // mirrors the identical fix already present in tree-LLVM's
+    // `backend_llvm.rs` for this exact operator pair. A `Const` RHS
+    // (`rhs_ty` is `None` -- a bare literal has no separately-tracked
+    // width, and renders as untyped text LLVM infers from context)
+    // never needs this.
+    if matches!(op, BinaryOp::Shl | BinaryOp::Shr) {
+        if let Some(rty) = rhs_ty {
+            let op_bits = op_ty.bits().unwrap_or(64);
+            let r_bits = rty.bits().unwrap_or(64);
+            if op_bits != r_bits {
+                let r_ty_str = llvm_type(rty)?;
+                let dest = format!("%v_{}.shwidth", result.0);
+                let cast_op = if op_bits > r_bits {
+                    if rty.is_signed_integer() { "sext" } else { "zext" }
+                } else {
+                    "trunc"
+                };
+                out.push_str(&format!(
+                    "  {} = {} {} {} to {}\n",
+                    dest, cast_op, r_ty_str, r_s, ty_str
+                ));
+                r_s = dest;
+            }
+        }
+    }
     // BUG-110: route Add/Sub/Mul/Div/Rem/Shl/Shr through the
     // `@__intent_checked_*` helpers (defined in `emit()`'s
     // preamble, gated on the pre-scan finding this exact (type,

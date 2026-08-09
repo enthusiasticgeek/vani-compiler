@@ -10283,3 +10283,113 @@ item's own explicitly-stated low priority.
 This closes out `docs/BUG_PATTERN_AUDIT_TODO_2.md`'s full scope -- all 6
 categories (A-F) are now closed. The next bug hunt needs a genuinely new
 theme, not a category G, per that document's own closing note.
+
+## BUG-146 (2026-08-08) -- both findings from `docs/BUG_PATTERN_AUDIT_TODO_3.md`: `Box<dyn Iface>` forward-declaration gap and shift-amount width mismatch
+
+Both categories from round 3 of the bug-pattern audit (built from a fresh
+localfuzz backlog triage, not from round 2's own bug shapes). Both were
+already root-caused in the audit doc before this session started fixing
+them; this section covers the actual fix + verification.
+
+**Category A -- `Box<dyn Iface>` payload/field never registers its
+interface for forward-declaration.** `collect_used_dyn_ifaces`
+(`backend_c.rs`) walks the program collecting every `dyn Iface` it finds
+so `emit_dyn_iface_typedefs` can forward-declare `intent_dyn_<Iface>`
+before anything references it. Its `walk_type` helper had arms for
+`Vec`/`Atomic`/`Mutex`/`Guard`/`Ref`/`RefMut`/`Channel`/`Tuple`/`FnPtr`/
+`Array` but not `Box` -- a `Box<dyn Iface>` enum-variant payload or
+struct field that's never actually constructed anywhere in the program
+never registered its interface, but the enum/struct's own eager C
+emission unconditionally references `intent_dyn_<Iface>` regardless of
+construction (`error: unknown type name 'intent_dyn_Drawable'`).
+Confirmed this also breaks LLVM for the struct-field shape specifically
+(`backend_llvm.rs`'s `collect_used_dyn_ifaces_llvm` is a literal
+passthrough to the same function) -- `error: use of undefined type named
+'intent_dyn_Drawable'`.
+
+Fix: widened `walk_type`'s match arms to cover every "wraps exactly one
+inner type" `Type` variant `type_references_unknown_name` already
+enumerates (from BUG-139/BUG-144's own audits) -- `Box`, `Vec128/256/
+512`, `TaskR`, `RwLock`, `ReadGuard`, `WriteGuard`, `Deque`, `HashSet`,
+`BTreeSet`, `BinaryHeap`, `Bst`, `Ptr`, `PtrMut`, `Pool`, `Handle`,
+`Tainted`, `BoundedPtr`, `ArenaRef`, plus `HashMap`/`BTreeMap` (both key
+and value) and `Closure` (alongside the existing `FnPtr` arm) -- not
+just `Box` alone, since the identical gap could hit any of them.
+
+Verified: both the original enum-payload repro and the struct-field
+repro now compile and run correctly on both backends (exit 0, correct
+printed output). Re-confirmed the ALREADY-fixed `Vec<Box<dyn Iface>>`
+case (fixed via a sibling function, `vec_element_has_user_struct`, per
+the comment describing that earlier fix) still works -- the widened
+match arms don't interact badly with it. `vanic check examples`
+unchanged (74, same as the post-BUG-144/145 baseline).
+
+**Category B -- compound shift-amount expressions produce a width-
+mismatched LLVM operand.** `bits << 3 + 0` (`bits: u8`) produced `shl i8
+%v_0, %v_1` where `%v_1` was genuinely i64-typed -- `lli` rejected it
+outright. `bits << 3` (a bare literal) worked fine. Root cause,
+confirmed via direct IR-diffing between the two cases: the checker
+(`check_shift`) deliberately never unifies the shift's LHS/RHS widths --
+a shift count is intentionally allowed a different width than the value
+being shifted, so this is NOT a checker bug (a fix there would have
+broken the working bare-literal case, which relies on exactly this
+flexibility). The actual gap was codegen-only, and only on ONE of the
+LLVM backend's TWO separate lowering paths: tree-LLVM (`backend_llvm.rs`)
+already had a correct width-adjustment fix for this exact class; SSA-
+LLVM (`ssa_backend_llvm.rs`, the path a simple, SSA-eligible program
+like this one actually takes by default) did not -- `emit_binary` derived
+a single shared `op_ty` from the LEFT operand only and used it
+unconditionally for the RHS too. A `Const` RHS (bare literal) renders as
+untyped text with no possible mismatch; a `Value` RHS (a genuinely-typed
+SSA register, from evaluating a compound expression like `3 + 0`)
+exposed the assumption.
+
+Took real debugging to find, not just reading: initially placed a debug
+`eprintln!` inside tree-LLVM's own (already-correct, pre-existing)
+width-adjustment code expecting it to explain the bug, and it never
+fired at all -- the missing piece was realizing the CLI's default `vanic
+run`/`vanic emit --backend=llvm` routes an SSA-eligible program through
+SSA-LLVM, not tree-LLVM, the same "which of the two lowering paths does
+this actually reach" trap several bugs this session already hit (BUG-137/
+BUG-142/BUG-143 needed forcing tree-C via `#[no_mangle]`; this is the
+LLVM-side mirror of that same class of confusion).
+
+Fix: at `InstrKind::Binary`'s one call site in `ssa_backend_llvm.rs`,
+look up the RHS operand's own type separately (`operand_type(r,
+value_types)`) and pass it into `emit_binary` as a new `rhs_ty: Option<&
+Type>` parameter; inside `emit_binary`, for `Shl`/`Shr` specifically,
+trunc/sext/zext the RHS to match `op_ty` (the LHS's type) BEFORE either
+downstream use (the `@__intent_checked_shift_*` helper call when
+`checked: true`, or the raw `shl`/`ashr`/`lshr` instruction) -- mirrors
+the pattern tree-LLVM's own fix already established, just applied to the
+path that was actually missing it.
+
+Verified across width/operator combinations: `u8`/`Shl`, `u8`/`Shr`,
+`u32`/`Shl`, all producing hand-computed-correct results on the LLVM
+backend (the C backend was never affected -- C's implicit integer
+promotion sidesteps this whole class, matching BUG-141's own earlier
+finding about C's structural immunity to width-mismatch bugs). Confirmed
+the bare-literal case still produces no unnecessary adjustment
+(`.shwidth` temp absent).
+
+Added 5 tests to `src/lib.rs`: `box_dyn_iface_enum_payload_never_
+constructed_compiles_on_c`, `box_dyn_iface_struct_field_never_
+constructed_compiles_on_both_backends`, `shl_with_compound_shift_
+amount_expression_compiles_and_runs_correctly`, `shr_with_compound_
+shift_amount_expression_compiles_on_ssa_llvm` (both shift tests route
+through `crate::ssa::lower_program` + `crate::ssa_backend_llvm::emit`
+directly, since the library's own `compile_to_llvm` helper always goes
+through tree-LLVM and can't exercise the SSA-specific fix),
+`shl_with_bare_literal_shift_amount_gets_no_width_adjustment_temp`.
+Added 3 to `tests/run_end_to_end.rs`: `box_dyn_iface_enum_payload_
+never_constructed_runs_correctly_on_c`, `box_dyn_iface_struct_field_
+never_constructed_runs_correctly_on_both_backends`,
+`compound_shift_amount_expressions_compute_correct_values_on_llvm`
+(3 width/op combinations in one test, real subprocess runs, hand-
+computed expected values).
+
+Full `cargo test --release` clean (2836 lib tests + 216 end-to-end tests
++ all other integration suites, 0 failed).
+
+This closes out `docs/BUG_PATTERN_AUDIT_TODO_3.md`'s full scope -- both
+categories now fixed. Next free bug number is **BUG-147**.

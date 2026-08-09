@@ -22613,11 +22613,41 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             Type::Object(name) => {
                 set.insert(name.clone());
             }
-            Type::Vec(inner) | Type::Atomic(inner) | Type::Mutex(inner)
-            | Type::Guard(inner) | Type::Ref(inner) | Type::RefMut(inner) => walk_type(inner, set),
+            // BUG-146: this match arm list used to cover only Vec/
+            // Atomic/Mutex/Guard/Ref/RefMut/Channel/Tuple/FnPtr/Array --
+            // a `Box<dyn Iface>` (or any of the other single-inner-type
+            // wrappers below) that's never actually CONSTRUCTED never
+            // registered its interface here, so `emit_dyn_iface_typedefs`
+            // never forward-declared `intent_dyn_<Iface>` before the
+            // enum-union/struct-field emission that unconditionally
+            // references it -- "unknown type name" on the C backend,
+            // "use of undefined type" on LLVM (this function is shared
+            // by both backends via `collect_used_dyn_ifaces_llvm`'s
+            // passthrough). Confirmed via a direct repro: an enum
+            // variant payloaded `Box<dyn Iface>`, never constructed,
+            // broke the C backend; a struct field of the same type,
+            // never constructed, broke BOTH backends. Widened to match
+            // `type_references_unknown_name`'s own exhaustive "wraps
+            // exactly one inner type" list (checker.rs, audited during
+            // BUG-139/BUG-144) rather than just adding `Box` alone --
+            // the identical gap could hit any of these wrapper types.
+            Type::Vec(inner) | Type::Vec128(inner) | Type::Vec256(inner) | Type::Vec512(inner)
+            | Type::Ref(inner) | Type::RefMut(inner)
+            | Type::TaskR(inner) | Type::Atomic(inner)
+            | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::RwLock(inner) | Type::ReadGuard(inner) | Type::WriteGuard(inner)
+            | Type::Deque(inner) | Type::HashSet(inner)
+            | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner)
+            | Type::Box(inner) | Type::Ptr(inner) | Type::PtrMut(inner)
+            | Type::Pool(inner) | Type::Handle(inner) | Type::Tainted(inner)
+            | Type::BoundedPtr(inner) | Type::ArenaRef(inner) => walk_type(inner, set),
             Type::Channel(inner, _) => walk_type(inner, set),
+            Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+                walk_type(k, set);
+                walk_type(v, set);
+            }
             Type::Tuple(elements) => elements.iter().for_each(|t| walk_type(t, set)),
-            Type::FnPtr(params, ret) => {
+            Type::FnPtr(params, ret) | Type::Closure(params, ret) => {
                 params.iter().for_each(|t| walk_type(t, set));
                 walk_type(ret, set);
             }

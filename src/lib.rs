@@ -14350,6 +14350,148 @@ fn main() -> i64 {
         );
     }
 
+    // BUG-146 (2026-08-08): bug-pattern-audit-round-3, category A. Found via
+    // localfuzz. `collect_used_dyn_ifaces` (backend_c.rs, shared by both
+    // backends -- `collect_used_dyn_ifaces_llvm` is a literal passthrough)
+    // walked Vec/Atomic/Mutex/Guard/Ref/RefMut/Channel/Tuple/FnPtr/Array
+    // looking for a nested `dyn Iface` marker type to forward-declare, but
+    // had no arm for `Box`. A `Box<dyn Iface>` enum-variant payload or
+    // struct field that's never actually CONSTRUCTED anywhere in the
+    // program never registered its interface, so `intent_dyn_<Iface>`'s
+    // typedef never got forward-declared -- but the enum/struct's own
+    // eager emission unconditionally references it regardless of
+    // construction. Confirmed C-only for the enum-payload shape (LLVM's
+    // on-demand lowering never touches the unconstructed variant) but
+    // BOTH backends for the struct-field shape. Widened the fix to match
+    // every "wraps exactly one inner type" `Type` variant `type_
+    // references_unknown_name` already enumerates (BUG-139/BUG-144),
+    // not just `Box`, since the identical gap could hit any of them.
+    #[test]
+    fn box_dyn_iface_enum_payload_never_constructed_compiles_on_c() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: u32 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+            fn main() -> i64 {
+              let a: Val = Val.Int(box(42));
+              let e: Val = Val.Empty;
+              return 42;
+            }
+        "#;
+        let c = compile_to_c(source).expect(
+            "an unconstructed Box<dyn Iface> enum variant payload must still compile to C",
+        );
+        assert!(
+            c.contains("intent_dyn_Drawable"),
+            "expected the forward-declared intent_dyn_Drawable typedef, got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn box_dyn_iface_struct_field_never_constructed_compiles_on_both_backends() {
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: u32 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            struct Holder { shape: Box<dyn Drawable>, tag: i64 }
+            fn main() -> i64 { return 42; }
+        "#;
+        compile_to_c(source).expect(
+            "an unconstructed Box<dyn Iface> struct field must still compile to C",
+        );
+        compile_to_llvm(source).expect(
+            "an unconstructed Box<dyn Iface> struct field must still compile to LLVM",
+        );
+    }
+
+    // BUG-146 (2026-08-08): bug-pattern-audit-round-3, category B. Found via
+    // localfuzz. `bits << 3 + 0` (a COMPOUND shift-amount expression)
+    // produced a width-mismatched `shl i8 ..., %v_N` where `%v_N` was
+    // genuinely i64-typed, rejected outright by `lli`; `bits << 3` (a bare
+    // literal) worked fine. Root cause: the checker deliberately never
+    // unifies a shift's LHS/RHS widths (a shift count legitimately may
+    // differ in width from the shifted value), and SSA-LLVM's `emit_binary`
+    // assumed both operands shared one `op_ty` derived from the LEFT
+    // operand only -- a bare-literal RHS renders as untyped text (no
+    // mismatch possible), but a compound RHS lowers to a genuinely-typed
+    // SSA register, exposing the assumption. Fixed by looking up the RHS
+    // operand's own type separately and trunc/sext/zext-ing it to match
+    // before either downstream use (the checked-shift-helper call or the
+    // raw shl/ashr/lshr instruction).
+    #[test]
+    fn shl_with_compound_shift_amount_expression_compiles_and_runs_correctly() {
+        // `compile_to_llvm` always goes through tree-LLVM directly
+        // (`backend_llvm::LlvmBackend.emit`), bypassing the SSA-
+        // eligibility dispatch the CLI does in main.rs -- tree-LLVM
+        // already had a correct width-adjustment fix for this exact
+        // shape (a pre-existing, unrelated piece of code), so it can't
+        // exercise THIS fix. Go through `crate::ssa::lower_program` +
+        // `crate::ssa_backend_llvm::emit` directly instead, matching
+        // this file's own established pattern for SSA-specific
+        // regression tests.
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 1 as u8;
+              let shifted: u8 = bits << 3 + 0;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("a compound shift-amount expression must compile via SSA-LLVM");
+        assert!(
+            ll.contains(".shwidth"),
+            "expected the RHS width-adjustment temp to appear, got:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn shr_with_compound_shift_amount_expression_compiles_on_ssa_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 128 as u8;
+              let shifted: u8 = bits >> 3 + 0;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_llvm::emit(&module)
+            .expect("a compound Shr shift-amount expression must compile via SSA-LLVM");
+    }
+
+    #[test]
+    fn shl_with_bare_literal_shift_amount_gets_no_width_adjustment_temp() {
+        // Companion to the compound-expression test above: confirm the
+        // fix doesn't insert an unnecessary adjustment for the already-
+        // working bare-literal case (a Const operand has no separately-
+        // tracked width to mismatch in the first place).
+        let source = r#"
+            fn main() -> i64 {
+              let bits: u8 = 1 as u8;
+              let shifted: u8 = bits << 3;
+              return shifted as i64;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("bare-literal shift compiles via SSA-LLVM");
+        assert!(
+            !ll.contains(".shwidth"),
+            "a bare-literal shift amount should need no width-adjustment temp, got:\n{ll}"
+        );
+    }
+
     #[test]
     fn parallel_for_reduce_supports_and_on_bool() {
         let source = r#"
