@@ -10514,3 +10514,44 @@ checked-and-isn't / intentionally-caller-responsible / already-safe-by-
 a-different-mechanism) is still open for a future session.
 
 Next free bug number is **BUG-149**.
+
+## Systematic bounds-check sweep (2026-08-09) -- category A closed, clean negative result
+
+Follow-up to BUG-147/BUG-148: swept the rest of the index-taking
+builtin surface per `docs/BUG_PATTERN_AUDIT_TODO_4.md` category A's
+open item. Grepped every `_at`/`_nth` string literal across
+`backend_c.rs`, `backend_llvm.rs`, `ssa_backend_c.rs`,
+`ssa_backend_llvm.rs` (exhaustive set: `clone_at`, `vec_remove_at`
+-- both already fixed -- plus `i64_byte_at`, `str_byte_at`, neither
+new), then read every implementation on the doc's "Builtins worth
+checking next" list directly:
+
+- `deque_pop_back`/`_front`/`peek_back`/`_front`, `heap_pop`/`peek`,
+  `binary_heap_pop`/`peek`, `bst_min`/`max`, `skiplist_min`/`max` --
+  all return `Enum_Option__i64` with an explicit `len == 0` guard on
+  both backends. Already safe.
+- `pool_get`/`pool_free` -- handle carries `(slot_idx, generation)`;
+  both backends check `slot_idx >= len` OR stale generation before
+  touching memory. Already safe, verified identical on C and LLVM.
+- `aref_load`/`aref_store` -- no length is even passed (bare pointer
+  arg); code comment states this deliberately mirrors raw
+  load/store's caller-responsible contract. Not a bug, by design.
+- `simd_load`/`simd_store` (128/256/512-bit) -- deliberately
+  unchecked by design, and explicitly documented as such in
+  `tutorials/src/advanced/05_simd.md` ("no bounds checking, no copy
+  of the fat pointer"). Not a bug.
+- `intent_vec_bool__get` (found while grepping, not on the original
+  list) -- the raw helper has no internal check, but every call site
+  (`emit_index`) wraps the index in `intent_check_bounds(...)` before
+  calling it. Already safe via caller-wraps-callee, same net effect
+  as `vec_remove_at`'s fix just structured the other way.
+
+None of these builtins exist in either SSA backend (confirmed via
+grep -- no match arms), so programs using them always fall back to
+the tree backend, meaning the sites read above are the only sites
+that exist for this family; no third/fourth site was missed.
+
+No code changes -- this pass's value was confirming the rest of the
+surface is safe rather than assuming it. `docs/BUG_PATTERN_AUDIT_TODO_4.md`
+category A is now fully closed; round 4 is done. A future session
+should pick a new audit theme.

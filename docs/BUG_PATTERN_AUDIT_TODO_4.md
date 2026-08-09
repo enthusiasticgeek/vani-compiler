@@ -1,7 +1,8 @@
 # vāṇी — Bug-pattern audit, round 4
 
-**STATUS (2026-08-09): category A's confirmed lead FIXED as BUG-148;
-the systematic sweep of the rest of the builtin surface is still OPEN.**
+**STATUS (2026-08-09): category A CLOSED. Confirmed lead fixed as
+BUG-148; the systematic sweep of the rest of the builtin surface
+found no further bugs (clean negative result) -- round 4 is done.**
 Sequel to `docs/BUG_PATTERN_AUDIT_TODO_3.md` (round 3, closed 2026-08-08
 as BUG-146). This round's localfuzz backlog triage (5 fresh candidates,
 2026-08-08 through 2026-08-09) found only one genuine bug --
@@ -22,19 +23,92 @@ exact same class. That's category A below, and it's a running head
 start, not a cold lead -- the next session should be able to open with
 a fix, the same way round 3 did for its two categories.
 
-## A. Bounds-check coverage audit across indexed-access builtins (🔴 high) -- confirmed lead FIXED 2026-08-09, BUG-148; systematic sweep still OPEN
+## A. Bounds-check coverage audit across indexed-access builtins (🔴 high) -- CLOSED 2026-08-09, BUG-148 + systematic sweep, clean negative result
 
-**Update (2026-08-09)**: the confirmed lead is fixed. `vec_remove_at`'s
-index is now routed through `intent_check_bounds` (`backend_c.rs`) /
-`@__intent_bounds_check` (`backend_llvm.rs`), the same two sites this
-category's writeup below already pinpointed. Verified: the OOB repro
-below now traps cleanly on both backends (C exit 134 with `"index out
-of bounds: 99, len 3"`, LLVM exit 3) instead of returning garbage; an
-in-bounds sanity check still shifts elements correctly. Full writeup in
-`docs/TODO_CURRENT.md`'s BUG-148 section. The systematic sweep of the
-rest of the builtin surface (the three-bucket classification below) is
-still open for a future session -- this only closed the one confirmed
-instance.
+**Update (2026-08-09, sweep)**: the confirmed lead is fixed (BUG-148,
+see below). The systematic sweep the writeup below left open is now
+done, with a clean negative result -- no further bugs found. Method:
+
+1. Grepped every `"..._at"` / `"..._nth"` string literal across all
+   four codegen files (`backend_c.rs`, `backend_llvm.rs`,
+   `ssa_backend_c.rs`, `ssa_backend_llvm.rs`) -- the exhaustive set is
+   `clone_at` (fixed, BUG-147), `vec_remove_at` (fixed, BUG-148),
+   `i64_byte_at`, `str_byte_at`. No other `_at`/`_nth`-suffixed
+   builtin exists anywhere in the four files.
+2. Walked the "Builtins worth checking next" list from the original
+   writeup below, reading each implementation directly:
+   - `deque_pop_back`/`deque_pop_front`/`deque_peek_back`/
+     `deque_peek_front` -- **bucket 3**. All four return
+     `Enum_Option__i64` with an explicit `if (d->len == 0) { r.tag = 1;
+     ...; return r; }` guard (`backend_c.rs` ~line 2757-2785;
+     LLVM preamble mirrors it, `backend_llvm.rs` ~line 40103-40181).
+   - `heap_pop`/`heap_peek` (generic, per-type-helper path) and
+     `binary_heap_pop`/`binary_heap_peek` (monomorphized i64 path) --
+     **bucket 3**. Same `Option` + `if (xs->len == 0) {...None...}`
+     shape (`backend_c.rs` ~line 12459-12480 for the generic path,
+     ~line 5686-5696 for `binary_heap_i64`).
+   - `bst_min`/`bst_max`, `skiplist_min`/`skiplist_max` -- **bucket
+     3**. Same `Option`-on-empty shape (`backend_c.rs` ~line
+     6138-6152, ~line 7483-7497).
+   - `pool_get`/`pool_free` -- **bucket 3**, but via a different
+     mechanism than the others: a handle carries `(slot_idx,
+     generation)`; both C and LLVM (`backend_c.rs` ~line 3121-3140,
+     `backend_llvm.rs` ~line 39518-39560) check `slot_idx >= len` OR
+     stale `generation` and return `None` / no-op rather than
+     touching memory. Confirmed identical on both backends.
+   - `aref_load`/`aref_store` -- **bucket 2**, intentionally
+     caller-responsible. The code comment right above them
+     (`backend_c.rs` ~line 19572-19574) says explicitly: "same machine
+     semantics as raw load/store but no Tainted wrapping (the
+     compile-time scope binding is the safety proof)." No length is
+     even passed in -- `args[0]` is a bare pointer, not a
+     length-carrying collection, so there's nothing to bounds-check
+     against; matches `str_byte_at`'s existing documented contract.
+   - `simd_load`/`simd_store` (and the 256/512-bit variants) --
+     **bucket 2**, intentionally caller-responsible, and explicitly
+     documented as such in the tutorial
+     (`tutorials/src/advanced/05_simd.md` line 175-176: "`simd_load`
+     and `simd_store` access the **heap buffer** of a `Vec<T>`
+     directly — no bounds checking, no copy of the fat pointer.").
+     Distinct from BUG-138 (index *width* mismatch, already fixed);
+     this is bounds-check *presence*, which this family deliberately
+     omits by design.
+3. Found one additional site not on the original list while grepping:
+   `intent_vec_bool__get` (`backend_c.rs` ~line 11493, the packed-bit
+   `Vec<bool>` accessor). The raw helper itself has no bounds check,
+   but unlike `vec_remove_at`'s old bug, every call site
+   (`emit_index`, `backend_c.rs` ~line 21230-21278) wraps the index in
+   `intent_check_bounds(...)` before calling the helper when
+   `checked` is true -- **bucket 3**, already safe, just via a
+   caller-wraps-callee shape instead of callee-checks-itself.
+4. None of these builtins have SSA-backend implementations
+   (`ssa_backend_c.rs`/`ssa_backend_llvm.rs` have no match arms for
+   any of them) -- confirmed via grep, only a stray comment mentions
+   `heap_pop`/`heap_peek` in passing. Any program using these types
+   falls back to the tree backend's `emit_c_via_ssa`/
+   `emit_llvm_via_ssa` fallback path, so the sites audited above are
+   the only sites that exist for this builtin family -- no third/
+   fourth site was missed.
+
+No code changes came out of this pass -- the sweep's value was
+confirming (by reading, not assuming) that `clone_at`/`vec_remove_at`
+were the only two gaps in this shape, and that the rest of the
+indexed-access surface is either already safe or deliberately
+unsafe-by-design and documented as such. Round 4 is closed; a future
+round should pick a new theme rather than re-sweep this surface.
+
+<details>
+<summary>BUG-148 fix note (2026-08-09)</summary>
+
+`vec_remove_at`'s index is now routed through `intent_check_bounds`
+(`backend_c.rs`) / `@__intent_bounds_check` (`backend_llvm.rs`), the
+same two sites the original writeup below pinpointed. Verified: the
+OOB repro below now traps cleanly on both backends (C exit 134 with
+`"index out of bounds: 99, len 3"`, LLVM exit 3) instead of returning
+garbage; an in-bounds sanity check still shifts elements correctly.
+Full writeup in `docs/TODO_CURRENT.md`'s BUG-148 section.
+
+</details>
 
 <details>
 <summary>Original writeup, kept for the reasoning trail</summary>
@@ -142,10 +216,10 @@ builtin sets).
    before trusting it (see `feedback_vani_localfuzz_staleness`).
 2. ~~Work category A's confirmed lead first (`vec_remove_at`)~~ --
    done, fixed as BUG-148.
-3. Do the systematic sweep -- grep every index-taking builtin across
-   all four codegen files, classify into the three buckets above, fix
-   anything in bucket 1. The "Builtins worth checking next" list above
-   is a starting point, not exhaustive.
+3. ~~Do the systematic sweep~~ -- done, 2026-08-09: every `_at`/
+   `_nth` builtin plus the full "Builtins worth checking next" list
+   classified, clean negative result (all bucket 2/3), no code
+   changes needed. Category A is closed; see the sweep write-up above.
 4. Every fix gets a `src/lib.rs` compile-check test (one per affected
    codegen path) AND a `tests/run_end_to_end.rs` real-subprocess test
    (OOB traps cleanly + in-bounds still works, both backends) --
@@ -156,3 +230,7 @@ builtin sets).
    (`git fetch origin && git log origin/main --oneline -3`) before
    every commit -- a concurrent localfuzz process also lands commits.
 6. CI/CodeQL polled green after every push.
+
+**Round 4 is closed.** A future session should pick a genuinely new
+audit theme rather than re-sweep this builtin surface -- see round 3's
+own closing note for the same guidance it followed.
