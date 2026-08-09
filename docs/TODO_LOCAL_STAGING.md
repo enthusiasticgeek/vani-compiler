@@ -4016,3 +4016,12 @@ Repro: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260809-044813-run-crash-ee47f053b7/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260809-060704-backend-divergence-19cd9af7a4
+
+Repro: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260809-060704-backend-divergence-19cd9af7a4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
