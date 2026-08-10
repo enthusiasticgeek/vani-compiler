@@ -38,8 +38,8 @@ vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems l
 
 ```vani
 fn add(a: i64, b: i64) -> i64
-  requires a >= 0 && b >= 0
-  ensures  result == a + b
+requires a >= 0 && b >= 0;
+ensures _return == a + b;
 {
   return a + b;
 }
@@ -62,6 +62,61 @@ fn main() -> i64 {
 | `Vec::with_capacity(n)` | `vec_with_capacity(n)` | no path syntax |
 | `match Some(x) => …` | `match Opt.Some(x) then …` | `then` not `=>` |
 | `xs?` | `try xs` or `xs?` | both spellings compile |
+
+### Same program, three ways
+
+Every keyword above has alternate spellings — plain-English word forms
+for `->` / `let` / `return`, and full Devanagari for `// vani-lang:
+sanskrit` — so the same program reads however you speak. All three
+below type-check, run, and print the same value.
+
+**Verbose English** (`->` → `yields`, `let` → `assign`, `return` → `give_back`):
+
+```vani
+fn add(a: i64, b: i64) yields i64
+requires a >= 0 && b >= 0;
+ensures _return == a + b;
+{
+  give_back a + b;
+}
+
+fn main() yields i64 {
+  assign xs: Vec<i64> = vec(3, 1, 4, 1, 5);
+  sort(mut ref xs);
+  assign k: i64 = vec_kth_smallest(ref xs, 2);   // 3
+  prove 2 + 2 == 4;
+  print k;
+  give_back 0;
+}
+```
+
+**Sanskrit** (`// vani-lang: sanskrit`; `main` is always literal — the
+entry point is never translated):
+
+```vani
+// vani-lang: sanskrit
+
+कार्य add(a: i64, b: i64) -> i64
+अपेक्षित a >= 0 && b >= 0;
+सुनिश्चयित _return == a + b;
+{
+  पुनरागम a + b;
+}
+
+कार्य main() -> i64 {
+  माना xs: Vec<i64> = vec(3, 1, 4, 1, 5);
+  sort(परिवर्तनीय दृष्ट्या xs);
+  माना k: i64 = vec_kth_smallest(दृष्ट्या xs, 2);   // 3
+  प्रमाण 2 + 2 == 4;
+  लिख k;
+  पुनरागम 0;
+}
+```
+
+The Sanskrit version prints `३` — the same value `3`, rendered in
+Devanagari numerals to match the source script. Builtin function names
+(`vec`, `sort`, `vec_kth_smallest`) and the reserved `main` entry point
+are never translated; only language keywords are.
 
 ---
 
