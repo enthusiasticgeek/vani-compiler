@@ -5033,3 +5033,42 @@ The compiler was triggered by a local fuzz test case on the base corpus file `/h
 
 ### **Observed Symptom:**
 The compilation process encountered an integer overflow error during the multiplication operation,
+
+---
+
+### Candidate: 20260810-195537-backend-divergence-2087d6ae03
+
+Repro: `tools/localfuzz/findings/20260810-195537-backend-divergence-2087d6ae03/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-195537-backend-divergence-2087d6ae03/fix_attempt.md`
+
+**Staging Entry:**
+
+**Vani Compiler Fuzzing Log - Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/mongolian/box_recursive_drop.vani`
+**Mutant/generated Source:** (attached)
+
+**Finding Kind:** `backend-divergence`
+
+**Raw Result Data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "index out of bounds\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
+**Crash Description:** The program attempts to access an index outside the valid range of a `Vec<i64>` in the backend-divergent branch, leading to a segmentation fault. This is a known bug in the C backend that needs further investigation.
+
+**Status:** Needs human/frontier root-cause review.
+
+This entry captures the initial stage of the fuzzing process where we observe a crash due to an out-of-bounds access, and provides the raw result data for further analysis and debugging.
