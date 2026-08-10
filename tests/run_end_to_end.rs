@@ -14068,3 +14068,96 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn async_str_local_runs_correctly_on_both_backends() {
+    // BUG-157/158 async instance (2026-08-10): `let label: Str =
+    // i64_to_str(mode);` inside an async fn used to leak (BUG-157)
+    // and, once BUG-158's general fix landed, still leak (excluded
+    // there deliberately -- fixing it needed the async transform's
+    // own hoisting strategy to change, not a rejection, since
+    // rejecting would break this already-shipped feature). Fixed by
+    // teaching `try_v31_transform` to hoist a cross-state `Str`
+    // local sourced from a known OwnedStr-returning builtin as an
+    // `OwnedStr` Task struct field instead of a `Str` alias -- the
+    // existing generic struct-Drop machinery then frees it
+    // correctly. This is a real-subprocess run (not just a compile
+    // check) confirming the actual example pattern still runs
+    // correctly end-to-end on both backends.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug157-158-async-str-local",
+        r#"
+async fn pick(fd: i64, mode: i64) -> i64 {
+  let label: Str = i64_to_str(mode);
+  let n: i64 = match label {
+    "0" then io_recv_async(fd, 64),
+    "1" then 111,
+    "2" then 222,
+    _ then 0 - 1
+  };
+  return n;
+}
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "mode=1:", r1;
+  let t2: Task__pick = pick(cfd, 2);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "mode=2:", r2;
+  let t9: Task__pick = pick(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "mode=99:", r9;
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "async Str-local example should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("mode=1: 111") && stdout.contains("mode=2: 222") && stdout.contains("mode=99: -1"),
+            "wrong output ({args:?}), got stdout: {}",
+            stdout
+        );
+    }
+}

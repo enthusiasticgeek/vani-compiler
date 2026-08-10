@@ -9400,14 +9400,21 @@ pub(crate) fn try_v31_transform(
     let n_states = states.len();
     let mut decl_state: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
+    // BUG-158 async follow-up (2026-08-10): each name's own
+    // declaring expression, captured alongside `decl_state` so the
+    // OwnedStr-hoisting pass below (right after this loop) can
+    // inspect it without a second walk over `states`.
+    let mut decl_expr: std::collections::HashMap<String, Expr> =
+        std::collections::HashMap::new();
     let mut reads_per_state: Vec<std::collections::HashSet<String>> =
         (0..n_states).map(|_| std::collections::HashSet::new()).collect();
     for (k, segs) in states.iter().enumerate() {
         for seg in segs {
-            if let Seg::NonSuspendLet { name, .. } = seg {
+            if let Seg::NonSuspendLet { name, expr, .. } = seg {
                 // First declaration wins (locals are unique in
                 // v3.1; the validator already guarded shadowing).
                 decl_state.entry(name.clone()).or_insert(k);
+                decl_expr.entry(name.clone()).or_insert_with(|| expr.clone());
             }
             seg_reads_into(seg, &mut reads_per_state[k]);
         }
@@ -9418,6 +9425,80 @@ pub(crate) fn try_v31_transform(
         let crossed = (0..n_states).any(|j| j != *k && reads_per_state[j].contains(name));
         if !crossed {
             state_locals.insert(name.clone());
+        }
+    }
+    // BUG-158 async follow-up (2026-08-10): a cross-state local
+    // declared `Str` whose value actually comes from an `OwnedStr`
+    // source (a known OwnedStr-returning builtin call, or a plain
+    // `Var` referring to another OwnedStr-typed local/param) needs
+    // to be hoisted into the Task struct as an `OwnedStr` FIELD, not
+    // a `Str` alias -- otherwise the state-local temp that actually
+    // owns the buffer gets freed at its own (narrower) state's end
+    // while the hoisted `Str` view is read in a later state, a
+    // confirmed heap-use-after-free (see the BUG-157/158 writeups in
+    // docs/BUG_PATTERN_AUDIT_TODO_8.md and docs/TODO_CURRENT.md).
+    // Hoisting the OwnedStr itself lets the EXISTING generic
+    // struct-Drop machinery free it correctly whenever the Task
+    // struct itself is dropped -- exactly like any other struct with
+    // an OwnedStr field.
+    //
+    // This can't run a full type inference pass (the checker hasn't
+    // run yet at parse time), so it's deliberately conservative: it
+    // only recognizes a small, explicit set of shapes it can be
+    // fully confident about. Anything it doesn't recognize keeps the
+    // ORIGINAL (leaky-but-safe, not crashing) behavior unchanged --
+    // this pass can only IMPROVE safety for the shapes it detects,
+    // never regress compilability for shapes it doesn't.
+    let owned_str_returning_builtins: std::collections::HashSet<&str> =
+        ["i64_to_str", "f64_to_str", "f64_to_str_fixed", "bool_to_str"]
+            .into_iter()
+            .collect();
+    let mut owned_str_locals: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for p in params {
+        if matches!(p.ty, Type::OwnedStr) {
+            owned_str_locals.insert(p.name.clone());
+        }
+    }
+    for (name, ty, _) in &locals {
+        if matches!(ty, Type::OwnedStr) {
+            owned_str_locals.insert(name.clone());
+        }
+    }
+    fn expr_is_owned_str_producing(
+        expr: &Expr,
+        owned_str_locals: &std::collections::HashSet<String>,
+        owned_str_returning_builtins: &std::collections::HashSet<&str>,
+    ) -> bool {
+        match &expr.kind {
+            ExprKind::Var(name) => owned_str_locals.contains(name),
+            ExprKind::Call { name, .. } => owned_str_returning_builtins.contains(name.as_str()),
+            _ => false,
+        }
+    }
+    let mut owned_str_hoisted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (name, k) in &decl_state {
+        if state_locals.contains(name) {
+            continue; // Not crossed -- already safe as-is (BUG-158's
+                      // FieldAssign fix doesn't even apply here since
+                      // there's no cross-state escape).
+        }
+        let is_str_declared = task_struct
+            .fields
+            .iter()
+            .any(|f| &f.name == name && matches!(f.ty, Type::Str));
+        if !is_str_declared {
+            continue;
+        }
+        if let Some(expr) = decl_expr.get(name) {
+            if expr_is_owned_str_producing(expr, &owned_str_locals, &owned_str_returning_builtins) {
+                owned_str_hoisted.insert(name.clone());
+            }
+        }
+        let _ = k;
+    }
+    for f in task_struct.fields.iter_mut() {
+        if owned_str_hoisted.contains(&f.name) {
+            f.ty = Type::OwnedStr;
         }
     }
     // Filter rename: state-local names refer to poll-fn locals,
@@ -9506,10 +9587,27 @@ pub(crate) fn try_v31_transform(
                         // Cross-state: existing two-step emission.
                         // Phase 3a -- `ty` carries the user-written
                         // annotation (Type::I64 by default).
+                        //
+                        // BUG-158 async follow-up: for a name in
+                        // `owned_str_hoisted`, the Task struct field
+                        // was already re-typed to `OwnedStr` above,
+                        // so the synthetic temp's annotation must
+                        // match (`OwnedStr`, not the user's original
+                        // `Str`) -- an exact-type FieldAssign below
+                        // then MOVES ownership into the field
+                        // (`consume_if_moved_var` marks the temp
+                        // moved, since OwnedStr isn't Copy), instead
+                        // of the old Str-typed alias that left the
+                        // real owner to be freed too early.
+                        let synth_ty = if owned_str_hoisted.contains(name) {
+                            Type::OwnedStr
+                        } else {
+                            ty.clone()
+                        };
                         let synth_local = format!("__v3_tmp_{}", name);
                         then_body.push(Stmt::Let {
                             name: synth_local.clone(),
-                            annotation: Some(ty.clone()),
+                            annotation: Some(synth_ty),
                             expr: rewritten_expr,
                             span: *span,
                         });
@@ -9877,9 +9975,19 @@ pub(crate) fn try_v31_transform(
         }
         // Phase 3a -- emit type-appropriate default-init so the
         // constructor's StructLit typechecks for non-i64 fields.
+        //
+        // BUG-158 async follow-up: `owned_str_hoisted` names had
+        // their Task struct field re-typed from `Str` to `OwnedStr`
+        // above -- the ctor's default-init must match the field's
+        // NEW type, not the user's original `Str` annotation.
+        let ctor_ty: Type = if owned_str_hoisted.contains(name) {
+            Type::OwnedStr
+        } else {
+            ty.clone()
+        };
         ctor_fields.push((
             name.clone(),
-            v31_default_init_expr(ty, *span),
+            v31_default_init_expr(&ctor_ty, *span),
         ));
     }
     // Phase 3-returns -- default-init the synthesized `__result`

@@ -2,14 +2,16 @@
 
 **STATUS (2026-08-10): 6 real bugs FIXED (BUG-153, BUG-154 -- general
 and severe -- BUG-155/156/157, and BUG-158, all fixed in same-day-or-
-next-day follow-up sessions at direct request). BUG-158 closes the
-GENERAL (non-async) instance of the "async caveat" misdiagnosis
-below via compile-time rejection. The async `__poll_*` INSTANCE of
-the same root issue remains open, deliberately, unchanged -- it needs
-the async transform's own hoisting strategy to change, not a
-rejection (rejecting there would break the already-shipped Str-local
-async feature wholesale). 2 false positives and 2 low-severity UB
-findings triaged, not fixed (see below for why).**
+next-day follow-up sessions at direct request), PLUS the async
+`__poll_*` instance of BUG-157/158's own root issue, fixed in the
+async transform itself (not a checker rejection this time -- see
+"Async transform fix" section below). Every OwnedStr/Str
+ownership-escape finding from this round is now closed except one
+separate, still-undiagnosed leak (`hashmap_strstr.vani` /
+`hashmap_strv.vani` -- NOT async-related, likely HashMap-internal,
+mislabeled as part of the async cluster in round 8's first pass).
+2 false positives and 2 low-severity UB findings triaged, not fixed
+(see below for why).**
 
 Directly requested: "pick a round-8 theme... my worry is always
 memory and leaks - this is absolutely uncompromised requirement for
@@ -324,11 +326,8 @@ Still EXCLUDED for `__poll_*` functions, same rationale as BUG-157:
 rejecting there would break the already-shipped (leaky-but-safe, not
 crashing) async Str-local feature wholesale. The async-transform
 INSTANCE of this exact bug (confirmed via the two-`let` manual-
-workaround repro above) is therefore still open and unchanged --
-fixing it needs the async transform's own hoisting strategy to
-change (e.g. hoist the `OwnedStr` itself as the persisted field
-rather than a `Str` alias into a state-local one), tracked as a
-separate, distinct follow-up, not attempted here.
+workaround repro above) was left open here -- **now FIXED, in the
+async transform itself, same day. See "Async transform fix" below.**
 
 Full writeup, verification (both repros now cleanly rejected, `vanic
 check examples` baseline unchanged, corpus-wide sweep unchanged, full
@@ -361,6 +360,60 @@ exact area, would repeat the same mistake at a larger scale. This
 needs a dedicated session with full attention, not a rushed attempt.
 
 </details>
+
+## Async transform fix (2026-08-10) -- the __poll_* instance of BUG-157/158, FIXED at direct request
+
+Root cause, precisely: `try_v31_transform`'s (parser.rs) liveness
+analysis classifies each local purely by NAME -- "is this name read
+in a different state than the one that declared it?" -- with no
+notion that one local's VALUE might alias another's underlying heap
+buffer. `let label: Str = i64_to_str(mode);` makes `label` cross-
+state (hoisted into the Task struct as a `Str` field aliasing a
+state-local `OwnedStr` temp), while the temp holding the ACTUAL
+buffer stays a plain per-state stack local, freed at the end of ITS
+OWN (narrower) state while the hoisted alias is read later.
+
+**Fix**: when a cross-state local is declared `Str` but its value
+provably comes from an `OwnedStr` source (a call to a small, explicit
+allowlist of known OwnedStr-returning builtins --  `i64_to_str`,
+`f64_to_str`, `f64_to_str_fixed`, `bool_to_str` -- or a plain `Var`
+referring to another local/param already known `OwnedStr`-typed),
+hoist it into the Task struct as an `OwnedStr` FIELD instead of a
+`Str` alias. The EXISTING, already-correct generic struct-Drop
+machinery then frees it whenever the Task struct itself is dropped --
+exactly like any other struct with an `OwnedStr` field, no new drop
+logic needed anywhere. The synthesized temp's type is updated to
+match, so the FieldAssign that stores it becomes an exact-type,
+ownership-transferring move instead of an untracked alias copy.
+
+Can't run real type inference (the checker hasn't run yet at parse
+time) -- deliberately conservative, verified against the two real
+shipped examples that actually use this feature
+(`echo_p3_locals_stress.vani`, `echo_p3b_str_local.vani`, both using
+exactly the allowlisted `i64_to_str` shape). Anything the allowlist
+doesn't recognize keeps the ORIGINAL leaky-but-safe behavior,
+guarded by the existing checker-side `__poll_*` exclusion -- this
+pass can only IMPROVE safety, never regress compilability.
+
+**`hashmap_strstr.vani` / `hashmap_strv.vani` are NOT fixed by this**
+-- confirmed during this fix that neither file has an `async fn` at
+all; they were mislabeled as part of the "async cluster" in round 8's
+first pass. Their leak is separate and still undiagnosed, most likely
+in `HashMap<OwnedStr, OwnedStr>`'s own insert/remove semantics. Left
+open, re-labeled correctly in `tools/leak_sweep_baseline.json`.
+
+Verified: both real async examples run completely clean under ASan
+(exit 0 -- confirmed via the generated C, which shows the Task
+struct's field freed both on overwrite mid-poll and at the Task's
+own scope exit in `main`). `vanic check examples` baseline unchanged.
+Corpus-wide sweep flagged count dropped from 8 to 6 (both async files
+no longer flagged; baseline updated with corrected reasons for the
+remaining 6). Full `cargo test --release` clean. 3 regression tests
+(1 updated `src/lib.rs` compile-check asserting the field's free
+sites directly, the existing `__poll_*`-exclusion guard test kept,
+1 real-subprocess `tests/run_end_to_end.rs` test running the actual
+example pattern end-to-end on both backends). Full writeup in
+`docs/TODO_CURRENT.md`'s "BUG-157/158 async instance" section.
 
 ## Done: wired into CI (2026-08-09, same day)
 

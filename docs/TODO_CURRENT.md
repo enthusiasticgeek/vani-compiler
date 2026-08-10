@@ -11323,4 +11323,76 @@ the recommended fix and plain `Str` literals still compile), 1 real-
 subprocess `tests/run_end_to_end.rs` test confirming the recommended
 `OwnedStr`-field fix actually runs correctly on both backends.
 
+## BUG-157/158 async instance (2026-08-10) -- FIXED, at direct request
+
+The async `__poll_*` instance of the exact same OwnedStr/Str
+ownership bug (deliberately left open in both BUG-157 and BUG-158)
+is now fixed too, in the actual root location: `parser.rs`'s
+`try_v31_transform` (the v3.1 async state-machine desugar).
+
+Root cause, precisely: the transform's liveness analysis classifies
+each local purely by NAME -- "is this name read in a different state
+than the one that declared it?" -- with no notion that one local's
+VALUE might alias another's underlying heap buffer. `let label: Str
+= i64_to_str(mode);` (or the two-`let` hand-split form) makes `label`
+cross-state (hoisted into the Task struct as a `Str` field that just
+aliases a state-local `OwnedStr` temp), while the temp holding the
+actual buffer stays a plain per-state stack local, freed at the end
+of ITS OWN (narrower) state -- while the hoisted alias is read later.
+Leak in the direct form (nothing ever freed at all, since the
+checker's BUG-157/158 fixes are deliberately excluded for `__poll_*`
+functions); use-after-free in the split form (confirmed via direct
+ASan testing while investigating this).
+
+**Fix**: when a cross-state local is declared `Str` but its value
+provably comes from an `OwnedStr` source -- a call to a small,
+explicit allowlist of known OwnedStr-returning builtins
+(`i64_to_str`, `f64_to_str`, `f64_to_str_fixed`, `bool_to_str`), or a
+plain `Var` referring to another local/param already known to be
+`OwnedStr`-typed -- hoist it into the Task struct as an `OwnedStr`
+FIELD instead of a `Str` alias. The existing, already-correct
+generic struct-Drop machinery then frees it correctly whenever the
+Task struct itself is dropped, exactly like any other struct with an
+`OwnedStr` field -- no new drop logic needed anywhere. The
+synthesized temp's own type is updated to match (`OwnedStr` instead
+of `Str`), so the FieldAssign that stores it becomes an exact-type,
+ownership-transferring move (`consume_if_moved_var` marks the temp
+moved, since `OwnedStr` isn't Copy) instead of an untracked alias
+copy.
+
+This can't run real type inference (the checker hasn't run yet at
+parse time), so it's deliberately conservative: it only recognizes a
+small set of shapes it's fully confident about, verified against the
+two real shipped examples that actually use this feature
+(`echo_p3_locals_stress.vani`, `echo_p3b_str_local.vani` -- both use
+exactly the `let label: Str = i64_to_str(mode);` shape). Anything the
+allowlist doesn't recognize keeps the ORIGINAL (leaky-but-safe, not
+crashing) behavior unchanged, guarded by the existing `__poll_*`
+exclusion in the checker's BUG-157/158 fixes -- this pass can only
+IMPROVE safety for the shapes it detects, never regress compilability
+for shapes it doesn't.
+
+**Note on `hashmap_strstr.vani` / `hashmap_strv.vani`**: these were
+originally lumped into the same "async cluster" in round 8's first
+pass, but neither has an `async fn` at all -- their leak is a
+separate, still-undiagnosed issue, most likely in
+`HashMap<OwnedStr, OwnedStr>`'s own insert/remove semantics. NOT
+touched or fixed by this change; still open, now correctly
+re-labeled in `tools/leak_sweep_baseline.json`.
+
+Verified: both real async examples now run completely clean under
+ASan (exit 0, no leak, no UAF, no crash -- confirmed via direct
+testing of the generated C, which shows the field correctly freed
+both on overwrite mid-poll and at the Task's own scope exit in
+`main`). `vanic check examples` baseline unchanged. Corpus-wide sweep
+re-run: flagged count dropped from 8 to 6 (the two async files no
+longer flagged; baseline updated accordingly with corrected reasons
+for the remaining 6, including the hashmap_str* re-labeling above).
+Full `cargo test --release` clean. 3 new regression tests: 1 updated
+`src/lib.rs` compile-check documenting the fix directly (asserts the
+Task field gets freed on both overwrite and scope exit), the
+existing `__poll_*`-exclusion guard test kept and re-documented, 1
+real-subprocess `tests/run_end_to_end.rs` test running the actual
+async example pattern end-to-end on both backends.
+
 Next free bug number is **BUG-159**.

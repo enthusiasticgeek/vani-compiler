@@ -10682,19 +10682,21 @@ mod tests {
         // EXCLUDED for `__poll_*` functions (the v3.1 async
         // state-machine transform's output, `parser.rs`'s
         // `try_v31_transform`, which runs at PARSE time -- before
-        // this checker pass ever sees the body). That transform
-        // hoists the user's own named `let`s into a persistent
-        // per-coroutine state struct so values survive across
-        // separate `poll()` calls; a synthetic temp introduced
-        // AFTER the transform ran is invisible to that hoisting
-        // pass and gets freed at the end of the CURRENT `poll()`
-        // call while the hoisted `Str` view is read on a LATER
-        // call -- confirmed via direct ASan testing to turn the
-        // original leak into a heap-use-after-free. Assert the
-        // synthetic-temp rewrite does NOT fire inside a `__poll_`
-        // function, so async bodies keep the original (leaky but
-        // safe) codegen until the async transform itself learns to
-        // hoist checker-synthesized temps.
+        // this checker pass ever sees the body). A checker-
+        // synthesized temp introduced AFTER the transform already
+        // ran would be invisible to its hoisting pass and get freed
+        // at the wrong scope -- confirmed via direct ASan testing to
+        // turn a leak into a heap-use-after-free. Assert the
+        // synthetic-temp rewrite still does NOT fire inside a
+        // `__poll_` function; this defense-in-depth guard stays
+        // correct and necessary for any OwnedStr-returning
+        // expression the async-transform-side fix below doesn't
+        // recognize (its own allowlist is deliberately small).
+        //
+        // BUG-157/158 async instance FIXED (2026-08-10), separately,
+        // in the async transform itself -- see
+        // `async_transform_hoists_owned_str_local_as_owned_str_field`
+        // below for the real fix and its own regression test.
         let source = r#"
             async fn pick(fd: i64, mode: i64) -> i64 {
               let label: Str = i64_to_str(mode);
@@ -10733,6 +10735,80 @@ mod tests {
             !c.contains("__owned_str_coerce_"),
             "the OwnedStr->Str synthetic-temp rewrite must not fire inside a __poll_ function \
              (it would free the buffer at the wrong scope and cause a use-after-free):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn async_transform_hoists_owned_str_local_as_owned_str_field() {
+        // BUG-157/158 async instance FIXED (2026-08-10): the same
+        // `let label: Str = i64_to_str(mode);` shape as the test
+        // above used to leak (BUG-157) and, if manually split into
+        // two `let`s, use-after-free (BUG-158's original finding).
+        // Root cause: `try_v31_transform` (parser.rs) hoists a
+        // cross-state `Str` local by aliasing a state-local
+        // `OwnedStr` temp into a `Str`-typed Task struct field --
+        // the temp gets freed at its own (narrower) state's end
+        // while the hoisted alias is read in a later state.
+        //
+        // Fix: when a cross-state local is declared `Str` but its
+        // value actually comes from a known OwnedStr source (here,
+        // `i64_to_str`, in a small explicit allowlist -- the
+        // transform has no full type inference to draw on), hoist
+        // it into the Task struct as an `OwnedStr` FIELD instead.
+        // The existing, already-correct generic struct-Drop
+        // machinery then frees it whenever the Task struct itself
+        // is dropped, exactly like any other OwnedStr-holding
+        // struct. Assert the field's declared type in the emitted
+        // C is a plain owning pointer (no separate `__v3_tmp_label`
+        // alias escaping past its own scope), and that the field
+        // gets freed both on overwrite (next poll tick) and at the
+        // Task's own scope exit.
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: Str = i64_to_str(mode);
+              let n: i64 = match label {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+              while true {
+                let r: i64 = __poll_pick(t);
+                if r != 0 - 2 { return r; }
+                let _ = epoll_wait_one(ep, 1000);
+              }
+              return 0;
+            }
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let server: i64 = tcp_listen(0);
+              let cfd: i64 = tcp_accept(server);
+              let _ = tcp_set_nonblocking(cfd);
+              let _ = epoll_add_read(ep, cfd);
+              let t0: Task__pick = pick(cfd, 1);
+              let r0: i64 = drive(ep, mut ref t0);
+              print "mode=1:", r0;
+              let _ = tcp_close(cfd);
+              let _ = tcp_close(server);
+              let _ = epoll_close(ep);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("free((void*)v___t->label)") || c.contains("free((void*)(v___t->label))"),
+            "expected the Task struct's label field to be freed on overwrite \
+             (confirms it's tracked as an owned value, not a leaked/aliased view):\n{}",
+            c
+        );
+        assert!(
+            c.contains("free((void*)v_t0.label)") || c.contains("free((void*)(v_t0.label))"),
+            "expected the Task struct's label field to be freed at its own \
+             scope exit in main (confirms the generic struct-Drop machinery \
+             now owns it):\n{}",
             c
         );
     }

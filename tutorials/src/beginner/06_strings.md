@@ -210,21 +210,18 @@ case above. You don't need to write the two-step form
 (`let tmp: OwnedStr = i64_to_str(42); let label: Str = tmp;`)
 yourself; either form works identically.
 
-> **Caveat (async fn bodies only)**: inside an `async fn`, this
-> exact narrowing pattern (`let label: Str = <fresh OwnedStr
-> call>;`) currently leaks the allocation instead of freeing it.
-> The async state-machine transform hoists locals it recognizes
-> into persistent per-coroutine state before the checker ever sees
-> the body, and its handling of an `OwnedStr`-owns/`Str`-views-into
-> relationship across a suspend point isn't sound yet — the
-> compiler-managed temp described above isn't safe to introduce
-> there. Splitting it into two `let`s yourself
-> (`let tmp: OwnedStr = i64_to_str(mode); let label: Str = tmp;`)
-> is **not** a safe workaround either — it still compiles, but
-> trades the leak for a heap-use-after-free instead, which is
-> worse. There is currently no source-level workaround that avoids
-> both; the fix has to be in the async transform itself. Tracked in
-> `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+> **Async fn bodies**: this pattern also works correctly inside an
+> `async fn`, for the common case — `let label: Str =
+> i64_to_str(mode);` (or `f64_to_str` / `f64_to_str_fixed` /
+> `bool_to_str`) is recognized directly by the async state-machine
+> transform, which hoists the underlying `OwnedStr` into the
+> generated coroutine's persistent state as a real owning field, not
+> just a view. Less common `OwnedStr` sources the transform doesn't
+> specifically recognize (e.g. building the string via `+`
+> concatenation, or a user-defined function that returns `OwnedStr`)
+> fall back to the same auto-borrow-only behavior as before this
+> fix — safe, but the allocation leaks for the lifetime of that
+> `Task`. Tracked in `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
 
 ### Storing an `OwnedStr` into a struct's `Str` field is rejected
 
