@@ -4605,3 +4605,14 @@ Repro: `tools/localfuzz/findings/20260810-024150-backend-divergence-8e74a245e6/r
 Fix attempt: `tools/localfuzz/findings/20260810-024150-backend-divergence-8e74a245e6/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-025203-backend-divergence-b4cbb21d7a
+
+Repro: `tools/localfuzz/findings/20260810-025203-backend-divergence-b4cbb21d7a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-025203-backend-divergence-b4cbb21d7a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The C backend failed to generate valid LLVM IR due to an out-of-bounds access error, which was observed when running the test case `/home/virgo/source/vani-compiler-localfuzz/examples/language/japanese/iterate.vani` with both the LLVM and C backends. The LLVM backend reported a return code of 3, while the C backend encountered a segmentation fault due to an index out-of-bounds error in the generated LLVM IR.
