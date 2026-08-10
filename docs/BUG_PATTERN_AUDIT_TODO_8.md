@@ -398,9 +398,8 @@ pass can only IMPROVE safety, never regress compilability.
 **`hashmap_strstr.vani` / `hashmap_strv.vani` are NOT fixed by this**
 -- confirmed during this fix that neither file has an `async fn` at
 all; they were mislabeled as part of the "async cluster" in round 8's
-first pass. Their leak is separate and still undiagnosed, most likely
-in `HashMap<OwnedStr, OwnedStr>`'s own insert/remove semantics. Left
-open, re-labeled correctly in `tools/leak_sweep_baseline.json`.
+first pass. Their leak is separate -- root-caused (not fixed) below,
+in "hashmap_strstr/strv root cause".
 
 Verified: both real async examples run completely clean under ASan
 (exit 0 -- confirmed via the generated C, which shows the Task
@@ -442,6 +441,74 @@ emitted LLVM IR after the fact) and only `examples/` (not the
 covered) -- both reasonable scope cuts for a per-push CI gate;
 extending either is a fine future follow-up but not required for the
 CI job to be worth having.
+
+## hashmap_strstr/strv root cause (2026-08-10) -- root-caused precisely, NOT fixed
+
+Root cause, confirmed via a minimal 1-line repro and direct source
+inspection: `hashmap_insert(mut ref m, K, V)` leaks any argument
+(K and/or V) that is a FRESH, never-bound `OwnedStr` expression --
+e.g. `i64_to_str(1)` passed directly, not through a `let`. Confirmed
+repro:
+```vani
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+  return 0;
+}
+```
+Leaks exactly 2 objects / 6 bytes under ASan (`"1"` = 2 bytes,
+`"100"` = 4 bytes -- matches precisely).
+
+**Mechanism**: `intent_hashmap_owned_str_owned_str_insert` (the
+runtime C helper `backend_c.rs` emits, ~line 4693) takes `k`/`v` as
+`const char*` and CLONES them into fresh `malloc`'d storage on every
+path -- both the "fresh insert" path (`k_owned = malloc(...);
+memcpy(k_owned, k, ...)`) and the "duplicate key, swap V" path
+(`v_owned2 = malloc(...); memcpy(v_owned2, v, ...)`). It never frees
+the CALLER's original `k`/`v` pointers. That's fine when the
+caller's `k`/`v` came from a named `OwnedStr` binding (that binding's
+own scope-exit Drop frees it later, matching `can_assign`'s
+"function args" auto-borrow rule) -- but when `k`/`v` is a fresh,
+unbound temporary expression (no `let` at all), NOTHING owns it:
+the checker has no binding to attach a drop to, and the callee
+clones-not-consumes. The temporary just leaks.
+
+**IMPORTANT -- this is NOT hashmap-specific.** Confirmed the
+identical leak reproduces passing a fresh `OwnedStr` expression as an
+argument to an ORDINARY user-defined function expecting `Str`:
+```vani
+fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+fn main() -> i64 {
+  let n: i64 = takes_str(i64_to_str(12345));   // leaks
+  print n;
+  return 0;
+}
+```
+This is the SAME "OwnedStr auto-borrowed to Str with no owner"
+family as BUG-157 (`Stmt::Let`, fixed) and BUG-158 (`Stmt::
+FieldAssign` / `StructLit` / `IndexAssign`, fixed via rejection) --
+but through a THIRD escape vector, function CALL ARGUMENTS, that
+neither fix touches. `print(...)`/`len(...)` are the only call-
+argument positions confirmed to correctly free a fresh `OwnedStr`
+argument -- via a hand-written, position-specific "conservative
+whitelist" in `emit_print_expr_no_newline` (`backend_c.rs`, comment:
+"only Call returning OwnedStr ... and Binary + ... are guaranteed-
+fresh heap-producers"). That pattern was never generalized to
+arbitrary call sites.
+
+**Why NOT fixed here**: the blast radius is much larger than
+`hashmap_insert` -- potentially every function call site in the
+compiler (every builtin AND every user-defined function taking a
+`Str` parameter) needs the same "is this argument a fresh, unbound
+OwnedStr expression? If so, free it after the call" treatment print
+already gets. This is a bigger, more pervasive change than BUG-157/
+158/the async fix combined, and warrants a scoping discussion before
+attempting -- not a same-pass fix. A narrower first cut (limited to
+`hashmap_insert`'s own K/V parameters specifically, reusing print's
+already-proven-safe "fresh Call/Binary-Add" detection) is plausible
+and much lower-risk than a fully general fix, if a future session
+wants to close just these two examples without taking on the wider
+scope.
 
 ## Process (mirrors rounds 1 through 7's own process sections)
 

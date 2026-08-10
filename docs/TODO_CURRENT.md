@@ -11395,4 +11395,31 @@ existing `__poll_*`-exclusion guard test kept and re-documented, 1
 real-subprocess `tests/run_end_to_end.rs` test running the actual
 async example pattern end-to-end on both backends.
 
+## hashmap_strstr/strv leak -- root-caused (2026-08-10), NOT fixed
+
+At direct request, root-caused the last open finding from round 8.
+`hashmap_insert(mut ref m, K, V)` leaks any argument that's a fresh,
+never-bound `OwnedStr` expression (e.g. `i64_to_str(1)` passed
+directly): the runtime C helper CLONES `k`/`v` into new storage on
+every path but never frees the caller's originals, and since they
+were never bound to a `let`, nothing else owns them either. Confirmed
+via a 1-line minimal repro leaking exactly 2 objects/6 bytes.
+
+**Turns out general, not hashmap-specific**: the identical leak
+reproduces passing a fresh `OwnedStr` expression to an ordinary user
+function expecting `Str` -- a THIRD escape vector of the same
+BUG-157/158 "OwnedStr auto-borrowed with no owner" family (after
+`Stmt::Let` and `Stmt::FieldAssign`/`StructLit`/`IndexAssign`), this
+time through function call arguments. `print`/`len` are the only
+call positions that already handle this correctly, via a hand-
+written, position-specific mechanism never generalized elsewhere.
+
+Deliberately NOT fixed -- the blast radius (every call site in the
+compiler, not just `hashmap_insert`) is larger than BUG-157/158/the
+async fix combined and needs a scoping discussion first. Full
+root-cause writeup, both repros, and a narrower-scope fix option
+(limited to `hashmap_insert`'s own K/V params) in
+`docs/BUG_PATTERN_AUDIT_TODO_8.md`'s "hashmap_strstr/strv root cause"
+section.
+
 Next free bug number is **BUG-159**.

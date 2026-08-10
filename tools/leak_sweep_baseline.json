@@ -12,12 +12,12 @@
   {
     "file": "examples/language/english/hashmap_strstr.vani",
     "klass": "LEAK",
-    "reason": "Round-8 audit (2026-08-09). Originally lumped in with the BUG-157/158 async __poll_* cluster, but this file has NO async fn at all -- confirmed while fixing BUG-157/158's async instance (2026-08-10) that this is a SEPARATE, still-undiagnosed leak, most likely in HashMap<OwnedStr, OwnedStr>'s own insert/remove semantics (this file exercises hashmap_insert/hashmap_remove with OwnedStr keys and values via i64_to_str). Not root-caused or fixed yet -- a genuinely open item for a future session, distinct from the async cluster."
+    "reason": "Root-caused 2026-08-10 (not fixed yet): every hashmap_insert(mut ref m, K, V) call where K and/or V is a FRESH, never-bound OwnedStr expression (e.g. i64_to_str(1) passed directly, not through a let) leaks that argument. intent_hashmap_owned_str_owned_str_insert's C runtime helper (backend_c.rs) takes k/v as `const char*` and CLONES them into new malloc'd storage on every path (fresh insert AND duplicate-key overwrite) -- it never frees the caller's original k/v pointers, and since they were passed as unbound temporaries (not a named Var), no checker-side scope-exit Drop exists to free them either. Confirmed via a 1-line minimal repro (single hashmap_insert call, both args fresh i64_to_str() calls) leaking exactly the expected 2 objects/6 bytes. IMPORTANT: this is NOT hashmap-specific -- confirmed the identical leak happens passing a fresh OwnedStr expression as an argument to an ORDINARY user-defined function expecting Str (e.g. `takes_str(i64_to_str(12345))` leaks the i64_to_str result). print()/len() are the only call-argument positions known to correctly free a fresh OwnedStr argument (via a hand-written, position-specific 'conservative whitelist' in emit_print_expr_no_newline) -- this is the SAME 'OwnedStr auto-borrowed with no owner' family as BUG-157/158, but through a THIRD escape vector (function call arguments) that neither fix covers. A general fix is a large, pervasive change (every call site, not just hashmap) -- deliberately not attempted without a scoping discussion first."
   },
   {
     "file": "examples/language/english/hashmap_strv.vani",
     "klass": "LEAK",
-    "reason": "Same as hashmap_strstr.vani -- likely a HashMap<..., OwnedStr>-internal leak, not async-related, not root-caused yet. See that entry."
+    "reason": "Same root cause as hashmap_strstr.vani -- confirmed via source inspection (hashmap_insert(mut ref m, 1, i64_to_str(100)) etc., fresh OwnedStr V argument). See that entry for the full root-cause writeup."
   },
   {
     "file": "examples/language/english/loop_carried_overflow_not_elided.vani",
