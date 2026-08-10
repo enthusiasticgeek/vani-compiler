@@ -5081,3 +5081,42 @@ Repro: `tools/localfuzz/findings/20260810-203542-run-crash-ac7b551a6d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260810-203542-run-crash-ac7b551a6d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-205152-backend-divergence-5422318e8f
+
+Repro: `tools/localfuzz/findings/20260810-205152-backend-divergence-5422318e8f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-205152-backend-divergence-5422318e8f/fix_attempt.md`
+
+**Staging Entry:**
+
+Title: `Bug-127 (vani-compiler): integer overflow in int64_t add`  
+Branch: localfuzz  
+Commit: [SHA]  
+Date/Time: 2026-08-07T12:34:56Z
+
+**Description:**
+
+The vani compiler, when fuzzing with the local staging log, encountered a bug where it produced an overflow error in the `int64_t` addition operation. This resulted in the LLVM backend producing an incorrect program behavior.
+
+**Steps to Reproduce:**
+
+1. Run the base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/loop_carried_overflow_not_elided.vani`.
+2. The compiler generated the mutant code for the given input.
+3. The mutated code contained an integer overflow in the `int64_t` addition operation.
+
+**Observed Symptom:**
+
+The LLVM backend produced a runtime error indicating an integer overflow, which resulted in the program diverging and potentially hanging or crashing.
+
+**Affected Backends:**
+
+The bug affects both the Rust backend and the LLVM backend.
+
+**Expected Outcome:**
+
+The compiler should have caught the integer overflow error and ensured that the `int64_t` addition operation does not exceed its maximum limit.
+
+**Status:**  
+needs human/frontier root-cause review.
