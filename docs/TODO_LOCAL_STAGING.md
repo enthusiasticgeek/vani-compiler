@@ -4840,3 +4840,12 @@ index out of bounds
 ---
 
 Thank you for providing this detailed staging entry for your vani-compiler bug report!
+
+---
+
+### Candidate: 20260810-124224-backend-divergence-e1322cfcd5
+
+Repro: `tools/localfuzz/findings/20260810-124224-backend-divergence-e1322cfcd5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-124224-backend-divergence-e1322cfcd5/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
