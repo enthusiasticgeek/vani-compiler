@@ -126,6 +126,15 @@ discovering these are already-decided non-fixes. All 4 have full
 
 ## Category 3: new localfuzz candidates since round 8 started (2026-08-09 evening onward, mostly untriaged)
 
+**Update (2026-08-10, later same day)**: 11 more findings landed since
+this section was first written (last one captured below was
+`b4cbb21d7a`). See the new subsections at the end of this category --
+"11 more findings (2026-08-10 04:14 onward)". None fixed or
+root-caused; this is still a raw inventory. The overflow-divergence
+theme below is now confirmed to be BROADER than integer overflow --
+one new finding shows the identical silent-vs-loud divergence for an
+"index out of bounds" trap.
+
 Source: `docs/TODO_LOCAL_STAGING.md` in the localfuzz worktree
 (`/home/virgo/source/vani-compiler-localfuzz`). Per the established
 localfuzz workflow, always re-verify against a freshly rebuilt `main`
@@ -213,6 +222,74 @@ Category 1. Worth checking whether this connects to Category 2 item
   actual out-of-bounds access somewhere), but don't trust this
   description's account of WHICH backend does WHAT; re-derive from
   the raw repro + actual run output directly.
+
+### 11 more findings (2026-08-10 04:14 onward)
+
+All from the same localfuzz worktree, none root-caused or fixed. Raw
+`finding.json` data quoted directly; `fix_attempt.md`'s auto-generated
+hypotheses are qwen2.5-coder:1.5b drafts (per the established
+staleness/unreliability caveat above) and mostly say "no patch
+attempted -- needs frontier-model or human review from scratch", so
+not reproduced here except where noted.
+
+**More overflow/bounds-divergence-theme findings** (same shape as the
+2 originally documented above -- C aborts loudly with rc=134 + a
+message, LLVM exits silently with rc=3 + empty stderr):
+
+- `20260810-063522-backend-divergence-5e6cada3c6` (base
+  `examples/language/bengali/early_exit.vani`) -- "integer overflow in
+  int64_t add".
+- `20260810-074148-backend-divergence-2492443756` (base `examples/
+  language/english/loop_carried_overflow_not_elided.vani` -- note:
+  this is literally the SAME source file as Category 2 item 3's
+  baseline entry) -- "integer overflow in int64_t add".
+- `20260810-090537-backend-divergence-20dcfc064d` (base `examples/
+  language/catalan/control_flow.vani`) -- "integer overflow in
+  int64_t add".
+- `20260810-091328-backend-divergence-236442a7a6` (base `examples/
+  language/spanish/for_loops.vani`) -- "integer overflow in int64_t
+  add". A patch was auto-attempted and discarded (didn't apply/build).
+- `20260810-105409-backend-divergence-1f84ad9671` (base `examples/
+  language/english/vec_of_ref.vani`) -- "integer overflow in i64
+  mul" (the multiply variant, matching the very first `56467d8c82`
+  finding's op).
+- **`20260810-113044-backend-divergence-b4d35be8e4`** (base `examples/
+  language/english/bounds_elision.vani`) -- **"index out of bounds"**,
+  not overflow. Same rc=134-loud/rc=3-silent divergence. This is new
+  evidence the theme isn't overflow-specific: it looks like ANY LLVM
+  runtime safety-guard trap (bounds checks included, likely others)
+  exits silently, while C's aborts loudly with a message. Worth
+  checking generally where the LLVM backend emits its trap/abort logic
+  and whether a single shared fix (make it print like C's does before
+  exiting) covers overflow AND bounds AND whatever else uses the same
+  trap mechanism. A patch was auto-attempted and discarded here too.
+
+**More timeout findings** (both backends hang, `rc=null,
+timed_out=true` on both C and LLVM -- same shape as `cdec4c613b`
+above, bringing the total to 6):
+
+- `20260810-041441-run-crash-d5870f7218` (base `examples/language/
+  pashto/async_cancel_auto.vani`).
+- `20260810-074640-run-crash-d8f20b7050` (base `examples/edge_cases/
+  mix_conc_mutex_struct.vani`).
+- `20260810-094706-run-crash-7b63fa98b6` (base `examples/language/
+  tibetan/early_exit.vani`).
+- `20260810-101253-run-crash-e37418e21c` (base `examples/language/
+  spanish/control_flow.vani`). A patch was auto-attempted and
+  discarded.
+- `20260810-103151-run-crash-78bdde8bba` (base `examples/language/
+  lao/early_exit.vani`).
+
+Two of the five (`7b63fa98b6`, `78bdde8bba`) share `early_exit.vani`
+as their base (different locale folders -- likely mutants of the same
+underlying source), which may explain a shared hang between those two
+specifically; the other three (`async_cancel_auto.vani`,
+`mix_conc_mutex_struct.vani`, `control_flow.vani`) don't share an
+obvious common base with each other or with the first two. As before:
+check each repro's actual control flow before assuming a real
+compiler/runtime hang vs. a fuzzer-generated infinite loop (a corpus
+artifact, not a bug) -- do NOT assume all 6 timeout findings share one
+root cause without verifying.
 
 ---
 
