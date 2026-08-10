@@ -4905,3 +4905,75 @@ Fix attempt: `tools/localfuzz/findings/20260810-170656-backend-divergence-8ceea3
 Status: needs human/frontier root-cause review.
 
 A vanic run with the mutant generated source produced a backend-divergence result, indicating that the C and LLVM backends produced different outputs for the same input. Specifically, LLVM crashed with an integer overflow error in the addition of two integers, while C did not crash but diverged by printing "integer overflow in int64_t add" and exiting with code 3. This suggests a potential bug related to handling large numbers or overflow in the `n = n + -9223372036854775808;` operation, which could be causing divergent behavior between different backends.
+
+---
+
+### Candidate: 20260810-171502-check-crash-d64fafa093
+
+Repro: `tools/localfuzz/findings/20260810-171502-check-crash-d64fafa093/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-171502-check-crash-d64fafa093/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Fuzz Log Entry for `candidate.vani`**
+
+---
+
+#### Mutation ID: 1
+
+##### Processed Source:
+```vani
+// build & run:
+//   vanic run examples/language/english/contracts_and_match.vani
+
+intent "Function contracts: requires + ensures + cross-call SMT reasoning + match with guarded arms over enum payloads";
+
+fn checked_sub(a: i64, b: i64) -> i64
+requires a >= b;
+requires b >= 0;
+ensures _return >= 0;
+{
+  return a - b;
+}
+
+fn double_if_positive(x: i64) -> i64
+requires x < 1000000000;
+ensures _return >= x;
+{
+  if x > 0 {
+    return x + x;
+  } else {
+    return x;
+  }
+}
+
+fn main() -> i64 {
+  let diff: i64 = checked_sub(20, 7);
+  prove diff >= 0;
+  assert diff == 13;
+
+  let bigger: i64 = double_if_positive(5);
+  prove bigger >= 5;
+  assert bigger == 10;
+
+  print grade(100);
+  print grade(95);
+  print grade(85);
+  print grade(75);
+  print grade(65);
+  print grade(50);
+
+  print classify(Status.Active, 4000);
+  print classify(Status.Active, 500);
+  print classify(Status.Active, 5);
+  print classify(Status.Idle, 0);
+
+  return 0;
+}
+
+enum Status { Active, Idle }
+
+fn classify(s: Status, secs: i64) -> Str {
+  return match s {
+    Status.Active if secs > 3600 then "active-long",
+    Status.Active if secs
