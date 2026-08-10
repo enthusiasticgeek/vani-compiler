@@ -827,6 +827,193 @@ mod tests {
     }
 
     #[test]
+    fn bug170_global_dialects_structure_keyword_parity() {
+        // BUG-170 (2026-08-10): the "global languages" round of the
+        // keyword-parity audit, extending BUG-166/169's Sanskrit/
+        // Hindi/Marathi + 10-India-dialect sweeps to every Tier II
+        // (global) dialect in src/lexer.rs. Before this fix, 49 of
+        // the 60 non-India keyword-table functions were each missing
+        // between 3 and 44 of the 46 required structure keywords --
+        // Reduce/With/EPrint was the near-universal minimal gap (~35
+        // functions), while several Latin-script dialects' NATIVE
+        // (accented) tables -- spanish_keyword, french_keyword,
+        // german_keyword, portuguese_keyword, catalan_keyword, and
+        // 12 others -- were only 15-30% populated, containing just
+        // the entries that actually NEED a diacritic; the bulk of
+        // each of those dialects' real coverage lives in its sibling
+        // `_ascii_keyword` table instead.
+        //
+        // That native/ascii split is load-bearing, not incidental:
+        // `Lexer::lex_ident`'s dispatch tries the non-ASCII-byte
+        // branch (which chains through every dialect's native table)
+        // first, and falls through to a SECOND match keyed on the
+        // FILE's OWN declared pragma that calls that one dialect's
+        // `_ascii_keyword` table -- so a pragma-declared file's
+        // effective keyword set is the UNION of its native and ascii
+        // tables, not either one alone. This test mirrors that at
+        // the coverage-check level: for the 17 dialects with a split
+        // table, a keyword counts as covered if EITHER table has it.
+        //
+        // As with BUG-169, this reads src/lexer.rs's own source via
+        // `include_str!` and mechanically extracts each function's
+        // `"spelling" => TokenKind::Kind` arms at test-run time
+        // rather than hand-transcribing ~2000 non-Latin/accented
+        // spellings across 60 functions.
+        let lexer_src: &str = include_str!("lexer.rs");
+
+        let required_kinds: &[&str] = &[
+            "Fn", "Pure", "Extern", "Parallel", "Reduce", "With", "Task", "Join", "Let",
+            "Return", "If", "Else", "While", "Break", "Continue", "Mut", "For", "In", "Ref",
+            "From", "To", "Struct", "Enum", "Match", "Then", "Interface", "Implement", "Where",
+            "Is", "Const", "Type", "Methods", "Intent", "Use", "Requires", "Ensures",
+            "Invariant", "Assert", "Prove", "Print", "EPrint", "Try", "Module", "Pub", "Unsafe",
+            "RegionKw",
+        ];
+
+        // Single-table dialects: exactly one `_keyword` fn covers them.
+        let single_table_dialects: &[(&str, &str)] = &[
+            ("Persian", "persian_keyword"),
+            ("Pashto", "pashto_keyword"),
+            ("Khmer", "khmer_keyword"),
+            ("Burmese", "burmese_keyword"),
+            ("Amharic", "amharic_keyword"),
+            ("Tibetan", "tibetan_keyword"),
+            ("Cherokee", "cherokee_keyword"),
+            ("Lao", "lao_keyword"),
+            ("Mongolian", "mongolian_keyword"),
+            ("Yoruba", "yoruba_keyword"),
+            ("Armenian", "armenian_keyword"),
+            ("Georgian", "georgian_keyword"),
+            ("Filipino", "filipino_ascii_keyword"),
+            ("Dutch", "dutch_ascii_keyword"),
+            ("Thai", "thai_keyword"),
+            ("Malay", "malay_ascii_keyword"),
+            ("Swahili", "swahili_ascii_keyword"),
+            ("Italian", "italian_ascii_keyword"),
+            ("Arabic", "arabic_keyword"),
+            ("Greek", "greek_keyword"),
+            ("Hebrew", "hebrew_keyword"),
+            ("Indonesian", "indonesian_ascii_keyword"),
+            ("Korean", "korean_keyword"),
+            ("Japanese", "japanese_keyword"),
+            ("Mandarin", "mandarin_keyword"),
+            ("Russian", "cyrillic_keyword"),
+        ];
+
+        // Split-table dialects: native (accented) fn + ascii-fallback
+        // fn together form the dialect's real coverage (see doc
+        // comment above -- this mirrors Lexer::lex_ident's actual
+        // dispatch, which consults both for a pragma-declared file).
+        let split_table_dialects: &[(&str, &str, &str)] = &[
+            ("Spanish", "spanish_keyword", "spanish_ascii_keyword"),
+            ("French", "french_keyword", "french_ascii_keyword"),
+            ("German", "german_keyword", "german_ascii_keyword"),
+            ("Portuguese", "portuguese_keyword", "portuguese_ascii_keyword"),
+            ("Polish", "polish_keyword", "polish_ascii_keyword"),
+            ("Turkish", "turkish_keyword", "turkish_ascii_keyword"),
+            ("Romanian", "romanian_keyword", "romanian_ascii_keyword"),
+            ("Vietnamese", "vietnamese_keyword", "vietnamese_ascii_keyword"),
+            ("Hungarian", "hungarian_keyword", "hungarian_ascii_keyword"),
+            ("Czech", "czech_keyword", "czech_ascii_keyword"),
+            ("Swedish", "swedish_keyword", "swedish_ascii_keyword"),
+            ("Norwegian", "norwegian_keyword", "norwegian_ascii_keyword"),
+            ("Danish", "danish_keyword", "danish_ascii_keyword"),
+            ("Slovak", "slovak_keyword", "slovak_ascii_keyword"),
+            ("Finnish", "finnish_keyword", "finnish_ascii_keyword"),
+            ("Catalan", "catalan_keyword", "catalan_ascii_keyword"),
+            ("Hausa", "hausa_keyword", "hausa_ascii_keyword"),
+        ];
+
+        fn extract_kinds_for_fn(src: &str, fn_name: &str) -> Vec<String> {
+            let marker = format!("fn {fn_name}(text: &str) -> Option<TokenKind> {{");
+            let start = src
+                .find(&marker)
+                .unwrap_or_else(|| panic!("dialect fn `{fn_name}` not found in lexer.rs"));
+            let body_start = start + marker.len();
+            let close = src[body_start..]
+                .find("\n}\n")
+                .unwrap_or_else(|| panic!("no closing `}}` found for `{fn_name}`"));
+            let body = &src[body_start..body_start + close];
+            let mut kinds = Vec::new();
+            let mut rest = body;
+            while let Some(idx) = rest.find("TokenKind::") {
+                let after = &rest[idx + "TokenKind::".len()..];
+                let end = after
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                kinds.push(after[..end].to_string());
+                rest = &after[end..];
+            }
+            kinds
+        }
+
+        let mut gaps: Vec<String> = Vec::new();
+        for &(dialect_name, fn_name) in single_table_dialects {
+            let kinds = extract_kinds_for_fn(lexer_src, fn_name);
+            for &required in required_kinds {
+                if !kinds.iter().any(|k| k == required) {
+                    gaps.push(format!("{dialect_name} ({fn_name}) has no {required} spelling"));
+                }
+            }
+        }
+        for &(dialect_name, native_fn, ascii_fn) in split_table_dialects {
+            let mut kinds = extract_kinds_for_fn(lexer_src, native_fn);
+            kinds.extend(extract_kinds_for_fn(lexer_src, ascii_fn));
+            for &required in required_kinds {
+                if !kinds.iter().any(|k| k == required) {
+                    gaps.push(format!(
+                        "{dialect_name} ({native_fn} + {ascii_fn} union) has no {required} spelling"
+                    ));
+                }
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "Global-dialect structure-keyword parity gaps found:\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
+    fn bug170_pashto_dead_multiword_entries_now_reachable() {
+        // BUG-170 follow-up (2026-08-10): found while auditing Pashto
+        // keyword coverage. `pashto_keyword` had 5 entries whose
+        // string literal contained a literal space ("په توګه" => As,
+        // "که نه" => Else, "تر څو" => While, "هر یو" => For, "د بدلون
+        // وړ" => Mut) -- these could never match, because the lexer
+        // tokenizes on whitespace and Pashto has no multi-word merge
+        // pass (unlike Devanagari's `merge_multi_word_devanagari_
+        // aliases`). Confirmed dead via a minimal repro before the
+        // fix: `5 په توګه i64` failed to parse ("expected ';'" right
+        // after `5`). Fixed by replacing all 5 with fused single-
+        // token spellings. This test compiles a Pashto program
+        // directly exercising 3 of the 5 (`لکه`/As, `کهنه`/Else,
+        // `ترڅو`/While); the other two (`هریو`/For, `بدلېدونکی`/Mut)
+        // are still covered by the mechanical spelling->TokenKind
+        // check in `bug170_global_dialects_structure_keyword_parity`
+        // above, just not by a full parse here.
+        let source = r#"
+// vani-lang: pashto
+فنکشن main() -> i64 {
+  ووایه ک: i64 = 5 لکه i64;
+  که ک == 5 {
+    ک = ک + 1;
+  } کهنه {
+    ک = 0;
+  }
+  ووایه ګ: i64 = 0;
+  ترڅو ګ < 3 {
+    ګ = ګ + 1;
+  }
+  بېرته ک + ګ;
+}
+"#;
+        let checked = compile(source)
+            .unwrap_or_else(|e| panic!("Pashto program using fused لکه/کهنه/ترڅو should compile: {e:?}"));
+        let _ = checked;
+    }
+
+    #[test]
     fn bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers() {
         // BUG-167 (2026-08-10): found while translating Sanskrit
         // example identifiers to Devanagari as a follow-up to the

@@ -93,47 +93,86 @@ eligible keyword.
 
 | # | Language | Script | Word order | Status | Verified |
 |---|----------|--------|-----------|--------|---------|
-| 1 | Spanish (*español*) | Latin | SVO | ✅ Shipped | ❌ |
-| 2 | French (*français*) | Latin | SVO | ✅ Shipped | ❌ |
-| 3 | German (*deutsch*) | Latin | V2/SOV | ✅ Shipped | ❌ |
-| 4 | Russian (*русский*) | Cyrillic | SVO | ✅ Shipped | ❌ |
-| 5 | Italian (*italiano*) | Latin | SVO | ✅ Shipped | ❌ |
-| 6 | Portuguese (*português*) | Latin | SVO | ✅ Shipped | ❌ |
-| 7 | Polish (*polski*) | Latin | SVO | ✅ Shipped | ❌ |
-| 8 | Turkish (*Türkçe*) | Latin | SOV | ✅ Shipped | ❌ |
-| 9 | Vietnamese (*Tiếng Việt*) | Latin | SVO | ✅ Shipped | ❌ |
-| 10 | Romanian (*română*) | Latin | SVO | ✅ Shipped | ❌ |
-| 11 | Dutch (*Nederlands*) | Latin | V2/SOV | ✅ Shipped | ❌ |
-| 12 | Hungarian (*magyar*) | Latin | SOV | ✅ Shipped | ❌ |
-| 13 | Czech (*čeština*) | Latin | free | ✅ Shipped | ❌ |
-| 14 | Slovak (*slovenčina*) | Latin | free | ✅ Shipped | ❌ |
-| 15 | Swedish (*svenska*) | Latin | SVO | ✅ Shipped | ❌ |
-| 16 | Norwegian (*norsk bokmål*) | Latin | SVO | ✅ Shipped | ❌ |
-| 17 | Danish (*dansk*) | Latin | SVO | ✅ Shipped | ❌ |
-| 18 | Finnish (*suomi*) | Latin | SVO | ✅ Shipped | ❌ |
-| 19 | Catalan (*català*) | Latin | SVO | ✅ Shipped | ❌ |
-| 20 | Arabic (*العربية*) | Arabic (RTL) | VSO | ✅ Shipped | ❌ |
-| 21 | Korean (*한국어*) | Hangul | SOV | ✅ Shipped | ❌ |
-| 22 | Japanese (*日本語*) | Kanji+Hiragana+Katakana | SOV | ✅ Shipped | ❌ |
-| 23 | Greek (*Ελληνικά*) | Greek | SVO | ✅ Shipped | ❌ |
-| 24 | Hebrew (*עברית*) | Hebrew (RTL) | SVO | ✅ Shipped | ❌ |
-| 25 | Thai (*ไทย*) | Thai | SVO | ✅ Shipped | ❌ |
-| 26 | Khmer (*ខ្មែរ*) | Khmer | SVO | ✅ Shipped | ❌ |
-| 27 | Burmese (*မြန်မာ*) | Myanmar | SOV | ✅ Shipped | ❌ |
-| 28 | Lao (*ລາວ*) | Lao | SVO | ✅ Shipped | ❌ |
-| 29 | Amharic (*አማርኛ*) | Ethiopic | SOV | ✅ Shipped | ❌ |
-| 30 | Tibetan (*བོད་ཡིག*) | Tibetan | SOV | ✅ Shipped | ❌ |
-| 31 | Cherokee (*ᏣᎳᎩ*) | Cherokee syllabary | SOV | ✅ Shipped | ❌ |
-| 32 | Mongolian (*ᠮᠣᠩᠭᠣᠯ*) | Mongolian traditional | SOV | ✅ Shipped | ❌ |
-| 33 | Armenian (*Հայերեն*) | Armenian | SOV | ✅ Shipped | ❌ |
-| 34 | Georgian (*ქართული*) | Georgian Mkhedruli | SOV | ✅ Shipped | ❌ |
-| 35 | Indonesian (*Bahasa Indonesia*) | Latin | SVO | ✅ Shipped | ❌ |
-| 36 | Malay (*Bahasa Melayu*) | Latin | SVO | ✅ Shipped | ❌ |
-| 37 | Filipino (*Tagalog*) | Latin | VSO | ✅ Shipped | ❌ |
-| 38 | Swahili (*Kiswahili*) | Latin | SVO | ✅ Shipped | ❌ |
-| 39 | Yoruba (*Èdè Yorùbá*) | Latin | SVO | ✅ Shipped | ❌ |
-| 40 | Hausa | Latin | SVO | ✅ Shipped | ❌ |
-| 62 | Mandarin Chinese (*中文*) | Han logograms | SVO | ✅ Shipped | ❌ |
+| 1 | Spanish (*español*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 2 | French (*français*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 3 | German (*deutsch*) | Latin | V2/SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 4 | Russian (*русский*) | Cyrillic | SVO | ✅ 46/46 keywords | ❌ |
+| 5 | Italian (*italiano*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 6 | Portuguese (*português*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 7 | Polish (*polski*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 8 | Turkish (*Türkçe*) | Latin | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 9 | Vietnamese (*Tiếng Việt*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 10 | Romanian (*română*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 11 | Dutch (*Nederlands*) | Latin | V2/SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 12 | Hungarian (*magyar*) | Latin | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 13 | Czech (*čeština*) | Latin | free | ✅ 46/46 keywords | ❌ |
+| 14 | Slovak (*slovenčina*) | Latin | free | ✅ 46/46 keywords | ❌ |
+| 15 | Swedish (*svenska*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 16 | Norwegian (*norsk bokmål*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 17 | Danish (*dansk*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 18 | Finnish (*suomi*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 19 | Catalan (*català*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 20 | Arabic (*العربية*) | Arabic (RTL) | VSO | ✅ 46/46 keywords | ❌ |
+| 21 | Korean (*한국어*) | Hangul | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 22 | Japanese (*日本語*) | Kanji+Hiragana+Katakana | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 23 | Greek (*Ελληνικά*) | Greek | SVO | ✅ 46/46 keywords | ❌ |
+| 24 | Hebrew (*עברית*) | Hebrew (RTL) | SVO | ✅ 46/46 keywords | ❌ |
+| 25 | Thai (*ไทย*) | Thai | SVO | ✅ 46/46 keywords | ❌ |
+| 26 | Khmer (*ខ្មែរ*) | Khmer | SVO | ✅ 46/46 keywords | ❌ |
+| 27 | Burmese (*မြန်မာ*) | Myanmar | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 28 | Lao (*ລາວ*) | Lao | SVO | ✅ 46/46 keywords | ❌ |
+| 29 | Amharic (*አማርኛ*) | Ethiopic | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 30 | Tibetan (*བོད་ཡིག*) | Tibetan | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 31 | Cherokee (*ᏣᎳᎩ*) | Cherokee syllabary | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 32 | Mongolian (*ᠮᠣᠩᠭᠣᠯ*) | Mongolian traditional | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 33 | Armenian (*Հայերեն*) | Armenian | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 34 | Georgian (*ქართული*) | Georgian Mkhedruli | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 35 | Indonesian (*Bahasa Indonesia*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 36 | Malay (*Bahasa Melayu*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 37 | Filipino (*Tagalog*) | Latin | VSO | ✅ 46/46 keywords | ❌ |
+| 38 | Swahili (*Kiswahili*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 39 | Yoruba (*Èdè Yorùbá*) | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 40 | Hausa | Latin | SVO | ✅ 46/46 keywords | ❌ |
+| 41 | Persian (*فارسی*) | Perso-Arabic (RTL) | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 42 | Pashto (*پښتو*) | Perso-Arabic (RTL) | SOV | ✅ 46/46 keywords, SOV supported | ❌ |
+| 62 | Mandarin Chinese (*中文*) | Han logograms | SVO | ✅ 46/46 keywords | ❌ |
+
+**BUG-170 (2026-08-10)**: the "global languages" round of the
+keyword-parity audit (following BUG-166's Sanskrit/Hindi/Marathi and
+BUG-169's 10-dialect India sweep). Found 49 of these 60 keyword-table
+functions each missing 3-44 of the 46 required structure keywords --
+`Reduce`/`With`/`EPrint` was the near-universal minimal gap; several
+Latin-script dialects' native (accented) tables were only 15-30%
+populated, since most of their real coverage lives in a sibling
+`_ascii_keyword` table instead (both are consulted for a pragma-
+declared file -- see `Lexer::lex_ident`'s dispatch chain -- so the two
+tables' union is what actually matters). All 43 affected dialects are
+now fully 46/46 -- confirmed both by a mechanical union-aware parity
+check and by real `vanic check`/`run` smoke tests. Two dialects
+(Persian, Pashto) had a working, complete keyword table in `src/
+lexer.rs` this whole time but were never listed in either tier of this
+document -- added above. Also found and fixed a latent, unrelated bug
+while auditing Pashto: 5 keyword entries (`As`/`Else`/`While`/`For`/
+`Mut`) were spelled with an internal space (e.g. `"په توګه"` for `As`)
+-- these could never match, since Pashto has no multi-word merge pass
+(unlike Devanagari's), so the lexer's whitespace-delimited tokenizer
+could never produce the multi-token span the pattern expected. Fixed
+by fusing each into a single token.
+
+**SOV vs. SVO**: the doc's own Word-order column already flagged which
+Tier II dialects are verb-final -- German (V2/SOV in subordinate
+clauses), Turkish, Dutch (V2/SOV), Hungarian, Korean, Japanese,
+Burmese, Amharic, Tibetan, Cherokee, Mongolian, Armenian, Georgian,
+Persian, and Pashto. As with the Tier I finding, the parser's SOV
+verb-at-end grammar turned out to already be dialect-agnostic (keyed
+on `TokenKind`, not the declared dialect), so no parser changes were
+needed -- verified directly against Japanese (Kanji/Hiragana/
+Katakana), Korean (Hangul), and Turkish (Latin) with real compile-and-
+run programs on both backends, including the `IDENT for ... { }`
+range-for SOV shape. VSO languages (Arabic, Filipino) and free-word-
+order ones (Czech, Slovak) correctly do NOT get SOV grammar forced on
+them -- their existing keyword-first surface already matches their
+natural order.
 
 ---
 

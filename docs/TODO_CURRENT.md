@@ -12073,3 +12073,104 @@ Full-corpus re-verification: `cargo test --release` (2882 lib tests +
 baseline exactly).
 
 Next free bug number is **BUG-170**.
+
+## BUG-170 (2026-08-10) -- "global languages" keyword-parity round (49 of 60 dialect functions), Pashto dead multi-word entries, SOV-vs-SVO check, FIXED
+
+Third round of the keyword-parity audit, per explicit request to
+follow the India round (BUG-169) with a separate pass over the
+remaining Tier II (global) dialects in `docs/languages.md`.
+
+**Scope**: every keyword-table function in `src/lexer.rs` outside the
+10 India-dialect ones BUG-169 already covered -- 60 functions total
+across ~43 distinct dialects (several Latin-script dialects have both
+a native accented table and a fallback ASCII table; a handful of
+dialects are ASCII-only).
+
+**Keyword parity**: a mechanical audit (same method as BUG-166/169)
+found 49 of the 60 functions missing between 3 and 44 of the 46
+required structure keywords. `Reduce`/`With`/`EPrint` was the
+near-universal minimal gap (~35 functions affected by just those
+three); the worst cases (`hausa_keyword`, `norwegian_keyword`,
+`finnish_keyword`, `spanish_keyword`, `french_keyword`, `german_
+keyword`, `portuguese_keyword`, `catalan_keyword`, `polish_keyword`,
+`danish_keyword`, `vietnamese_ascii_keyword` -- 33-44 missing each)
+turned out to be a red herring on first read: `Lexer::lex_ident`'s
+dispatch tries every dialect's NATIVE (accented) table first, then
+falls through to a second match keyed on the file's declared pragma
+that calls that SAME dialect's `_ascii_keyword` table -- so a pragma-
+declared file's real keyword set is the union of both tables, and
+several of those "33-44 missing" native tables were only ever meant
+to hold the entries that actually need a diacritic, with the bulk of
+real coverage already living in the (separately near-complete) ASCII
+sibling. Recomputing gaps as a union across all 17 split-table
+dialects showed every one of them was ALREADY functionally complete
+once its ASCII table was fixed -- no native-table work needed beyond
+that. Added 1-24 new spellings per remaining incomplete function,
+following each dialect's own established vocabulary register
+(reusing the same word across a dialect's native+ASCII table pair
+where the word is already diacritic-free, since `_ascii_keyword` and
+its native sibling are two independent Rust match blocks and
+identical literal strings across them are harmless).
+
+**Regression caught mid-round (real bug in my own additions, not
+pre-existing)**: several of the new spellings were single ASCII
+characters (`i` for `In` in Danish/Norwegian/Swedish's ASCII and
+native tables, `v` for `In` in Slovak/Czech, `s` for `With` in
+Slovak, `z` for `With` in Polish, `e` for `Is` in Italian) --
+`vanic check examples` dropped from 940 to 922 immediately after,
+because `i` collides with the near-universal loop-counter variable
+name convention (`examples/language/{danish,norwegian,swedish}/*.vani`
+all declare a local named `i`) and `v`/`s`/`z`/`e` collide the same
+way in the Slovak/Czech/Polish/Italian examples. All 10 replaced with
+longer, unambiguous words (e.g. Danish `i` -> `indeni` "inside",
+Slovak `s` -> `spolu` "together", Italian `e` -> `risulta` "results
+in"); `vanic check examples` returned to exactly 940/940 (same file
+set, diffed against the pre-BUG-170 baseline, not just the same
+count) afterward. Documented here as a caution for any future large-
+scale keyword-coinage pass: single-character ASCII spellings are a
+much higher collision risk with real user code than they first
+appear, even for languages where the *word itself* really is one
+letter (Slovak "s"/"v", Danish/Norwegian/Swedish "i" as poetic-license
+shortenings) -- prefer the fuller form.
+
+**Pashto dead multi-word entries (separate, unrelated bug, found
+opportunistically)**: `pashto_keyword` had 5 entries whose string
+literal contained a space (`"په توګه"` => `As`, `"که نه"` => `Else`,
+`"تر څو"` => `While`, `"هر یو"` => `For`, `"د بدلون وړ"` => `Mut`).
+These could never match -- the lexer's tokenizer splits on
+whitespace, and Pashto has no multi-word merge pass analogous to
+Devanagari's `merge_multi_word_devanagari_aliases`. Confirmed dead
+via a minimal repro (`5 په توګه i64` failed with "expected ';'" right
+after `5`) before fixing. A repo-wide scan confirmed this pattern is
+unique to Pashto -- no other dialect table has a space-containing key.
+Fixed by fusing each into a single token (`لکه`, `کهنه`, `ترڅو`,
+`هریو`, `بدلېدونکی` respectively); re-verified all 4 testable ones
+(`Mut` untested end-to-end, only via the mechanical parity check)
+parse and run correctly.
+
+**SOV vs. SVO**: `docs/languages.md`'s own Word-order column already
+flags which Tier II dialects are verb-final (Turkish, Hungarian,
+Korean, Japanese, Burmese, Amharic, Tibetan, Cherokee, Mongolian,
+Armenian, Georgian, Persian, Pashto, plus German/Dutch's V2-in-
+subordinate-clauses SOV). As with the Tier I finding, the parser's
+SOV verb-at-end grammar turned out to already be dialect-agnostic
+(TokenKind-keyed, not dialect-name-gated) -- verified directly with
+real compile-and-run programs against Japanese, Korean, and Turkish
+(three different script families), including the `IDENT for ... { }`
+range-for SOV shape. No parser changes needed.
+
+Regression tests (`src/lib.rs`): `bug170_global_dialects_structure_
+keyword_parity` mechanically re-derives per-dialect coverage from
+`src/lexer.rs`'s own source via `include_str!`, correctly modeling
+the native+ascii union for the 17 split-table dialects (no hand-
+transcription of ~2000 spellings across 60 functions).
+`bug170_pashto_dead_multiword_entries_now_reachable` compiles a real
+Pashto program exercising 3 of the 5 previously-dead entries.
+
+Full-corpus re-verification: `cargo test --release` (2884 lib tests +
+12 other suites, 0 failed), `vanic check examples` (940 ok, exact same
+file set as the pre-BUG-170 baseline, not just the same count),
+`tools/leak_sweep.py` (935 compiled+run clean, 4 flagged -- matches
+baseline exactly).
+
+Next free bug number is **BUG-171**.
