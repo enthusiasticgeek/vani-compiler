@@ -11789,4 +11789,34 @@ including a Var-sourced, non-loop-carried regression guard -- 1
 real-subprocess `tests/run_end_to_end.rs` test confirming message
 parity with exit codes deliberately unchanged).
 
+## 3 more localfuzz findings (2026-08-10, after BUG-164 shipped) -- 1 stale, 1 more corpus artifact, 1 new characteristic documented (no fix)
+
+- `8ceea3f964` (korean/early_exit.vani, overflow-divergence shape) --
+  STALE. Re-ran against the current BUG-162-fixed binary: both
+  backends now print the identical message. The localfuzz harness ran
+  this against an older binary; not a new gap.
+- `e2447c8ead` (konkani/basics.vani, both-backends-timeout) -- another
+  confirmed corpus artifact (10th total): the fuzzer deleted a `i = i
+  - 1;` decrement from a countdown loop, a genuine infinite loop in
+  the mutated source. Same conclusion as the earlier 9.
+- `22a310f619` (german/control_flow.vani) -- a NEW, distinct shape:
+  ASYMMETRIC timeout (C finishes cleanly, LLVM hangs). Root cause:
+  the mutation changes a loop's start value to `i64::MIN`, creating a
+  ~9.2-quintillion-iteration loop. `gcc -O2` (`--backend=c`) and `llc`
+  (`vanic build`'s AOT path) both resolve the loop's final value via
+  standard induction-variable/closed-form analysis without literally
+  iterating -- confirmed by testing the AOT binary, which also
+  completes instantly. `lli` (what `vanic run`'s default JIT path
+  uses) has no equivalent optimization and hangs. NOT a compiler bug
+  -- codegen is correct and identical in spirit on both paths; the
+  gap is `lli`'s lack of loop-closed-form optimization, an inherent,
+  out-of-vāṇी's-control characteristic of using an interpreter for
+  the default `vanic run` execution strategy. Full writeup (including
+  why this isn't fixable without either patching upstream LLVM
+  tooling or changing `vanic run`'s default execution strategy
+  entirely -- a much bigger, separate design question) is in `docs/
+  BUG_PATTERN_AUDIT_TODO_9.md`'s "3 more findings, landed after
+  BUG-164 shipped" section. Logged as a known characteristic for
+  future reference, not a fix candidate.
+
 Next free bug number is **BUG-165**.

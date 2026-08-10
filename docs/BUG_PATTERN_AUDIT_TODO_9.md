@@ -387,6 +387,61 @@ pursued): `d8f20b7050`'s same-thread double-lock is arguably a missed
 static-analysis opportunity for vāṇी's existing lock-order checker,
 which doesn't currently catch this pattern in a straight-line scope.
 
+### 3 more findings, landed after BUG-164 shipped (2026-08-10, later still)
+
+- `20260810-170656-backend-divergence-8ceea3f964` (base `examples/
+  language/korean/early_exit.vani`) -- the familiar overflow-
+  divergence shape (C: rc=134 + "integer overflow in int64_t add";
+  LLVM: rc=3, empty stderr). STALE, not a new gap: re-ran against the
+  current (BUG-162-fixed) binary and both backends now print the
+  identical message. The localfuzz harness evidently ran this one
+  against an older binary before BUG-162 landed/rebuilt. No action
+  needed -- this is a clean confirmation of BUG-162's fix, not a
+  regression.
+- `20260810-165451-run-crash-e2447c8ead` (base `examples/language/
+  konkani/basics.vani`) -- both backends hang. Same shape as the 8
+  above: diffing against the base example shows the fuzzer deleted
+  the `i = i - 1;` decrement from a `while i > 0 { ... }` countdown
+  loop, so `i` never reaches 0 -- a genuine infinite loop in the
+  mutated source, not a compiler/runtime bug. Brings the confirmed-
+  corpus-artifact timeout count to 9.
+- **`20260810-161013-run-crash-22a310f619`** (base `examples/
+  language/german/control_flow.vani`) -- NEW SHAPE, worth its own
+  writeup: unlike every other timeout finding, this one is
+  ASYMMETRIC -- C finishes cleanly (`rc=0`, correct output) while
+  LLVM (`vanic run`'s default, via `lli`) times out. Root cause,
+  confirmed directly: the mutation changes a loop's start value from
+  `0` to `-9223372036854775808 + 0` (`i64::MIN`), turning `while i < 5
+  { i = i + 1; }` into a ~9.2-quintillion-iteration loop (`5 -
+  i64::MIN` trips). `gcc -O2` (what `--backend=c` compiles with) and
+  `llc` (what `vanic build`'s AOT path uses) both apply standard
+  induction-variable / closed-form loop analysis and resolve `i`'s
+  final value directly WITHOUT literally executing the loop --
+  confirmed by testing `vanic build`'s AOT binary on this exact repro,
+  which also completes instantly, matching C. `lli`, the JIT
+  INTERPRETER `vanic run` uses by default, has no equivalent
+  optimization and executes each iteration literally, so it hangs on
+  any loop with an astronomically large trip count regardless of
+  whether the loop body has any real work in it. **Not a compiler bug**
+  -- both codegen paths (tree/SSA, C/LLVM) produce semantically
+  identical, correct code; the difference is entirely in the
+  EXECUTION strategy `vanic run` picks (JIT-interpret via `lli`) vs.
+  what `--backend=c` and `vanic build` do (compile with a real
+  optimizer). Not fixable without either (a) making `lli` itself
+  smarter about loop induction variables -- out of vāṇी's control,
+  that's upstream LLVM tooling -- or (b) `vanic run` switching its
+  default execution strategy away from `lli`, a much bigger design
+  question with its own tradeoffs (JIT startup latency, etc.), not
+  something to decide from one fuzzer finding. Documented here as a
+  known, inherent characteristic of `vanic run`'s current
+  architecture: an astronomically-large-trip-count loop (unlikely in
+  realistic programs, but not impossible -- e.g. a bug in a real
+  program's own loop bound computation) can make `vanic run`
+  APPEAR to hang even though the equivalent `--backend=c` or
+  `vanic build` invocation would return instantly. If this class of
+  finding recurs, this writeup is the reference; no new investigation
+  needed unless the mechanism looks different from this one.
+
 ---
 
 ## Process note for whoever picks this up
