@@ -296,6 +296,28 @@ thread_local! {
     ///   3. Emit env-save + free after each indirect call.
     pub(crate) static CLOSURE_AFF_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, Vec<(String, Type)>)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// BUG-155 (2026-08-09): `CLOSURE_AFF_REGISTRY` is keyed by the
+    /// LOCAL binding name a closure literal was directly constructed
+    /// at (populated by `lambda_lift_program`, which runs once, over
+    /// the whole program, before any function body is type-checked).
+    /// A closure that ESCAPES via a function's return value and gets
+    /// bound to a DIFFERENT name in the caller (`let say_hi =
+    /// make_greeter(...);`) was never registered under `say_hi` at
+    /// all, so its heap-allocated env struct leaked at the caller's
+    /// scope exit -- confirmed via a systematic ASan/LeakSanitizer
+    /// sweep (round 8). This registry closes that gap: function name
+    /// -> the name of the affine-closure-registered LOCAL variable
+    /// its body returns (when it returns one directly as a bare
+    /// `Var`). Populated once, right after `lambda_lift_program`
+    /// (so every function's own closure literals are already
+    /// registered in `CLOSURE_AFF_REGISTRY` by the time this runs --
+    /// no ordering dependence on which function gets type-checked
+    /// first). Consulted when checking `let x = some_fn(...);` where
+    /// `some_fn`'s return type is `Closure(..)`, to also register
+    /// `x` in `CLOSURE_AFF_REGISTRY` under the SAME env-struct-name/
+    /// fields as whatever `some_fn` itself returns.
+    pub(crate) static FN_RETURN_VAR_NAME: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// L5: set of env struct names whose closure binding has non-Copy
     /// captures. The C constructor checks this to choose malloc vs
     /// static __thread allocation.
@@ -320,6 +342,16 @@ thread_local! {
     /// change.
     pub(crate) static CURRENT_FN_PARAMS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// BUG-158 (2026-08-10): the current function's own name, set
+    /// alongside `CURRENT_FN_PARAMS` right before its body is
+    /// checked. Read by `reject_owned_str_escape_into_field` (in
+    /// checker.rs), which needs "is this a `__poll_*` function" but
+    /// is called from `check_expr`'s `StructLit` arm, which doesn't
+    /// have `&Function` in scope (only `check_one_stmt`'s arms do).
+    /// Same one-at-a-time-never-concurrent overwrite rationale as
+    /// `CURRENT_FN_PARAMS`.
+    pub(crate) static CURRENT_FN_NAME: std::cell::RefCell<String> =
+        std::cell::RefCell::new(String::new());
     /// Arc 8 v3.1 Phase 1 — registry of synthesized async-fn
     /// state machines. Each entry is a `(StructDecl, Function)`
     /// pair: the per-async-fn task struct + its companion

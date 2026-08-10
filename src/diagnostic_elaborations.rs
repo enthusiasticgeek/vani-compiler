@@ -1159,6 +1159,37 @@ pub fn cast_unsupported(from_ty: &str, to_ty: &str) -> Vec<String> {
     ]
 }
 
+/// Auto-borrowing a freshly-owned `OwnedStr` into a `Str`-typed
+/// struct field (via `h.f = owned_expr;` or `Struct { f: owned_expr,
+/// .. }`) -- rejected because the struct can outlive the `OwnedStr`
+/// source's own scope. BUG-158 (2026-08-10): found via a corpus-wide
+/// ASan sweep as a real, general (non-async) heap-use-after-free --
+/// `{ let owned: OwnedStr = f(); h.f = owned; }` frees `owned` at the
+/// block's end while `h.f` (an alias into the same buffer) is still
+/// readable afterward.
+pub fn owned_str_escape_into_field(field: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Field `{}` is declared `Str` (a non-owning view), but the value \
+             being stored is a freshly-computed `OwnedStr` (a heap-owning \
+             value) -- copying its pointer into the field doesn't transfer \
+             ownership, and the struct holding the field can easily outlive \
+             the `OwnedStr` source's own scope.",
+            field
+        ),
+        "When that happens, the `OwnedStr` source is freed at the end of \
+         its own scope while the struct's field still points at the same \
+         (now-freed) buffer -- a genuine use-after-free the first time the \
+         field is read afterward, not just a leak."
+            .to_string(),
+        "Either declare the field as `OwnedStr` instead of `Str` so it \
+         owns its own copy (the struct's Drop then frees it correctly), or \
+         store a `Str` value that's actually safe to view long-term (a \
+         string literal, or a binding you know outlives the struct)."
+            .to_string(),
+    ]
+}
+
 /// A built-in function received an argument of the wrong type.
 pub fn builtin_wrong_arg_type() -> Vec<String> {
     vec![

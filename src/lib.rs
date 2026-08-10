@@ -10496,6 +10496,425 @@ mod tests {
     }
 
     #[test]
+    fn mixed_payload_enum_box_variant_emits_free_on_c_backend() {
+        // BUG-153: found via a systematic ASan/LeakSanitizer sweep of
+        // the full example corpus (round 8 -- "not sure if you have
+        // asan and/or valgrind... check for all examples or libs for
+        // any potential leaks"). A mixed-payload enum (variants with
+        // DIFFERENT payload types, e.g. `Int(Box<i64>)` and
+        // `Shape(Box<dyn Drawable>)`) never freed a `Box<T>`-payload
+        // variant at scope exit -- `emit_enum_value_drop`'s mixed-
+        // payload switch only ever handled `OwnedStr`/`Vec<T>`
+        // payloads, silently emitting no free call for Box (the
+        // single-payload/legacy path already correctly handled Box;
+        // the mixed-payload path just never got the same treatment).
+        // Confirmed a real 16-byte leak (2 allocations) on the exact
+        // shape below before the fix.
+        let source = r#"
+            interface Drawable { fn area(self: ref Self) -> i64; }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+            }
+            enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+            fn main() -> i64 {
+              let a: Val = Val.Int(box(42));
+              let c: Circle = Circle { r: 7 };
+              let b: Val = Val.Shape(box(c as dyn Drawable));
+              let e: Val = Val.Empty;
+              print 42;
+              return 42;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("free(v_a.u.v_Int)"),
+            "expected a free call for the Box<i64> variant:\n{}",
+            c
+        );
+        assert!(
+            c.contains("free(v_a.u.v_Shape.data)") || c.contains("free(v_b.u.v_Shape.data)"),
+            "expected a free call for the Box<dyn Drawable> variant's .data slot:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn scope_exit_drops_run_in_reverse_declaration_order_not_alphabetical() {
+        // BUG-154: found via the same systematic ASan sweep. `Env`
+        // stores each scope as a `BTreeMap<String, VarInfo>` --
+        // iterated (and therefore dropped) alphabetically by binding
+        // NAME, not by declaration order. A `ReadGuard` obtained
+        // from a `RwLock` stored inside a `Vec` depends on that
+        // Vec's storage staying alive until the guard itself is
+        // dropped -- but `"locks" < "rg"` alphabetically, so `locks`
+        // (the Vec) was freed BEFORE `rg` (the guard) tried to
+        // unlock through it: a real, name-dependent heap-use-after-
+        // free, confirmed via AddressSanitizer before this fix (not
+        // hypothetical). Every scope-exit drop site now sorts by
+        // `decl_span.start` descending (later-declared drops first)
+        // instead of trusting the map's natural iteration order.
+        let source = r#"
+            fn main() -> i64 {
+              let r1: RwLock<i64> = rwlock_new(100);
+              let locks: Vec<RwLock<i64>> = vec(r1);
+              let rg = rwlock_read(mut ref locks[0]);
+              print read_guard_get(ref rg);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        let unlock_pos = c
+            .find("intent_read_guard_int64_t_unlock(&v_rg)")
+            .expect("expected rg to be unlocked at scope exit");
+        let free_pos = c
+            .find("intent_vec_intent_rwlock_i64__free(v_locks)")
+            .expect("expected locks to be freed at scope exit");
+        assert!(
+            unlock_pos < free_pos,
+            "rg must unlock BEFORE locks is freed (reverse declaration order), \
+             got unlock at {unlock_pos}, free at {free_pos}:\n{c}"
+        );
+    }
+
+    #[test]
+    fn closure_returned_from_factory_function_frees_env_on_scope_exit() {
+        // BUG-155: found via the round-8 systematic ASan sweep. A
+        // closure with non-Copy captures gets registered in
+        // `CLOSURE_AFF_REGISTRY` -- keyed by the LOCAL binding name
+        // it was directly constructed at (`g` inside `make_greeter`,
+        // populated by `lambda_lift_program`, which runs once over
+        // the whole program before any type-checking). A closure
+        // that ESCAPES via a function's return value and gets bound
+        // to a DIFFERENT name in the caller (`say_hi`) was never
+        // registered under THAT name, so `say_hi`'s scope-exit Drop
+        // never freed the env struct -- confirmed a real 8-byte leak.
+        // Fixed via `FN_RETURN_VAR_NAME`: populated once, right after
+        // `lambda_lift_program`, mapping a function name to the
+        // affine-closure-registered local it returns; consulted when
+        // checking `let x = some_fn(...)` to also register `x`.
+        let source = r#"
+            fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+              let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+              return g;
+            }
+            fn main() -> i64 {
+              let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("v_say_hi") && c.contains("free("),
+            "expected say_hi's env struct to be freed at scope exit:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn discarded_call_to_affine_closure_frees_env_on_c_backend() {
+        // BUG-156, found while verifying BUG-155: a MORE GENERAL,
+        // more fundamental gap than the factory-function case above.
+        // Calling an affine closure (`g(1);`, no `let` binding --
+        // lowers to `TypedStmt::Discard`) marks the binding "moved"
+        // (correctly rejecting a second call, which would read the
+        // already-freed captured field -- a real use-after-free that
+        // protection prevents). But nothing at the call site ever
+        // freed the ENV STRUCT itself -- that free only ever existed
+        // in the `TypedStmt::Let` emission path (`let r = g(1);`),
+        // for when the call's result is actually bound to a name.
+        // `TypedStmt::Discard`'s C emission had no `Type::Closure`
+        // handling at all (impossible to add one the same way as
+        // Let's, since `expr.ty` there is the CALL'S RETURN type,
+        // not the callee's type) -- confirmed a real leak, on a
+        // closure that was never even returned from another
+        // function, just constructed and called directly.
+        let source = r#"
+            fn main() -> i64 {
+              let name: OwnedStr = "bob" + "";
+              let g = fn(x: i64) -> i64 { print "hi,", name, x; return 0; };
+              g(1);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("__env_sv_discard") && c.contains("free((void*)(uintptr_t)__env_sv_discard)"),
+            "expected the discarded closure call to free its env struct:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn fresh_owned_str_narrowed_to_str_gets_a_real_owning_temp() {
+        // BUG-157 (2026-08-09): `can_assign`'s `OwnedStr -> Str`
+        // auto-borrow assumes an already-live OwnedStr binding does
+        // the owning ("its drop fires at the original scope's
+        // end") -- true for `let label: Str = some_owned_var;`
+        // (the RHS is a `Var`; that binding keeps its own
+        // scope-exit Drop, confirmed leak-free separately), but
+        // false when the RHS is a fresh, never-bound
+        // OwnedStr-producing expression like `i64_to_str(42)`:
+        // nothing ever owned that allocation, so it leaked --
+        // found general-purpose (not async-specific) via a
+        // corpus-wide ASan/LeakSanitizer sweep (round 8). Fix:
+        // synthesize a real sibling `let` for the OwnedStr result
+        // so it gets a real scope-exit Drop, then bind the
+        // original name to a `Str` view of that temp.
+        let source = r#"
+            fn main() -> i64 {
+              let label: Str = i64_to_str(42);
+              print label;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("__owned_str_coerce_") && c.contains("free((void*)v___owned_str_coerce_"),
+            "expected a synthetic OwnedStr temp with its own free:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn async_poll_owned_str_narrowing_keeps_original_leaky_but_safe_form() {
+        // BUG-157 follow-up: the general fix above is deliberately
+        // EXCLUDED for `__poll_*` functions (the v3.1 async
+        // state-machine transform's output, `parser.rs`'s
+        // `try_v31_transform`, which runs at PARSE time -- before
+        // this checker pass ever sees the body). A checker-
+        // synthesized temp introduced AFTER the transform already
+        // ran would be invisible to its hoisting pass and get freed
+        // at the wrong scope -- confirmed via direct ASan testing to
+        // turn a leak into a heap-use-after-free. Assert the
+        // synthetic-temp rewrite still does NOT fire inside a
+        // `__poll_` function; this defense-in-depth guard stays
+        // correct and necessary for any OwnedStr-returning
+        // expression the async-transform-side fix below doesn't
+        // recognize (its own allowlist is deliberately small).
+        //
+        // BUG-157/158 async instance FIXED (2026-08-10), separately,
+        // in the async transform itself -- see
+        // `async_transform_hoists_owned_str_local_as_owned_str_field`
+        // below for the real fix and its own regression test.
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: Str = i64_to_str(mode);
+              let n: i64 = match label {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+              while true {
+                let r: i64 = __poll_pick(t);
+                if r != 0 - 2 { return r; }
+                let _ = epoll_wait_one(ep, 1000);
+              }
+              return 0;
+            }
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let server: i64 = tcp_listen(0);
+              let cfd: i64 = tcp_accept(server);
+              let _ = tcp_set_nonblocking(cfd);
+              let _ = epoll_add_read(ep, cfd);
+              let t0: Task__pick = pick(cfd, 1);
+              let r0: i64 = drive(ep, mut ref t0);
+              print "mode=1:", r0;
+              let _ = tcp_close(cfd);
+              let _ = tcp_close(server);
+              let _ = epoll_close(ep);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            !c.contains("__owned_str_coerce_"),
+            "the OwnedStr->Str synthetic-temp rewrite must not fire inside a __poll_ function \
+             (it would free the buffer at the wrong scope and cause a use-after-free):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn async_transform_hoists_owned_str_local_as_owned_str_field() {
+        // BUG-157/158 async instance FIXED (2026-08-10): the same
+        // `let label: Str = i64_to_str(mode);` shape as the test
+        // above used to leak (BUG-157) and, if manually split into
+        // two `let`s, use-after-free (BUG-158's original finding).
+        // Root cause: `try_v31_transform` (parser.rs) hoists a
+        // cross-state `Str` local by aliasing a state-local
+        // `OwnedStr` temp into a `Str`-typed Task struct field --
+        // the temp gets freed at its own (narrower) state's end
+        // while the hoisted alias is read in a later state.
+        //
+        // Fix: when a cross-state local is declared `Str` but its
+        // value actually comes from a known OwnedStr source (here,
+        // `i64_to_str`, in a small explicit allowlist -- the
+        // transform has no full type inference to draw on), hoist
+        // it into the Task struct as an `OwnedStr` FIELD instead.
+        // The existing, already-correct generic struct-Drop
+        // machinery then frees it whenever the Task struct itself
+        // is dropped, exactly like any other OwnedStr-holding
+        // struct. Assert the field's declared type in the emitted
+        // C is a plain owning pointer (no separate `__v3_tmp_label`
+        // alias escaping past its own scope), and that the field
+        // gets freed both on overwrite (next poll tick) and at the
+        // Task's own scope exit.
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: Str = i64_to_str(mode);
+              let n: i64 = match label {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+              while true {
+                let r: i64 = __poll_pick(t);
+                if r != 0 - 2 { return r; }
+                let _ = epoll_wait_one(ep, 1000);
+              }
+              return 0;
+            }
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let server: i64 = tcp_listen(0);
+              let cfd: i64 = tcp_accept(server);
+              let _ = tcp_set_nonblocking(cfd);
+              let _ = epoll_add_read(ep, cfd);
+              let t0: Task__pick = pick(cfd, 1);
+              let r0: i64 = drive(ep, mut ref t0);
+              print "mode=1:", r0;
+              let _ = tcp_close(cfd);
+              let _ = tcp_close(server);
+              let _ = epoll_close(ep);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("C backend emits a program");
+        assert!(
+            c.contains("free((void*)v___t->label)") || c.contains("free((void*)(v___t->label))"),
+            "expected the Task struct's label field to be freed on overwrite \
+             (confirms it's tracked as an owned value, not a leaked/aliased view):\n{}",
+            c
+        );
+        assert!(
+            c.contains("free((void*)v_t0.label)") || c.contains("free((void*)(v_t0.label))"),
+            "expected the Task struct's label field to be freed at its own \
+             scope exit in main (confirms the generic struct-Drop machinery \
+             now owns it):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn field_assign_owned_str_into_str_field_rejected() {
+        // BUG-158 (2026-08-10): found while writing a tutorial
+        // workaround note for BUG-157's async caveat -- the proposed
+        // workaround itself use-after-frees, which led to the real,
+        // general (non-async) root cause: `can_assign`'s
+        // `OwnedStr -> Str` auto-borrow has no escape tracking for
+        // `Stmt::FieldAssign`. `h.s = owned;` inside a block narrower
+        // than `h`'s own scope frees `owned` at the block's end while
+        // `h.s` (an alias into the same buffer) is read afterward --
+        // confirmed a real heap-use-after-free via direct ASan
+        // testing before this fix. Now rejected at compile time.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn main() -> i64 {
+              let h: Holder = Holder { s: "", n: 0 };
+              {
+                let owned: OwnedStr = i64_to_str(99);
+                h.s = owned;
+              }
+              print h.s;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("OwnedStr -> Str field escape must be rejected");
+        let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("freshly-owned `OwnedStr`") && m.contains("use-after-free")),
+            "expected the OwnedStr-escape-into-field diagnostic; got: {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn struct_lit_owned_str_field_init_rejected() {
+        // BUG-158: same escape gap, but at StructLit field-init time
+        // instead of a later FieldAssign -- `return Holder { s: owned,
+        // .. };` frees `owned` at the end of `make`'s own scope while
+        // the returned struct's `s` field is read afterward in the
+        // caller. Confirmed a real heap-use-after-free before this
+        // fix; now rejected at compile time.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn make() -> Holder {
+              let owned: OwnedStr = i64_to_str(77);
+              return Holder { s: owned, n: 1 };
+            }
+            fn main() -> i64 {
+              let h: Holder = make();
+              print h.s;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("OwnedStr -> Str struct-literal escape must be rejected");
+        let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("freshly-owned `OwnedStr`") && m.contains("use-after-free")),
+            "expected the OwnedStr-escape-into-field diagnostic; got: {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn owned_str_field_declared_as_owned_str_still_compiles() {
+        // BUG-158 regression guard: the fix must not reject the
+        // SAFE, correct alternative it recommends -- declaring the
+        // field as `OwnedStr` (so it owns its own copy) instead of
+        // `Str`. This must keep compiling and running cleanly.
+        let source = r#"
+            struct Holder { s: OwnedStr, n: i64 }
+            fn make() -> Holder {
+              let owned: OwnedStr = i64_to_str(77);
+              return Holder { s: owned, n: 1 };
+            }
+            fn main() -> i64 {
+              let h: Holder = make();
+              print h.s;
+              return 0;
+            }
+        "#;
+        compile(source).expect("OwnedStr-typed field should compile fine");
+    }
+
+    #[test]
+    fn str_literal_field_assign_and_struct_lit_still_compile() {
+        // BUG-158 regression guard: only OwnedStr sources into Str
+        // fields are rejected -- an ordinary Str literal (already
+        // safe, `.rodata`-backed, never freed) must still work in
+        // both FieldAssign and StructLit field-init positions.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn main() -> i64 {
+              let h: Holder = Holder { s: "hello", n: 0 };
+              h.s = "world";
+              print h.s;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Str literal into Str field should compile fine");
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`
@@ -48246,6 +48665,72 @@ função main() -> i64 {
             c.contains("char* k_owned = (char*)malloc(nk + 1)")
                 && c.contains("char* v_owned = (char*)malloc(nv + 1)"),
             "expected both K and V clone allocations"
+        );
+    }
+
+    #[test]
+    fn hashmap_insert_frees_fresh_owned_str_key_and_value() {
+        // BUG-159 (2026-08-10): root-caused via a corpus-wide ASan
+        // sweep (docs/BUG_PATTERN_AUDIT_TODO_8.md's "hashmap_strstr/
+        // strv root cause" section). `hashmap_insert(mut ref m, K,
+        // V)` leaked any argument that's a fresh, never-bound
+        // OwnedStr expression (e.g. i64_to_str(1) passed directly,
+        // not through a let) -- the runtime helper clones K/V into
+        // new storage on every path but never frees the caller's
+        // originals, and an unbound temporary has no other owner.
+        // Fixed by reusing the same "conservative whitelist"
+        // freshness check print/len already use
+        // (is_fresh_owned_str): a fresh K/V argument is bound to a
+        // stable temp and freed right after the call.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        assert!(
+            c.contains("_intent_hm_k") && c.contains("_intent_hm_v")
+                && c.contains("free((void*)_intent_hm_k)")
+                && c.contains("free((void*)_intent_hm_v)"),
+            "expected fresh K and V args to be bound to temps and freed \
+             after the insert call:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, OwnedStr> → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 2,
+            "expected both fresh K and V args to be freed in the LLVM \
+             output (at least the 2 from this insert call, likely more \
+             from other OwnedStr drops):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn hashmap_insert_does_not_double_free_owned_var_key_or_value() {
+        // BUG-159 regression guard: the freshness check must only
+        // fire for genuinely fresh (Call/Binary-Add) expressions --
+        // a K/V sourced from an EXISTING named OwnedStr binding must
+        // NOT be freed by the insert call site (that binding keeps
+        // its own scope-exit Drop; freeing here would double-free).
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let v: OwnedStr = i64_to_str(100);
+              let _ = hashmap_insert(mut ref m, k, v);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        assert!(
+            !c.contains("_intent_hm_k") && !c.contains("_intent_hm_v"),
+            "a Var-sourced K/V must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
         );
     }
 

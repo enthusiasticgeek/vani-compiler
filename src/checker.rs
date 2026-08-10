@@ -775,6 +775,25 @@ fn check_impl(
     // in the next closure under Level 3).
     lambda_lift_program(&mut program);
 
+    // BUG-155 (2026-08-09): record, for every function, which local
+    // variable (if any) its body returns directly as a bare `Var`
+    // that `lambda_lift_program` just registered as an affine
+    // closure. Must run here -- right after the lift, before any
+    // function body is type-checked -- so a CALLER function checked
+    // before its CALLEE (source order doesn't guarantee producers
+    // are checked before consumers) can still find the callee's
+    // affine-closure info via `FN_RETURN_VAR_NAME` +
+    // `CLOSURE_AFF_REGISTRY`, both fully populated for the whole
+    // program by this point. See `FN_RETURN_VAR_NAME`'s doc comment
+    // in ast.rs for the full leak this closes.
+    for function in &program.functions {
+        if let Some(returned_name) = find_returned_affine_closure_var(&function.body) {
+            crate::ast::FN_RETURN_VAR_NAME.with(|r| {
+                r.borrow_mut().insert(function.name.clone(), returned_name);
+            });
+        }
+    }
+
     // Closure #318: auto-fuse adjacent `let m = xs.map(f);
     // let t = m.fold(init, g);` patterns into a single
     // `vec_map_fold(ref xs, init, f, g)` call when `m` has
@@ -2263,6 +2282,44 @@ fn validate_main(
 ///   enforcement layer lands in a follow-up commit; this
 ///   first cut establishes the name-flow infrastructure.
 /// - Cross-module impl orphan rules unchecked in v1.
+/// BUG-155: does this statement list contain a `return <var>;`
+/// (at the top level, or one `if`/`else` level deep -- the common
+/// factory-function shapes) where `<var>` is a local binding
+/// `lambda_lift_program` already registered as an affine closure?
+/// Returns the first such variable name found. Deliberately doesn't
+/// chase every possible nesting (`while`/`for`/`match` bodies,
+/// deeper `if` nesting) -- a narrower, safer fix than a fully
+/// general control-flow walk; see `FN_RETURN_VAR_NAME`'s doc comment
+/// in ast.rs for why this is safe to under-detect (a missed case
+/// just leaves the existing leak in place, not a new bug) but must
+/// not over-detect (never fabricate a name that isn't a real,
+/// registered affine closure).
+fn find_returned_affine_closure_var(stmts: &[Stmt]) -> Option<String> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Return { expr, .. } => {
+                if let ExprKind::Var(name) = &expr.kind {
+                    let is_affine = crate::ast::CLOSURE_AFF_REGISTRY
+                        .with(|r| r.borrow().contains_key(name.as_str()));
+                    if is_affine {
+                        return Some(name.clone());
+                    }
+                }
+            }
+            Stmt::If { then_body, else_body, .. } => {
+                if let Some(name) = find_returned_affine_closure_var(then_body) {
+                    return Some(name);
+                }
+                if let Some(name) = find_returned_affine_closure_var(else_body) {
+                    return Some(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Closure #308 â€” lambda-lift anonymous fn expressions.
 ///
 /// Walks each top-level function's body / requires / ensures
@@ -10846,6 +10903,84 @@ fn dyn_src_synth_name() -> String {
     format!("__dyn_src_{}", DYN_SRC_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+fn owned_str_coerce_synth_name() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static OWNED_STR_COERCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("__owned_str_coerce_{}", OWNED_STR_COERCE_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+/// BUG-158 (2026-08-10): `can_assign`'s `OwnedStr -> Str` auto-borrow
+/// assumes the source's own scope outlives every read of the
+/// resulting view -- true for function args/comparisons/len() (the
+/// callee/comparison can't outlive the caller's stack frame) and for
+/// a plain `let` (BUG-157 gives it a real owning temp), but NOT for
+/// `Stmt::FieldAssign` or a `StructLit` field initializer: the
+/// destination struct can freely outlive the `OwnedStr` source's own
+/// (often much narrower) scope --
+/// `{ let owned: OwnedStr = f(); h.s = owned; }` frees `owned` at the
+/// block's end while `h.s` (an alias into the same buffer) is read
+/// afterward. Confirmed a real, general (non-async) heap-use-after-
+/// free via two independent minimal repros (one FieldAssign, one
+/// StructLit) during a corpus-wide ASan sweep, round 8.
+///
+/// Rather than attempt real escape/lifetime analysis (comparing the
+/// source's scope depth against the destination's, which the ref-
+/// scope-escape check elsewhere in this file already does for `ref`
+/// sources specifically -- but generalizing that to arbitrary struct
+/// lifetimes is a bigger undertaking than this fix warrants) this
+/// just REJECTS the coercion outright at these two positions,
+/// matching the codebase's established preference for compile-time
+/// rejection over unsound runtime behavior. A rejected program still
+/// has two straightforward fixes available (declare the field as
+/// `OwnedStr`, or supply an already-safe `Str` value) -- see
+/// `diagnostic_elaborations::owned_str_escape_into_field`.
+///
+/// EXCLUDED for `__poll_*` functions: the v3.1 async transform
+/// (`parser.rs`'s `try_v31_transform`) synthesizes exactly this
+/// FieldAssign shape internally to hoist a cross-state `Str` local
+/// into the Task struct. Rejecting it there would break the already-
+/// shipped (leaky-but-safe, not crashing) async Str-local feature
+/// wholesale; that leak is tracked separately (BUG-157's writeup in
+/// `docs/BUG_PATTERN_AUDIT_TODO_8.md`) and deliberately left as-is --
+/// fixing it properly needs the async transform's own hoisting
+/// strategy to change, not a rejection here.
+///
+/// Returns `true` (and has already pushed a diagnostic) when the
+/// caller should treat this as a compile error and skip the normal
+/// `coerce_checked` call for this value.
+fn reject_owned_str_escape_into_field(
+    source_ty: &Type,
+    field_ty: &Type,
+    field_name: &str,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let in_poll_fn = crate::ast::CURRENT_FN_NAME.with(|r| r.borrow().starts_with("__poll_"));
+    if in_poll_fn {
+        return false;
+    }
+    if matches!(source_ty, Type::OwnedStr) && matches!(field_ty, Type::Str) {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "cannot store a freshly-owned `OwnedStr` into `Str`-typed \
+                     field '{}' -- the struct can outlive the `OwnedStr`'s own \
+                     scope, which would free the buffer while the field is \
+                     still readable (a use-after-free)",
+                    field_name
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::owned_str_escape_into_field(
+                field_name,
+            )),
+        );
+        true
+    } else {
+        false
+    }
+}
+
 fn fresh_loop_val_name() -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static LOOP_VAL_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -11519,6 +11654,9 @@ fn check_function(
     // no push/pop stack needed.
     crate::ast::CURRENT_FN_PARAMS.with(|r| {
         *r.borrow_mut() = function.params.iter().map(|p| p.name.clone()).collect();
+    });
+    crate::ast::CURRENT_FN_NAME.with(|r| {
+        *r.borrow_mut() = function.name.clone();
     });
     let terminated = check_stmt_list(
         &function.body,
@@ -12531,12 +12669,40 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
     walk(body, diagnostics);
 }
 
+/// BUG-154 (2026-08-09): `Env::scopes` is `Vec<BTreeMap<String,
+/// VarInfo>>` -- keyed (and therefore iterated) by BINDING NAME,
+/// alphabetically, not by declaration order. Every scope-exit drop
+/// site used to iterate a scope's bindings directly and emit `Drop`
+/// statements in that alphabetical order, silently violating the
+/// "reverse declaration order" RAII convention this codebase's own
+/// comments claim everywhere (and correctly implement for STRUCT
+/// FIELDS, which iterate an ordered `Vec<(String, Type)>` instead of
+/// a name-keyed map). Confirmed via a systematic ASan/LeakSanitizer
+/// sweep: `let locks: Vec<RwLock<i64>> = ...; let rg =
+/// rwlock_read(mut ref locks[0]); ...` dropped `locks` (freeing the
+/// RwLock's storage) BEFORE `rg` (whose drop unlocks that same
+/// storage) purely because `"locks" < "rg"` alphabetically -- a
+/// real, name-dependent heap-use-after-free, not a hypothetical.
+/// Every bulk drop-list site now sorts by `decl_span.start`
+/// (descending -- later-declared, i.e. larger byte offset, drops
+/// first) before emitting, restoring true reverse-declaration order
+/// regardless of what the bindings happen to be named.
+fn sort_by_reverse_decl_order<T>(items: &mut [(String, T)], decl_span_of: impl Fn(&T) -> Span) {
+    items.sort_by(|(_, a), (_, b)| decl_span_of(b).start.cmp(&decl_span_of(a).start));
+}
+
 fn emit_current_scope_drops(
     env: &Env,
     body: &mut Vec<TypedStmt>,
     _diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for (name, info) in env.current_scope().iter() {
+    let mut scope_entries: Vec<(String, VarInfo)> = env
+        .current_scope()
+        .iter()
+        .map(|(n, i)| (n.clone(), i.clone()))
+        .collect();
+    sort_by_reverse_decl_order(&mut scope_entries, |info| info.decl_span);
+    for (name, info) in scope_entries.iter().map(|(n, i)| (n, i)) {
         if matches!(info.ty, Type::Task | Type::TaskR(_)) {
             // Task/Task<R> handles are affine but have no
             // runtime resource to free in v1 (sequential
@@ -12825,13 +12991,104 @@ fn check_one_stmt(
                     elaborated
                 } else {
                     let raw = check_expr(expr, env, signatures, diagnostics);
-                    coerce_checked(
-                        raw,
-                        annotation,
-                        expr.span,
-                        "let initializer",
-                        diagnostics,
-                    )
+                    // BUG-157 (2026-08-09): `can_assign`'s
+                    // `OwnedStr -> Str` auto-borrow assumes an
+                    // already-live OwnedStr binding is doing the
+                    // owning ("the OwnedStr binding stays live; its
+                    // drop fires at the original scope's end") --
+                    // true for `let label: Str = some_owned_var;`
+                    // (confirmed leak-free: `some_owned_var` keeps
+                    // its own scope-exit Drop), false when the RHS
+                    // is a fresh, never-bound OwnedStr-producing
+                    // expression like `let label: Str =
+                    // i64_to_str(42);` -- nothing ever owns THAT
+                    // allocation, so it leaks (found via a
+                    // corpus-wide ASan/LeakSanitizer sweep, round
+                    // 8; confirmed general, not async-specific).
+                    // Fix: synthesize a real sibling `let` for the
+                    // OwnedStr result, registered in `env` exactly
+                    // like an ordinary binding so it gets a real
+                    // scope-exit Drop through the normal machinery,
+                    // then bind `name` to a `Str` view of that
+                    // temp. `coerce_checked`'s own generic fallback
+                    // can't do this itself -- it has no access to
+                    // `body`/`env` to introduce a sibling
+                    // statement, only to a single expression slot --
+                    // so this has to happen here, at the one call
+                    // site that owns both. Only fires when the RHS
+                    // isn't already a `Var`; an existing binding
+                    // already owns its allocation correctly, and
+                    // wrapping it here would just add a needless
+                    // extra temp.
+                    //
+                    // EXCLUDED for `__poll_*` functions (the v3.1
+                    // async state-machine transform's output,
+                    // `parser.rs`'s `try_v31_transform`, which runs
+                    // at PARSE time -- well before this checker
+                    // pass ever sees the body). That transform
+                    // hoists the user's own named `let`s it knows
+                    // about into a persistent per-coroutine state
+                    // struct so their values survive across
+                    // separate `poll()` calls (separate C function
+                    // invocations); a synthetic temp introduced
+                    // HERE, after the transform already ran, is
+                    // invisible to that hoisting pass and stays an
+                    // ordinary per-call local instead -- freed at
+                    // the end of THIS `poll()` call while `label`'s
+                    // pointer (correctly hoisted) is read on a
+                    // LATER call. Confirmed by direct testing: this
+                    // turns the original leak into a heap-use-
+                    // after-free on both round-8 flagged async
+                    // examples (`echo_p3_locals_stress.vani`,
+                    // `echo_p3b_str_local.vani`) -- strictly worse
+                    // than the leak it replaces. Async/coroutine
+                    // bodies keep the original (leaky but safe)
+                    // fallback until the async transform itself
+                    // learns to hoist checker-synthesized temps.
+                    if matches!(raw.ty(), Type::OwnedStr)
+                        && matches!(annotation, Type::Str)
+                        && !matches!(raw.expr.kind, TypedExprKind::Var(_))
+                        && !function.name.starts_with("__poll_")
+                    {
+                        let synth = owned_str_coerce_synth_name();
+                        let synth_span = raw.expr.span;
+                        body.push(TypedStmt::Let {
+                            name: synth.clone(),
+                            ty: Type::OwnedStr,
+                            expr: raw.expr,
+                        });
+                        env.insert_current(
+                            synth.clone(),
+                            VarInfo {
+                                ty: Type::OwnedStr,
+                                constant: None,
+                                moved: None,
+                                decl_span: synth_span,
+                                vec_literal_elements: None,
+                                array_version: 0,
+                                guarded_mutex: None,
+                                no_drop: false,
+                                is_const: false,
+                                struct_literal_fields: None,
+                                moved_fields: std::collections::BTreeMap::new(),
+                                ref_aliases: Vec::new(),
+                            },
+                        );
+                        CheckedExpr::new(
+                            TypedExprKind::Var(synth),
+                            Type::Str,
+                            None,
+                            synth_span,
+                        )
+                    } else {
+                        coerce_checked(
+                            raw,
+                            annotation,
+                            expr.span,
+                            "let initializer",
+                            diagnostics,
+                        )
+                    }
                 }
             } else {
                 check_expr(expr, env, signatures, diagnostics)
@@ -12856,6 +13113,35 @@ fn check_one_stmt(
             }
 
             consume_if_moved_var(expr, &checked, env);
+
+            // BUG-155: `let x = some_fn(...);` where `some_fn` returns
+            // an affine closure (a closure literal with non-Copy
+            // captures, constructed and returned from INSIDE
+            // `some_fn`'s own body) needs `x` registered in
+            // `CLOSURE_AFF_REGISTRY` too, under the same env-struct-
+            // name/fields `some_fn`'s own returned variable carries --
+            // otherwise `x`'s scope-exit Drop never frees the env
+            // struct (confirmed leak via a systematic ASan sweep).
+            // `FN_RETURN_VAR_NAME` was fully populated for the whole
+            // program before any function body was checked, so this
+            // works regardless of whether `some_fn` happens to be
+            // checked before or after the current function.
+            if matches!(checked.ty(), Type::Closure(_, _)) {
+                if let TypedExprKind::Call { name: callee_name, .. } = &checked.expr.kind {
+                    let returned_var = crate::ast::FN_RETURN_VAR_NAME
+                        .with(|r| r.borrow().get(callee_name).cloned());
+                    if let Some(returned_var) = returned_var {
+                        let aff_info = crate::ast::CLOSURE_AFF_REGISTRY
+                            .with(|r| r.borrow().get(&returned_var).cloned());
+                        if let Some(aff_info) = aff_info {
+                            crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                                r.borrow_mut().insert(name.clone(), aff_info);
+                            });
+                        }
+                    }
+                }
+            }
+
             // After the conservative move marks all branch
             // Vars as moved, rewrite the typed expr to drop
             // the unchosen branches' Vars inline so the heap
@@ -13453,16 +13739,27 @@ fn check_one_stmt(
                 body,
             );
 
-            let drop_names: Vec<(String, Type, Vec<String>)> = env
+            // BUG-154: sort by reverse declaration order (see
+            // `sort_by_reverse_decl_order`'s doc comment) instead of
+            // trusting `all_bindings()`'s alphabetical-by-name
+            // iteration -- a later-declared binding's drop can
+            // depend on an earlier one still being alive (e.g. a
+            // `ReadGuard` unlocking storage owned by the `Vec` it
+            // was borrowed from).
+            let mut drop_names: Vec<(String, (Type, Vec<String>, Span))> = env
                 .all_bindings()
                 .filter(|(_, info)| !info.ty.is_copy() && info.moved.is_none() && !info.no_drop)
                 .map(|(name, info)| (
                     name.clone(),
-                    info.ty.clone(),
-                    info.moved_fields.keys().cloned().collect::<Vec<_>>(),
+                    (
+                        info.ty.clone(),
+                        info.moved_fields.keys().cloned().collect::<Vec<_>>(),
+                        info.decl_span,
+                    ),
                 ))
                 .collect();
-            for (drop_name, drop_ty, moved_fields) in drop_names {
+            sort_by_reverse_decl_order(&mut drop_names, |(_, _, span)| *span);
+            for (drop_name, (drop_ty, moved_fields, _)) in drop_names {
                 body.push(TypedStmt::Drop {
                     name: drop_name,
                     ty: drop_ty,
@@ -13497,7 +13794,7 @@ fn check_one_stmt(
                 ExprKind::Var(name) => Some(name.as_str()),
                 _ => None,
             };
-            let aff_drops: Vec<(String, Type)> = env
+            let mut aff_drops: Vec<(String, (Type, Span))> = env
                 .all_bindings()
                 .filter(|(n, info)| {
                     matches!(info.ty, Type::Closure(_, _))
@@ -13505,9 +13802,10 @@ fn check_one_stmt(
                         && Some(n.as_str()) != returned_var_name
                         && crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().contains_key(n.as_str()))
                 })
-                .map(|(n, info)| (n.clone(), info.ty.clone()))
+                .map(|(n, info)| (n.clone(), (info.ty.clone(), info.decl_span)))
                 .collect();
-            for (drop_name, drop_ty) in aff_drops {
+            sort_by_reverse_decl_order(&mut aff_drops, |(_, span)| *span);
+            for (drop_name, (drop_ty, _)) in aff_drops {
                 body.push(TypedStmt::Drop {
                     name: drop_name,
                     ty: drop_ty,
@@ -14421,6 +14719,23 @@ fn check_one_stmt(
             }
 
             let value_checked = check_expr(value, env, signatures, diagnostics);
+            // BUG-158: `xs[i].field = owned_str_expr;` has the same
+            // OwnedStr -> Str escape risk as a plain FieldAssign --
+            // `xs` typically outlives a narrower-scoped OwnedStr
+            // source just as easily as a struct binding does. Reuse
+            // the same rejection; field_path's last segment (or the
+            // Vec's own name for the no-path `xs[i] = v;` shape) is
+            // the field being written.
+            let field_display = field_path.last().cloned().unwrap_or_else(|| name.clone());
+            if reject_owned_str_escape_into_field(
+                value_checked.ty(),
+                &target_ty,
+                &field_display,
+                value.span,
+                diagnostics,
+            ) {
+                return false;
+            }
             let value_coerced = coerce_checked(
                 value_checked,
                 &target_ty,
@@ -14709,6 +15024,15 @@ fn check_one_stmt(
                 return false;
             };
             let value_checked = check_expr(value, env, signatures, diagnostics);
+            if reject_owned_str_escape_into_field(
+                value_checked.ty(),
+                field_ty,
+                field,
+                value.span,
+                diagnostics,
+            ) {
+                return false;
+            }
             let value_coerced = coerce_checked(
                 value_checked,
                 field_ty,
@@ -16216,7 +16540,12 @@ fn emit_drops_through_loop(env: &Env, loop_body_depth: usize, body: &mut Vec<Typ
         if scope_index >= env.scopes.len() {
             continue;
         }
-        for (name, info) in env.scopes[scope_index].iter() {
+        let mut scope_entries: Vec<(String, VarInfo)> = env.scopes[scope_index]
+            .iter()
+            .map(|(n, i)| (n.clone(), i.clone()))
+            .collect();
+        sort_by_reverse_decl_order(&mut scope_entries, |info| info.decl_span);
+        for (name, info) in &scope_entries {
             if !info.ty.is_copy() && info.moved.is_none() {
                 body.push(TypedStmt::Drop {
                     name: name.clone(),
@@ -20284,6 +20613,15 @@ fn check_expr(
                     return CheckedExpr::fallback_integer(expr.span);
                 };
                 let checked_v = check_expr(&found.1, env, signatures, diagnostics);
+                if reject_owned_str_escape_into_field(
+                    checked_v.ty(),
+                    fty,
+                    fname,
+                    found.1.span,
+                    diagnostics,
+                ) {
+                    return CheckedExpr::fallback_integer(expr.span);
+                }
                 let coerced = coerce_checked(
                     checked_v,
                     fty,

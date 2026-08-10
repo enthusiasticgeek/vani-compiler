@@ -13794,3 +13794,420 @@ fn main() -> i64 {
         );
     }
 }
+
+// BUG-153/BUG-154 (2026-08-09): found via a systematic ASan/
+// LeakSanitizer sweep of the full example corpus (round 8, requested
+// after the user asked "not sure if you have asan and/or valgrind...
+// check for all examples or libs for any potential leaks"). Both are
+// real memory-safety bugs, not just output-correctness bugs -- these
+// tests only check exit status + stdout (a leak or a use-after-free
+// doesn't always crash a plain `run`), the actual verification was
+// done separately with ASan/LeakSanitizer and valgrind on native
+// builds of both backends; see docs/TODO_CURRENT.md's BUG-153/154
+// sections for the full sanitizer output.
+#[test]
+fn mixed_payload_enum_with_box_variant_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug153-mixed-enum-box",
+        r#"
+interface Drawable { fn area(self: ref Self) -> i64; }
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+enum Val { Int(Box<i64>), Shape(Box<dyn Drawable>), Empty }
+fn main() -> i64 {
+  let a: Val = Val.Int(box(42));
+  let c: Circle = Circle { r: 7 };
+  let b: Val = Val.Shape(box(c as dyn Drawable));
+  let e: Val = Val.Empty;
+  print 42;
+  return 42;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert_eq!(
+            output.status.code(),
+            Some(42),
+            "mixed-payload enum with Box variants should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn read_guard_into_vec_of_rwlock_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug154-drop-order-rwlock",
+        r#"
+fn main() -> i64 {
+  let r1: RwLock<i64> = rwlock_new(100);
+  let locks: Vec<RwLock<i64>> = vec(r1);
+  let rg = rwlock_read(mut ref locks[0]);
+  print read_guard_get(ref rg);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "ReadGuard into a Vec<RwLock<T>> should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "100",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+// BUG-155/BUG-156 (2026-08-09): found while fixing round 8's two
+// documented open leaks. As with BUG-153/154, only exit status +
+// stdout are checked here (a leak doesn't crash a plain `run`) --
+// the actual leak verification was ASan/LeakSanitizer on native C
+// builds and valgrind on native LLVM AOT builds; see
+// docs/TODO_CURRENT.md's BUG-155/156 section for that output.
+#[test]
+fn closure_returned_from_factory_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug155-closure-factory",
+        r#"
+fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64 {
+  let g = fn(x: i64) -> i64 { print "hello,", name, x; return 0; };
+  return g;
+}
+fn main() -> i64 {
+  let say_hi: Closure(i64) -> i64 = make_greeter("alice" + "");
+  say_hi(5);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "closure returned from a factory function should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "hello, alice 5",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn directly_called_closure_runs_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug156-closure-direct-call",
+        r#"
+fn main() -> i64 {
+  let name: OwnedStr = "bob" + "";
+  let g = fn(x: i64) -> i64 { print "hi,", name, x; return 0; };
+  g(1);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "directly-called closure should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "hi, bob 1",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn fresh_owned_str_narrowed_to_str_runs_correctly_on_both_backends() {
+    // BUG-157 (2026-08-09): `let label: Str = i64_to_str(42);` --
+    // narrowing a fresh, never-bound OwnedStr call result straight to
+    // a Str-typed let -- used to leak the OwnedStr allocation (found
+    // via a corpus-wide ASan/LeakSanitizer sweep). The fix
+    // synthesizes a real sibling `let` for the OwnedStr result so it
+    // gets a genuine scope-exit Drop; this test just confirms the
+    // program still runs and prints correctly on both backends.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug157-owned-str-narrow-to-str",
+        r#"
+fn main() -> i64 {
+  let label: Str = i64_to_str(42);
+  print label;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "fresh OwnedStr narrowed to Str should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "42",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn owned_str_field_runs_correctly_on_both_backends() {
+    // BUG-158 (2026-08-10): storing a fresh `OwnedStr` into a
+    // `Str`-typed struct field (via FieldAssign or StructLit) used to
+    // heap-use-after-free once the source's own (narrower) scope
+    // ended -- now rejected at compile time (see the `_rejected`
+    // tests in src/lib.rs). This confirms the recommended fix --
+    // declare the field as `OwnedStr` instead -- actually compiles
+    // and runs correctly on both backends, with no leak or crash.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug158-owned-str-field",
+        r#"
+struct Holder { s: OwnedStr, n: i64 }
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };
+}
+fn main() -> i64 {
+  let h: Holder = make();
+  print h.s;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "OwnedStr-typed struct field should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "77",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn async_str_local_runs_correctly_on_both_backends() {
+    // BUG-157/158 async instance (2026-08-10): `let label: Str =
+    // i64_to_str(mode);` inside an async fn used to leak (BUG-157)
+    // and, once BUG-158's general fix landed, still leak (excluded
+    // there deliberately -- fixing it needed the async transform's
+    // own hoisting strategy to change, not a rejection, since
+    // rejecting would break this already-shipped feature). Fixed by
+    // teaching `try_v31_transform` to hoist a cross-state `Str`
+    // local sourced from a known OwnedStr-returning builtin as an
+    // `OwnedStr` Task struct field instead of a `Str` alias -- the
+    // existing generic struct-Drop machinery then frees it
+    // correctly. This is a real-subprocess run (not just a compile
+    // check) confirming the actual example pattern still runs
+    // correctly end-to-end on both backends.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug157-158-async-str-local",
+        r#"
+async fn pick(fd: i64, mode: i64) -> i64 {
+  let label: Str = i64_to_str(mode);
+  let n: i64 = match label {
+    "0" then io_recv_async(fd, 64),
+    "1" then 111,
+    "2" then 222,
+    _ then 0 - 1
+  };
+  return n;
+}
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "mode=1:", r1;
+  let t2: Task__pick = pick(cfd, 2);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "mode=2:", r2;
+  let t9: Task__pick = pick(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "mode=99:", r9;
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "async Str-local example should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("mode=1: 111") && stdout.contains("mode=2: 222") && stdout.contains("mode=99: -1"),
+            "wrong output ({args:?}), got stdout: {}",
+            stdout
+        );
+    }
+}
+
+#[test]
+fn hashmap_insert_fresh_owned_str_args_run_correctly_on_both_backends() {
+    // BUG-159 (2026-08-10): hashmap_insert(mut ref m, K, V) leaked
+    // any fresh, never-bound OwnedStr argument (e.g. i64_to_str(1)
+    // passed directly) -- the runtime helper clones K/V into new
+    // storage but never frees the caller's originals, and an
+    // unbound temporary has no other owner. Fixed by freeing fresh
+    // K/V args right after the insert call, on both backends. This
+    // is a real-subprocess run of the exact repro that was
+    // originally flagged by the corpus-wide ASan sweep, confirming
+    // it still produces correct output (the sweep itself, not this
+    // test, is what confirms the leak is actually gone).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug159-hashmap-insert-fresh-owned-str",
+        r#"
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+  let _ = hashmap_insert(mut ref m, i64_to_str(2), i64_to_str(200));
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(999));
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "hashmap_insert with fresh OwnedStr args should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "2",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

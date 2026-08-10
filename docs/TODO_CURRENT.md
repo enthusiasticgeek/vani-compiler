@@ -10888,3 +10888,556 @@ still shows exactly 78 errors, matching the established baseline
 This closes `docs/BUG_PATTERN_AUDIT_TODO_6.md` category A.
 
 Next free bug number is **BUG-153**.
+
+## BUG-153 + BUG-154 (2026-08-09) -- systematic ASan/LeakSanitizer sweep of the full example corpus
+
+Requested directly: "not sure if you have asan and/or valgrind or
+similar tools check for all examples or libs for any potential
+leaks." No such systematic sweep existed before this -- `valgrind`
+had only ever been used manually, one test at a time, and explicitly
+"not wired into CI" (per `docs/TESTING_MATRIX_TODO.md`'s own note on
+an earlier one-off check).
+
+**Methodology**: every `.vani` file that passes `vanic check` (1148
+total: all 1040 files under `examples/`, plus 108 unique inline test
+programs extracted from `tests/run_end_to_end.rs`'s `write_tmp_vani`
+calls) was compiled via `vanic emit-c`, built with `gcc
+-fsanitize=address,leak,undefined -fno-sanitize-recover=all`, and run
+with a short timeout, classifying any AddressSanitizer/
+LeakSanitizer/UndefinedBehaviorSanitizer report. ASan can't
+instrument already-emitted LLVM IR after the fact, so the LLVM
+backend was separately spot-checked with `valgrind --leak-check=full`
+on native `vanic build` binaries for every confirmed finding (and
+both fixes below were verified clean on both backends this way).
+1008 of 1148 compiled and ran clean; 9 were flagged after both fixes
+below (down from 12 before them) -- see the "Remaining findings"
+section for the full triage of what's left.
+
+### BUG-153 -- mixed-payload enum with a `Box<T>` variant leaked its payload
+
+A mixed-payload enum (variants with genuinely different payload
+types, e.g. `Int(Box<i64>)` and `Shape(Box<dyn Drawable>)`) never
+freed a `Box<T>`-payload variant at scope exit. Confirmed a real
+16-byte leak (2 allocations) via LeakSanitizer on
+`examples/edge_cases/mix_box_enum_payload.vani` (a program whose own
+source comment explicitly, and incorrectly, claimed "Scope-exit Drop
+frees each Box payload... Now compiles + runs on both backends").
+
+Root cause: `backend_c.rs`'s `emit_enum_value_drop` has two branches
+-- a legacy single-payload path (`ENUM_PAYLOAD_REGISTRY`) that
+already correctly handled `Type::Box(inner)` with sub-cases for
+`Object`/`Vec`/`OwnedStr`/`Struct` (including the box-recursive-
+struct deep-drop helper), and a newer mixed-payload path
+(`ENUM_VARIANT_PAYLOADS_REGISTRY`, per-variant union member access)
+whose per-variant match only ever handled `OwnedStr`/`Vec<T>` --
+`Type::Box(_)` fell to `_ => None`, silently emitting no free call.
+The gap was even explicitly documented in a code comment ("BUG-97
+note: mixed-payload enums with a Box<Struct>-shaped variant payload
+remain a deferred gap") but never actually closed.
+
+Fix: factored the single-payload path's Box-handling logic out into
+a new shared `box_payload_free_expr(payload_path, inner) -> String`
+helper (parameterized on the payload's full lvalue path, so it works
+for both the single-payload `.payload` field and the mixed-payload
+`.u.v_<Variant>` union member), and called it from both branches.
+The single-payload branch is now a one-line call to the shared
+helper instead of duplicating the whole match; the mixed-payload
+branch gained a `Type::Box(inner)` arm it never had.
+
+LLVM backend: **not affected** -- confirmed via `valgrind
+--leak-check=full` on the native LLVM AOT build of the exact same
+repro (0 leaks, 0 errors, before AND after the C-side fix), so no
+LLVM code changes were needed. (Tree-LLVM's own mixed-payload enum
+Drop codegen has the analogous `Type::OwnedStr | Vec(_) => ...,
+_ => continue` gap for `Type::Box` on direct code inspection, but the
+`Box<i64>`/`Box<dyn Drawable>` shapes in this repro apparently don't
+route through it the same way C's does -- not fully root-caused given
+time constraints, flagged as a documented open question in
+`docs/BUG_PATTERN_AUDIT_TODO_8.md` rather than either fixed blind or
+silently ignored.)
+
+Verified: the leak is gone (confirmed via both ASan/LeakSanitizer on
+C and valgrind on both backends), both Box variants' free calls now
+appear in the generated C (`free(v_a.u.v_Int)`, `free(v_a.u.v_Shape.data)`),
+program output/exit code unchanged (still `42`).
+
+### BUG-154 -- scope-exit drops ran in alphabetical-by-name order instead of reverse declaration order
+
+Far more general and severe than BUG-153: `Env::scopes` is
+`Vec<BTreeMap<String, VarInfo>>` -- every scope-exit drop site
+iterated that map directly, meaning bindings were dropped in
+**alphabetical order by variable name**, not reverse declaration
+order, silently contradicting the "Rust RAII convention" this
+codebase's own comments claim everywhere (and correctly implement
+for STRUCT FIELDS specifically, which iterate an ordered
+`Vec<(String, Type)>` rather than a name-keyed map).
+
+Confirmed via a genuine, reproducible heap-use-after-free (not a
+leak) caught by AddressSanitizer:
+```vani
+fn main() -> i64 {
+  let r1: RwLock<i64> = rwlock_new(100);
+  let locks: Vec<RwLock<i64>> = vec(r1);
+  let rg = rwlock_read(mut ref locks[0]);
+  print read_guard_get(ref rg);
+  return 0;
+}
+```
+`rg` (a `ReadGuard`) holds a pointer back into `locks`'s heap buffer
+(to unlock the RwLock it borrowed). At scope exit, `locks` was freed
+BEFORE `rg` tried to unlock through it -- purely because `"locks" <
+"rg"` alphabetically -- a real, name-dependent use-after-free.
+AddressSanitizer's exact report: `WRITE of size 4` into memory
+`freed by` the Vec's own free call, executed one call earlier in
+`fn_main`. This is a NAME-DEPENDENT bug -- it doesn't reproduce for
+every combination of dependent bindings, only when the dependent
+binding's name happens to alphabetically precede what it depends on
+-- which is precisely why a hand-written test suite, however large,
+was unlikely to ever stumble onto it by chance; a systematic sweep
+across hundreds of real programs with varied naming did.
+
+Root cause confirmed directly (not inferred) by reading `checker.rs`:
+`Env::current_scope()` and `Env::all_bindings()` both return/iterate
+the `BTreeMap` in its natural (alphabetical) key order, with no
+re-sorting applied anywhere downstream.
+
+Fix: added a `sort_by_reverse_decl_order` helper (sorts a
+`(String, T)` list by a caller-supplied `decl_span.start` extractor,
+descending -- later source position drops first) and applied it at
+every bulk scope-exit drop-list site found:
+- `emit_current_scope_drops` (fall-off-the-end-of-a-block case)
+- the return-statement's main non-Copy-binding drop list
+- the return-statement's separate affine-closure drop list
+- `emit_drops_through_loop` (break/continue -- already correctly
+  ordered scope-to-scope across nested blocks, just needed the same
+  fix WITHIN each individual scope's binding list)
+
+`VarInfo.decl_span: Span` (an existing, always-populated field --
+"Source span where this binding was declared") was reused directly
+as the sort key; no new field was needed. Every site was already
+computing an intermediate `Vec` before this fix (to filter/collect
+bindings into a drop list), so adding a sort in front of the existing
+collection was a small, localized, easy-to-review change at each
+site rather than restructuring `Env`'s own storage.
+
+One deliberate, documented limitation: the return-statement's two
+drop lists (regular non-Copy bindings, and affine closures) are each
+independently sorted correctly WITHIN themselves, but still run as
+two separate back-to-back loops -- so a closure whose drop depends on
+a non-closure binding declared AFTER it (or vice versa) wouldn't get
+correctly interleaved. Not confirmed to be reachable (closures'
+`CLOSURE_AFF_REGISTRY`-gated drops are narrower in scope than general
+bindings), flagged as a residual limitation rather than silently
+assumed fixed.
+
+Verified on both backends: the repro now runs cleanly and prints
+`100` (confirmed via ASan on C, valgrind on native LLVM AOT -- 0
+leaks, 0 errors, correct output on both). Generated C confirms
+correct order: `intent_read_guard_int64_t_unlock(&v_rg);` now
+precedes `intent_vec_intent_rwlock_i64__free(v_locks);`.
+
+### Regression tests
+
+4 added: 2 to `src/lib.rs`
+(`mixed_payload_enum_box_variant_emits_free_on_c_backend`,
+`scope_exit_drops_run_in_reverse_declaration_order_not_alphabetical`),
+2 to `tests/run_end_to_end.rs`
+(`mixed_payload_enum_with_box_variant_runs_correctly_on_both_backends`,
+`read_guard_into_vec_of_rwlock_runs_correctly_on_both_backends`), the
+latter pair real subprocess runs on both backends. Full `cargo test
+--release` clean (0 failed). `vanic check examples` unchanged at the
+78-error baseline.
+
+### Remaining findings from the sweep (not fixed this session)
+
+Full triage in `docs/BUG_PATTERN_AUDIT_TODO_8.md`. Summary:
+- **2 false positives of the sweep's own methodology**, not compiler
+  bugs: a bare-metal/MMIO example correctly SEGVs when run as a
+  native userspace binary instead of on real hardware/QEMU (expected
+  -- it reads a hardcoded STM32 GPIO address); a channel round-trip
+  example's legitimate return value (`99`) collided with the sweep
+  harness's own `ASAN_OPTIONS exitcode=99` convention.
+- **2 low-severity UndefinedBehaviorSanitizer findings**: an i64::MIN
+  literal represented in generated C as `-(int64_t)9223372036854775808LL`
+  (technically UB by the C standard's letter -- both the huge-
+  unsigned-to-int64_t conversion and the subsequent negation of an
+  unrepresentable value -- but implemented identically to the
+  intended two's-complement value by every real compiler/CPU) and a
+  signed left-shift whose result doesn't fit (same "technically UB,
+  universally well-defined in practice" class). Neither produced
+  observably wrong output. Not fixed this session; a proper fix would
+  emit `INT64_MIN`-style literals and treat `<<` as an explicitly
+  wrapping/unsigned operation in the generated C.
+- **1 confirmed, unfixed leak**: a closure returned from a factory
+  function (`fn make_greeter(name: OwnedStr) -> Closure(i64) -> i64`)
+  leaks its heap-allocated env struct (8 bytes) -- the closure's
+  `CLOSURE_AFF_REGISTRY` affine-tracking appears to only register
+  closures constructed via a direct literal in the CURRENT scope,
+  not closures that arrive as a function's return value. Root-caused
+  to that level but not fixed -- properly extending the registry
+  without breaking the existing FnOnce-style call-time free guard
+  needs more investigation than remaining session time allowed.
+- **4 confirmed, unfixed leaks sharing one root cause**: `echo_p3_
+  locals_stress.vani`, `echo_p3b_str_local.vani`, `hashmap_strstr.vani`,
+  `hashmap_strv.vani` all leak through `intent_i64_to_str` calls made
+  from `fn___poll_*`-named functions -- almost certainly the v3.1
+  async state-machine transform's generated polling functions not
+  correctly routing a temporary `OwnedStr` result through the normal
+  drop-tracking. Not investigated in depth this session.
+
+Next free bug number is **BUG-155**.
+
+## BUG-155 + BUG-156 (2026-08-09) -- closure returned from a function, or simply called, leaked its env struct
+
+Fixes the first of round 8's two documented open leaks. Turned out to
+be TWO separate bugs, not one -- the original round-8 finding (a
+closure returned from a factory function leaks) was real, but fixing
+it exposed a second, more general gap underneath.
+
+### BUG-155 -- `CLOSURE_AFF_REGISTRY` never propagated across a function-call boundary
+
+`CLOSURE_AFF_REGISTRY` (env_struct_name + non-Copy captured fields,
+for closures whose captures need scope-exit freeing) is keyed by the
+LOCAL BINDING NAME a closure literal was directly constructed at --
+populated once, program-wide, by `lambda_lift_program` (which runs
+before any function body is type-checked, so there's no ordering
+dependency on which function gets checked first). A closure that
+escapes via a function's RETURN VALUE and gets bound to a DIFFERENT
+name in the caller (`let say_hi = make_greeter(...);` -- the literal
+itself was bound to `g` inside `make_greeter`) was never registered
+under `say_hi` at all, so `say_hi`'s scope-exit Drop never fired.
+
+Fix: added `FN_RETURN_VAR_NAME: HashMap<FunctionName, LocalVarName>`
+(ast.rs), populated once, right after `lambda_lift_program` (so
+`CLOSURE_AFF_REGISTRY` is already complete for every function's own
+closure literals by the time this runs), by scanning each function's
+body for `return <var>;` where `<var>` is affine-closure-registered
+(`find_returned_affine_closure_var`, checker.rs -- handles the
+top-level and one level of `if`/`else` nesting, not a fully general
+control-flow walk). Consulted when checking `let x = some_fn(...);`:
+if `some_fn`'s return type is `Closure(..)` and `some_fn` is in
+`FN_RETURN_VAR_NAME`, register `x` under the SAME env-struct-name/
+fields the callee's own returned variable carries.
+
+### BUG-156 -- discarded closure calls (`g(1);`, no `let`) never freed the env struct at all, for ANY closure
+
+Found while verifying BUG-155's fix didn't actually stop the leak --
+it turned out BUG-155 alone wasn't sufficient, for a more fundamental
+reason unrelated to cross-function propagation. `say_hi(5);` (used as
+a bare statement, not bound to a `let`) lowers to `TypedStmt::Discard`.
+Calling an affine closure correctly marks the binding `moved`
+(protecting against a dangerous second call -- the captured field
+gets freed by the closure's OWN body at the end of its first call, so
+calling it again would read already-freed memory; this protection is
+real and was NOT touched). But nothing at the call site ever freed
+the ENV STRUCT itself. That free logic only ever existed in
+`TypedStmt::Let`'s C emission (`let r = f(args);` -- save `.env`, null
+it, call, then `free()` the saved pointer) -- `TypedStmt::Discard`'s
+C emission had NO `Type::Closure` handling at all. Confirmed via a
+minimal repro with NO factory function involved -- a closure
+constructed directly in `main` and called once, with no return-value
+escape anywhere, leaked identically. This is the REAL reason BUG-155's
+registration alone didn't fix the round-8 finding: `say_hi` WAS
+correctly registered by BUG-155's fix, but `say_hi(5);` still
+discarded the call's result, and the Discard path had no free logic
+to consult that registration in the first place.
+
+Fix: `TypedStmt::Discard`'s C emission couldn't gain a `Type::Closure`
+match ARM the way `Let`'s dispatch has one, because the match there
+switches on `expr.ty` -- the CALL'S OWN return type (e.g. `i64`), not
+the callee's type. Instead, added an early intercept (mirroring the
+`Let` path's own structure) that checks `expr.kind` directly for
+`CallIndirect` with a `Var` callee registered in
+`CLOSURE_AFF_REGISTRY`, and if so emits the same "save env, null it,
+call, free env" sequence, brace-scoped so consecutive discards in the
+same block don't collide on the temp name.
+
+LLVM backend: confirmed NOT affected by either gap -- valgrind clean
+on native LLVM AOT builds of both repros, both BEFORE (BUG-155 only)
+and after the C-side BUG-156 fix, using only the checker-level
+BUG-155 fix (no LLVM backend code was touched). LLVM's own call-site
+codegen for affine closures apparently already frees the env struct
+correctly on the discard path; the gap was specific to tree-C.
+
+Verified: both the "returned from a factory function, then called"
+repro (round 8's original finding) and a "constructed directly,
+called once, never returned anywhere" repro are clean (0 leaks, 0
+errors) via ASan/LeakSanitizer on C and valgrind on native LLVM AOT
+builds. A "never called" variant (closure returned but the caller
+never invokes it) was also verified clean, confirming BUG-155's
+registration fix is independently correct/needed, not just
+incidentally masked by BUG-156's fix.
+
+4 regression tests added: 2 `src/lib.rs` compile-checks
+(`closure_returned_from_factory_function_frees_env_on_scope_exit`,
+`discarded_call_to_affine_closure_frees_env_on_c_backend`), 2
+`tests/run_end_to_end.rs` real-subprocess tests on both backends
+(`closure_returned_from_factory_runs_correctly_on_both_backends`,
+`directly_called_closure_runs_correctly_on_both_backends`). Full
+`cargo test --release` clean, `vanic check examples` unchanged at the
+78-error baseline.
+
+This closes the first of round 8's two documented open leaks. The
+second was re-investigated the same day and turns out NOT to be
+async-specific at all -- a plain `let label: Str = i64_to_str(42);`
+with no async/await/coroutine anywhere leaks identically.
+
+## BUG-157 (2026-08-09) -- fresh `OwnedStr` narrowed straight to `Str` leaked; general, not async-specific
+
+Root cause: `can_assign`'s `OwnedStr -> Str` auto-borrow comment
+says "the OwnedStr binding stays live; its drop fires at the original
+scope's end" -- true for `let label: Str = some_owned_var;` (the RHS
+is a `Var`; that binding keeps its own scope-exit Drop), but false
+when the RHS is a fresh, never-bound `OwnedStr`-producing expression
+like `i64_to_str(42)`: nothing ever owned that allocation, so
+`coerce_checked`'s generic `cast_expr` fallback just relabeled it as
+`Str` with no free anywhere.
+
+Fix: at the one `Stmt::Let` call site in `checker.rs` that has access
+to both the output statement list and `env` (`coerce_checked` itself
+has neither, so it can't do this), detect `OwnedStr -> Str` narrowing
+of a non-`Var` RHS and synthesize a real sibling `let` for the
+`OwnedStr` result -- registered in `env` exactly like an ordinary
+binding, so it gets a genuine scope-exit Drop through the normal
+machinery -- then bind the original name to a `Str` view of that
+temp. Exactly mirrors the already-correct two-`let` form a user could
+write by hand.
+
+**Near-miss worth recording**: the first version of this fix applied
+unconditionally and turned the leak into a heap-use-after-free inside
+async `__poll_*` functions (confirmed via direct ASan testing on both
+round-8-flagged examples). Root cause: `parser.rs`'s `try_v31_transform`
+(the async state-machine desugar) runs at PARSE time, before the
+checker ever sees the body, and hoists the user's own named `let`s it
+recognizes into a persistent per-coroutine state struct so their
+values survive across separate `poll()` calls (separate C function
+invocations). A synthetic temp introduced by the checker AFTER that
+transform already ran is invisible to its hoisting pass and stays an
+ordinary per-call local -- freed at the end of THIS `poll()` call,
+while the `Str` view (correctly hoisted) gets read on a LATER call
+after the buffer is gone. The fix now explicitly excludes any
+function whose name starts with `__poll_`, so async/coroutine bodies
+keep the original (leaky but safe) codegen; a real fix there needs
+the async transform itself to learn about checker-synthesized temps,
+which is out of scope here. This is exactly the risk this fix was
+flagged for before attempting it -- worth remembering next time a fix
+touches a pervasive coercion path: test the async/coroutine corpus
+specifically, not just the common case, before calling it done.
+
+2 regression tests added to `src/lib.rs`
+(`fresh_owned_str_narrowed_to_str_gets_a_real_owning_temp` asserts the
+synthetic temp + its free appear in the C output;
+`async_poll_owned_str_narrowing_keeps_original_leaky_but_safe_form`
+asserts the rewrite does NOT fire inside a `__poll_` function), 1 to
+`tests/run_end_to_end.rs`
+(`fresh_owned_str_narrowed_to_str_runs_correctly_on_both_backends`,
+real-subprocess, both backends). Full `cargo test --release` clean
+(3380 lines, 13/13 test-binary results ok, 0 FAILED). Corpus-wide
+ASan/LeakSanitizer sweep re-run after the fix to confirm no other
+regressions -- see `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+**IMPORTANT UPDATE, same day**: the "`__poll_*` caveat" above turned
+out to be misdiagnosed as async-specific. It's actually a GENERAL,
+pre-existing heap-use-after-free in the checker's `OwnedStr -> Str`
+auto-borrow, reachable from ordinary non-async code via
+`Stmt::FieldAssign` (`h.s = owned;` where `owned`'s scope is narrower
+than `h`'s) and `StructLit` field init (`return Holder { s: owned,
+.. };`) -- the async transform's `__poll_*` codegen just happens to
+synthesize the same `FieldAssign` shape internally. Found while
+writing the tutorial's workaround note for the async caveat -- the
+proposed two-`let` workaround itself use-after-frees, which is what
+led to finding the general repro.
+
+## BUG-158 (2026-08-10) -- OwnedStr -> Str escape into a struct field, general non-async UAF, FIXED
+
+Same-day dedicated follow-up to the finding above, at direct request.
+Root cause confirmed via two independent minimal repros:
+```vani
+struct Holder { s: Str, n: i64 }
+fn main() -> i64 {
+  let h: Holder = Holder { s: "", n: 0 };
+  { let owned: OwnedStr = i64_to_str(99); h.s = owned; }  // owned freed here
+  print h.s;   // heap-use-after-free
+  return 0;
+}
+```
+```vani
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };   // owned freed when make() returns
+}
+// main(): let h = make(); print h.s;  -- heap-use-after-free
+```
+`can_assign`'s `OwnedStr -> Str` auto-borrow assumes the source's own
+scope outlives every read of the resulting view. True for function
+args/comparisons/len() (can't outlive the caller's frame) and for a
+plain `let` (BUG-157 gives it a real owning temp). False for
+`Stmt::FieldAssign` and `StructLit` field init: the destination
+struct can freely outlive the `OwnedStr` source's own scope.
+
+**Fix**: reject the coercion outright at these positions (plus a
+third, closely related one found during implementation --
+`xs[i].field = owned_expr;`, the mixed index+field-assign path,
+which has the identical risk against a `Vec` that typically outlives
+a narrower-scoped `OwnedStr`) via a shared
+`reject_owned_str_escape_into_field` helper in checker.rs, rather
+than attempting real scope-depth escape analysis (the ref-source
+scope-escape check elsewhere in `Stmt::FieldAssign` does something
+similar for `ref` sources specifically, but generalizing it to
+arbitrary struct lifetimes under time pressure was judged riskier
+than a clean rejection). Matches this codebase's established
+preference for compile-time rejection over unsound runtime behavior.
+Clear diagnostic + 3-step elaboration
+(`diagnostic_elaborations::owned_str_escape_into_field`) points at
+the fix: declare the field `OwnedStr` instead of `Str`, or supply an
+already-safe `Str` value.
+
+A new `CURRENT_FN_NAME` thread-local (ast.rs, mirroring the existing
+`CURRENT_FN_PARAMS` pattern) lets the `StructLit` call site (inside
+`check_expr`, which doesn't have `&Function` in scope) apply the same
+`__poll_*`-function exclusion `Stmt::FieldAssign`'s call site
+(inside `check_one_stmt`, which does have `&Function`) uses directly.
+
+**EXCLUDED for `__poll_*` functions**, same as BUG-157: the async
+transform synthesizes exactly this `FieldAssign` shape internally to
+hoist a cross-state `Str` local into the Task struct. Confirmed via
+direct testing that the async cluster's `__poll_*` functions still
+compile unchanged, and (deliberately, unchanged) still exhibit the
+underlying use-after-free if a user manually splits the narrowing
+`let` into two inside an `async fn` body -- that specific instance of
+the bug is NOT fixed by this change and remains open; a real fix
+there needs the async transform's own hoisting strategy to change
+(e.g. hoist the `OwnedStr` itself as the persisted, owned field,
+rather than a `Str` alias into a state-local one), which is
+out of scope here.
+
+Verified: both minimal repros now get a clean compile-time
+rejection (not a crash). `vanic check examples` baseline unchanged
+(923 ok / 86 files with pre-existing errors, same as before this
+fix -- no shipped example relied on the now-rejected pattern). Full
+corpus-wide ASan/LeakSanitizer sweep (`tools/leak_sweep.py`)
+re-run: identical flagged-file set, zero regressions. Full
+`cargo test --release` clean (3380+ lines, 0 FAILED). 5 new tests:
+4 in `src/lib.rs` (2 rejection tests, 2 regression guards confirming
+the recommended fix and plain `Str` literals still compile), 1 real-
+subprocess `tests/run_end_to_end.rs` test confirming the recommended
+`OwnedStr`-field fix actually runs correctly on both backends.
+
+## BUG-157/158 async instance (2026-08-10) -- FIXED, at direct request
+
+The async `__poll_*` instance of the exact same OwnedStr/Str
+ownership bug (deliberately left open in both BUG-157 and BUG-158)
+is now fixed too, in the actual root location: `parser.rs`'s
+`try_v31_transform` (the v3.1 async state-machine desugar).
+
+Root cause, precisely: the transform's liveness analysis classifies
+each local purely by NAME -- "is this name read in a different state
+than the one that declared it?" -- with no notion that one local's
+VALUE might alias another's underlying heap buffer. `let label: Str
+= i64_to_str(mode);` (or the two-`let` hand-split form) makes `label`
+cross-state (hoisted into the Task struct as a `Str` field that just
+aliases a state-local `OwnedStr` temp), while the temp holding the
+actual buffer stays a plain per-state stack local, freed at the end
+of ITS OWN (narrower) state -- while the hoisted alias is read later.
+Leak in the direct form (nothing ever freed at all, since the
+checker's BUG-157/158 fixes are deliberately excluded for `__poll_*`
+functions); use-after-free in the split form (confirmed via direct
+ASan testing while investigating this).
+
+**Fix**: when a cross-state local is declared `Str` but its value
+provably comes from an `OwnedStr` source -- a call to a small,
+explicit allowlist of known OwnedStr-returning builtins
+(`i64_to_str`, `f64_to_str`, `f64_to_str_fixed`, `bool_to_str`), or a
+plain `Var` referring to another local/param already known to be
+`OwnedStr`-typed -- hoist it into the Task struct as an `OwnedStr`
+FIELD instead of a `Str` alias. The existing, already-correct
+generic struct-Drop machinery then frees it correctly whenever the
+Task struct itself is dropped, exactly like any other struct with an
+`OwnedStr` field -- no new drop logic needed anywhere. The
+synthesized temp's own type is updated to match (`OwnedStr` instead
+of `Str`), so the FieldAssign that stores it becomes an exact-type,
+ownership-transferring move (`consume_if_moved_var` marks the temp
+moved, since `OwnedStr` isn't Copy) instead of an untracked alias
+copy.
+
+This can't run real type inference (the checker hasn't run yet at
+parse time), so it's deliberately conservative: it only recognizes a
+small set of shapes it's fully confident about, verified against the
+two real shipped examples that actually use this feature
+(`echo_p3_locals_stress.vani`, `echo_p3b_str_local.vani` -- both use
+exactly the `let label: Str = i64_to_str(mode);` shape). Anything the
+allowlist doesn't recognize keeps the ORIGINAL (leaky-but-safe, not
+crashing) behavior unchanged, guarded by the existing `__poll_*`
+exclusion in the checker's BUG-157/158 fixes -- this pass can only
+IMPROVE safety for the shapes it detects, never regress compilability
+for shapes it doesn't.
+
+**Note on `hashmap_strstr.vani` / `hashmap_strv.vani`**: these were
+originally lumped into the same "async cluster" in round 8's first
+pass, but neither has an `async fn` at all -- their leak is a
+separate, still-undiagnosed issue, most likely in
+`HashMap<OwnedStr, OwnedStr>`'s own insert/remove semantics. NOT
+touched or fixed by this change; still open, now correctly
+re-labeled in `tools/leak_sweep_baseline.json`.
+
+Verified: both real async examples now run completely clean under
+ASan (exit 0, no leak, no UAF, no crash -- confirmed via direct
+testing of the generated C, which shows the field correctly freed
+both on overwrite mid-poll and at the Task's own scope exit in
+`main`). `vanic check examples` baseline unchanged. Corpus-wide sweep
+re-run: flagged count dropped from 8 to 6 (the two async files no
+longer flagged; baseline updated accordingly with corrected reasons
+for the remaining 6, including the hashmap_str* re-labeling above).
+Full `cargo test --release` clean. 3 new regression tests: 1 updated
+`src/lib.rs` compile-check documenting the fix directly (asserts the
+Task field gets freed on both overwrite and scope exit), the
+existing `__poll_*`-exclusion guard test kept and re-documented, 1
+real-subprocess `tests/run_end_to_end.rs` test running the actual
+async example pattern end-to-end on both backends.
+
+## BUG-159 (2026-08-10) -- hashmap_strstr/strv leak, root-caused then FIXED (narrow scope)
+
+At direct request, root-caused the last open finding from round 8.
+`hashmap_insert(mut ref m, K, V)` leaks any argument that's a fresh,
+never-bound `OwnedStr` expression (e.g. `i64_to_str(1)` passed
+directly): the runtime C helper CLONES `k`/`v` into new storage on
+every path but never frees the caller's originals, and since they
+were never bound to a `let`, nothing else owns them either. Confirmed
+via a 1-line minimal repro leaking exactly 2 objects/6 bytes.
+
+**Turns out general, not hashmap-specific**: the identical leak
+reproduces passing a fresh `OwnedStr` expression to an ordinary user
+function expecting `Str` -- a THIRD escape vector of the same
+BUG-157/158 "OwnedStr auto-borrowed with no owner" family (after
+`Stmt::Let` and `Stmt::FieldAssign`/`StructLit`/`IndexAssign`), this
+time through function call arguments. `print`/`len` are the only
+call positions that already handle this correctly, via a hand-
+written, position-specific mechanism never generalized elsewhere.
+The GENERAL fix (every call site in the compiler) needs its own
+scoping discussion and was not attempted.
+
+**Fixed (narrow scope), at direct request, same day**: limited to
+`hashmap_insert`'s own K/V parameters, reusing the exact same
+`crate::ir::is_fresh_owned_str` "conservative whitelist" freshness
+check `print`/`len` already use. Fixed on BOTH backends -- tree-C
+wraps the call in a statement-expression binding fresh args to a
+stable temp (needed to both pass to the call and free afterward);
+LLVM just emits a `call void @free(...)` after the insert instruction
+for whichever SSA register(s) were fresh (no temp-binding needed --
+LLVM registers stay valid for later same-block instructions). The
+common (Var-sourced, already-safe) case emits identically to before
+on both backends.
+
+Verified: minimal repro clean under ASan; both real examples
+(`hashmap_strstr.vani`, `hashmap_strv.vani`) run with 0 leaks on
+tree-C (ASan) AND on LLVM (`valgrind --leak-check=full` on a native
+AOT build -- ASan can't instrument already-emitted LLVM IR). `vanic
+check examples` baseline unchanged. Corpus-wide sweep flagged count
+dropped from 6 to 4 (both hashmap files no longer flagged). Full
+`cargo test --release` clean. 4 new regression tests (2 `src/lib.rs`
+compile-checks including an explicit double-free regression guard, 1
+real-subprocess `tests/run_end_to_end.rs` test on both backends).
+Full writeup in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
+"hashmap_strstr/strv" section.
+
+Next free bug number is **BUG-160**.

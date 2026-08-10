@@ -3,6 +3,7 @@
 Out-of-tree utilities that do not ship with the compiler binary.
 
 - [`vani_translate.py`](#vani_translatepy) — keyword translation between 57 languages with optional LLM translation of comments, strings, and identifiers
+- [`leak_sweep.py`](#leak_sweeppy) — ASan + LeakSanitizer + UBSan sweep over the example corpus, run in CI
 - [`llm_context/`](llm_context/README.md) — prompt-engineering bundle and MCP server for AI agents (Phase ML-2)
 
 ---
@@ -273,6 +274,32 @@ The translator is a pure-Python single-file tool (`tools/vani_translate.py`). It
 3. **LLM pass** (optional) — `//` comment text, quoted string content, and optionally identifiers are extracted and sent to the chosen LLM backend. On failure the original text is kept unchanged.
 
 `_is_word_char()` recognises characters from all 27 supported Unicode script ranges so that non-ASCII keyword tokens are correctly delimited without a full Unicode segmenter.
+
+---
+
+## `leak_sweep.py`
+
+**Status**: Production; runs in CI on every push/PR to `main` (the `leak-sweep` job in `.github/workflows/ci.yml`)
+
+Compiles every `.vani` file under `examples/` that passes `vanic check` to C, builds it with `gcc -fsanitize=address,leak,undefined -fno-sanitize-recover=all` (the same flags `vanic run --backend=c` itself uses), runs it, and classifies any AddressSanitizer / LeakSanitizer / UndefinedBehaviorSanitizer report. Added after round 8's bug-pattern audit (2026-08-09) found this kind of systematic sweep had never existed and turned up two real bugs (one a genuine heap-use-after-free) on its first pass.
+
+```bash
+# Build vanic first, then sweep the corpus against the checked-in baseline.
+# Exits 0 if every finding matches the baseline exactly, 1 otherwise.
+cargo build --release --bin vanic
+python3 tools/leak_sweep.py
+```
+
+Some findings are already-triaged (a methodology false positive, or a real bug deliberately left open with a documented reason) rather than new regressions — those live in `tools/leak_sweep_baseline.json` with a `reason` field, so the sweep only fails CI on a genuinely NEW finding. If you fix one of the baselined bugs, remove its entry; if the sweep flags something new, read `tools/leak_sweep_baseline.json`'s existing entries first (particularly the BUG-157 async-cluster entries) before assuming it's the same known issue.
+
+To regenerate the baseline file from scratch after a deliberate, reviewed change in what's expected to be flagged:
+
+```bash
+python3 tools/leak_sweep.py --update-baseline
+# then edit tools/leak_sweep_baseline.json to fill in each entry's "reason"
+```
+
+Full methodology writeup, and the reasoning behind each currently-baselined finding, is in `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
 
 ---
 

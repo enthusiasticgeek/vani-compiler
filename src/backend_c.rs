@@ -14407,7 +14407,48 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 // drop.
             }
         },
-        TypedStmt::Discard { expr } => match &expr.ty {
+        TypedStmt::Discard { expr } => {
+            // BUG-156 (2026-08-09): `f(args);` (a discarded call,
+            // no `let` binding) to an affine closure never freed
+            // its env struct -- the "save env, null it, call, free
+            // env" sequence a few lines up (the `TypedStmt::Let`
+            // emission path, for `let r = f(args);`) was never
+            // mirrored here for the bare-statement-call shape.
+            // Confirmed a real leak via a systematic ASan sweep
+            // (round 8): `say_hi(5);` where `say_hi` is a factory-
+            // returned affine closure leaked its 8-byte env struct
+            // on every call, since `expr.ty` here is the CALL'S
+            // RETURN type (whatever the closure itself returns),
+            // not `Type::Closure(..)` -- the type-dispatch match
+            // below can't see the callee's own closure-ness at all,
+            // so this needs to intercept before it, on `expr.kind`
+            // instead of `expr.ty`.
+            if let TypedExprKind::CallIndirect { callee, args: call_args } = &expr.kind {
+                if let TypedExprKind::Var(callee_name) = &callee.kind {
+                    if matches!(callee.ty, Type::Closure(_, _)) {
+                        let is_aff = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                            r.borrow().contains_key(callee_name.as_str())
+                        });
+                        if is_aff {
+                            let cv = local_name(callee_name);
+                            let arg_strs: Vec<String> = call_args.iter().map(emit_expr).collect();
+                            let mut all_args: Vec<String> =
+                                vec!["__env_sv_discard".to_string()];
+                            all_args.extend(arg_strs);
+                            out.push_str(&format!(
+                                "  {{\n    uint64_t __env_sv_discard = {cv}.env;\n\
+                                 \x20   {cv}.env = 0;\n\
+                                 \x20   (void)({cv}.call({args}));\n\
+                                 \x20   free((void*)(uintptr_t)__env_sv_discard);\n  }}\n",
+                                cv = cv,
+                                args = all_args.join(", "),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+            match &expr.ty {
                 // BUG found auditing tutorials/src/advanced/05_simd.md
                 // (2026-08-01): simd_store/simd256_store/simd512_store
                 // mutate the target Vec THROUGH its ref/pointer and
@@ -14605,7 +14646,8 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&emit_expr(expr));
                 out.push_str(");\n");
             }
-        },
+            }
+        }
         TypedStmt::Return { expr } => {
             // Closure #239: when returning an array-typed
             // value, wrap it in the per-shape struct wrapper.
@@ -15226,6 +15268,80 @@ fn emit_for_iter(
     }
 }
 
+/// Build the free-expression for a `Box<T>` enum-variant payload
+/// already located at `payload_path` (a full, valid C lvalue
+/// expression -- e.g. `foo.payload` for the legacy single-payload
+/// enum representation, or `foo.u.v_Variant` for the mixed-payload
+/// union representation). Factored out of `emit_enum_value_drop`
+/// (BUG-153, 2026-08-09) so the mixed-payload switch-case branch
+/// below can share it instead of only ever handling `OwnedStr`/
+/// `Vec<T>` payloads and silently leaking every `Box<T>`-payload
+/// variant of a mixed-payload enum -- confirmed via a systematic
+/// ASan/LeakSanitizer sweep of the example corpus, not a hypothetical.
+fn box_payload_free_expr(payload_path: &str, inner: &Type) -> String {
+    match inner {
+        // Box<dyn Iface>: fat-pointer struct; free the
+        // owning .data field (the concrete heap slot).
+        Type::Object(_iface) => format!("free({path}.data)", path = payload_path),
+        // Box<Vec<T>>: free Vec's data buffer, then
+        // free the Box's heap slot for the Vec struct.
+        Type::Vec(element) => format!(
+            "{{ {helper}(*{path}); free({path}); }}",
+            helper = vec_helper(element, "free"),
+            path = payload_path
+        ),
+        // Box<OwnedStr>: free the string buffer, then
+        // free the Box's heap slot for the i8* pointer.
+        Type::OwnedStr => format!(
+            "{{ free((void*)*{path}); free({path}); }}",
+            path = payload_path
+        ),
+        // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
+        // payload -- the `Option<Box<Node>>` recursive-struct
+        // shape. A box-recursive inner struct calls its
+        // generated iterative deep-drop helper (inlining would
+        // need infinitely much C text to unroll the cycle); a
+        // non-recursive inner struct's owning fields are freed
+        // inline before the box's own slot.
+        Type::Struct(inner_name) => {
+            if crate::ast::struct_is_box_recursive(inner_name) {
+                format!(
+                    "__box_deep_drop_{}({path})",
+                    struct_c_name(inner_name),
+                    path = payload_path
+                )
+            } else {
+                let inner_fields = STRUCT_FIELDS_REGISTRY
+                    .with(|r| r.borrow().get(inner_name).cloned())
+                    .unwrap_or_default();
+                if inner_fields.is_empty() {
+                    format!("free({path})", path = payload_path)
+                } else {
+                    let deref_path = format!("(*{})", payload_path);
+                    let mut field_drops = String::new();
+                    let empty: std::collections::HashSet<&String> =
+                        std::collections::HashSet::new();
+                    emit_struct_field_drops(
+                        &deref_path,
+                        inner_name,
+                        &inner_fields,
+                        &empty,
+                        &mut field_drops,
+                    );
+                    format!(
+                        "{{ {} free({path}); }}",
+                        field_drops.trim(),
+                        path = payload_path
+                    )
+                }
+            }
+        }
+        // Box<T> for scalar T: payload is T*;
+        // simply free the heap slot.
+        _ => format!("free({path})", path = payload_path),
+    }
+}
+
 /// Emit scope-exit drop code for an enum-typed value at `path`
 /// (already a valid C lvalue -- a bare local name or a `foo.field`
 /// chain): frees/recurses into whichever variant's payload owns
@@ -15264,11 +15380,16 @@ fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
                     vec_helper(element, "free"),
                     path, enum_variant_member(vname)
                 )),
-                // BUG-97 note: mixed-payload enums with a
-                // Box<Struct>-shaped variant payload remain a
-                // deferred gap (not needed by the recursive-struct
-                // shape this fix targets, which is single-payload);
-                // see docs/TODO_CURRENT.md.
+                // BUG-153 (2026-08-09): mixed-payload enums with a
+                // Box<T>-shaped variant payload used to be a
+                // deferred gap here (this arm fell to `_ => None`,
+                // silently emitting no free call at all) -- now
+                // shares the same Box-payload logic the single-
+                // payload path below already had.
+                Type::Box(inner) => Some(box_payload_free_expr(
+                    &format!("{}.u.{}", path, enum_variant_member(vname)),
+                    inner,
+                )),
                 _ => None,
             };
             if let Some(call) = free_for_variant {
@@ -15299,70 +15420,10 @@ fn emit_enum_value_drop(path: &str, enum_name: &str, out: &mut String) {
             vec_helper(element, "free"),
             path
         )),
-        Some(Type::Box(inner)) => Some(match &**inner {
-            // Box<dyn Iface>: fat-pointer struct; free the
-            // owning .data field (the concrete heap slot).
-            Type::Object(_iface) => format!(
-                "free({path}.payload.data)",
-                path = path
-            ),
-            // Box<Vec<T>>: free Vec's data buffer, then
-            // free the Box's heap slot for the Vec struct.
-            Type::Vec(element) => format!(
-                "{{ {helper}(*{path}.payload); free({path}.payload); }}",
-                helper = vec_helper(element, "free"),
-                path = path
-            ),
-            // Box<OwnedStr>: free the string buffer, then
-            // free the Box's heap slot for the i8* pointer.
-            Type::OwnedStr => format!(
-                "{{ free((void*)*{path}.payload); free({path}.payload); }}",
-                path = path
-            ),
-            // BUG-97 (task #39, 2026-08-03): Box<Struct> enum
-            // payload -- the `Option<Box<Node>>` recursive-struct
-            // shape. A box-recursive inner struct calls its
-            // generated iterative deep-drop helper (inlining would
-            // need infinitely much C text to unroll the cycle); a
-            // non-recursive inner struct's owning fields are freed
-            // inline before the box's own slot.
-            Type::Struct(inner_name) => {
-                if crate::ast::struct_is_box_recursive(inner_name) {
-                    format!(
-                        "__box_deep_drop_{}({path}.payload)",
-                        struct_c_name(inner_name),
-                        path = path
-                    )
-                } else {
-                    let inner_fields = STRUCT_FIELDS_REGISTRY
-                        .with(|r| r.borrow().get(inner_name).cloned())
-                        .unwrap_or_default();
-                    if inner_fields.is_empty() {
-                        format!("free({path}.payload)", path = path)
-                    } else {
-                        let deref_path = format!("(*{}.payload)", path);
-                        let mut field_drops = String::new();
-                        let empty: std::collections::HashSet<&String> =
-                            std::collections::HashSet::new();
-                        emit_struct_field_drops(
-                            &deref_path,
-                            inner_name,
-                            &inner_fields,
-                            &empty,
-                            &mut field_drops,
-                        );
-                        format!(
-                            "{{ {} free({path}.payload); }}",
-                            field_drops.trim(),
-                            path = path
-                        )
-                    }
-                }
-            }
-            // Box<T> for scalar T: payload is T*;
-            // simply free the heap slot.
-            _ => format!("free({path}.payload)", path = path),
-        }),
+        Some(Type::Box(inner)) => Some(box_payload_free_expr(
+            &format!("{}.payload", path),
+            inner,
+        )),
         _ => None,
     };
     if let Some(free_call) = free_expr {
@@ -19204,13 +19265,74 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             hashmap_prefix_from_ty(result_ty),
             emit_expr(&args[0])
         ),
-        "hashmap_insert" => format!(
-            "{}_insert({}, ({}), ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1]),
-            emit_expr(&args[2])
-        ),
+        "hashmap_insert" => {
+            // BUG-159 (2026-08-10): the runtime `..._insert` helper
+            // CLONES K/V into new storage on every path (fresh
+            // insert AND duplicate-key overwrite) but never frees
+            // the caller's original K/V pointers -- fine when K/V
+            // came from a named OwnedStr binding (its own scope-exit
+            // Drop frees it), but a FRESH, never-bound OwnedStr
+            // argument (`i64_to_str(1)` passed directly, not through
+            // a `let`) has no other owner and leaks. Root-caused via
+            // a corpus-wide ASan sweep; see docs/BUG_PATTERN_AUDIT_
+            // TODO_8.md's "hashmap_strstr/strv root cause" section
+            // for the full writeup, including why this fix is
+            // deliberately narrow (limited to hashmap_insert's own
+            // K/V params) rather than the much larger general fix
+            // (every function-call argument in the compiler) that
+            // same writeup identifies as the real underlying gap.
+            //
+            // Fix: reuse the exact same "conservative whitelist"
+            // freshness check `print`/`len` already use
+            // (`is_fresh_owned_str` -- only a Call or Binary-Add
+            // producing OwnedStr counts as fresh; a Var/FieldAccess/
+            // TupleAccess is owned by some binding whose own drop
+            // handles it, freeing here would double-free). Only
+            // wrap in a statement-expression when at least one of
+            // K/V is actually fresh -- the common (already-safe)
+            // case emits identically to before.
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1]);
+            let v_fresh = crate::ir::is_fresh_owned_str(&args[2]);
+            if !k_fresh && !v_fresh {
+                format!(
+                    "{}_insert({}, ({}), ({}))",
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1]),
+                    emit_expr(&args[2])
+                )
+            } else {
+                let prefix = hashmap_prefix_from_recv(&args[0].ty);
+                let map_expr = emit_expr(&args[0]);
+                let k_expr = emit_expr(&args[1]);
+                let v_expr = emit_expr(&args[2]);
+                let mut body = String::from("({ ");
+                let k_arg = if k_fresh {
+                    body.push_str(&format!("char* _intent_hm_k = ({}); ", k_expr));
+                    "_intent_hm_k".to_string()
+                } else {
+                    format!("({})", k_expr)
+                };
+                let v_arg = if v_fresh {
+                    body.push_str(&format!("char* _intent_hm_v = ({}); ", v_expr));
+                    "_intent_hm_v".to_string()
+                } else {
+                    format!("({})", v_expr)
+                };
+                body.push_str(&format!(
+                    "{} _intent_hm_r = {}_insert({}, {}, {}); ",
+                    c_type_name(result_ty), prefix, map_expr, k_arg, v_arg
+                ));
+                if k_fresh {
+                    body.push_str("free((void*)_intent_hm_k); ");
+                }
+                if v_fresh {
+                    body.push_str("free((void*)_intent_hm_v); ");
+                }
+                body.push_str("_intent_hm_r; })");
+                body
+            }
+        }
         "hashmap_get" => format!(
             "{}_get({}, ({}))",
             hashmap_prefix_from_recv(&args[0].ty),

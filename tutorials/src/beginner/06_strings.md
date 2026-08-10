@@ -191,6 +191,113 @@ fn main() -> i64 {
 The `owned` binding stays alive; only a read-only pointer is
 passed. `owned` is freed at end of `main`.
 
+The same auto-coercion also works when you narrow a **fresh**
+`OwnedStr`-producing call straight into a `Str`-typed `let`, with
+no intermediate `OwnedStr` binding of your own:
+
+```vani
+fn main() -> i64 {
+  let label: Str = i64_to_str(42);   // fresh OwnedStr narrowed to Str
+  print label;
+  return 0;
+}
+```
+
+The compiler transparently keeps an `OwnedStr` behind the scenes
+to own the allocation and free it at scope exit — `label` itself
+is just a read-only view into it, same as the function-argument
+case above. You don't need to write the two-step form
+(`let tmp: OwnedStr = i64_to_str(42); let label: Str = tmp;`)
+yourself; either form works identically.
+
+> **Async fn bodies**: this pattern also works correctly inside an
+> `async fn`, for the common case — `let label: Str =
+> i64_to_str(mode);` (or `f64_to_str` / `f64_to_str_fixed` /
+> `bool_to_str`) is recognized directly by the async state-machine
+> transform, which hoists the underlying `OwnedStr` into the
+> generated coroutine's persistent state as a real owning field, not
+> just a view. Less common `OwnedStr` sources the transform doesn't
+> specifically recognize (e.g. building the string via `+`
+> concatenation, or a user-defined function that returns `OwnedStr`)
+> fall back to the same auto-borrow-only behavior as before this
+> fix — safe, but the allocation leaks for the lifetime of that
+> `Task`. Tracked in `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+### Storing an `OwnedStr` into a struct's `Str` field is rejected
+
+The `let`-narrowing case above is safe because the compiler-managed
+temp's scope is tied directly to the `let` itself. That safety
+doesn't carry over to a struct field — a struct can easily outlive
+whatever `OwnedStr` you tried to view into it:
+
+```vani
+struct Holder { s: Str, n: i64 }
+fn main() -> i64 {
+  let h: Holder = Holder { s: "", n: 0 };
+  {
+    let owned: OwnedStr = i64_to_str(99);
+    h.s = owned;   // rejected -- see below
+  }
+  print h.s;
+  return 0;
+}
+```
+```
+error: cannot store a freshly-owned `OwnedStr` into `Str`-typed field 's' -- the struct
+can outlive the `OwnedStr`'s own scope, which would free the buffer while the field is
+still readable (a use-after-free)
+    h.s = owned;
+          ^^^^^
+```
+
+The same rejection applies to initializing the field directly in a
+struct literal (`Holder { s: owned, .. }`) and to writing through a
+`Vec` element's field (`xs[i].s = owned;`). **Fix**: declare the
+field as `OwnedStr` instead of `Str` — then it owns its own copy, and
+the struct's own Drop frees it correctly:
+
+```vani
+struct Holder { s: OwnedStr, n: i64 }
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };   // fine -- s owns the allocation
+}
+fn main() -> i64 {
+  let h: Holder = make();
+  print h.s;
+  return 0;
+}
+```
+
+### Passing a fresh `OwnedStr` into a container builtin
+
+`hashmap_insert(mut ref m, k, v)` (and friends) accept `OwnedStr` keys
+and values for `HashMap<OwnedStr, _>` / `HashMap<_, OwnedStr>`. Most
+call sites are safe — passing an already-owned binding just moves it
+into the map, and print/len-style read-only positions already handle
+a freshly-computed value correctly. `hashmap_insert` specifically also
+handles a **freshly-computed** `OwnedStr` argument correctly:
+
+```vani
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));  // fine
+  return 0;
+}
+```
+
+> **Known gap**: this same "fresh value, no owning binding" pattern
+> still leaks (not crashes — just leaks, safely) in a few related
+> spots that haven't been fixed yet: `hashmap_get`/
+> `hashmap_contains_key`/`hashmap_remove`'s key argument, `Trie`'s
+> `.insert(...)` method, and — most broadly — passing a freshly-
+> computed `OwnedStr` directly as an argument to an ordinary function
+> that takes `Str` (`my_fn(i64_to_str(5))`). Bind the value to a `let`
+> first if you want to be sure it's freed (`let k: OwnedStr =
+> i64_to_str(5); my_fn(k);` — this form is always correct, since `k`
+> keeps its own scope-exit Drop). Tracked in
+> `docs/BUG_PATTERN_AUDIT_TODO_9.md`.
+
 ### Copying a `Str` literal into an `OwnedStr`
 
 To get an owned copy of a literal, concatenate with an empty
