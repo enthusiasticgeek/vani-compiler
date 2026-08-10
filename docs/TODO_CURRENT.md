@@ -11602,4 +11602,114 @@ condition), 2 real-subprocess `tests/run_end_to_end.rs` tests (one
 overflow case, one bounds case with the dynamic idx/len values,
 matching exit codes 3/134 preserved on both backends).
 
-Next free bug number is **BUG-163**.
+## BUG-163 (2026-08-10) -- struct-field Vec<T> index read had NO bounds check on tree-LLVM, FIXED
+
+Found while manually testing BUG-162 repros. `h.xs[h.i]` (a `Vec<T>`
+living inside a struct FIELD, indexed directly, T non-bool) crashed
+tree-LLVM with NO message and an unstable exit code (101/107/117 all
+observed across repro variants) -- unlike every OTHER bounds-check
+trap, which BUG-162 gave a clean `rc=3` + message. Confirmed via `git
+stash` that this reproduces identically on the pre-BUG-162 code, so
+it's a separate, pre-existing bug, not a BUG-162 regression.
+
+**Root cause**: `src/backend_llvm.rs`'s `TypedExprKind::Index` handler
+has a dedicated arm for `array.kind == FieldAccess` (i.e. the Vec
+being indexed is itself a struct field, not a plain local). That arm
+has THREE sub-cases -- `Vec<bool>` (packed-bit read), `Array<T, N>`,
+and the general `Vec<T>` (non-bool) read -- and the general `Vec<T>`
+sub-case was simply missing the `@__intent_bounds_check` call every
+one of its siblings has: the Var-base Vec arm above it (BUG-108), this
+SAME FieldAccess block's own `Vec<bool>` sub-case (BUG-122), and the
+FieldAccess+Array sub-case in the same block (BUG-149). A raw
+out-of-range `h.i` GEP'd straight past the heap buffer with no trap at
+all -- not "traps with the wrong message," genuinely never reached ANY
+trap.
+
+**Fixed**: added the same `@__intent_bounds_check` call (load `.len`,
+check, then the existing data-pointer GEP+load), matching the sibling
+arms' shape exactly. `h.xs[h.i]` now gets the same clean `rc=3` +
+dynamic idx/len message tree-C already gives (`"index out of bounds:
+7, len 3"`) -- confirmed byte-identical between backends, both `vanic
+run` (JIT) and AOT `vanic build`. The write-path analog (`h.xs[h.i] =
+val`, direct assignment through a struct-field Vec index) turned out
+not to be valid vāṇी syntax at all (`vanic check` rejects it with
+"expected statement"), so there's no equivalent write-path bug to fix
+-- `IndexAssign`'s own codegen only handles a plain local Vec base
+with FIELD DESCENT after the index (`xs[i].field = val`), not a Vec
+living behind a field access before the index.
+
+Verified: element-type generalization confirmed (`Vec<f64>` struct
+field, same fix path, same correct message). In-bounds access on the
+same shape still returns the correct value (unaffected). `valgrind
+--leak-check=full` on the AOT binary: clean, no leaks introduced.
+`vanic check examples` baseline unchanged (923 ok). Corpus-wide `tools/
+leak_sweep.py` sweep still matches the 4-item baseline. Full `cargo
+test --release` clean (2876 lib tests + all 12 other test binaries, 0
+failed). 2 new regression tests (1 `src/lib.rs` compile-check, 1
+real-subprocess `tests/run_end_to_end.rs` test on both backends).
+
+## Localfuzz timeout findings (2026-08-10) -- all 8 confirmed corpus artifacts, not compiler bugs
+
+Investigated every "both backends timed out" localfuzz finding
+accumulated since round 8 (`cdec4c613b`, `d5870f7218`, `d8f20b7050`,
+`7b63fa98b6`, `e37418e21c`, `78bdde8bba`, `d669b7fd24`,
+`22c8c106e2`) by diffing each repro against its base example and
+re-running against the current (BUG-162/163-fixed) binary. All 8
+reproduce as genuine hangs on both backends -- but every single one
+is a genuinely broken MUTATED PROGRAM, not a compiler/runtime bug:
+
+- `cdec4c613b` (btreeset.vani), `e37418e21c` (control_flow.vani): a
+  loop increment (`i = i + 1;`) mutated to a decrement (`i = i +
+  -1;`) -- the loop condition (`i < N`) never becomes false.
+- `7b63fa98b6` (early_exit.vani, tibetan), `78bdde8bba` (early_exit.vani,
+  lao): the loop increment statement (`n = n + 1;`) deleted outright
+  -- same effect, condition never becomes false.
+- `d5870f7218`, `22c8c106e2` (async_cancel_auto.vani, pashto +
+  spanish): `sleep_ms(ms)`'s `ms` argument mutated from a small
+  constant to `9223372036854775807` (i64::MAX) -- the program
+  legitimately sleeps for ~292 million years; not a hang, a correct
+  (if absurd) `sleep_ms` call honoring its input.
+- `d8f20b7050` (mix_conc_mutex_struct.vani): a second `mutex_lock(ref
+  s.m)` call inserted before the original one, on the SAME
+  non-reentrant mutex, same thread -- a genuine self-deadlock from
+  the mutated program, not a compiler bug (though arguably a missed
+  static-analysis opportunity -- vāṇी's existing lock-order checker
+  doesn't currently catch same-thread double-lock in a straight-line
+  scope; noted as a possible future static-check candidate, not
+  pursued this session).
+- `d669b7fd24` (mix_conc_channel_send_recv.vani): the `channel_send`
+  call deleted -- `channel_recv` on the now-empty, sender-less
+  channel legitimately blocks forever.
+
+No fix needed for any of these; all are working-as-designed given
+genuinely broken input programs.
+
+## New localfuzz finding, documented not fixed: SSA-C has no `Vec` support at all
+
+While investigating a wording mismatch on `20260810-124224-backend-
+divergence-e1322cfcd5` (LLVM printed the SSA-pair's static `"index out
+of bounds"`, C printed the tree-pair's dynamic `"index out of bounds:
+5, len 5"` -- BUG-162 fixed the SILENCE on both, but this exposed a
+separate wording divergence), root-caused via a direct call to
+`crate::ssa_backend_c::emit`: it explicitly rejects ANY `Vec<T>` type
+with `"type Vec(...) is outside the SSA-C scalar/string subset"`.
+SSA-LLVM has no such restriction. Since the two SSA/tree eligibility
+gates (`ssa_c_extra_reject`/`ssa_llvm_extra_reject` in `src/main.rs`)
+pass this specific program on BOTH sides (their narrow per-backend
+gaps don't cover Vec at all), the divergence comes from SSA-C's own
+emit function failing internally and silently falling back to tree-C
+-- a per-backend runtime fallback the architecture already documents
+as intentional (`emit_c_via_ssa`'s own comment: "Anything an SSA
+backend can't yet handle surfaces EmitError... and falls back
+per-backend"). This means ANY program using `Vec` can silently diverge
+between which path (SSA vs tree) each backend takes independently,
+which in turn means their exact trap message wording can differ even
+after BUG-162 -- not a new bug, a pre-existing, much larger
+architectural gap (SSA-C simply doesn't implement Vec at all) that's
+out of scope for a quick fix. Not pursued this session; noted as a
+future candidate (would mean either implementing Vec support in
+SSA-C, a large undertaking, or accepting the wording split as
+permanent and documenting it -- which the tutorial update below
+already does).
+
+Next free bug number is **BUG-164**.

@@ -2,14 +2,18 @@
 
 **STATUS (2026-08-10): Category 1's two cheapest pickups FIXED
 (BUG-160, BUG-161); Category 3's overflow/bounds-divergence theme also
-FIXED (BUG-162).** See `docs/TODO_CURRENT.md` for the full writeups.
-This is now a partial-progress candidate list, not a from-scratch one:
-Category 2 is untouched (by design -- those 4 are non-fixes); Category
-1's general (ordinary-user-function) case remains deliberately
-unscoped/open; Category 3 has a NEW untriaged candidate found while
-fixing BUG-162 (a pre-existing, unrelated struct-field-Vec bounds
-crash -- see its own subsection below) plus its original untriaged
-localfuzz findings, still open.
+FIXED (BUG-162), plus the struct-field-Vec bounds crash it surfaced
+also FIXED (BUG-163); all 8 localfuzz timeout findings investigated
+and confirmed as corpus artifacts (genuinely broken mutated programs),
+not compiler bugs.** See `docs/TODO_CURRENT.md` for the full
+writeups. This is now a partial-progress candidate list, not a
+from-scratch one: Category 2 is untouched (by design -- those 4 are
+non-fixes); Category 1's general (ordinary-user-function) case remains
+deliberately unscoped/open; Category 3's timeout cluster is fully
+resolved (no fix needed -- see below), but it gained a new,
+much-larger, NOT-pursued candidate: SSA-C has no `Vec<T>` support at
+all, causing per-program SSA/tree divergence on the C side independent
+of anything BUG-162 touched.
 
 Three source categories, each its own section below:
 1. More instances of BUG-159's exact bug family (OwnedStr auto-borrow
@@ -198,11 +202,18 @@ Category 1. Worth checking whether this connects to Category 2 item
 3/4's i64::MIN/shift UB findings -- same neighborhood of the codebase
 (overflow/UB handling), not confirmed to be the same code path.
 
-### NEW (2026-08-10): struct field holding a Vec crashes on tree-LLVM out-of-bounds, no clean message
+### FIXED (2026-08-10, BUG-163 -- see docs/TODO_CURRENT.md): struct field holding a Vec crashed on tree-LLVM out-of-bounds, no clean message
 
 Found while manually testing BUG-162 repros (not from localfuzz, no
-finding directory) -- worth its own localfuzz-style writeup here.
-Repro:
+finding directory); root-caused and fixed same-day. Root cause:
+`backend_llvm.rs`'s `TypedExprKind::Index` handler had a dedicated
+FieldAccess-base arm with 3 sub-cases (`Vec<bool>`, `Array`, general
+`Vec<T>`) -- the general `Vec<T>` sub-case was simply missing the
+`@__intent_bounds_check` call every sibling arm around it already had
+(BUG-108/122/149). Fixed by adding it, matching the sibling shape
+exactly. Full technical detail (including why the write-path analog
+turned out not to be valid syntax at all) is in `docs/TODO_CURRENT.md`.
+Repro, for reference:
 ```vani
 struct Holder { xs: Vec<i64>, i: i64 }
 fn f(h: Holder) -> i64 { return h.xs[h.i]; }
@@ -212,26 +223,15 @@ fn main() -> i64 {
   return f(h);
 }
 ```
-Tree-LLVM (both `vanic run` and AOT `vanic build`): crashes with NO
-stderr output at all, and an unstable exit code across runs/repro
-shape variants (101, 107, 117 all observed) -- not a clean `rc=3` +
-message like BUG-162 gives every other bounds-check trap. Tree-C on
-the SAME repro runs correctly and prints the expected `"index out of
-bounds: 7, len 3"` message. Confirmed via `git stash` that this
-reproduces identically on the pre-BUG-162 code -- a separate,
-pre-existing bug, NOT a BUG-162 regression. NOT root-caused: unclear
-whether the crash is actually happening inside `__intent_bounds_check`
-itself (a struct-field GEP producing a bad `%idx`/`%len` pair that
-never reaches the check cleanly), somewhere in Vec-move-into-struct-
-field plumbing before the check, or something else entirely. A
-NON-struct-wrapped version of the same out-of-range access (passed via
-a plain `ref Vec<i64>` parameter alongside an unrelated struct just to
-force the tree path) works perfectly -- see
-`bug162_bounds_check_prints_idx_len_message_on_llvm_matching_exit3_
-convention` in `tests/run_end_to_end.rs` -- so the bug is specifically
-about a Vec living INSIDE a struct FIELD reaching the bounds-check
-call, not bounds-checking in general. Good next-round candidate: cheap
-to reproduce, clearly scoped, doesn't touch BUG-162's own code.
+Before the fix: tree-LLVM (both `vanic run` and AOT `vanic build`)
+crashed with NO stderr output at all and an unstable exit code across
+repro shape variants (101, 107, 117 all observed) -- not a clean
+`rc=3` + message like BUG-162 gives every other bounds-check trap.
+Tree-C on the same repro always ran correctly. Confirmed via `git
+stash` that this reproduced identically on the pre-BUG-162 code -- a
+separate, pre-existing bug, not a BUG-162 regression. After the fix:
+both backends give the identical `"index out of bounds: 7, len 3"`
+message with a clean, stable `rc=3`/`rc=134`.
 
 ### Needs root-cause investigation (no clear pattern yet)
 
@@ -250,13 +250,14 @@ to reproduce, clearly scoped, doesn't touch BUG-162's own code.
   root-cause review", repro/details not fully captured in the staging
   doc -- read `tools/localfuzz/findings/20260809-201604-backend-
   divergence-7b9b35c019/repro.vani` directly before starting.
-- **`20260810-015549-run-crash-cdec4c613b`** -- BOTH backends TIMED
-  OUT on the same input (`rc=null, timed_out=true` for both C and
-  LLVM). Needs investigation into whether this is a genuine compiler/
-  runtime hang (a real bug) or simply a fuzzer-mutated program that
-  legitimately contains an infinite loop (not a bug, a corpus
-  artifact) -- check the repro's actual control flow first before
-  assuming either.
+- **`20260810-015549-run-crash-cdec4c613b`** -- FIXED, i.e. investigated
+  and closed with no code change needed (2026-08-10): a mutant of
+  `btreeset.vani` where the drain loop's decrement (`j = j + 1;` ->
+  `j = j + -1;`) makes `j < 20` never go false. A genuine infinite
+  loop in the mutated SOURCE, not a compiler/runtime bug -- see the
+  "Localfuzz timeout findings" subsection in `docs/TODO_CURRENT.md`
+  for the full investigation of this and 7 siblings, all reaching the
+  same conclusion.
 - **`20260810-024150-backend-divergence-8e74a245e6`** -- marked
   "needs human/frontier root-cause review", no detail captured in the
   staging doc at all. Read the repro directly.
@@ -322,32 +323,67 @@ message, LLVM exits silently with rc=3 + empty stderr):
   exiting) covers overflow AND bounds AND whatever else uses the same
   trap mechanism. A patch was auto-attempted and discarded here too.
 
-**More timeout findings** (both backends hang, `rc=null,
-timed_out=true` on both C and LLVM -- same shape as `cdec4c613b`
-above, bringing the total to 6):
+### 4 more findings, landed after BUG-162 shipped (2026-08-10, later)
 
-- `20260810-041441-run-crash-d5870f7218` (base `examples/language/
-  pashto/async_cancel_auto.vani`).
-- `20260810-074640-run-crash-d8f20b7050` (base `examples/edge_cases/
-  mix_conc_mutex_struct.vani`).
-- `20260810-094706-run-crash-7b63fa98b6` (base `examples/language/
-  tibetan/early_exit.vani`).
-- `20260810-101253-run-crash-e37418e21c` (base `examples/language/
-  spanish/control_flow.vani`). A patch was auto-attempted and
-  discarded.
-- `20260810-103151-run-crash-78bdde8bba` (base `examples/language/
-  lao/early_exit.vani`).
+- `20260810-134722-backend-divergence-f1f2c603f4` (base `examples/
+  language/amharic/for_loops.vani`) -- "integer overflow in int64_t
+  add". Re-ran against the current (BUG-162-fixed) binary: FULLY
+  CLOSED, both backends now print the identical message. Confirms the
+  fix.
+- **`20260810-124224-backend-divergence-e1322cfcd5`** (base `examples/
+  language/odia/control_flow.vani`) -- an out-of-range Vec index.
+  Re-ran against the current binary: no longer silent on either side
+  (BUG-162 worked), but the exact WORDING still differs -- LLVM prints
+  the SSA-pair's static `"index out of bounds"`, C prints the
+  tree-pair's dynamic `"index out of bounds: 5, len 5"`. Root-caused:
+  this program uses `Vec<i64>`, and `ssa_backend_c::emit` explicitly
+  rejects ANY `Vec<T>` (`"type Vec(...) is outside the SSA-C scalar/
+  string subset"`) while SSA-LLVM has no such restriction -- so this
+  program's LLVM side takes the SSA fast path while its C side falls
+  back to tree-C, independently, for the same source. NOT a BUG-162
+  bug (the silence is fixed); a separate, much larger, pre-existing
+  architectural gap (SSA-C has no Vec support at all). See `docs/
+  TODO_CURRENT.md`'s "SSA-C has no Vec support at all" section for the
+  full writeup. Not fixed, not a quick pickup -- would mean either
+  implementing Vec in SSA-C or accepting the wording split as
+  permanent (current call: accept it, documented in the tutorials).
+- `20260810-124633-run-crash-d669b7fd24` (mix_conc_channel_send_recv.vani)
+  and `20260810-142721-run-crash-22c8c106e2` (spanish/
+  async_cancel_auto.vani) -- both timeout findings, folded into the
+  "More timeout findings" list below (both investigated and closed as
+  corpus artifacts, not bugs).
 
-Two of the five (`7b63fa98b6`, `78bdde8bba`) share `early_exit.vani`
-as their base (different locale folders -- likely mutants of the same
-underlying source), which may explain a shared hang between those two
-specifically; the other three (`async_cancel_auto.vani`,
-`mix_conc_mutex_struct.vani`, `control_flow.vani`) don't share an
-obvious common base with each other or with the first two. As before:
-check each repro's actual control flow before assuming a real
-compiler/runtime hang vs. a fuzzer-generated infinite loop (a corpus
-artifact, not a bug) -- do NOT assume all 6 timeout findings share one
-root cause without verifying.
+**More timeout findings, ALL INVESTIGATED AND CLOSED (2026-08-10, no
+code change needed)** -- both backends hang, `rc=null, timed_out=true`
+on both C and LLVM, same shape as `cdec4c613b` above. Every one of
+these (plus 2 more that landed even later, `d669b7fd24` and
+`22c8c106e2`, not yet in this doc when this subsection was first
+written) was root-caused by diffing against its base example; all 8
+total are genuinely broken mutated programs (infinite loops,
+deadlocks, or an absurd-but-correct multi-million-year sleep), not
+compiler/runtime bugs. Full investigation writeup in
+`docs/TODO_CURRENT.md`'s "Localfuzz timeout findings" section; one-line
+summary per finding:
+
+- `20260810-041441-run-crash-d5870f7218` (pashto/async_cancel_auto.vani)
+  -- `sleep_ms` argument mutated to i64::MAX.
+- `20260810-074640-run-crash-d8f20b7050` (mix_conc_mutex_struct.vani)
+  -- same non-reentrant mutex locked twice on one thread, self-deadlock.
+- `20260810-094706-run-crash-7b63fa98b6` (tibetan/early_exit.vani) --
+  loop increment statement deleted.
+- `20260810-101253-run-crash-e37418e21c` (spanish/control_flow.vani)
+  -- loop increment flipped to a decrement.
+- `20260810-103151-run-crash-78bdde8bba` (lao/early_exit.vani) -- same
+  as `7b63fa98b6`, deleted increment.
+- `20260810-124633-run-crash-d669b7fd24` (mix_conc_channel_send_recv.vani)
+  -- the `channel_send` call deleted; `channel_recv` blocks forever.
+- `20260810-142721-run-crash-22c8c106e2` (spanish/async_cancel_auto.vani)
+  -- same as `d5870f7218`, `sleep_ms` mutated to i64::MAX.
+
+No fix needed for any of these. One soft follow-up noted (not
+pursued): `d8f20b7050`'s same-thread double-lock is arguably a missed
+static-analysis opportunity for vāṇी's existing lock-order checker,
+which doesn't currently catch this pattern in a straight-line scope.
 
 ---
 

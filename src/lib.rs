@@ -42475,6 +42475,44 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug163_struct_field_vec_index_read_bounds_checked_on_tree_llvm() {
+        // BUG-163 (2026-08-10): found while manually testing BUG-162
+        // repros. `TypedExprKind::Index` on a struct-FIELD-based,
+        // non-bool `Vec<T>` base (e.g. `h.xs[h.i]`) had NO bounds
+        // check at all -- every sibling arm around it (Var-base Vec
+        // via BUG-108, this same FieldAccess block's own Vec<bool>
+        // sub-case via BUG-122, FieldAccess+Array via BUG-149) all
+        // call `@__intent_bounds_check`; this one arm was simply
+        // missed. A raw out-of-range index GEP'd straight past the
+        // heap buffer with no trap and no message at all (unlike
+        // every other bounds-check site, which BUG-162 gave a clean
+        // message to) -- confirmed pre-existing via `git stash`,
+        // unrelated to BUG-162 itself.
+        let source = r#"
+            struct Holder { xs: Vec<i64>, i: i64 }
+            fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let h: Holder = Holder { xs: xs, i: 7 };
+              return f(h);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("struct-field Vec index compiles");
+        assert!(
+            !ll.contains("ModuleID = 'intent-ssa'"),
+            "expected this program to take the tree-LLVM path (sanity check on the test itself):\n{}",
+            &ll[..ll.len().min(500)]
+        );
+        let bounds_check_calls = ll.matches("call void @__intent_bounds_check(").count();
+        assert!(
+            bounds_check_calls >= 1,
+            "expected h.xs[h.i] to emit a bounds check, got {} calls in:\n{}",
+            bounds_check_calls,
+            ll
+        );
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

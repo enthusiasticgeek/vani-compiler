@@ -17238,6 +17238,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     ));
                     let idx_v = emit_expr(index, ctx, out);
                     let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                    // BUG-163 (2026-08-10): this arm (a struct-FIELD-
+                    // based, non-bool Vec<T> read, e.g. `h.xs[h.i]`)
+                    // had NO bounds check at all -- unlike every
+                    // sibling arm around it (the Var-base Vec arm
+                    // above via BUG-108, this same FieldAccess block's
+                    // own Vec<bool> sub-case via BUG-122, and the
+                    // FieldAccess+Array arm via BUG-149), which all
+                    // call `@__intent_bounds_check` before reading.
+                    // A raw out-of-range `h.i` GEP'd straight past the
+                    // heap buffer with no trap at all -- found while
+                    // testing BUG-162 (silently crashed with no
+                    // message and an unstable exit code, unlike every
+                    // other bounds-check trap, because it never
+                    // reached ANY trap at all).
+                    let len_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                        len_p, s_ty, s_ty, base_addr
+                    ));
+                    let len_v = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_p));
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx_i64, len_v
+                    ));
                     let p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 {}\n",

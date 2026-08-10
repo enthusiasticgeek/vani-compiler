@@ -14421,3 +14421,52 @@ fn main() -> i64 {
         String::from_utf8_lossy(&c_out.stderr)
     );
 }
+
+#[test]
+fn bug163_struct_field_vec_index_out_of_range_traps_cleanly_on_both_backends() {
+    // BUG-163 (2026-08-10): `h.xs[h.i]` (a Vec living inside a struct
+    // FIELD, indexed directly) had NO bounds check at all on
+    // tree-LLVM -- every sibling shape (Var-base Vec, this same
+    // struct-field arm's own Vec<bool> case, struct-field Array) was
+    // already checked; this one arm was simply missed. Before the
+    // fix: no message, no clean exit code (rc varied by repro shape
+    // -- 101/107/117 observed), a raw out-of-bounds heap read.
+    // Confirmed pre-existing via `git stash` (unrelated to BUG-162).
+    // After the fix: clean rc=3 + the same message tree-C already
+    // gave. Real-subprocess run on both `vanic run` and AOT
+    // `vanic build`, confirming both the message and a stable exit
+    // code.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug163-struct-field-vec-oob",
+        r#"
+struct Holder { xs: Vec<i64>, i: i64 }
+fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let h: Holder = Holder { xs: xs, i: 7 };
+  return f(h);
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM must trap cleanly with rc=3, not crash unpredictably");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}
