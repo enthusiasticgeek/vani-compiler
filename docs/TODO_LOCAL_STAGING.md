@@ -4627,3 +4627,12 @@ Fix attempt: `tools/localfuzz/findings/20260810-041441-run-crash-d5870f7218/fix_
 STATUS: needs human/frontier root-cause review.
 
 A run-crash test was executed against the provided vani-lang codebase with a mutant generated from a local fuzzer. The resulting executable crashed during its execution, which indicates an internal error in the compiler's core logic or optimizations. The exact repro source for this crash is not specified in the given information. The observed symptom is that the program terminates unexpectedly after running for a significant amount of time (up to 2^64 milliseconds). The backend(s) affected by this issue are LLVM and C, as indicated by the "--backend=c" flag used during the compilation process.
+
+---
+
+### Candidate: 20260810-063522-backend-divergence-5e6cada3c6
+
+Repro: `tools/localfuzz/findings/20260810-063522-backend-divergence-5e6cada3c6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-063522-backend-divergence-5e6cada3c6/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
