@@ -14019,3 +14019,52 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn owned_str_field_runs_correctly_on_both_backends() {
+    // BUG-158 (2026-08-10): storing a fresh `OwnedStr` into a
+    // `Str`-typed struct field (via FieldAssign or StructLit) used to
+    // heap-use-after-free once the source's own (narrower) scope
+    // ended -- now rejected at compile time (see the `_rejected`
+    // tests in src/lib.rs). This confirms the recommended fix --
+    // declare the field as `OwnedStr` instead -- actually compiles
+    // and runs correctly on both backends, with no leak or crash.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug158-owned-str-field",
+        r#"
+struct Holder { s: OwnedStr, n: i64 }
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };
+}
+fn main() -> i64 {
+  let h: Holder = make();
+  print h.s;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "OwnedStr-typed struct field should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "77",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

@@ -11246,8 +11246,81 @@ than `h`'s) and `StructLit` field init (`return Holder { s: owned,
 synthesize the same `FieldAssign` shape internally. Found while
 writing the tutorial's workaround note for the async caveat -- the
 proposed two-`let` workaround itself use-after-frees, which is what
-led to finding the general repro. Full writeup, both minimal repros,
-and why it's not being fixed this session in
-`docs/BUG_PATTERN_AUDIT_TODO_8.md`'s "IMPORTANT UPDATE" section.
+led to finding the general repro.
 
-Next free bug number is **BUG-158**.
+## BUG-158 (2026-08-10) -- OwnedStr -> Str escape into a struct field, general non-async UAF, FIXED
+
+Same-day dedicated follow-up to the finding above, at direct request.
+Root cause confirmed via two independent minimal repros:
+```vani
+struct Holder { s: Str, n: i64 }
+fn main() -> i64 {
+  let h: Holder = Holder { s: "", n: 0 };
+  { let owned: OwnedStr = i64_to_str(99); h.s = owned; }  // owned freed here
+  print h.s;   // heap-use-after-free
+  return 0;
+}
+```
+```vani
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };   // owned freed when make() returns
+}
+// main(): let h = make(); print h.s;  -- heap-use-after-free
+```
+`can_assign`'s `OwnedStr -> Str` auto-borrow assumes the source's own
+scope outlives every read of the resulting view. True for function
+args/comparisons/len() (can't outlive the caller's frame) and for a
+plain `let` (BUG-157 gives it a real owning temp). False for
+`Stmt::FieldAssign` and `StructLit` field init: the destination
+struct can freely outlive the `OwnedStr` source's own scope.
+
+**Fix**: reject the coercion outright at these positions (plus a
+third, closely related one found during implementation --
+`xs[i].field = owned_expr;`, the mixed index+field-assign path,
+which has the identical risk against a `Vec` that typically outlives
+a narrower-scoped `OwnedStr`) via a shared
+`reject_owned_str_escape_into_field` helper in checker.rs, rather
+than attempting real scope-depth escape analysis (the ref-source
+scope-escape check elsewhere in `Stmt::FieldAssign` does something
+similar for `ref` sources specifically, but generalizing it to
+arbitrary struct lifetimes under time pressure was judged riskier
+than a clean rejection). Matches this codebase's established
+preference for compile-time rejection over unsound runtime behavior.
+Clear diagnostic + 3-step elaboration
+(`diagnostic_elaborations::owned_str_escape_into_field`) points at
+the fix: declare the field `OwnedStr` instead of `Str`, or supply an
+already-safe `Str` value.
+
+A new `CURRENT_FN_NAME` thread-local (ast.rs, mirroring the existing
+`CURRENT_FN_PARAMS` pattern) lets the `StructLit` call site (inside
+`check_expr`, which doesn't have `&Function` in scope) apply the same
+`__poll_*`-function exclusion `Stmt::FieldAssign`'s call site
+(inside `check_one_stmt`, which does have `&Function`) uses directly.
+
+**EXCLUDED for `__poll_*` functions**, same as BUG-157: the async
+transform synthesizes exactly this `FieldAssign` shape internally to
+hoist a cross-state `Str` local into the Task struct. Confirmed via
+direct testing that the async cluster's `__poll_*` functions still
+compile unchanged, and (deliberately, unchanged) still exhibit the
+underlying use-after-free if a user manually splits the narrowing
+`let` into two inside an `async fn` body -- that specific instance of
+the bug is NOT fixed by this change and remains open; a real fix
+there needs the async transform's own hoisting strategy to change
+(e.g. hoist the `OwnedStr` itself as the persisted, owned field,
+rather than a `Str` alias into a state-local one), which is
+out of scope here.
+
+Verified: both minimal repros now get a clean compile-time
+rejection (not a crash). `vanic check examples` baseline unchanged
+(923 ok / 86 files with pre-existing errors, same as before this
+fix -- no shipped example relied on the now-rejected pattern). Full
+corpus-wide ASan/LeakSanitizer sweep (`tools/leak_sweep.py`)
+re-run: identical flagged-file set, zero regressions. Full
+`cargo test --release` clean (3380+ lines, 0 FAILED). 5 new tests:
+4 in `src/lib.rs` (2 rejection tests, 2 regression guards confirming
+the recommended fix and plain `Str` literals still compile), 1 real-
+subprocess `tests/run_end_to_end.rs` test confirming the recommended
+`OwnedStr`-field fix actually runs correctly on both backends.
+
+Next free bug number is **BUG-159**.

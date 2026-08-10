@@ -226,6 +226,52 @@ yourself; either form works identically.
 > both; the fix has to be in the async transform itself. Tracked in
 > `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
 
+### Storing an `OwnedStr` into a struct's `Str` field is rejected
+
+The `let`-narrowing case above is safe because the compiler-managed
+temp's scope is tied directly to the `let` itself. That safety
+doesn't carry over to a struct field — a struct can easily outlive
+whatever `OwnedStr` you tried to view into it:
+
+```vani
+struct Holder { s: Str, n: i64 }
+fn main() -> i64 {
+  let h: Holder = Holder { s: "", n: 0 };
+  {
+    let owned: OwnedStr = i64_to_str(99);
+    h.s = owned;   // rejected -- see below
+  }
+  print h.s;
+  return 0;
+}
+```
+```
+error: cannot store a freshly-owned `OwnedStr` into `Str`-typed field 's' -- the struct
+can outlive the `OwnedStr`'s own scope, which would free the buffer while the field is
+still readable (a use-after-free)
+    h.s = owned;
+          ^^^^^
+```
+
+The same rejection applies to initializing the field directly in a
+struct literal (`Holder { s: owned, .. }`) and to writing through a
+`Vec` element's field (`xs[i].s = owned;`). **Fix**: declare the
+field as `OwnedStr` instead of `Str` — then it owns its own copy, and
+the struct's own Drop frees it correctly:
+
+```vani
+struct Holder { s: OwnedStr, n: i64 }
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };   // fine -- s owns the allocation
+}
+fn main() -> i64 {
+  let h: Holder = make();
+  print h.s;
+  return 0;
+}
+```
+
 ### Copying a `Str` literal into an `OwnedStr`
 
 To get an owned copy of a literal, concatenate with an empty

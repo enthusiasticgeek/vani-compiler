@@ -342,6 +342,16 @@ thread_local! {
     /// change.
     pub(crate) static CURRENT_FN_PARAMS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// BUG-158 (2026-08-10): the current function's own name, set
+    /// alongside `CURRENT_FN_PARAMS` right before its body is
+    /// checked. Read by `reject_owned_str_escape_into_field` (in
+    /// checker.rs), which needs "is this a `__poll_*` function" but
+    /// is called from `check_expr`'s `StructLit` arm, which doesn't
+    /// have `&Function` in scope (only `check_one_stmt`'s arms do).
+    /// Same one-at-a-time-never-concurrent overwrite rationale as
+    /// `CURRENT_FN_PARAMS`.
+    pub(crate) static CURRENT_FN_NAME: std::cell::RefCell<String> =
+        std::cell::RefCell::new(String::new());
     /// Arc 8 v3.1 Phase 1 — registry of synthesized async-fn
     /// state machines. Each entry is a `(StructDecl, Function)`
     /// pair: the per-async-fn task struct + its companion

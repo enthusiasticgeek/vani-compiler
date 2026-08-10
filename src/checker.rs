@@ -10909,6 +10909,78 @@ fn owned_str_coerce_synth_name() -> String {
     format!("__owned_str_coerce_{}", OWNED_STR_COERCE_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+/// BUG-158 (2026-08-10): `can_assign`'s `OwnedStr -> Str` auto-borrow
+/// assumes the source's own scope outlives every read of the
+/// resulting view -- true for function args/comparisons/len() (the
+/// callee/comparison can't outlive the caller's stack frame) and for
+/// a plain `let` (BUG-157 gives it a real owning temp), but NOT for
+/// `Stmt::FieldAssign` or a `StructLit` field initializer: the
+/// destination struct can freely outlive the `OwnedStr` source's own
+/// (often much narrower) scope --
+/// `{ let owned: OwnedStr = f(); h.s = owned; }` frees `owned` at the
+/// block's end while `h.s` (an alias into the same buffer) is read
+/// afterward. Confirmed a real, general (non-async) heap-use-after-
+/// free via two independent minimal repros (one FieldAssign, one
+/// StructLit) during a corpus-wide ASan sweep, round 8.
+///
+/// Rather than attempt real escape/lifetime analysis (comparing the
+/// source's scope depth against the destination's, which the ref-
+/// scope-escape check elsewhere in this file already does for `ref`
+/// sources specifically -- but generalizing that to arbitrary struct
+/// lifetimes is a bigger undertaking than this fix warrants) this
+/// just REJECTS the coercion outright at these two positions,
+/// matching the codebase's established preference for compile-time
+/// rejection over unsound runtime behavior. A rejected program still
+/// has two straightforward fixes available (declare the field as
+/// `OwnedStr`, or supply an already-safe `Str` value) -- see
+/// `diagnostic_elaborations::owned_str_escape_into_field`.
+///
+/// EXCLUDED for `__poll_*` functions: the v3.1 async transform
+/// (`parser.rs`'s `try_v31_transform`) synthesizes exactly this
+/// FieldAssign shape internally to hoist a cross-state `Str` local
+/// into the Task struct. Rejecting it there would break the already-
+/// shipped (leaky-but-safe, not crashing) async Str-local feature
+/// wholesale; that leak is tracked separately (BUG-157's writeup in
+/// `docs/BUG_PATTERN_AUDIT_TODO_8.md`) and deliberately left as-is --
+/// fixing it properly needs the async transform's own hoisting
+/// strategy to change, not a rejection here.
+///
+/// Returns `true` (and has already pushed a diagnostic) when the
+/// caller should treat this as a compile error and skip the normal
+/// `coerce_checked` call for this value.
+fn reject_owned_str_escape_into_field(
+    source_ty: &Type,
+    field_ty: &Type,
+    field_name: &str,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let in_poll_fn = crate::ast::CURRENT_FN_NAME.with(|r| r.borrow().starts_with("__poll_"));
+    if in_poll_fn {
+        return false;
+    }
+    if matches!(source_ty, Type::OwnedStr) && matches!(field_ty, Type::Str) {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "cannot store a freshly-owned `OwnedStr` into `Str`-typed \
+                     field '{}' -- the struct can outlive the `OwnedStr`'s own \
+                     scope, which would free the buffer while the field is \
+                     still readable (a use-after-free)",
+                    field_name
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::owned_str_escape_into_field(
+                field_name,
+            )),
+        );
+        true
+    } else {
+        false
+    }
+}
+
 fn fresh_loop_val_name() -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static LOOP_VAL_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -11582,6 +11654,9 @@ fn check_function(
     // no push/pop stack needed.
     crate::ast::CURRENT_FN_PARAMS.with(|r| {
         *r.borrow_mut() = function.params.iter().map(|p| p.name.clone()).collect();
+    });
+    crate::ast::CURRENT_FN_NAME.with(|r| {
+        *r.borrow_mut() = function.name.clone();
     });
     let terminated = check_stmt_list(
         &function.body,
@@ -14644,6 +14719,23 @@ fn check_one_stmt(
             }
 
             let value_checked = check_expr(value, env, signatures, diagnostics);
+            // BUG-158: `xs[i].field = owned_str_expr;` has the same
+            // OwnedStr -> Str escape risk as a plain FieldAssign --
+            // `xs` typically outlives a narrower-scoped OwnedStr
+            // source just as easily as a struct binding does. Reuse
+            // the same rejection; field_path's last segment (or the
+            // Vec's own name for the no-path `xs[i] = v;` shape) is
+            // the field being written.
+            let field_display = field_path.last().cloned().unwrap_or_else(|| name.clone());
+            if reject_owned_str_escape_into_field(
+                value_checked.ty(),
+                &target_ty,
+                &field_display,
+                value.span,
+                diagnostics,
+            ) {
+                return false;
+            }
             let value_coerced = coerce_checked(
                 value_checked,
                 &target_ty,
@@ -14932,6 +15024,15 @@ fn check_one_stmt(
                 return false;
             };
             let value_checked = check_expr(value, env, signatures, diagnostics);
+            if reject_owned_str_escape_into_field(
+                value_checked.ty(),
+                field_ty,
+                field,
+                value.span,
+                diagnostics,
+            ) {
+                return false;
+            }
             let value_coerced = coerce_checked(
                 value_checked,
                 field_ty,
@@ -20512,6 +20613,15 @@ fn check_expr(
                     return CheckedExpr::fallback_integer(expr.span);
                 };
                 let checked_v = check_expr(&found.1, env, signatures, diagnostics);
+                if reject_owned_str_escape_into_field(
+                    checked_v.ty(),
+                    fty,
+                    fname,
+                    found.1.span,
+                    diagnostics,
+                ) {
+                    return CheckedExpr::fallback_integer(expr.span);
+                }
                 let coerced = coerce_checked(
                     checked_v,
                     fty,

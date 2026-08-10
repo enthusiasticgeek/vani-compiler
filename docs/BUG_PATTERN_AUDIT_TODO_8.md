@@ -1,19 +1,15 @@
 # vāṇी — Bug-pattern audit, round 8
 
-**STATUS (2026-08-09): 5 real bugs FIXED (BUG-153, BUG-154 -- the
-latter general and severe -- plus BUG-155/156/157, all fixed in
-same-day follow-up sessions at direct request). One finding
-DELIBERATELY LEFT OPEN, and it turned out bigger than first framed:
-the async `__poll_*` leak cluster (4 files) is not actually an async
-bug at all -- it's a GENERAL, pre-existing heap-use-after-free in the
-checker's `OwnedStr -> Str` auto-borrow reachable from ordinary
-non-async code (`h.s = owned;` field assignment, or a struct literal
-field init, where the `OwnedStr` source's own scope is narrower than
-the struct's) -- see the "IMPORTANT UPDATE" section below for the
-full story, found while writing the tutorial workaround note. Not
-fixed this session -- needs real escape-analysis design work, not a
-rushed attempt. 2 false positives and 2 low-severity UB findings
-triaged, not fixed (see below for why).**
+**STATUS (2026-08-10): 6 real bugs FIXED (BUG-153, BUG-154 -- general
+and severe -- BUG-155/156/157, and BUG-158, all fixed in same-day-or-
+next-day follow-up sessions at direct request). BUG-158 closes the
+GENERAL (non-async) instance of the "async caveat" misdiagnosis
+below via compile-time rejection. The async `__poll_*` INSTANCE of
+the same root issue remains open, deliberately, unchanged -- it needs
+the async transform's own hoisting strategy to change, not a
+rejection (rejecting there would break the already-shipped Str-local
+async feature wholesale). 2 false positives and 2 low-severity UB
+findings triaged, not fixed (see below for why).**
 
 Directly requested: "pick a round-8 theme... my worry is always
 memory and leaks - this is absolutely uncompromised requirement for
@@ -305,28 +301,66 @@ struct passed by value into another escaping container, etc.) were
 not individually checked and should be assumed similarly affected
 until proven otherwise.
 
-**Deliberately NOT fixed this session.** This is more general and
-more severe than the narrow "hoist checker-synthesized temps" framing
-originally used above for the `__poll_` caveat, and a correct general
-fix needs real design work (either reject the coercion at compile
-time when the source's scope is provably narrower than the
-destination's -- a real escape-analysis feature that doesn't exist
-yet in any form -- or make the coercion an actual ownership transfer
-in these escaping-write positions specifically, suppressing the
-source's own drop, which needs to be done without breaking the
-already-correct, already-tested `Var`-to-already-live-binding case).
-Attempting this at the tail of an already very long session, right
-after the BUG-157 near-miss already demonstrated how easy it is to
-turn a leak into a worse UAF in this exact area, would repeat the
-same mistake at a larger scale. This needs a dedicated session with
-full attention, not a rushed attempt.
+**FIXED next day, as BUG-158, via a dedicated follow-up pass at
+direct request.** Rather than attempt real scope-depth escape
+analysis under time pressure (rejected as too risky the day this was
+found -- see the original reasoning, kept below for the record), the
+fix rejects the coercion outright at both confirmed sites
+(`Stmt::FieldAssign`, `StructLit` field init) plus a third, closely
+related one found during implementation (`xs[i].field =
+owned_expr;`, the mixed index+field-assign path -- same risk against
+a `Vec` that typically outlives a narrower-scoped `OwnedStr`). A
+clear diagnostic + 3-step elaboration points at the fix: declare the
+field `OwnedStr` instead of `Str`, or supply an already-safe `Str`
+value. Matches this codebase's established preference for compile-
+time rejection over unsound runtime behavior -- simpler and safer
+than attempting the ownership-transfer alternative also considered
+(suppressing the source's own drop specifically at these escaping
+positions), which would have needed more careful, riskier surgery to
+avoid breaking the already-correct `Var`-to-already-live-binding
+case.
 
-`tools/leak_sweep_baseline.json`'s existing entries do NOT need
-updating for this -- neither of the two new repros above went through
-the sweep corpus (they're new minimal repros written to investigate
-the caveat, not files under `examples/`), so this remains an
-open, documented finding rather than something the CI sweep is
-currently either catching or missing.
+Still EXCLUDED for `__poll_*` functions, same rationale as BUG-157:
+rejecting there would break the already-shipped (leaky-but-safe, not
+crashing) async Str-local feature wholesale. The async-transform
+INSTANCE of this exact bug (confirmed via the two-`let` manual-
+workaround repro above) is therefore still open and unchanged --
+fixing it needs the async transform's own hoisting strategy to
+change (e.g. hoist the `OwnedStr` itself as the persisted field
+rather than a `Str` alias into a state-local one), tracked as a
+separate, distinct follow-up, not attempted here.
+
+Full writeup, verification (both repros now cleanly rejected, `vanic
+check examples` baseline unchanged, corpus-wide sweep unchanged, full
+`cargo test --release` clean, 5 new regression tests), in
+`docs/TODO_CURRENT.md`'s BUG-158 section.
+
+`tools/leak_sweep_baseline.json`'s existing entries did NOT need
+updating for this fix -- neither of the two minimal repros went
+through the sweep corpus (they're standalone repros, not files under
+`examples/`), and the sweep's own re-run after the fix confirmed an
+identical flagged-file set (the async cluster's leak-not-UAF
+behavior is unchanged, as intended).
+
+<details>
+<summary>Original same-day reasoning for NOT fixing immediately (superseded by the FIXED note above, kept for the record)</summary>
+
+This is more general and more severe than the narrow "hoist checker-
+synthesized temps" framing originally used above for the `__poll_`
+caveat, and a correct general fix needs real design work (either
+reject the coercion at compile time when the source's scope is
+provably narrower than the destination's -- a real escape-analysis
+feature that doesn't exist yet in any form -- or make the coercion an
+actual ownership transfer in these escaping-write positions
+specifically, suppressing the source's own drop, which needs to be
+done without breaking the already-correct, already-tested `Var`-to-
+already-live-binding case). Attempting this at the tail of an already
+very long session, right after the BUG-157 near-miss already
+demonstrated how easy it is to turn a leak into a worse UAF in this
+exact area, would repeat the same mistake at a larger scale. This
+needs a dedicated session with full attention, not a rushed attempt.
+
+</details>
 
 ## Done: wired into CI (2026-08-09, same day)
 

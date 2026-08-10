@@ -10738,6 +10738,107 @@ mod tests {
     }
 
     #[test]
+    fn field_assign_owned_str_into_str_field_rejected() {
+        // BUG-158 (2026-08-10): found while writing a tutorial
+        // workaround note for BUG-157's async caveat -- the proposed
+        // workaround itself use-after-frees, which led to the real,
+        // general (non-async) root cause: `can_assign`'s
+        // `OwnedStr -> Str` auto-borrow has no escape tracking for
+        // `Stmt::FieldAssign`. `h.s = owned;` inside a block narrower
+        // than `h`'s own scope frees `owned` at the block's end while
+        // `h.s` (an alias into the same buffer) is read afterward --
+        // confirmed a real heap-use-after-free via direct ASan
+        // testing before this fix. Now rejected at compile time.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn main() -> i64 {
+              let h: Holder = Holder { s: "", n: 0 };
+              {
+                let owned: OwnedStr = i64_to_str(99);
+                h.s = owned;
+              }
+              print h.s;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("OwnedStr -> Str field escape must be rejected");
+        let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("freshly-owned `OwnedStr`") && m.contains("use-after-free")),
+            "expected the OwnedStr-escape-into-field diagnostic; got: {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn struct_lit_owned_str_field_init_rejected() {
+        // BUG-158: same escape gap, but at StructLit field-init time
+        // instead of a later FieldAssign -- `return Holder { s: owned,
+        // .. };` frees `owned` at the end of `make`'s own scope while
+        // the returned struct's `s` field is read afterward in the
+        // caller. Confirmed a real heap-use-after-free before this
+        // fix; now rejected at compile time.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn make() -> Holder {
+              let owned: OwnedStr = i64_to_str(77);
+              return Holder { s: owned, n: 1 };
+            }
+            fn main() -> i64 {
+              let h: Holder = make();
+              print h.s;
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("OwnedStr -> Str struct-literal escape must be rejected");
+        let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("freshly-owned `OwnedStr`") && m.contains("use-after-free")),
+            "expected the OwnedStr-escape-into-field diagnostic; got: {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn owned_str_field_declared_as_owned_str_still_compiles() {
+        // BUG-158 regression guard: the fix must not reject the
+        // SAFE, correct alternative it recommends -- declaring the
+        // field as `OwnedStr` (so it owns its own copy) instead of
+        // `Str`. This must keep compiling and running cleanly.
+        let source = r#"
+            struct Holder { s: OwnedStr, n: i64 }
+            fn make() -> Holder {
+              let owned: OwnedStr = i64_to_str(77);
+              return Holder { s: owned, n: 1 };
+            }
+            fn main() -> i64 {
+              let h: Holder = make();
+              print h.s;
+              return 0;
+            }
+        "#;
+        compile(source).expect("OwnedStr-typed field should compile fine");
+    }
+
+    #[test]
+    fn str_literal_field_assign_and_struct_lit_still_compile() {
+        // BUG-158 regression guard: only OwnedStr sources into Str
+        // fields are rejected -- an ordinary Str literal (already
+        // safe, `.rodata`-backed, never freed) must still work in
+        // both FieldAssign and StructLit field-init positions.
+        let source = r#"
+            struct Holder { s: Str, n: i64 }
+            fn main() -> i64 {
+              let h: Holder = Holder { s: "hello", n: 0 };
+              h.s = "world";
+              print h.s;
+              return 0;
+            }
+        "#;
+        compile(source).expect("Str literal into Str field should compile fine");
+    }
+
+    #[test]
     fn struct_eq_via_user_impl() {
         // User-defined equality: `implement Eq for Point {
         // fn eq(self: Point, other: Point) -> bool { … } }`
