@@ -4560,3 +4560,39 @@ Fix attempt: `tools/localfuzz/findings/20260810-020953-backend-divergence-966a24
 }
 ```
 
+
+---
+
+### Candidate: 20260810-023328-backend-divergence-ecc728fea0
+
+Repro: `tools/localfuzz/findings/20260810-023328-backend-divergence-ecc728fea0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-023328-backend-divergence-ecc728fea0/fix_attempt.md`
+
+### STAGING ENTRY
+
+#### Environment:
+- Vani Compiler Version: [Insert the specific version of the vani compiler used for this test case]
+- Operating System: Linux (Insert the name and version of the operating system)
+- CPU Architecture: x86_64 (Insert the CPU architecture)
+
+#### Command Line:
+```sh
+vani --localfuzz --corpus /home/virgo/source/vani-compiler-localfuzz/examples/language/kannada/basics.vani --seed 12345 --backend-divergence
+```
+
+#### Input Corpus:
+The input corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/kannada/basics.vani` was used to generate the mutant.
+
+#### Generated Source Code:
+```vani
+// vani-lang: kannada
+//
+// Phase 6 (2026-06-07): Kannada (ಕನ್ನಡ) — Dravidian, Karnataka.
+// Brahmi-derived script at U+0C80..U+0CFF; numerals ೦..೯ at
+// U+0CE6..0CEF.
+
+ಉದ್दೇಶ "Kannada-pragma intro — sum two numbers with a contract";
+
+ಕಾರ್ಯ add(a: i64, b: i64) -> i64
+ಅಗತ್ಯ a >= 0;
+
