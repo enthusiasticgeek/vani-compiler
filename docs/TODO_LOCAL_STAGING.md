@@ -4781,3 +4781,31 @@ Fix attempt: `tools/localfuzz/findings/20260810-103151-run-crash-78bdde8bba/fix_
 
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260810-105409-backend-divergence-1f84ad9671
+
+Repro: `tools/localfuzz/findings/20260810-105409-backend-divergence-1f84ad9671/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-105409-backend-divergence-1f84ad9671/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
