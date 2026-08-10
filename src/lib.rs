@@ -42320,10 +42320,156 @@ função main() -> i64 {
         // BUG-115 (2026-08-05): the oob block now calls `exit(3)`
         // instead of `abort()` -- same misleading-`lli`-crash-report
         // fix as BUG-106/113, applied to this helper too.
+        // BUG-162 (2026-08-10): the oob block now also prints the
+        // idx/len values via `dprintf` before exit(3), matching
+        // tree-C's own `intent_check_bounds` message -- previously
+        // silent, a real backend-divergence gap found via localfuzz.
         assert!(
             ll.contains("br i1 %ok, label %cont, label %oob")
-                && ll.contains("oob:\n  call void @exit(i32 3)\n  unreachable"),
-            "bounds-check helper must branch to a reachable exit(3) oob block:\n{}",
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8*")
+                && ll.contains("call void @exit(i32 3)\n  unreachable"),
+            "bounds-check helper must branch to a reachable, message-printing exit(3) oob block:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug162_ssa_llvm_checked_overflow_and_bounds_print_message_before_exit3() {
+        // BUG-162 (2026-08-10): found via localfuzz backend-divergence
+        // findings -- both backends correctly detect the same fault
+        // (an i64 add overflow, an out-of-range index), but the
+        // OBSERVABLE behavior diverged: C aborts loudly (rc=134 + a
+        // message), LLVM exited silently (rc=3, empty stderr). Fixed
+        // by adding a `@__intent_trap(i8* %msg)` helper that prints
+        // via `dprintf` before `exit(3)` -- the exit code itself is
+        // untouched (still 3, still deliberately not abort() -- see
+        // BUG-106/113/115/117/120's own "misleading lli crash report"
+        // reasoning). `compile_to_llvm` always goes through tree-LLVM
+        // directly (`backend_llvm::LlvmBackend.emit`), bypassing the
+        // SSA-eligibility dispatch the CLI does in main.rs -- go
+        // through `crate::ssa::lower_program` + `crate::ssa_backend_
+        // llvm::emit` directly instead, matching this file's own
+        // established pattern for SSA-specific regression tests
+        // (e.g. `shl_with_compound_shift_amount_expression_compiles_
+        // and_runs_correctly` above).
+        let source = r#"
+            fn f(x: i64, y: i64) -> i64 { return x + y; }
+            fn main() -> i64 {
+              return f(9223372036854775807, 1);
+            }
+        "#;
+        let checked = compile(source).expect("checked-add program compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("SSA-eligible checked-add must compile via SSA-LLVM");
+        assert!(
+            ll.contains("define internal void @__intent_trap(i8* %msg)")
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)"),
+            "expected the shared trap-with-message helper:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("integer overflow in int64_t add"),
+            "expected the checked-add overflow message to match ssa_backend_c.rs's own \
+             wording (C-style tyname, since this is the SSA path):\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("call void @__intent_trap(i8*")
+                && ll.contains(".msg.ovf.i64.add"),
+            "expected the add overflow oob block to call __intent_trap with the \
+             pre-defined message global:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug162_tree_llvm_checked_overflow_and_bounds_print_message_before_exit3() {
+        // BUG-162, tree-LLVM half (mirrors the SSA test above).
+        // Forced onto the tree path via a struct literal
+        // (ssa_path_supports rejects struct types). Message wording
+        // matches backend_c.rs's OWN convention here (short vāṇी
+        // tyname, e.g. "i64", not the C typedef "int64_t" -- the two
+        // C backends already spell this differently from each other;
+        // this fix matches each LLVM backend to its OWN paired C
+        // backend, not to the other one).
+        let source = r#"
+            struct Holder { x: i64, y: i64 }
+            fn f(h: Holder) -> i64 { return h.x * h.y; }
+            fn main() -> i64 {
+              let h: Holder = Holder { x: 9223372036854775807, y: 2 };
+              return f(h);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("struct-forced checked-mul compiles");
+        assert!(
+            !ll.contains("ModuleID = 'intent-ssa'"),
+            "expected this program to take the tree-LLVM path (sanity check on the test itself):\n{}",
+            &ll[..ll.len().min(500)]
+        );
+        assert!(
+            ll.contains("define internal void @__intent_trap(i8* %msg)")
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)"),
+            "expected the shared trap-with-message helper:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("integer overflow in i64 mul"),
+            "expected the checked-mul overflow message to match backend_c.rs's own \
+             wording (short vāṇी tyname, since this is the tree path):\n{}",
+            ll
+        );
+        // The bounds-check helper's own message includes the actual
+        // idx/len values (matches backend_c.rs's intent_check_bounds
+        // exactly), unlike the SSA path's static message -- confirmed
+        // separately by `tree_llvm_out_of_range_vec_index_aborts_
+        // instead_of_reading_garbage` above; just confirm the shared
+        // format-string global is present here too since every
+        // tree-LLVM program unconditionally gets the same preamble.
+        assert!(
+            ll.contains("index out of bounds: %lld, len %lld"),
+            "expected the tree-LLVM preamble to always define the dynamic bounds \
+             message, regardless of whether THIS program uses indexing:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug162_llvm_checked_div_rem_and_shift_do_not_double_emit_or_regress_var_source() {
+        // BUG-162 regression guard: division by zero, MIN/-1 overflow,
+        // and shift-range all get their own distinct messages (not a
+        // shared/confused one), and using a checked op that DOESN'T
+        // fail (in-range shift, non-zero divisor) must not somehow
+        // pull in an unrelated trap message.
+        let source = r#"
+            fn f(x: i64, y: i64, n: i64) -> i64 {
+              let d: i64 = x / y;
+              let s: i64 = x << n;
+              return d + s;
+            }
+            fn main() -> i64 { return f(10, 2, 3); }
+        "#;
+        let ll = compile_to_llvm(source).expect("checked div + shift compiles");
+        assert!(
+            ll.contains(".msg.divzero") && ll.contains("division by zero"),
+            "expected a division-by-zero message global even though this program's \
+             runtime values never trigger it (the guard is unconditional codegen):\n{}",
+            ll
+        );
+        assert!(
+            ll.contains(".msg.shift") && ll.contains("shift amount out of range"),
+            "expected a shift-range message global:\n{}",
+            ll
+        );
+        // Signed div's MIN/-1 overflow message must be its OWN
+        // distinct global from the plain divide-by-zero one (two
+        // different fail conditions inside the same checked-div
+        // helper need two different oob blocks/messages).
+        assert!(
+            ll.contains(".msg.ovf.i64.div") && ll.contains("integer overflow in i64 div"),
+            "expected the MIN/-1-overflow message to be distinct from the plain \
+             division-by-zero message:\n{}",
             ll
         );
     }

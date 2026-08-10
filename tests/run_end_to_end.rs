@@ -14322,3 +14322,102 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn bug162_checked_overflow_prints_message_on_llvm_matching_exit3_convention() {
+    // BUG-162 (2026-08-10): found via localfuzz backend-divergence
+    // findings -- an i64 add overflow is correctly detected by BOTH
+    // backends (neither produces a wrong answer), but the OBSERVABLE
+    // behavior diverged: C aborts loudly (rc=134 + a message), LLVM
+    // exited silently (rc=3, empty stderr). Fixed by printing the
+    // same kind of message on LLVM before its (deliberately
+    // unchanged) exit(3). Real-subprocess run confirming both the
+    // message text and the exit code on both backends. This plain
+    // 2-function shape is SSA-eligible on BOTH backends' own CLI
+    // dispatch (`main.rs`'s `ssa_path_supports`), so the message uses
+    // the SSA pair's own wording (C typedef style, "int64_t" -- see
+    // ssa_backend_c.rs/ssa_backend_llvm.rs), confirmed empirically;
+    // the tree-pair's own short-tyname wording ("i64") is covered by
+    // the struct-forced bounds-check test below and by
+    // `bug162_tree_llvm_checked_overflow_and_bounds_print_message_
+    // before_exit3` in src/lib.rs.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug162-checked-add-overflow",
+        r#"
+fn f(x: i64, y: i64) -> i64 { return x + y; }
+fn main() -> i64 {
+  return f(9223372036854775807, 1);
+}
+"#,
+    );
+    // LLVM: message now present, exit code unchanged (still 3, not
+    // switched to abort()'s SIGABRT -- see BUG-106/113/115/117/120).
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code must stay 3");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("integer overflow in int64_t add"),
+        "expected an overflow message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    // C: unchanged reference behavior (rc=134, its own message).
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("integer overflow in int64_t add"),
+        "expected an overflow message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}
+
+#[test]
+fn bug162_bounds_check_prints_idx_len_message_on_llvm_matching_exit3_convention() {
+    // BUG-162, bounds-check half. Forced onto the tree path via a
+    // struct literal (ssa_path_supports rejects struct types) so
+    // this exercises tree-LLVM's own `__intent_bounds_check`, whose
+    // message includes the actual idx/len values -- matching tree-
+    // C's `intent_check_bounds` exactly (unlike the SSA path's
+    // static "index out of bounds" message).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug162-tree-bounds-check",
+        r#"
+struct Marker { tag: i64 }
+fn f(m: Marker, xs: ref Vec<i64>, i: i64) -> i64 {
+  let _ = m;
+  return xs[i];
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let m: Marker = Marker { tag: 1 };
+  return f(m, ref xs, 7);
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code must stay 3");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}

@@ -11514,4 +11514,92 @@ fixed" list from `docs/BUG_PATTERN_AUDIT_TODO_9.md` except the general,
 ordinary-user-function case, which remains deliberately unscoped/open
 for a future dedicated session.
 
-Next free bug number is **BUG-162**.
+## BUG-162 (2026-08-10) -- LLVM runtime safety-guard traps exit silently, FIXED
+
+Round 9's Category 3 theme (from `docs/BUG_PATTERN_AUDIT_TODO_9.md`):
+localfuzz backend-divergence findings kept showing the identical
+shape -- an i64 checked-arithmetic overflow, or an out-of-range Vec
+index, correctly detected by BOTH backends (neither produces a wrong
+answer), but the OBSERVABLE behavior diverged: the C backend aborts
+loudly (`rc=134` + a descriptive `fprintf(stderr, ...)` message), the
+LLVM backend exits silently (`rc=3`, empty stderr). Not a correctness
+bug -- a real debuggability/backend-consistency gap. 7 localfuzz
+findings this round alone showed the pattern (6 overflow-family,
+1 bounds-family -- `20260810-113044-backend-divergence-b4d35be8e4`,
+which showed the SAME silent-vs-loud split for an "index out of
+bounds" trap, confirming the gap isn't overflow-specific).
+
+**Root cause**: every runtime safety-guard trap in both LLVM backends
+(`ssa_backend_llvm.rs`, `backend_llvm.rs`) calls `@exit(i32 3)`
+directly with no message at all -- `exit(3)` itself is a deliberate,
+correct design choice (NOT the bug -- see the BUG-106/113/115/117/120
+chain: a raw `abort()`'s SIGABRT makes `lli` misreport a clean,
+expected trap as an internal "PLEASE submit a bug report" crash dump,
+so every vāṇी runtime trap uses `exit(3)` instead), but unlike the C
+backends' equivalent guards, nothing ever prints WHY before exiting.
+
+**Fixed** on both `ssa_backend_llvm.rs` and `backend_llvm.rs`: added a
+shared `@__intent_trap(i8* %msg)` helper (`dprintf(2, msg); exit(3);
+unreachable`) and pointed every checked-arithmetic/bounds-check oob
+block at it with an appropriate message, instead of calling
+`@exit(i32 3)` directly. The exit code itself is untouched (still 3
+on both). Scope: checked Add/Sub/Mul overflow (signed + unsigned),
+Div/Rem-by-zero, signed `MIN / -1` overflow, Shl/Shr range, and the
+general Vec bounds-check helper (`@__intent_bounds_check`).
+
+Each LLVM backend matches its OWN paired C backend's message wording
+-- which turned out to already differ from each other, a pre-existing
+inconsistency not introduced by this fix: `ssa_backend_c.rs` spells
+the overflow message with the C typedef name (`"integer overflow in
+int64_t add"`), `backend_c.rs` (tree) uses the short vāṇी type name
+(`"integer overflow in i64 add"`); `ssa_backend_c.rs`'s bounds message
+is static (`"index out of bounds"`), `backend_c.rs`'s includes the
+actual idx/len values (`"index out of bounds: 7, len 3"`) -- tree-
+LLVM's fix reproduces that exactly, using the real `%idx`/`%len`
+values already available at the bounds-check call site via `dprintf`.
+Since `ssa_backend_llvm.rs` has no equivalent pre-scan-per-call-site
+mechanism issue (it already pre-scans all (type, op) combos actually
+used), its message globals are emitted lazily per combo; tree-LLVM's
+checked-arithmetic codegen is inline at each call site inside an
+already-open function body (where a global definition can't legally
+appear), so its messages are instead ALL pre-defined unconditionally
+in the true top-level preamble, and call sites just reference them by
+name (negligible bloat: 8 int types x 5 ops + 2 shared strings).
+
+**Deliberately NOT touched** (same silent-`exit(3)` shape, but out of
+this round's evidenced scope -- follow-up candidates for later):
+`requires`-clause violations (`backend_llvm.rs` line ~2491,
+silent -- unlike plain `assert`/`intent_assert_fail`, which already
+print via `dprintf`/BUG-106), the `#[bounded(N)]` recursion-bound
+guard (needs a DYNAMIC message with the function name + bound value,
+a different mechanism than this fix's static messages), and the
+Vec-builtin-specific bounds checks (`pop_mut`/`swap_remove`/`insert`
+each have their own already-C-message-prefixed guard, e.g.
+`"swap_remove: index out of bounds"`, that tree-LLVM's own copies of
+these builtins don't yet print).
+
+**Also found, NOT fixed, unrelated**: while testing bounds-check
+repros, hit a pre-existing crash -- a struct field holding a
+`Vec<i64>` that's then out-of-bounds-indexed crashes tree-LLVM with
+NO clean message (exact `rc` varies by repro shape, e.g. 101/107/117
+seen). Confirmed via `git stash` that this reproduces identically on
+the pre-BUG-162 code, so it's a separate, unrelated bug, not a
+regression from this fix. Not root-caused. New candidate for a future
+round (see `docs/BUG_PATTERN_AUDIT_TODO_9.md`).
+
+Verified: all 7 localfuzz repros from this round now print matching
+messages on both backends (spot-checked directly). `vanic check
+examples` baseline unchanged (923 ok). Corpus-wide `tools/
+leak_sweep.py` sweep still matches the 4-item baseline exactly (this
+fix doesn't touch allocation). Full `cargo test --release` clean
+(2875 lib tests + all 12 other test binaries, 0 failed). 5 new
+regression tests: 3 `src/lib.rs` compile-checks (SSA path via
+`crate::ssa::lower_program` + `crate::ssa_backend_llvm::emit`
+directly -- `compile_to_llvm` always goes through tree-LLVM and can't
+exercise the SSA half; tree path via `compile_to_llvm`; a div/rem/
+shift regression guard confirming distinct messages per fail
+condition), 2 real-subprocess `tests/run_end_to_end.rs` tests (one
+overflow case, one bounds case with the dynamic idx/len values,
+matching exit codes 3/134 preserved on both backends).
+
+Next free bug number is **BUG-163**.

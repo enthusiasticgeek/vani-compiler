@@ -1,10 +1,15 @@
 # vāṇी — Bug-pattern audit, round 9
 
 **STATUS (2026-08-10): Category 1's two cheapest pickups FIXED
-(BUG-160, BUG-161).** See `docs/TODO_CURRENT.md` for the full writeup.
+(BUG-160, BUG-161); Category 3's overflow/bounds-divergence theme also
+FIXED (BUG-162).** See `docs/TODO_CURRENT.md` for the full writeups.
 This is now a partial-progress candidate list, not a from-scratch one:
-Categories 2 and 3 are untouched, and Category 1's general
-(ordinary-user-function) case remains deliberately unscoped/open.
+Category 2 is untouched (by design -- those 4 are non-fixes); Category
+1's general (ordinary-user-function) case remains deliberately
+unscoped/open; Category 3 has a NEW untriaged candidate found while
+fixing BUG-162 (a pre-existing, unrelated struct-field-Vec bounds
+crash -- see its own subsection below) plus its original untriaged
+localfuzz findings, still open.
 
 Three source categories, each its own section below:
 1. More instances of BUG-159's exact bug family (OwnedStr auto-borrow
@@ -142,9 +147,27 @@ before trusting any of these -- the worktree can go stale within a
 single day. None of these have been root-caused or fixed this
 session; this is a raw inventory, not a triage.
 
-### Likely ONE unified theme: LLVM backend's overflow-check exits silently, C backend's aborts loudly
+### FIXED (2026-08-10, BUG-162 -- see docs/TODO_CURRENT.md): LLVM backend's overflow/bounds-check traps exited silently, C backend's aborted loudly
 
-Two separate candidates show the identical shape:
+Two separate candidates originally showed the identical shape (kept
+below for the record); root-caused, fixed, and verified same-day, and
+turned out broader than "overflow-check" -- the SAME silent-vs-loud
+split also affected the general Vec bounds-check trap (confirmed via
+a THIRD localfuzz finding, `20260810-113044-backend-divergence-
+b4d35be8e4`, "index out of bounds"). Fixed by adding a shared
+`@__intent_trap(i8* %msg)` helper (prints via `dprintf` before the
+deliberately-unchanged `exit(3)`) to both `ssa_backend_llvm.rs` and
+`backend_llvm.rs`, scoped to: checked Add/Sub/Mul overflow, Div/Rem-
+by-zero, signed `MIN / -1` overflow, Shl/Shr range, and the general
+Vec bounds-check. Deliberately NOT extended to `requires`-clause
+violations, the `#[bounded(N)]` recursion guard (needs a dynamic
+message, different mechanism), or the Vec-builtin-specific bounds
+checks (`swap_remove`/`insert`/`pop_mut`) -- noted as follow-ups in
+`docs/TODO_CURRENT.md`'s own BUG-162 writeup, which has the full
+technical detail (message-wording nuances between the two C backends,
+verification results, etc.) -- not repeated here.
+
+Two of the originally-documented candidates, for reference:
 
 - **`20260809-221155-backend-divergence-56467d8c82`** -- repro:
   ```vani
@@ -174,6 +197,41 @@ message C's does before exiting) -- much lower risk than anything in
 Category 1. Worth checking whether this connects to Category 2 item
 3/4's i64::MIN/shift UB findings -- same neighborhood of the codebase
 (overflow/UB handling), not confirmed to be the same code path.
+
+### NEW (2026-08-10): struct field holding a Vec crashes on tree-LLVM out-of-bounds, no clean message
+
+Found while manually testing BUG-162 repros (not from localfuzz, no
+finding directory) -- worth its own localfuzz-style writeup here.
+Repro:
+```vani
+struct Holder { xs: Vec<i64>, i: i64 }
+fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let h: Holder = Holder { xs: xs, i: 7 };
+  return f(h);
+}
+```
+Tree-LLVM (both `vanic run` and AOT `vanic build`): crashes with NO
+stderr output at all, and an unstable exit code across runs/repro
+shape variants (101, 107, 117 all observed) -- not a clean `rc=3` +
+message like BUG-162 gives every other bounds-check trap. Tree-C on
+the SAME repro runs correctly and prints the expected `"index out of
+bounds: 7, len 3"` message. Confirmed via `git stash` that this
+reproduces identically on the pre-BUG-162 code -- a separate,
+pre-existing bug, NOT a BUG-162 regression. NOT root-caused: unclear
+whether the crash is actually happening inside `__intent_bounds_check`
+itself (a struct-field GEP producing a bad `%idx`/`%len` pair that
+never reaches the check cleanly), somewhere in Vec-move-into-struct-
+field plumbing before the check, or something else entirely. A
+NON-struct-wrapped version of the same out-of-range access (passed via
+a plain `ref Vec<i64>` parameter alongside an unrelated struct just to
+force the tree path) works perfectly -- see
+`bug162_bounds_check_prints_idx_len_message_on_llvm_matching_exit3_
+convention` in `tests/run_end_to_end.rs` -- so the bug is specifically
+about a Vec living INSIDE a struct FIELD reaching the bounds-check
+call, not bounds-checking in general. Good next-round candidate: cheap
+to reproduce, clearly scoped, doesn't touch BUG-162's own code.
 
 ### Needs root-cause investigation (no clear pattern yet)
 
