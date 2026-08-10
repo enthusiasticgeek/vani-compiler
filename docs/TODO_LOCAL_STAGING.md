@@ -4986,3 +4986,50 @@ Repro: `tools/localfuzz/findings/20260810-181916-backend-divergence-78ca7600f3/r
 Fix attempt: `tools/localfuzz/findings/20260810-181916-backend-divergence-78ca7600f3/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-192523-backend-divergence-816e11c174
+
+Repro: `tools/localfuzz/findings/20260810-192523-backend-divergence-816e11c174/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-192523-backend-divergence-816e11c174/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+### **Compiler Version and Environment:**
+- Compiler: vani-compiler 0.1.2 (Local Fuzzing)
+- Backend(s): LLVM, Vani
+
+---
+
+### **Bug Report:**
+The compiler was triggered by a local fuzz test case on the base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/sindhi/try_question_op.vani`. The generated source included a function `فنکشن دوگنا(o: Opt) -> Opt` that calculates twice the value of an optional integer. However, this function does not handle overflow correctly, leading to an integer overflow in the multiplication operation.
+
+### **Reproduction Source:**
+```vani
+// vani-lang: sindhi
+مقصد "Sindhi try-? operator smoke-test";
+شمار Opt { Some(i64), None }
+فنکشن دوگنا(o: Opt) -> Opt {
+  مانیں v: i64 = o?;
+  واپس Opt.Some(v * 2);
+}
+فنکشن نکال(o: Opt, ک: i64) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب ک,
+  };
+}
+فنکشن main() -> i64 {
+  مانیں ک: Opt = دوگنا(Opt.Some(-9223372036854775808));
+  یقینی نکال(ک, 0) == 10;
+  مانیں خ: Opt = دوگنا(Opt.None);
+  لکھو "Sindhi try-? OK";
+  واپس 0;
+}
+```
+
+### **Observed Symptom:**
+The compilation process encountered an integer overflow error during the multiplication operation,
