@@ -5072,3 +5072,12 @@ Fix attempt: `tools/localfuzz/findings/20260810-195537-backend-divergence-2087d6
 **Status:** Needs human/frontier root-cause review.
 
 This entry captures the initial stage of the fuzzing process where we observe a crash due to an out-of-bounds access, and provides the raw result data for further analysis and debugging.
+
+---
+
+### Candidate: 20260810-203542-run-crash-ac7b551a6d
+
+Repro: `tools/localfuzz/findings/20260810-203542-run-crash-ac7b551a6d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-203542-run-crash-ac7b551a6d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
