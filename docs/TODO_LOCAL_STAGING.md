@@ -4636,3 +4636,37 @@ Repro: `tools/localfuzz/findings/20260810-063522-backend-divergence-5e6cada3c6/r
 Fix attempt: `tools/localfuzz/findings/20260810-063522-backend-divergence-5e6cada3c6/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-074148-backend-divergence-2492443756
+
+Repro: `tools/localfuzz/findings/20260810-074148-backend-divergence-2492443756/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-074148-backend-divergence-2492443756/fix_attempt.md`
+
+Staging entry for Bug-127 (crash due to integer overflow in loop-carried overflow not elided):
+
+```
+Bugs: vani-compiler-127
+
+Bug ID: vani-compiler-127
+
+Version: 0.8.3
+
+Description:
+
+The vani compiler, when running the provided mutant source code with the specified input data (language/english/loop_carried_overflow_not_elided.vani), exhibits a crash due to an integer overflow in the loop-carried addition operation on the variable `n`.
+
+Steps to reproduce:
+1. Clone the vani-compiler repository from the given base corpus file.
+2. Navigate to the examples/language/english directory and locate the provided mutant source code (loop_carried_overflow_not_elided.vani).
+3. Run the compiler with the mutant input data:
+   ```
+   ./vani -f examples/language/english/loop_carried_overflow_not_elided.vani
+   ```
+
+Observed symptom: The compiler crashes with an error message indicating an integer overflow in the addition operation.
+
+Affected backends: LLVM backend
+
+STATUS: needs human/frontier root-cause review.
