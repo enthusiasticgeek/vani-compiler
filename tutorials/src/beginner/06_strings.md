@@ -269,6 +269,35 @@ fn main() -> i64 {
 }
 ```
 
+### Passing a fresh `OwnedStr` into a container builtin
+
+`hashmap_insert(mut ref m, k, v)` (and friends) accept `OwnedStr` keys
+and values for `HashMap<OwnedStr, _>` / `HashMap<_, OwnedStr>`. Most
+call sites are safe — passing an already-owned binding just moves it
+into the map, and print/len-style read-only positions already handle
+a freshly-computed value correctly. `hashmap_insert` specifically also
+handles a **freshly-computed** `OwnedStr` argument correctly:
+
+```vani
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));  // fine
+  return 0;
+}
+```
+
+> **Known gap**: this same "fresh value, no owning binding" pattern
+> still leaks (not crashes — just leaks, safely) in a few related
+> spots that haven't been fixed yet: `hashmap_get`/
+> `hashmap_contains_key`/`hashmap_remove`'s key argument, `Trie`'s
+> `.insert(...)` method, and — most broadly — passing a freshly-
+> computed `OwnedStr` directly as an argument to an ordinary function
+> that takes `Str` (`my_fn(i64_to_str(5))`). Bind the value to a `let`
+> first if you want to be sure it's freed (`let k: OwnedStr =
+> i64_to_str(5); my_fn(k);` — this form is always correct, since `k`
+> keeps its own scope-exit Drop). Tracked in
+> `docs/BUG_PATTERN_AUDIT_TODO_9.md`.
+
 ### Copying a `Str` literal into an `OwnedStr`
 
 To get an owned copy of a literal, concatenate with an empty
