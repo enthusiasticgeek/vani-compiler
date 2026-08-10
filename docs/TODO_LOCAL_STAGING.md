@@ -4616,3 +4616,14 @@ Fix attempt: `tools/localfuzz/findings/20260810-025203-backend-divergence-b4cbb2
 STATUS: needs human/frontier root-cause review.
 
 The C backend failed to generate valid LLVM IR due to an out-of-bounds access error, which was observed when running the test case `/home/virgo/source/vani-compiler-localfuzz/examples/language/japanese/iterate.vani` with both the LLVM and C backends. The LLVM backend reported a return code of 3, while the C backend encountered a segmentation fault due to an index out-of-bounds error in the generated LLVM IR.
+
+---
+
+### Candidate: 20260810-041441-run-crash-d5870f7218
+
+Repro: `tools/localfuzz/findings/20260810-041441-run-crash-d5870f7218/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-041441-run-crash-d5870f7218/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+A run-crash test was executed against the provided vani-lang codebase with a mutant generated from a local fuzzer. The resulting executable crashed during its execution, which indicates an internal error in the compiler's core logic or optimizations. The exact repro source for this crash is not specified in the given information. The observed symptom is that the program terminates unexpectedly after running for a significant amount of time (up to 2^64 milliseconds). The backend(s) affected by this issue are LLVM and C, as indicated by the "--backend=c" flag used during the compilation process.
