@@ -4670,3 +4670,12 @@ Observed symptom: The compiler crashes with an error message indicating an integ
 Affected backends: LLVM backend
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-074640-run-crash-d8f20b7050
+
+Repro: `tools/localfuzz/findings/20260810-074640-run-crash-d8f20b7050/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-074640-run-crash-d8f20b7050/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
