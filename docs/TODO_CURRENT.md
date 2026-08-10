@@ -11395,7 +11395,7 @@ existing `__poll_*`-exclusion guard test kept and re-documented, 1
 real-subprocess `tests/run_end_to_end.rs` test running the actual
 async example pattern end-to-end on both backends.
 
-## hashmap_strstr/strv leak -- root-caused (2026-08-10), NOT fixed
+## BUG-159 (2026-08-10) -- hashmap_strstr/strv leak, root-caused then FIXED (narrow scope)
 
 At direct request, root-caused the last open finding from round 8.
 `hashmap_insert(mut ref m, K, V)` leaks any argument that's a fresh,
@@ -11413,13 +11413,31 @@ BUG-157/158 "OwnedStr auto-borrowed with no owner" family (after
 time through function call arguments. `print`/`len` are the only
 call positions that already handle this correctly, via a hand-
 written, position-specific mechanism never generalized elsewhere.
+The GENERAL fix (every call site in the compiler) needs its own
+scoping discussion and was not attempted.
 
-Deliberately NOT fixed -- the blast radius (every call site in the
-compiler, not just `hashmap_insert`) is larger than BUG-157/158/the
-async fix combined and needs a scoping discussion first. Full
-root-cause writeup, both repros, and a narrower-scope fix option
-(limited to `hashmap_insert`'s own K/V params) in
-`docs/BUG_PATTERN_AUDIT_TODO_8.md`'s "hashmap_strstr/strv root cause"
-section.
+**Fixed (narrow scope), at direct request, same day**: limited to
+`hashmap_insert`'s own K/V parameters, reusing the exact same
+`crate::ir::is_fresh_owned_str` "conservative whitelist" freshness
+check `print`/`len` already use. Fixed on BOTH backends -- tree-C
+wraps the call in a statement-expression binding fresh args to a
+stable temp (needed to both pass to the call and free afterward);
+LLVM just emits a `call void @free(...)` after the insert instruction
+for whichever SSA register(s) were fresh (no temp-binding needed --
+LLVM registers stay valid for later same-block instructions). The
+common (Var-sourced, already-safe) case emits identically to before
+on both backends.
 
-Next free bug number is **BUG-159**.
+Verified: minimal repro clean under ASan; both real examples
+(`hashmap_strstr.vani`, `hashmap_strv.vani`) run with 0 leaks on
+tree-C (ASan) AND on LLVM (`valgrind --leak-check=full` on a native
+AOT build -- ASan can't instrument already-emitted LLVM IR). `vanic
+check examples` baseline unchanged. Corpus-wide sweep flagged count
+dropped from 6 to 4 (both hashmap files no longer flagged). Full
+`cargo test --release` clean. 4 new regression tests (2 `src/lib.rs`
+compile-checks including an explicit double-free regression guard, 1
+real-subprocess `tests/run_end_to_end.rs` test on both backends).
+Full writeup in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
+"hashmap_strstr/strv" section.
+
+Next free bug number is **BUG-160**.

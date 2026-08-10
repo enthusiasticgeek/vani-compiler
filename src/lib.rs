@@ -48668,6 +48668,72 @@ função main() -> i64 {
         );
     }
 
+    #[test]
+    fn hashmap_insert_frees_fresh_owned_str_key_and_value() {
+        // BUG-159 (2026-08-10): root-caused via a corpus-wide ASan
+        // sweep (docs/BUG_PATTERN_AUDIT_TODO_8.md's "hashmap_strstr/
+        // strv root cause" section). `hashmap_insert(mut ref m, K,
+        // V)` leaked any argument that's a fresh, never-bound
+        // OwnedStr expression (e.g. i64_to_str(1) passed directly,
+        // not through a let) -- the runtime helper clones K/V into
+        // new storage on every path but never frees the caller's
+        // originals, and an unbound temporary has no other owner.
+        // Fixed by reusing the same "conservative whitelist"
+        // freshness check print/len already use
+        // (is_fresh_owned_str): a fresh K/V argument is bound to a
+        // stable temp and freed right after the call.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        assert!(
+            c.contains("_intent_hm_k") && c.contains("_intent_hm_v")
+                && c.contains("free((void*)_intent_hm_k)")
+                && c.contains("free((void*)_intent_hm_v)"),
+            "expected fresh K and V args to be bound to temps and freed \
+             after the insert call:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, OwnedStr> → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 2,
+            "expected both fresh K and V args to be freed in the LLVM \
+             output (at least the 2 from this insert call, likely more \
+             from other OwnedStr drops):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn hashmap_insert_does_not_double_free_owned_var_key_or_value() {
+        // BUG-159 regression guard: the freshness check must only
+        // fire for genuinely fresh (Call/Binary-Add) expressions --
+        // a K/V sourced from an EXISTING named OwnedStr binding must
+        // NOT be freed by the insert call site (that binding keeps
+        // its own scope-exit Drop; freeing here would double-free).
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let v: OwnedStr = i64_to_str(100);
+              let _ = hashmap_insert(mut ref m, k, v);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        assert!(
+            !c.contains("_intent_hm_k") && !c.contains("_intent_hm_v"),
+            "a Var-sourced K/V must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
+        );
+    }
+
     // ARC 4.2 — HashMap<i64, OwnedStr>: V drop walks on
     // drop/clear/remove; _insert clones V internally; _insert
     // duplicate + _remove transfer prior V ownership to caller.

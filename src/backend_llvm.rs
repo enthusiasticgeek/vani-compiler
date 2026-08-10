@@ -10542,6 +10542,23 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call %{opt} @{p}_insert(%{p}* {}, {kty} {}, {v} {})\n",
                     dest, m, k, v, p = prefix, kty = k_llvm, v = v_llvm, opt = opt
                 ));
+                // BUG-159 (2026-08-10): mirrors the tree-C fix -- the
+                // runtime `..._insert` helper clones K/V into new
+                // storage but never frees the caller's original K/V
+                // pointers. A FRESH, never-bound OwnedStr argument
+                // (e.g. `i64_to_str(1)` passed directly) has no other
+                // owner and leaks. Reuse the same "conservative
+                // whitelist" freshness check print/len already use;
+                // only free here when the arg is actually fresh (a
+                // Var/FieldAccess/TupleAccess is owned by some
+                // binding whose own drop handles it -- freeing here
+                // would double-free).
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
+                if crate::ir::is_fresh_owned_str(&args[2]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", v));
+                }
                 return dest;
             }
             if name == "hashmap_get" {

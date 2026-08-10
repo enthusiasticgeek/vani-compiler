@@ -19265,13 +19265,74 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             hashmap_prefix_from_ty(result_ty),
             emit_expr(&args[0])
         ),
-        "hashmap_insert" => format!(
-            "{}_insert({}, ({}), ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1]),
-            emit_expr(&args[2])
-        ),
+        "hashmap_insert" => {
+            // BUG-159 (2026-08-10): the runtime `..._insert` helper
+            // CLONES K/V into new storage on every path (fresh
+            // insert AND duplicate-key overwrite) but never frees
+            // the caller's original K/V pointers -- fine when K/V
+            // came from a named OwnedStr binding (its own scope-exit
+            // Drop frees it), but a FRESH, never-bound OwnedStr
+            // argument (`i64_to_str(1)` passed directly, not through
+            // a `let`) has no other owner and leaks. Root-caused via
+            // a corpus-wide ASan sweep; see docs/BUG_PATTERN_AUDIT_
+            // TODO_8.md's "hashmap_strstr/strv root cause" section
+            // for the full writeup, including why this fix is
+            // deliberately narrow (limited to hashmap_insert's own
+            // K/V params) rather than the much larger general fix
+            // (every function-call argument in the compiler) that
+            // same writeup identifies as the real underlying gap.
+            //
+            // Fix: reuse the exact same "conservative whitelist"
+            // freshness check `print`/`len` already use
+            // (`is_fresh_owned_str` -- only a Call or Binary-Add
+            // producing OwnedStr counts as fresh; a Var/FieldAccess/
+            // TupleAccess is owned by some binding whose own drop
+            // handles it, freeing here would double-free). Only
+            // wrap in a statement-expression when at least one of
+            // K/V is actually fresh -- the common (already-safe)
+            // case emits identically to before.
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1]);
+            let v_fresh = crate::ir::is_fresh_owned_str(&args[2]);
+            if !k_fresh && !v_fresh {
+                format!(
+                    "{}_insert({}, ({}), ({}))",
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1]),
+                    emit_expr(&args[2])
+                )
+            } else {
+                let prefix = hashmap_prefix_from_recv(&args[0].ty);
+                let map_expr = emit_expr(&args[0]);
+                let k_expr = emit_expr(&args[1]);
+                let v_expr = emit_expr(&args[2]);
+                let mut body = String::from("({ ");
+                let k_arg = if k_fresh {
+                    body.push_str(&format!("char* _intent_hm_k = ({}); ", k_expr));
+                    "_intent_hm_k".to_string()
+                } else {
+                    format!("({})", k_expr)
+                };
+                let v_arg = if v_fresh {
+                    body.push_str(&format!("char* _intent_hm_v = ({}); ", v_expr));
+                    "_intent_hm_v".to_string()
+                } else {
+                    format!("({})", v_expr)
+                };
+                body.push_str(&format!(
+                    "{} _intent_hm_r = {}_insert({}, {}, {}); ",
+                    c_type_name(result_ty), prefix, map_expr, k_arg, v_arg
+                ));
+                if k_fresh {
+                    body.push_str("free((void*)_intent_hm_k); ");
+                }
+                if v_fresh {
+                    body.push_str("free((void*)_intent_hm_v); ");
+                }
+                body.push_str("_intent_hm_r; })");
+                body
+            }
+        }
         "hashmap_get" => format!(
             "{}_get({}, ({}))",
             hashmap_prefix_from_recv(&args[0].ty),

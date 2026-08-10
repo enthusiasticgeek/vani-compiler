@@ -14161,3 +14161,53 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn hashmap_insert_fresh_owned_str_args_run_correctly_on_both_backends() {
+    // BUG-159 (2026-08-10): hashmap_insert(mut ref m, K, V) leaked
+    // any fresh, never-bound OwnedStr argument (e.g. i64_to_str(1)
+    // passed directly) -- the runtime helper clones K/V into new
+    // storage but never frees the caller's originals, and an
+    // unbound temporary has no other owner. Fixed by freeing fresh
+    // K/V args right after the insert call, on both backends. This
+    // is a real-subprocess run of the exact repro that was
+    // originally flagged by the corpus-wide ASan sweep, confirming
+    // it still produces correct output (the sweep itself, not this
+    // test, is what confirms the leak is actually gone).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug159-hashmap-insert-fresh-owned-str",
+        r#"
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+  let _ = hashmap_insert(mut ref m, i64_to_str(2), i64_to_str(200));
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(999));
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "hashmap_insert with fresh OwnedStr args should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "2",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}

@@ -1,17 +1,16 @@
 # vāṇी — Bug-pattern audit, round 8
 
-**STATUS (2026-08-10): 6 real bugs FIXED (BUG-153, BUG-154 -- general
-and severe -- BUG-155/156/157, and BUG-158, all fixed in same-day-or-
-next-day follow-up sessions at direct request), PLUS the async
+**STATUS (2026-08-10): 7 real bugs FIXED (BUG-153, BUG-154 -- general
+and severe -- BUG-155/156/157/158, and BUG-159, all fixed in same-
+day-or-next-day follow-up sessions at direct request), PLUS the async
 `__poll_*` instance of BUG-157/158's own root issue, fixed in the
-async transform itself (not a checker rejection this time -- see
-"Async transform fix" section below). Every OwnedStr/Str
-ownership-escape finding from this round is now closed except one
-separate, still-undiagnosed leak (`hashmap_strstr.vani` /
-`hashmap_strv.vani` -- NOT async-related, likely HashMap-internal,
-mislabeled as part of the async cluster in round 8's first pass).
-2 false positives and 2 low-severity UB findings triaged, not fixed
-(see below for why).**
+async transform itself. Every leak/UAF this round found is now fixed
+-- `hashmap_strstr.vani`/`hashmap_strv.vani` (BUG-159, a THIRD escape
+vector of the OwnedStr-auto-borrow family, through function call
+arguments, fixed narrowly for `hashmap_insert`'s own K/V params) were
+the last open items. 2 false positives and 2 low-severity UB findings
+triaged, not fixed (see below for why) -- these were never memory-
+safety bugs, just sweep-methodology/portability notes.**
 
 Directly requested: "pick a round-8 theme... my worry is always
 memory and leaks - this is absolutely uncompromised requirement for
@@ -442,7 +441,7 @@ covered) -- both reasonable scope cuts for a per-push CI gate;
 extending either is a fine future follow-up but not required for the
 CI job to be worth having.
 
-## hashmap_strstr/strv root cause (2026-08-10) -- root-caused precisely, NOT fixed
+## hashmap_strstr/strv (2026-08-10) -- FIXED via the narrow, hashmap_insert-scoped option
 
 Root cause, confirmed via a minimal 1-line repro and direct source
 inspection: `hashmap_insert(mut ref m, K, V)` leaks any argument
@@ -496,19 +495,53 @@ whitelist" in `emit_print_expr_no_newline` (`backend_c.rs`, comment:
 fresh heap-producers"). That pattern was never generalized to
 arbitrary call sites.
 
-**Why NOT fixed here**: the blast radius is much larger than
-`hashmap_insert` -- potentially every function call site in the
-compiler (every builtin AND every user-defined function taking a
-`Str` parameter) needs the same "is this argument a fresh, unbound
-OwnedStr expression? If so, free it after the call" treatment print
-already gets. This is a bigger, more pervasive change than BUG-157/
-158/the async fix combined, and warrants a scoping discussion before
-attempting -- not a same-pass fix. A narrower first cut (limited to
-`hashmap_insert`'s own K/V parameters specifically, reusing print's
-already-proven-safe "fresh Call/Binary-Add" detection) is plausible
-and much lower-risk than a fully general fix, if a future session
-wants to close just these two examples without taking on the wider
-scope.
+**Why the GENERAL fix (every function call site in the compiler) was
+NOT attempted**: that blast radius -- every builtin AND every user-
+defined function taking a `Str` parameter -- is bigger than BUG-157/
+158/the async fix combined and still needs its own scoping
+discussion. Not attempted here.
+
+**FIXED (narrow scope), at direct request, same day**: the
+`hashmap_insert`-only option identified above. Both `backend_c.rs`
+and `backend_llvm.rs`'s `hashmap_insert` emission now check each of
+K/V with `crate::ir::is_fresh_owned_str` -- the exact same
+"conservative whitelist" freshness check `print`/`len` already use
+(only a `Call`/`Binary`-`+` producing `OwnedStr` counts as fresh; a
+`Var`/`FieldAccess`/`TupleAccess` is owned by some binding whose own
+Drop handles it, so freeing there would double-free). When at least
+one of K/V is fresh:
+- **Tree-C**: wraps the call in a GCC statement-expression, binding
+  each fresh arg to a stable `_intent_hm_k`/`_intent_hm_v` temp
+  (needed both to pass to the call and to have a handle to free
+  afterward), calls `..._insert`, frees whichever temp(s) were
+  fresh, yields the `Option<V>` result. The common (already-safe,
+  Var-sourced) case is untouched -- emits identically to before.
+- **LLVM**: after the existing `call %opt @..._insert(...)`
+  instruction, emits `call void @free(i8* %k)` / `call void @free(i8*
+  %v)` for whichever SSA register(s) were fresh -- LLVM registers
+  stay valid for later instructions in the same block, so no
+  temp-binding step is needed the way tree-C's expression-based
+  emission requires.
+
+Verified: the minimal 1-line repro and both real examples
+(`hashmap_strstr.vani`, `hashmap_strv.vani`) now run completely clean
+-- 0 leaks under ASan (tree-C) AND under `valgrind --leak-check=full`
+on a native LLVM AOT build (LLVM; ASan can't instrument already-
+emitted LLVM IR after the fact, so valgrind is this codebase's
+established cross-check for that backend). `vanic check examples`
+baseline unchanged. Corpus-wide sweep flagged count dropped from 6 to
+4 (both hashmap files no longer flagged; baseline updated). Full
+`cargo test --release` clean. 4 new regression tests: 2 `src/lib.rs`
+compile-checks (fresh K/V get bound+freed on both backends; a
+Var-sourced K/V is explicitly confirmed NOT to go through the
+fresh-arg path, guarding against a double-free regression), 1
+real-subprocess `tests/run_end_to_end.rs` test running the original
+flagged repro shape (3 inserts, including a duplicate-key overwrite)
+end-to-end on both backends.
+
+The general call-argument fix (every function call site, not just
+`hashmap_insert`) remains a separate, larger, not-yet-scoped item for
+a future session if ever needed beyond this narrow case.
 
 ## Process (mirrors rounds 1 through 7's own process sections)
 
