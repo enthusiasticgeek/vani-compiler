@@ -48734,6 +48734,132 @@ função main() -> i64 {
         );
     }
 
+    #[test]
+    fn hashmap_get_contains_remove_free_fresh_owned_str_key() {
+        // BUG-160 (2026-08-10): same family as BUG-159, the sibling
+        // instance the narrow hashmap_insert fix deliberately didn't
+        // cover. hashmap_get/hashmap_contains_key/hashmap_remove
+        // don't clone K at all (only used for a lookup then
+        // discarded), but a fresh, never-bound OwnedStr key arg
+        // still has no owner to free it after the call. Same
+        // is_fresh_owned_str + free-after-call pattern, scoped to
+        // the key argument only.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), 100);
+              let r: Option<i64> = hashmap_get(ref m, i64_to_str(1));
+              let c: bool = hashmap_contains_key(ref m, i64_to_str(1));
+              let rm: Option<i64> = hashmap_remove(mut ref m, i64_to_str(1));
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        assert!(
+            c.matches("_intent_hm_k").count() >= 3 && c.matches("free((void*)_intent_hm_k)").count() >= 3,
+            "expected all 3 of get/contains_key/remove to bind + free a \
+             fresh key temp:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, i64> → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 4,
+            "expected 4 frees total (insert's fresh K + get/contains_key/ \
+             remove's fresh key each freed once):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn hashmap_get_contains_remove_do_not_double_free_owned_var_key() {
+        // BUG-160 regression guard, mirrors hashmap_insert's own.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              let k2: OwnedStr = i64_to_str(1);
+              let r: Option<i64> = hashmap_get(ref m, k2);
+              let k3: OwnedStr = i64_to_str(1);
+              let c: bool = hashmap_contains_key(ref m, k3);
+              let k4: OwnedStr = i64_to_str(1);
+              let rm: Option<i64> = hashmap_remove(mut ref m, k4);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        assert!(
+            !c.contains("_intent_hm_k"),
+            "a Var-sourced key must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn trie_insert_contains_starts_with_delete_free_fresh_owned_str_key() {
+        // BUG-161 (2026-08-10): same family as BUG-159/160. Trie's
+        // key param is typed `Str` (not `OwnedStr` like hashmap's K),
+        // so the checker wraps a fresh OwnedStr arg in an implicit
+        // borrow cast (Cast { ty: Str, .. }) before it reaches
+        // codegen -- is_fresh_owned_str alone misses this shape since
+        // the outer type is Str, not OwnedStr. Fixed via the new
+        // is_fresh_owned_str_via_str_cast helper, which unwraps
+        // exactly that cast.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let _ = t.insert(i64_to_str(5));
+              let c: bool = t.contains(i64_to_str(5));
+              let sw: bool = t.starts_with(i64_to_str(5));
+              let d: bool = t.delete(i64_to_str(5));
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Trie key ops → C");
+        assert!(
+            c.matches("_intent_trie_k").count() >= 4
+                && c.matches("free((void*)_intent_trie_k)").count() >= 4,
+            "expected all 4 of insert/contains/starts_with/delete to bind \
+             + free a fresh key temp:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("Trie key ops → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 4,
+            "expected 4 frees, one per fresh-key trie call:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn trie_ops_do_not_double_free_owned_var_key() {
+        // BUG-161 regression guard, mirrors hashmap_insert's own.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let k1: OwnedStr = i64_to_str(5);
+              let _ = t.insert(k1);
+              let k2: OwnedStr = i64_to_str(5);
+              let c: bool = t.contains(k2);
+              let k3: OwnedStr = i64_to_str(5);
+              let sw: bool = t.starts_with(k3);
+              let k4: OwnedStr = i64_to_str(5);
+              let d: bool = t.delete(k4);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Trie key ops → C");
+        assert!(
+            !c.contains("_intent_trie_k"),
+            "a Var-sourced key must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
+        );
+    }
+
     // ARC 4.2 — HashMap<i64, OwnedStr>: V drop walks on
     // drop/clear/remove; _insert clones V internally; _insert
     // duplicate + _remove transfer prior V ownership to caller.

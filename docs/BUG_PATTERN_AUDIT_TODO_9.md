@@ -1,12 +1,10 @@
-# vāṇी — Bug-pattern audit, round 9 (candidates, NOT started)
+# vāṇी — Bug-pattern audit, round 9
 
-**STATUS (2026-08-10): NOT STARTED.** This is a candidate list compiled
-at the end of round 8 (which is fully closed -- see
-`docs/BUG_PATTERN_AUDIT_TODO_8.md`), at direct request, so a future
-session can pick a theme without re-deriving this research from
-scratch. Nothing in this file has been fixed. Some items are well-
-root-caused already (cheap to pick up); others are raw localfuzz
-findings that still need root-causing.
+**STATUS (2026-08-10): Category 1's two cheapest pickups FIXED
+(BUG-160, BUG-161).** See `docs/TODO_CURRENT.md` for the full writeup.
+This is now a partial-progress candidate list, not a from-scratch one:
+Categories 2 and 3 are untouched, and Category 1's general
+(ordinary-user-function) case remains deliberately unscoped/open.
 
 Three source categories, each its own section below:
 1. More instances of BUG-159's exact bug family (OwnedStr auto-borrow
@@ -30,33 +28,22 @@ where the callee doesn't take ownership responsibility) recurs in
 several sibling positions that the narrow fix didn't touch. All
 confirmed via direct ASan testing, 2026-08-10.
 
+### FIXED (2026-08-10, BUG-160 + BUG-161 -- see docs/TODO_CURRENT.md)
+
+- **`hashmap_get(ref m, K)` / `hashmap_contains_key(ref m, K)` /
+  `hashmap_remove(mut ref m, K)`** -- BUG-160. Fixed via the same
+  `is_fresh_owned_str` + free-after-call pattern as `hashmap_insert`.
+- **`trie_insert` / `trie_contains` / `trie_starts_with` /
+  `trie_delete`** (all 4 siblings, not just `.insert(...)`) --
+  BUG-161. Needed one more layer than BUG-160: Trie's key param is
+  typed `Str`, so a fresh OwnedStr arg arrives wrapped in the
+  checker's implicit borrow cast; fixed via a new
+  `is_fresh_owned_str_via_str_cast` helper in `src/ir.rs` that
+  unwraps exactly that cast. `examples/language/english/trie.vani`
+  uses `Str` literals only and was never affected.
+
 ### Confirmed leaking, NOT fixed
 
-- **`hashmap_get(ref m, K)`** -- fresh `OwnedStr` K leaks. Repro:
-  ```vani
-  let r: Option<OwnedStr> = hashmap_get(ref m, i64_to_str(1));
-  ```
-  Leaks 2 bytes / 1 object under ASan.
-- **`hashmap_contains_key(ref m, K)`** -- same, fresh K leaks.
-- **`hashmap_remove(mut ref m, K)`** -- same, fresh K leaks. (Note:
-  unlike `_insert`, `_get`/`_contains_key`/`_remove` don't clone K
-  into new storage at all -- they only use it for a `strcmp` lookup
-  and then discard it. The exact "clone vs never-freed-source" shape
-  BUG-159's writeup describes for `_insert` doesn't apply the same
-  way here; still, root cause is the same category: nothing frees
-  the fresh temporary after the call, because nothing owns it.)
-  Combined repro (`contains_key` + `remove`) leaks 4 bytes / 2
-  objects.
-- **`trie_insert` / `Trie.insert(...)`** -- fresh `OwnedStr` key
-  leaks identically to `hashmap_insert`'s pre-fix behavior. Repro:
-  ```vani
-  let t: Trie = trie_new();
-  let _ = t.insert(i64_to_str(5));   // leaks
-  ```
-  Leaks 2 bytes / 1 object. NOT checked: `trie_contains`,
-  `trie_starts_with`, `trie_delete` (all take a Str-shaped key
-  argument too, per the same builtin family -- likely affected
-  identically, not individually verified this session).
 - **Ordinary user-defined functions taking a `Str` parameter** -- the
   general, pervasive case, confirmed via:
   ```vani
@@ -90,16 +77,18 @@ confirmed via direct ASan testing, 2026-08-10.
 
 ### Suggested approach for a future session
 
-Given `hashmap_get`/`_contains_key`/`_remove` are the SAME file,
-SAME function family, SAME fix pattern (`is_fresh_owned_str` +
-free-after-call) as the already-fixed `hashmap_insert`, they're the
-cheapest, lowest-risk pickup -- essentially finishing what BUG-159
-started, not a new investigation. `trie_insert` (and its Str-key
-siblings) is the next-cheapest, same pattern, different file. The
-general function-call-argument case is a separate, much larger
-undertaking that deserves its own dedicated session and explicit
-scoping conversation before starting -- do not fold it into a
-"quick" round-9 sweep.
+Both cheap pickups (`hashmap_get`/`_contains_key`/`_remove` as
+BUG-160, `trie_insert`/`_contains`/`_starts_with`/`_delete` as
+BUG-161) are now fixed -- see the FIXED subsection above. What
+remains in this category is only the general function-call-argument
+case (ordinary user functions taking `Str`), which is a separate,
+much larger undertaking that deserves its own dedicated session and
+explicit scoping conversation before starting -- do not fold it into
+a "quick" sweep. Note BUG-161 showed the general case is slightly
+bigger than BUG-159/160 alone suggested: any `Str`-typed parameter
+(not just `OwnedStr`-typed ones) needs the cast-unwrapping
+`is_fresh_owned_str_via_str_cast` check too, not just the direct
+`is_fresh_owned_str` check.
 
 ---
 

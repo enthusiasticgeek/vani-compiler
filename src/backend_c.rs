@@ -19187,26 +19187,40 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         ),
         // Closure #330: Trie dispatch.
         "trie_new" => "intent_trie_new()".to_string(),
-        "trie_insert" => format!(
-            "intent_trie_insert({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_contains" => format!(
-            "intent_trie_contains({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_starts_with" => format!(
-            "intent_trie_starts_with({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_delete" => format!(
-            "intent_trie_delete({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        "trie_insert" | "trie_contains" | "trie_starts_with" | "trie_delete" => {
+            // BUG-161 (2026-08-10): same family as BUG-159/160 -- a
+            // fresh, never-bound OwnedStr key argument has no owner
+            // to free it after the call. Trie's key param is typed
+            // `Str` (not `OwnedStr` like hashmap's K), so the checker
+            // wraps a fresh OwnedStr arg in an implicit borrow cast
+            // (`Cast { ty: Str, .. }`) before it reaches here --
+            // is_fresh_owned_str alone misses it since the outer type
+            // is Str. Check both the direct and cast-wrapped shapes.
+            let op = match name {
+                "trie_insert" => "insert",
+                "trie_contains" => "contains",
+                "trie_starts_with" => "starts_with",
+                _ => "delete",
+            };
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1])
+                || crate::ir::is_fresh_owned_str_via_str_cast(&args[1]);
+            if !k_fresh {
+                format!(
+                    "intent_trie_{}({}, ({}))",
+                    op,
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1])
+                )
+            } else {
+                format!(
+                    "({{ const char* _intent_trie_k = ({}); {} _intent_trie_r = intent_trie_{}({}, _intent_trie_k); free((void*)_intent_trie_k); _intent_trie_r; }})",
+                    emit_expr(&args[1]),
+                    c_type_name(result_ty),
+                    op,
+                    emit_expr(&args[0])
+                )
+            }
+        }
         "trie_clear" => format!(
             "intent_trie_clear({})",
             emit_expr(&args[0])
@@ -19333,24 +19347,40 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 body
             }
         }
-        "hashmap_get" => format!(
-            "{}_get({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "hashmap_contains_key" => format!(
-            "{}_contains_key({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "hashmap_remove" => format!(
-            "{}_remove({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        "hashmap_get" | "hashmap_contains_key" | "hashmap_remove" => {
+            // BUG-160 (2026-08-10): same family as BUG-159's
+            // hashmap_insert fix -- a fresh, never-bound OwnedStr key
+            // argument has no owner to free it after the call. Unlike
+            // _insert, these three don't clone K into new storage at
+            // all (only used for a strcmp lookup then discarded), but
+            // the leak shape is identical: nothing frees the fresh
+            // temporary. Reuse the same is_fresh_owned_str +
+            // free-after-call pattern, scoped to the key argument only.
+            let op = match name {
+                "hashmap_get" => "get",
+                "hashmap_contains_key" => "contains_key",
+                _ => "remove",
+            };
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1]);
+            if !k_fresh {
+                format!(
+                    "{}_{}({}, ({}))",
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    op,
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1])
+                )
+            } else {
+                format!(
+                    "({{ char* _intent_hm_k = ({}); {} _intent_hm_r = {}_{}({}, _intent_hm_k); free((void*)_intent_hm_k); _intent_hm_r; }})",
+                    emit_expr(&args[1]),
+                    c_type_name(result_ty),
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    op,
+                    emit_expr(&args[0])
+                )
+            }
+        }
         "hashmap_len" => format!(
             "{}_len({})",
             hashmap_prefix_from_recv(&args[0].ty),

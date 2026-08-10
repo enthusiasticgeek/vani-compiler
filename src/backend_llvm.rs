@@ -10572,6 +10572,14 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call %{opt} @{p}_get(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm, opt = opt
                 ));
+                // BUG-160 (2026-08-10): mirrors BUG-159's hashmap_insert
+                // fix -- get/contains_key/remove don't clone K at all
+                // (only used for a lookup then discarded), but a
+                // FRESH, never-bound OwnedStr key arg still has no
+                // owner to free it.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_contains_key" {
@@ -10585,6 +10593,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call i1 @{p}_contains_key(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm
                 ));
+                // BUG-160 (2026-08-10): see hashmap_get above.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_remove" {
@@ -10598,6 +10610,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call %{opt} @{p}_remove(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm, opt = opt
                 ));
+                // BUG-160 (2026-08-10): see hashmap_get above.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_len" {
@@ -11073,6 +11089,18 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call i1 @intent_trie_{}(%intent_trie* {}, i8* {})\n",
                     dest, suffix, t, s
                 ));
+                // BUG-161 (2026-08-10): mirrors BUG-159/160 -- a fresh,
+                // never-bound OwnedStr key arg has no owner to free it.
+                // Trie's key param is `Str`, so a fresh OwnedStr arg
+                // arrives wrapped in the checker's implicit borrow
+                // cast; the cast is a no-op bitcast on LLVM (same SSA
+                // value), so checking the cast-wrapped shape too is
+                // safe -- see is_fresh_owned_str_via_str_cast's doc.
+                if crate::ir::is_fresh_owned_str(&args[1])
+                    || crate::ir::is_fresh_owned_str_via_str_cast(&args[1])
+                {
+                    out.push_str(&format!("  call void @free(i8* {})\n", s));
+                }
                 return dest;
             }
             if name == "trie_len" || name == "trie_node_count" || name == "trie_clear" {

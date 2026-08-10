@@ -11440,4 +11440,78 @@ real-subprocess `tests/run_end_to_end.rs` test on both backends).
 Full writeup in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
 "hashmap_strstr/strv" section.
 
-Next free bug number is **BUG-160**.
+## BUG-160 (2026-08-10) -- hashmap_get/contains_key/remove fresh OwnedStr key leak, FIXED
+
+Round 9's cheapest pickup, exactly as scoped in `docs/BUG_PATTERN_AUDIT_
+TODO_9.md`'s Category 1: the same fresh-`OwnedStr`-argument leak family
+as BUG-159, in `hashmap_get`/`hashmap_contains_key`/`hashmap_remove`'s
+own key parameter. Unlike `_insert`, these three don't clone K into new
+storage at all (only used for a `strcmp` lookup then discarded), but
+the leak shape is identical: nothing frees the fresh temporary once the
+call returns, because nothing owns it.
+
+Fixed on both backends by reusing `is_fresh_owned_str` + free-after-call,
+scoped to the key argument for all three builtins (a single combined
+match arm in `backend_c.rs`, three near-identical `if` blocks in
+`backend_llvm.rs`). Same shape as BUG-159's own fix: tree-C wraps the
+call in a statement-expression binding the fresh key to a stable temp;
+LLVM just emits `call void @free(...)` on the SSA register after the
+call instruction.
+
+Verified: minimal repro clean under ASan (tree-C, gcc+ASan+LSan+UBSan)
+and valgrind (LLVM native AOT); Var-sourced key case confirmed to emit
+identically to before (no double-free). `vanic check examples` baseline
+unchanged. Corpus-wide sweep still flags exactly the same 4 baseline
+items (unaffected -- no example file exercised this call shape before).
+Full `cargo test --release` clean (2872+ lib tests, all e2e binaries, 0
+failed). 4 new regression tests (2 `src/lib.rs` compile-checks incl. a
+double-free regression guard, 2 real-subprocess `tests/
+run_end_to_end.rs` tests on both backends).
+
+## BUG-161 (2026-08-10) -- Trie key-op fresh OwnedStr leak, FIXED
+
+Round 9's second pickup: `trie_insert`/`trie_contains`/
+`trie_starts_with`/`trie_delete` (`Trie.insert(...)` etc. via method
+sugar) leak a fresh, never-bound `OwnedStr` key argument the same way.
+**Turned out to need one more layer than BUG-159/160**: Trie's key
+parameter is typed `Str`, not `OwnedStr` like HashMap's K, so the
+checker wraps a fresh OwnedStr argument in its implicit borrow cast
+(`TypedExprKind::Cast { ty: Type::Str, .. }`) before it reaches codegen.
+`is_fresh_owned_str(&args[1])` alone always returned `false` here --
+the outer expression's type is `Str`, not `OwnedStr` -- even though the
+value underneath is exactly the same kind of fresh temporary BUG-159/
+160 free correctly.
+
+Fixed by adding `crate::ir::is_fresh_owned_str_via_str_cast` (`src/
+ir.rs`, next to `is_fresh_owned_str`): matches specifically on
+`Cast { ty: Type::Str, .. }` wrapping an `is_fresh_owned_str` inner
+expression. Safe to free after use for the same reason `is_fresh_
+owned_str` freeing is safe (nothing else owns the value once the call
+returns) -- and the cast itself is a no-op reinterpretation on both
+backends (same pointer value: `(const char*)(...)` in C, a `bitcast-
+noop` in LLVM that returns the same SSA register unchanged), so
+freeing the post-cast value frees the correct allocation. Call sites
+now check `is_fresh_owned_str(&args[1]) ||
+is_fresh_owned_str_via_str_cast(&args[1])`. Deliberately NOT
+generalized beyond Trie's own 4 call sites -- the same cast-unwrapping
+would apply to ANY ordinary user function taking a `Str` parameter,
+which is exactly the general, much-larger fix `docs/
+BUG_PATTERN_AUDIT_TODO_9.md` explicitly scoped out of this round.
+
+Verified: `examples/language/english/trie.vani` uses `Str` literals
+only (never a fresh OwnedStr), so it was never affected and needed no
+re-check beyond confirming the fix doesn't touch its emitted code.
+Minimal repro (all 4 ops on a fresh key) clean under ASan and valgrind
+on both backends; Var-sourced key case confirmed to emit identically to
+before. `vanic check examples` baseline unchanged. Corpus-wide sweep
+still flags exactly the same 4 baseline items. Full `cargo test
+--release` clean. 4 new regression tests (2 `src/lib.rs` compile-checks
+incl. a double-free regression guard, 2 real-subprocess `tests/
+run_end_to_end.rs` tests on both backends).
+
+Both BUG-160 and BUG-161 close out Category 1's "confirmed leaking, not
+fixed" list from `docs/BUG_PATTERN_AUDIT_TODO_9.md` except the general,
+ordinary-user-function case, which remains deliberately unscoped/open
+for a future dedicated session.
+
+Next free bug number is **BUG-162**.

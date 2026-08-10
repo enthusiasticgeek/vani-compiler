@@ -14211,3 +14211,114 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn hashmap_get_contains_remove_fresh_owned_str_key_runs_correctly_on_both_backends() {
+    // BUG-160 (2026-08-10): sibling of BUG-159 -- hashmap_get/
+    // hashmap_contains_key/hashmap_remove leaked a fresh, never-bound
+    // OwnedStr key argument (they don't clone K at all, only use it
+    // for a lookup then discard it, so nothing ever owned the
+    // temporary). Fixed by freeing the fresh key right after each
+    // call, on both backends. Real-subprocess run confirming correct
+    // output (the corpus-wide ASan sweep, not this test, confirms the
+    // leak itself is gone).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug160-hashmap-get-contains-remove-fresh-owned-str",
+        r#"
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, i64> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), 100);
+  let r: Option<i64> = hashmap_get(ref m, i64_to_str(1));
+  let found: i64 = match r {
+    Option.Some(v) then v,
+    Option.None then -1,
+  };
+  let c: bool = hashmap_contains_key(ref m, i64_to_str(1));
+  let rm: Option<i64> = hashmap_remove(mut ref m, i64_to_str(1));
+  let removed: i64 = match rm {
+    Option.Some(v) then v,
+    Option.None then -1,
+  };
+  print found;
+  print c;
+  print removed;
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "hashmap_get/contains_key/remove with fresh OwnedStr key should run \
+             cleanly ({args:?}), got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "100\ntrue\n100\n0",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn trie_ops_fresh_owned_str_key_run_correctly_on_both_backends() {
+    // BUG-161 (2026-08-10): same family as BUG-159/160. Trie's key
+    // param is typed Str, so a fresh OwnedStr arg arrives wrapped in
+    // the checker's implicit OwnedStr->Str borrow cast -- the plain
+    // is_fresh_owned_str check misses this shape (outer type is Str,
+    // not OwnedStr). Fixed via is_fresh_owned_str_via_str_cast, which
+    // unwraps exactly that cast on both backends. Real-subprocess run
+    // confirming correct output.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug161-trie-fresh-owned-str-key",
+        r#"
+fn main() -> i64 {
+  let t: Trie = trie_new();
+  let ins: bool = t.insert(i64_to_str(5));
+  let has: bool = t.contains(i64_to_str(5));
+  let pre: bool = t.starts_with(i64_to_str(5));
+  let del: bool = t.delete(i64_to_str(5));
+  print ins;
+  print has;
+  print pre;
+  print del;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "trie ops with fresh OwnedStr key should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "true\ntrue\ntrue\ntrue",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
