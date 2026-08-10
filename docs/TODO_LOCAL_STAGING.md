@@ -4977,3 +4977,12 @@ fn classify(s: Status, secs: i64) -> Str {
   return match s {
     Status.Active if secs > 3600 then "active-long",
     Status.Active if secs
+
+---
+
+### Candidate: 20260810-181916-backend-divergence-78ca7600f3
+
+Repro: `tools/localfuzz/findings/20260810-181916-backend-divergence-78ca7600f3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-181916-backend-divergence-78ca7600f3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
