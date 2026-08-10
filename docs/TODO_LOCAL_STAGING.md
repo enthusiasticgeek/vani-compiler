@@ -4809,3 +4809,34 @@ Fix attempt: `tools/localfuzz/findings/20260810-105409-backend-divergence-1f84ad
 }
 ```
 
+
+---
+
+### Candidate: 20260810-113044-backend-divergence-b4d35be8e4
+
+Repro: `tools/localfuzz/findings/20260810-113044-backend-divergence-b4d35be8e4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-113044-backend-divergence-b4d35be8e4/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Test Case Identifier**: vani-compiler-localfuzz-1
+
+**Fuzzer Input**: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/bounds_elision.vani
+
+**Expected Outcome**: The program should terminate normally and produce the expected output.
+
+**Actual Outcome**: After running the program, the `at` function returned an incorrect value. The output was:
+
+```
+index out of bounds
+```
+
+**Backends Affected**: LLVM (LLVM backend) and C (C backend)
+
+**Status: needs human/frontier root-cause review.**
+
+---
+
+Thank you for providing this detailed staging entry for your vani-compiler bug report!
