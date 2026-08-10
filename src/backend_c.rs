@@ -187,8 +187,13 @@ fn enum_has_mixed_payloads(decl: &crate::ir::TypedEnumDecl) -> bool {
 /// Closure #283: C identifier for the per-variant union
 /// member name. `v_Ok`, `v_Err`, etc. Mirrored on the LLVM
 /// side via `intent_enum_v_<variant>`-style globals.
+/// BUG-168 (2026-08-10): enum variant names are ordinary user
+/// identifiers (confirmed reachable with a non-ASCII variant name,
+/// e.g. a Devanagari-named custom enum) and need the same
+/// sanitization as every other local/collection name -- same bug
+/// class as the other BUG-168 sites in this file.
 pub(crate) fn enum_variant_member(variant: &str) -> String {
-    format!("v_{}", variant)
+    format!("v_{}", sanitize_ident(variant))
 }
 
 /// Common payload type across all payloaded variants of the
@@ -13646,7 +13651,13 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                         });
                         if is_aff {
                             let cv = local_name(callee_name);
-                            let uid = name; // binding name is unique in this scope
+                            // BUG-168 (2026-08-10): `name` is a
+                            // source identifier (the "binding name is
+                            // unique in this scope" comment already
+                            // notes it's used as a uniqueness key) --
+                            // sanitize it the same way every other
+                            // local-name reference in this file does.
+                            let uid = sanitize_ident(name);
                             let arg_strs: Vec<String> = call_args.iter().map(emit_expr).collect();
                             let mut all_args: Vec<String> =
                                 vec![format!("__env_sv_{}", uid)];
@@ -15129,7 +15140,11 @@ return __intent_ret; }}\n",
             // Free the consumed Vec's buffer on an early-return path.
             // The normal-exit path (after the last iteration) already
             // emits this free at the bottom of `emit_for_iter`.
-            let coll_local = format!("v_{}", collection);
+            // BUG-168 (2026-08-10): see the matching fix on the
+            // Block-expr `Let` handler; `collection` is a source
+            // identifier and needs the same sanitization as every
+            // other local-name reference.
+            let coll_local = format!("v_{}", sanitize_ident(collection));
             if element_ty.is_copy() {
                 out.push_str(&format!(
                     "  {}({});\n",
@@ -16575,10 +16590,21 @@ fn emit_expr(expr: &TypedExpr) -> String {
                         }
                         _ => c_element_storage(bty),
                     };
+                    // BUG-168 (2026-08-10): `bname` used to be spliced
+                    // in raw here while every reference to the SAME
+                    // binding inside `body_v` (via `emit_expr`)
+                    // already went through `local_name`/
+                    // `sanitize_ident` -- for a non-ASCII (e.g.
+                    // Devanagari) binding name this declared `v_ग`
+                    // but referenced `v__u917_`, an "undeclared
+                    // identifier" mismatch at the C compiler. Found
+                    // translating Sanskrit example identifiers (same
+                    // bug class as the backend_llvm.rs match-arm-
+                    // binding site fixed alongside this one).
                     format!(
                         "{{ {} v_{} = {}; __r = ({}); }}",
                         binding_ty,
-                        bname,
+                        sanitize_ident(bname),
                         init,
                         body_v
                     )
@@ -16628,10 +16654,22 @@ fn emit_expr(expr: &TypedExpr) -> String {
             for s in stmts {
                 match s {
                     TypedStmt::Let { name, ty, expr: rhs } => {
+                        // BUG-168 (2026-08-10): `name` used to be
+                        // spliced in raw here (matching the same bug
+                        // fixed in the match-arm-binding code above)
+                        // -- for a non-ASCII (e.g. Devanagari) `let`
+                        // inside a synthetic block expression (the
+                        // `?` operator's own desugar produces exactly
+                        // this shape), every OTHER reference to the
+                        // same binding went through `local_name`/
+                        // `sanitize_ident` while this declaration
+                        // didn't, causing an "undeclared identifier"
+                        // mismatch at the C compiler. Found
+                        // translating Sanskrit example identifiers.
                         body.push_str(&format!(
                             "{} v_{} = ({}); ",
                             c_type_name(ty),
-                            name,
+                            sanitize_ident(name),
                             emit_expr(rhs)
                         ));
                     }
@@ -16642,9 +16680,11 @@ fn emit_expr(expr: &TypedExpr) -> String {
                         // Block-expr Reassign: simple stored-
                         // value update. Mirrors the stmt-level
                         // Reassign emit for the trivial case.
+                        // BUG-168 (2026-08-10): see the matching fix
+                        // on the Block-expr `Let` handler above.
                         body.push_str(&format!(
                             "v_{} = ({}); ",
-                            name,
+                            sanitize_ident(name),
                             emit_expr(rhs),
                         ));
                     }
@@ -17308,10 +17348,12 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                         // Same emission shape as the Block-statement
                         // path in emit_expr: declare a local, assign
                         // the RHS, follow with a semicolon-space.
+                        // BUG-168 (2026-08-10): see the matching fix
+                        // in the Block-expr `Let` handler above.
                         prelude.push_str(&format!(
                             "{} v_{} = ({}); ",
                             c_type_name(ty),
-                            name,
+                            sanitize_ident(name),
                             emit_expr(rhs),
                         ));
                     }
@@ -19187,26 +19229,40 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         ),
         // Closure #330: Trie dispatch.
         "trie_new" => "intent_trie_new()".to_string(),
-        "trie_insert" => format!(
-            "intent_trie_insert({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_contains" => format!(
-            "intent_trie_contains({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_starts_with" => format!(
-            "intent_trie_starts_with({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "trie_delete" => format!(
-            "intent_trie_delete({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        "trie_insert" | "trie_contains" | "trie_starts_with" | "trie_delete" => {
+            // BUG-161 (2026-08-10): same family as BUG-159/160 -- a
+            // fresh, never-bound OwnedStr key argument has no owner
+            // to free it after the call. Trie's key param is typed
+            // `Str` (not `OwnedStr` like hashmap's K), so the checker
+            // wraps a fresh OwnedStr arg in an implicit borrow cast
+            // (`Cast { ty: Str, .. }`) before it reaches here --
+            // is_fresh_owned_str alone misses it since the outer type
+            // is Str. Check both the direct and cast-wrapped shapes.
+            let op = match name {
+                "trie_insert" => "insert",
+                "trie_contains" => "contains",
+                "trie_starts_with" => "starts_with",
+                _ => "delete",
+            };
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1])
+                || crate::ir::is_fresh_owned_str_via_str_cast(&args[1]);
+            if !k_fresh {
+                format!(
+                    "intent_trie_{}({}, ({}))",
+                    op,
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1])
+                )
+            } else {
+                format!(
+                    "({{ const char* _intent_trie_k = ({}); {} _intent_trie_r = intent_trie_{}({}, _intent_trie_k); free((void*)_intent_trie_k); _intent_trie_r; }})",
+                    emit_expr(&args[1]),
+                    c_type_name(result_ty),
+                    op,
+                    emit_expr(&args[0])
+                )
+            }
+        }
         "trie_clear" => format!(
             "intent_trie_clear({})",
             emit_expr(&args[0])
@@ -19333,24 +19389,40 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 body
             }
         }
-        "hashmap_get" => format!(
-            "{}_get({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "hashmap_contains_key" => format!(
-            "{}_contains_key({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
-        "hashmap_remove" => format!(
-            "{}_remove({}, ({}))",
-            hashmap_prefix_from_recv(&args[0].ty),
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        "hashmap_get" | "hashmap_contains_key" | "hashmap_remove" => {
+            // BUG-160 (2026-08-10): same family as BUG-159's
+            // hashmap_insert fix -- a fresh, never-bound OwnedStr key
+            // argument has no owner to free it after the call. Unlike
+            // _insert, these three don't clone K into new storage at
+            // all (only used for a strcmp lookup then discarded), but
+            // the leak shape is identical: nothing frees the fresh
+            // temporary. Reuse the same is_fresh_owned_str +
+            // free-after-call pattern, scoped to the key argument only.
+            let op = match name {
+                "hashmap_get" => "get",
+                "hashmap_contains_key" => "contains_key",
+                _ => "remove",
+            };
+            let k_fresh = crate::ir::is_fresh_owned_str(&args[1]);
+            if !k_fresh {
+                format!(
+                    "{}_{}({}, ({}))",
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    op,
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1])
+                )
+            } else {
+                format!(
+                    "({{ char* _intent_hm_k = ({}); {} _intent_hm_r = {}_{}({}, _intent_hm_k); free((void*)_intent_hm_k); _intent_hm_r; }})",
+                    emit_expr(&args[1]),
+                    c_type_name(result_ty),
+                    hashmap_prefix_from_recv(&args[0].ty),
+                    op,
+                    emit_expr(&args[0])
+                )
+            }
+        }
         "hashmap_len" => format!(
             "{}_len({})",
             hashmap_prefix_from_recv(&args[0].ty),

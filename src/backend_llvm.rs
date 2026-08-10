@@ -900,6 +900,22 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare void @exit(i32) noreturn\n");
+    // BUG-162 (2026-08-10): mirrors the identical helper added to
+    // ssa_backend_llvm.rs -- every runtime safety-guard trap in this
+    // file (bounds check, checked-arithmetic overflow, division by
+    // zero, shift-range) called `@exit(i32 3)` directly with NO
+    // message, unlike the C backends' equivalent guards. Found via
+    // localfuzz backend-divergence findings; this only ADDS a
+    // message, it does not touch the exit code or switch back to
+    // abort() (see the BUG-106/113/115/117/120 chain in this file's
+    // other comments for why exit(3)-not-abort() is deliberate).
+    out.push_str(
+        "define internal void @__intent_trap(i8* %msg) alwaysinline noreturn {\n\
+         entry:\n  \
+           call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)\n  \
+           call void @exit(i32 3)\n  \
+           unreachable\n}\n",
+    );
     // BUG-108 (2026-08-04): the tree-walking LLVM backend's Vec
     // index read (`TypedExprKind::Index`), index write
     // (`TypedStmt::IndexAssign`), and mut-ref-element
@@ -938,14 +954,68 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // applies -- that framing does NOT apply here). `exit(3)`
     // matches the process-exit-code convention every other vāṇी
     // runtime trap uses.
-    out.push_str(
-        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
+    // BUG-162: tree-C's own `intent_check_bounds` prints the actual
+    // idx/len values (`"index out of bounds: %lld, len %lld\n"`, see
+    // backend_c.rs), not a static message like ssa_backend_c.rs's
+    // plain `"index out of bounds\n"` -- match tree-C's own wording
+    // exactly (both idx and len are right here as this helper's own
+    // parameters, so there's no reason to settle for the static
+    // ssa-style message on this backend).
+    let bounds_fmt = crate::ssa_backend_llvm::emit_trap_msg_global(
+        &mut out,
+        ".msg.bounds",
+        "index out of bounds: %lld, len %lld\n",
+    );
+    out.push_str(&format!(
+        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {{\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
            br i1 %ok, label %cont, label %oob\n\
-         oob:\n  call void @exit(i32 3)\n  unreachable\n\
-         cont:\n  ret void\n}\n",
-    );
+         oob:\n  \
+           call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {fmt}, i64 %idx, i64 %len)\n  \
+           call void @exit(i32 3)\n  \
+           unreachable\n\
+         cont:\n  ret void\n}}\n",
+        fmt = bounds_fmt,
+    ));
+    // BUG-162: unlike ssa_backend_llvm.rs (which pre-scans the whole
+    // module for the exact (type, op) combos actually used), this
+    // tree-walking emitter has no such pre-pass -- checked-arithmetic
+    // codegen happens inline at each `TypedExprKind::Binary` node as
+    // it's visited, deep inside a per-function body that's ALREADY
+    // open (`out` mid-way through a `define ... {` block) by the time
+    // that code runs. A global definition can't be emitted there --
+    // LLVM requires globals stay outside any function's `{ ... }`
+    // body. So instead of emitting each message lazily at its call
+    // site (like ssa_backend_llvm.rs does), unconditionally define
+    // ALL possible messages here, in the true top-level preamble,
+    // before any function body opens; call sites below just
+    // reference them by name via `trap_msg_ref` (no re-emission).
+    // Negligible bloat (8 int types x 5 ops + 2 shared strings, all
+    // a few bytes each) even for programs using none of them.
+    // Message wording matches THIS backend's own paired C backend
+    // (backend_c.rs / tree-C), not ssa_backend_c.rs -- the two C
+    // backends already spell this message differently from each
+    // other (tree-C's `{t}` is the short vāṇी type name, e.g. "i64";
+    // ssa_backend_c.rs's is the C typedef, e.g. "int64_t"; a pre-
+    // existing inconsistency between the two C backends, not
+    // introduced here). Use the short spelling to match tree-C.
+    for tyname in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"] {
+        for op_word in ["add", "sub", "mul", "div", "rem"] {
+            out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+                &format!(".msg.ovf.{}.{}", tyname, op_word),
+                &format!("integer overflow in {} {}\n", tyname, op_word),
+            ));
+        }
+    }
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.divzero",
+        "division by zero\n",
+    ));
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.shift",
+        "shift amount out of range\n",
+    ));
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -5164,6 +5234,26 @@ fn emit_lvalue_addr(obj: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> Strin
     }
 }
 
+/// BUG-162 (2026-08-10): the short vāṇी tyname string (matching
+/// `backend_c.rs`'s own `{t}` message-text convention -- see the
+/// comment on `emit_llvm`'s preamble loop) for a given (signed, bits)
+/// pair, used only to name-reference the pre-emitted
+/// `@.msg.ovf.{tyname}.{op}` globals from that preamble at each
+/// checked-arithmetic call site below.
+fn overflow_msg_tyname(signed: bool, bits: u16) -> &'static str {
+    match (signed, bits) {
+        (true, 8) => "i8",
+        (true, 16) => "i16",
+        (true, 32) => "i32",
+        (true, 64) => "i64",
+        (false, 8) => "u8",
+        (false, 16) => "u16",
+        (false, 32) => "u32",
+        (false, 64) => "u64",
+        _ => "i64",
+    }
+}
+
 fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
     match &expr.kind {
         TypedExprKind::Int(v) => format!("{}", v),
@@ -5345,6 +5435,17 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             let r = emit_expr(right, ctx, out);
             let ty = llvm_type(&left.ty);
             let signed = left.ty.is_signed_integer();
+            // BUG-162: reference (not re-emit -- see the doc comment
+            // on `emit_llvm`'s preamble loop) one of the trap message
+            // globals pre-defined there, for a checked-arithmetic
+            // overflow of the given (signed, bits, op_word).
+            let ovf_msg_ref = |signed: bool, bits: u16, op_word: &str| -> String {
+                let tyname = overflow_msg_tyname(signed, bits);
+                crate::ssa_backend_llvm::trap_msg_ref(
+                    &format!(".msg.ovf.{}.{}", tyname, op_word),
+                    &format!("integer overflow in {} {}\n", tyname, op_word),
+                )
+            };
             // Runtime safety guards. Fire only when `checked: true`.
             // Div/Rem: divisor != 0. Shl/Shr: count in [0, bits).
             // Add/Sub/Mul: integer overflow (L4). The overflow check uses
@@ -5445,8 +5546,12 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                     // arithmetic block was the one BUG-115's
                                     // sweep missed (it explicitly fixed
                                     // SSA-LLVM's checked-arithmetic guards but
-                                    // not tree-LLVM's own).
-                                    out.push_str("  call void @exit(i32 3)\n");
+                                    // not tree-LLVM's own). BUG-162 adds the
+                                    // message C already prints here.
+                                    out.push_str(&format!(
+                                        "  call void @__intent_trap(i8* {})\n",
+                                        ovf_msg_ref(false, bits, "sub")
+                                    ));
                                     out.push_str("  unreachable\n");
                                     out.push_str(&format!("{}:\n", after));
                                     ctx.current_block = after;
@@ -5483,8 +5588,18 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         }
                         out.push_str(&format!("{}:\n", fail));
                         // BUG-120: exit(3), not abort() -- see the comment
-                        // on the unsigned-Sub `fail` block above.
-                        out.push_str("  call void @exit(i32 3)\n");
+                        // on the unsigned-Sub `fail` block above. BUG-162
+                        // adds the message C already prints here.
+                        let op_word = match op {
+                            BinaryOp::Add => "add",
+                            BinaryOp::Sub => "sub",
+                            BinaryOp::Mul => "mul",
+                            _ => unreachable!(),
+                        };
+                        out.push_str(&format!(
+                            "  call void @__intent_trap(i8* {})\n",
+                            ovf_msg_ref(signed, bits, op_word)
+                        ));
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         ctx.current_block = ok;
@@ -5507,8 +5622,12 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         ));
                         out.push_str(&format!("{}:\n", fail));
                         // BUG-120: exit(3), not abort() -- see the comment
-                        // on the unsigned-Sub `fail` block above.
-                        out.push_str("  call void @exit(i32 3)\n");
+                        // on the unsigned-Sub `fail` block above. BUG-162
+                        // adds the message C already prints here.
+                        out.push_str(&format!(
+                            "  call void @__intent_trap(i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(".msg.divzero", "division by zero\n")
+                        ));
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // LLVM phi-block-tracking fix: subsequent
@@ -5557,8 +5676,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             ));
                             out.push_str(&format!("{}:\n", ovf_fail));
                             // BUG-120: exit(3), not abort() -- see the
-                            // comment on the unsigned-Sub `fail` block above.
-                            out.push_str("  call void @exit(i32 3)\n");
+                            // comment on the unsigned-Sub `fail` block
+                            // above. BUG-162 adds the message C already
+                            // prints here (op_word is always "div"/"rem"
+                            // here -- this branch is signed Div/Rem only).
+                            let op_word = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
+                            out.push_str(&format!(
+                                "  call void @__intent_trap(i8* {})\n",
+                                ovf_msg_ref(true, bits, op_word)
+                            ));
                             out.push_str("  unreachable\n");
                             out.push_str(&format!("{}:\n", ovf_ok));
                             ctx.current_block = ovf_ok;
@@ -5600,8 +5726,15 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         ));
                         out.push_str(&format!("{}:\n", fail));
                         // BUG-120: exit(3), not abort() -- see the comment
-                        // on the unsigned-Sub `fail` block above.
-                        out.push_str("  call void @exit(i32 3)\n");
+                        // on the unsigned-Sub `fail` block above. BUG-162
+                        // adds the message C already prints here.
+                        out.push_str(&format!(
+                            "  call void @__intent_trap(i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.shift",
+                                "shift amount out of range\n"
+                            )
+                        ));
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
                         // Same phi-block-tracking fix as the
@@ -10572,6 +10705,14 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call %{opt} @{p}_get(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm, opt = opt
                 ));
+                // BUG-160 (2026-08-10): mirrors BUG-159's hashmap_insert
+                // fix -- get/contains_key/remove don't clone K at all
+                // (only used for a lookup then discarded), but a
+                // FRESH, never-bound OwnedStr key arg still has no
+                // owner to free it.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_contains_key" {
@@ -10585,6 +10726,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call i1 @{p}_contains_key(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm
                 ));
+                // BUG-160 (2026-08-10): see hashmap_get above.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_remove" {
@@ -10598,6 +10743,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call %{opt} @{p}_remove(%{p}* {}, {kty} {})\n",
                     dest, m, k, p = prefix, kty = k_llvm, opt = opt
                 ));
+                // BUG-160 (2026-08-10): see hashmap_get above.
+                if crate::ir::is_fresh_owned_str(&args[1]) {
+                    out.push_str(&format!("  call void @free(i8* {})\n", k));
+                }
                 return dest;
             }
             if name == "hashmap_len" {
@@ -11073,6 +11222,18 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = call i1 @intent_trie_{}(%intent_trie* {}, i8* {})\n",
                     dest, suffix, t, s
                 ));
+                // BUG-161 (2026-08-10): mirrors BUG-159/160 -- a fresh,
+                // never-bound OwnedStr key arg has no owner to free it.
+                // Trie's key param is `Str`, so a fresh OwnedStr arg
+                // arrives wrapped in the checker's implicit borrow
+                // cast; the cast is a no-op bitcast on LLVM (same SSA
+                // value), so checking the cast-wrapped shape too is
+                // safe -- see is_fresh_owned_str_via_str_cast's doc.
+                if crate::ir::is_fresh_owned_str(&args[1])
+                    || crate::ir::is_fresh_owned_str_via_str_cast(&args[1])
+                {
+                    out.push_str(&format!("  call void @free(i8* {})\n", s));
+                }
                 return dest;
             }
             if name == "trie_len" || name == "trie_node_count" || name == "trie_clear" {
@@ -17077,6 +17238,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     ));
                     let idx_v = emit_expr(index, ctx, out);
                     let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                    // BUG-163 (2026-08-10): this arm (a struct-FIELD-
+                    // based, non-bool Vec<T> read, e.g. `h.xs[h.i]`)
+                    // had NO bounds check at all -- unlike every
+                    // sibling arm around it (the Var-base Vec arm
+                    // above via BUG-108, this same FieldAccess block's
+                    // own Vec<bool> sub-case via BUG-122, and the
+                    // FieldAccess+Array arm via BUG-149), which all
+                    // call `@__intent_bounds_check` before reading.
+                    // A raw out-of-range `h.i` GEP'd straight past the
+                    // heap buffer with no trap at all -- found while
+                    // testing BUG-162 (silently crashed with no
+                    // message and an unstable exit code, unlike every
+                    // other bounds-check trap, because it never
+                    // reached ANY trap at all).
+                    let len_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 1\n",
+                        len_p, s_ty, s_ty, base_addr
+                    ));
+                    let len_v = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = load i64, i64* {}\n", len_v, len_p));
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx_i64, len_v
+                    ));
                     let p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 {}\n",
@@ -17880,7 +18066,22 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 extracted, struct_ty, scr_v
                             ));
                         }
-                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), bname);
+                        // BUG-168 (2026-08-10): every sibling `.addr`
+                        // construction site in this file wraps the
+                        // source name in `llvm_mangle_ident` first
+                        // (hex-encoding non-ASCII bytes, since raw
+                        // Unicode isn't valid in an unquoted LLVM
+                        // identifier) -- this one match-arm-binding
+                        // site was missed, so a non-ASCII (e.g.
+                        // Devanagari) pattern-bound variable name
+                        // produced invalid LLVM IR (`lli`: "expected
+                        // '=' after instruction name"). Found
+                        // translating Sanskrit example identifiers.
+                        // Only the LLVM-visible symbol needs
+                        // mangling; `bname` itself stays the
+                        // original source name for the `ctx.locals`
+                        // lookup-table key below.
+                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), llvm_mangle_ident(bname));
                         out.push_str(&format!("  {} = alloca {}\n", addr, bty_ll));
                         out.push_str(&format!(
                             "  store {} {}, {}* {}\n",

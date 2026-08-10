@@ -236,7 +236,7 @@ pub enum TokenKind {
 /// The table is intentionally conservative — finalized aliases per
 /// language will land with grammar consultant review per Roadmap
 /// item #9.
-fn devanagari_keyword(text: &str) -> Option<TokenKind> {
+pub(crate) fn devanagari_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // fn
         "फलन" => TokenKind::Fn,           // phalan (Hindi/Marathi: "function")
@@ -330,6 +330,23 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         // Devanagari-script languages.
         "लिख" => TokenKind::Print,         // likh (Sanskrit root: "write")
         "लिखो" => TokenKind::Print,        // likho (Hindi imperative: "write!")
+        // eprint (stderr write) — BUG-166 follow-up (2026-08-10):
+        // this had ZERO non-English coverage until now (confirmed
+        // during the Sanskrit/Hindi/Marathi parity audit); every
+        // other structure keyword already had all three. New
+        // coinages, not yet native-speaker reviewed (same caveat as
+        // every other addition in this table — see
+        // docs/archive/grammar_review_queue.md): compounds of the
+        // existing "error" root the compiler's own diagnostics
+        // already use (त्रुटि Sanskrit/Hindi, दोष shared tatsama
+        // "fault" chosen for Marathi to avoid colliding with the
+        // existing bare चूक = False literal) with the same "write"
+        // verb roots print already uses, so the family reads
+        // consistently (त्रुटिलिख next to लिख, त्रुटिलिखो next to
+        // लिखो, दोषलिहा next to लिहा).
+        "त्रुटिलिख" => TokenKind::EPrint,   // truṭilikha (Sanskrit: "error-write")
+        "त्रुटिलिखो" => TokenKind::EPrint,  // truṭilikho (Hindi imperative: "error-write!")
+        "दोषलिहा" => TokenKind::EPrint,     // doṣalihā (Marathi imperative: "fault-write!")
         // Marathi conjugates the "write" verb from a different
         // root — लिह्- (lih-), not लिख्- (likh-). The natural
         // imperatives in Marathi are लिहा (lihā) / लिही (lihī)
@@ -4348,7 +4365,7 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
 /// explicitly opt out of mixed-script files even when the source
 /// is purely English-keyword (otherwise the gate is no-op there).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum DialectLang {
+pub(crate) enum DialectLang {
     Sanskrit,
     Hindi,
     Marathi,
@@ -5268,7 +5285,7 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
 /// support it. Source: per-line comments in `devanagari_keyword`
 /// + `multi_word_devanagari_keyword` above. Tatsama (Sanskrit-
 /// root loanwords used in Hindi/Marathi) tag all three dialects.
-fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
+pub(crate) fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
     // Phase 2 (2026-06-07): Tier I dialect extensions. Nepali /
     // Maithili / Konkani-Devanagari are Indo-Aryan languages
     // that share heavy tatsama (Sanskrit-rooted) vocabulary
@@ -5389,6 +5406,10 @@ fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
         "लिहा" => &[Marathi],
         "लिही" => &[Marathi],
         "लिहिया" => &[Marathi],
+        // eprint — new coinages, BUG-166 follow-up (2026-08-10).
+        "त्रुटिलिख" => &[Sanskrit],
+        "त्रुटिलिखो" => &[Hindi],
+        "दोषलिहा" => &[Marathi],
         // === PURITY / PARALLELISM ===
         "शुद्ध" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "समानांतर" => &[Sanskrit, Hindi, Marathi],  // tatsama
@@ -5439,7 +5460,7 @@ fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
 /// boolean literals stay neutral so they can appear in any
 /// language file. Add new structure keywords here when extending
 /// the lexer.
-fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
+pub(crate) fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::Fn
@@ -5602,7 +5623,7 @@ fn whitespace_only(source: &str, start: usize, end: usize) -> bool {
 /// alias on its own). For v1, this is the safe overlap because
 /// none of these phrases share their first word with a single-word
 /// alias.
-fn multi_word_devanagari_keyword(text: &str) -> Option<TokenKind> {
+pub(crate) fn multi_word_devanagari_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "नहीं तो" => TokenKind::Else,       // nahīṁ to (Hindi: "if not / else")
         "के लिए" => TokenKind::For,         // ke liye (Hindi: "for the sake of")

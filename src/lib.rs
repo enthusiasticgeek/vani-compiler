@@ -458,6 +458,277 @@ mod tests {
     use crate::ir::TypedStmt;
 
     #[test]
+    fn bug166_sanskrit_hindi_marathi_structure_keyword_parity() {
+        // BUG-166 (2026-08-10): a permanent regression guard for the
+        // Sanskrit/Hindi/Marathi keyword-parity audit performed this
+        // session. Two real bugs were found and fixed by that audit:
+        // (1) `is_async_ident`/`is_await_ident` in src/parser.rs had
+        // mojibake-corrupted non-English string literals, silently
+        // breaking async/await in every dialect but English; (2)
+        // `eprint` had ZERO Devanagari coverage in any of the three
+        // languages. This test mechanically cross-references every
+        // spelling in `devanagari_keyword`/`multi_word_devanagari_
+        // keyword` against `spelling_supports_dialect` and asserts
+        // every one of the 46 structure keywords (`is_structure_
+        // keyword_kind`'s own list) has at least one Sanskrit, one
+        // Hindi, and one Marathi spelling -- so a future keyword
+        // addition that forgets one of the three languages, or a
+        // future mojibake-style corruption, fails CI immediately
+        // instead of silently breaking a whole dialect the way both
+        // bugs above did. The (spelling, TokenKind-name) and
+        // required-TokenKind lists below were extracted mechanically
+        // from src/lexer.rs via a script, not retyped by hand, to
+        // avoid the exact transcription-error risk this test guards
+        // against.
+        use crate::lexer::{spelling_supports_dialect, DialectLang};
+        let spellings: &[(&str, &str)] = &[
+            ("फलन", "Fn"),
+            ("कार्य", "Fn"),
+            ("मान", "Let"),
+            ("माना", "Let"),
+            ("परत", "Return"),
+            ("लौटाओ", "Return"),
+            ("पुनरागम", "Return"),
+            ("यदि", "If"),
+            ("अगर", "If"),
+            ("जर", "If"),
+            ("अन्यथा", "Else"),
+            ("वरना", "Else"),
+            ("नाहीतर", "Else"),
+            ("यावत्", "While"),
+            ("जबतक", "While"),
+            ("जोपर्यंत", "While"),
+            ("प्रति", "For"),
+            ("साठी", "For"),
+            ("तदा", "Then"),
+            ("तो", "Then"),
+            ("तर", "Then"),
+            ("पहा", "Ref"),
+            ("देखो", "Ref"),
+            ("दृष्ट्या", "Ref"),
+            ("बदल", "Mut"),
+            ("बदलणारा", "Mut"),
+            ("परिवर्तनीय", "Mut"),
+            ("जुळवा", "Match"),
+            ("मिलान", "Match"),
+            ("मेल", "Match"),
+            ("मेलन", "Match"),
+            ("खात्री", "Assert"),
+            ("सुनिश्चित", "Assert"),
+            ("सिद्धम्", "Assert"),
+            ("सिद्ध", "Prove"),
+            ("प्रमाण", "Prove"),
+            ("प्रमाणित", "Prove"),
+            ("दर्शाओ", "Prove"),
+            ("दाखवा", "Prove"),
+            ("अपेक्षित", "Requires"),
+            ("चाहिए", "Requires"),
+            ("पाहिजे", "Requires"),
+            ("निश्चित", "Ensures"),
+            ("सुनिश्चयित", "Ensures"),
+            ("सत्य", "True"),
+            ("सही", "True"),
+            ("सच", "True"),
+            ("बरोबर", "True"),
+            ("खरे", "True"),
+            ("असत्य", "False"),
+            ("अशुद्ध", "False"),
+            ("झूठ", "False"),
+            ("गलत", "False"),
+            ("खोटे", "False"),
+            ("चूक", "False"),
+            ("लिख", "Print"),
+            ("लिखो", "Print"),
+            ("त्रुटिलिख", "EPrint"),
+            ("त्रुटिलिखो", "EPrint"),
+            ("दोषलिहा", "EPrint"),
+            ("लिहा", "Print"),
+            ("लिही", "Print"),
+            ("लिहिया", "Print"),
+            ("शुद्ध", "Pure"),
+            ("संरचना", "Struct"),
+            ("विकल्प", "Enum"),
+            ("गणन", "Enum"),
+            ("स्थिर", "Const"),
+            ("नियत", "Const"),
+            ("विराम", "Break"),
+            ("रुको", "Break"),
+            ("थांब", "Break"),
+            ("अग्रे", "Continue"),
+            ("पुढे", "Continue"),
+            ("आगे", "Continue"),
+            ("में", "In"),
+            ("से", "From"),
+            ("तक", "To"),
+            ("संक्षेप", "Reduce"),
+            ("सह", "With"),
+            ("समानांतर", "Parallel"),
+            ("उपयोग", "Use"),
+            ("खण्ड", "Module"),
+            ("मॉड्यूल", "Module"),
+            ("सार्वजनिक", "Pub"),
+            ("यथा", "As"),
+            ("संकेत", "Interface"),
+            ("अंतरापृष्ठ", "Interface"),
+            ("कार्यान्वित", "Implement"),
+            ("विधि", "Methods"),
+            ("जहाँ", "Where"),
+            ("यत्र", "Where"),
+            ("जिथे", "Where"),
+            ("है", "Is"),
+            ("अस्ति", "Is"),
+            ("आहे", "Is"),
+            ("प्रयास", "Try"),
+            ("नियोग", "Task"),
+            ("संयोजन", "Join"),
+            ("असुरक्षित", "Unsafe"),
+            ("क्षेत्र", "RegionKw"),
+            ("उद्देश्य", "Intent"),
+            ("प्रकार", "Type"),
+            ("बाह्य", "Extern"),
+            ("अपरिवर्तनीय", "Invariant"),
+            ("पूर्णांक", "I64"),
+            ("पूर्णांक८", "I8"),
+            ("पूर्णांक१६", "I16"),
+            ("पूर्णांक३२", "I32"),
+            ("पूर्णांक६४", "I64"),
+            ("अहस्ताक्षरित८", "U8"),
+            ("अहस्ताक्षरित१६", "U16"),
+            ("अहस्ताक्षरित३२", "U32"),
+            ("अहस्ताक्षरित६४", "U64"),
+            ("दशांश", "F64"),
+            ("दशांश३२", "F32"),
+            ("दशांश६४", "F64"),
+            ("तर्क", "Bool"),
+            ("बूल", "Bool"),
+            ("सूची", "Vec"),
+            ("नहीं तो", "Else"),
+            ("के लिए", "For"),
+            ("सिद्ध करो", "Prove"),
+            ("सिद्ध करा", "Prove"),
+            ("समान्तर प्रति", "Parallel"),
+        ];
+        let required: &[&str] = &[
+            "Fn",
+            "Pure",
+            "Extern",
+            "Parallel",
+            "Reduce",
+            "With",
+            "Task",
+            "Join",
+            "Let",
+            "Return",
+            "If",
+            "Else",
+            "While",
+            "Break",
+            "Continue",
+            "Mut",
+            "For",
+            "In",
+            "Ref",
+            "From",
+            "To",
+            "Struct",
+            "Enum",
+            "Match",
+            "Then",
+            "Interface",
+            "Implement",
+            "Where",
+            "Is",
+            "Const",
+            "Type",
+            "Methods",
+            "Intent",
+            "Use",
+            "Requires",
+            "Ensures",
+            "Invariant",
+            "Assert",
+            "Prove",
+            "Print",
+            "EPrint",
+            "Try",
+            "Module",
+            "Pub",
+            "Unsafe",
+            "RegionKw",
+        ];
+        let dialects = [
+            ("Sanskrit", DialectLang::Sanskrit),
+            ("Hindi", DialectLang::Hindi),
+            ("Marathi", DialectLang::Marathi),
+        ];
+        let mut gaps: Vec<String> = Vec::new();
+        for &kind in required {
+            for &(dialect_name, dialect) in &dialects {
+                let covered = spellings
+                    .iter()
+                    .any(|&(spelling, k)| k == kind && spelling_supports_dialect(spelling, dialect));
+                if !covered {
+                    gaps.push(format!("{} has no {} spelling", kind, dialect_name));
+                }
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "Sanskrit/Hindi/Marathi structure-keyword parity gaps found:\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
+    fn bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers() {
+        // BUG-167 (2026-08-10): found while translating Sanskrit
+        // example identifiers to Devanagari as a follow-up to the
+        // keyword-parity audit. `smt.rs`'s `sanitize()` collapsed
+        // EVERY non-ASCII character to a bare `_`, so two different
+        // one-character Devanagari variable names (क, ख) both
+        // produced the identical SMT symbol `v__` -- Z3 then saw one
+        // aliased variable standing in for two distinct program
+        // variables. This is a FORMAL-VERIFICATION SOUNDNESS bug, not
+        // just a spurious rejection: a trivially-true `prove` clause
+        // (`क - ख >= 0` given `क >= ख` and `ख >= 0`) failed to
+        // discharge ("SMT solver returned 'unknown'") purely because
+        // of the aliasing, and the same mechanism could in principle
+        // let an unsound claim pass by conflating two variables'
+        // constraints. Fixed by hex-encoding each non-ASCII
+        // character's codepoint (an injective mapping) instead of
+        // collapsing it. This test compiles a minimal repro with two
+        // functions each taking a same-length Devanagari-named
+        // parameter and asserts the `prove` clause -- which is
+        // mathematically trivial and was ALWAYS true -- now
+        // discharges successfully.
+        let source = r#"
+            fn पहला(ग: i64, ghost: i64) -> i64
+            requires ghost >= 0;
+            {
+              return ग;
+            }
+
+            fn दूसरा(क: i64, ख: i64) -> i64
+            requires क >= ख;
+            requires ख >= 0;
+            {
+              prove क - ख >= 0;
+              return क - ख;
+            }
+
+            fn main() -> i64 {
+              let a: i64 = पहला(5, 0);
+              let b: i64 = दूसरा(10, 3);
+              return a + b;
+            }
+        "#;
+        compile(source).expect(
+            "a trivially-true `prove` clause over distinct Devanagari-named \
+             parameters must discharge (BUG-167 regression)",
+        );
+    }
+
+    #[test]
     fn compiles_basic_program_to_c() {
         let source = r#"
             intent "test";
@@ -42320,12 +42591,271 @@ função main() -> i64 {
         // BUG-115 (2026-08-05): the oob block now calls `exit(3)`
         // instead of `abort()` -- same misleading-`lli`-crash-report
         // fix as BUG-106/113, applied to this helper too.
+        // BUG-162 (2026-08-10): the oob block now also prints the
+        // idx/len values via `dprintf` before exit(3), matching
+        // tree-C's own `intent_check_bounds` message -- previously
+        // silent, a real backend-divergence gap found via localfuzz.
         assert!(
             ll.contains("br i1 %ok, label %cont, label %oob")
-                && ll.contains("oob:\n  call void @exit(i32 3)\n  unreachable"),
-            "bounds-check helper must branch to a reachable exit(3) oob block:\n{}",
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8*")
+                && ll.contains("call void @exit(i32 3)\n  unreachable"),
+            "bounds-check helper must branch to a reachable, message-printing exit(3) oob block:\n{}",
             ll
         );
+    }
+
+    #[test]
+    fn bug162_ssa_llvm_checked_overflow_and_bounds_print_message_before_exit3() {
+        // BUG-162 (2026-08-10): found via localfuzz backend-divergence
+        // findings -- both backends correctly detect the same fault
+        // (an i64 add overflow, an out-of-range index), but the
+        // OBSERVABLE behavior diverged: C aborts loudly (rc=134 + a
+        // message), LLVM exited silently (rc=3, empty stderr). Fixed
+        // by adding a `@__intent_trap(i8* %msg)` helper that prints
+        // via `dprintf` before `exit(3)` -- the exit code itself is
+        // untouched (still 3, still deliberately not abort() -- see
+        // BUG-106/113/115/117/120's own "misleading lli crash report"
+        // reasoning). `compile_to_llvm` always goes through tree-LLVM
+        // directly (`backend_llvm::LlvmBackend.emit`), bypassing the
+        // SSA-eligibility dispatch the CLI does in main.rs -- go
+        // through `crate::ssa::lower_program` + `crate::ssa_backend_
+        // llvm::emit` directly instead, matching this file's own
+        // established pattern for SSA-specific regression tests
+        // (e.g. `shl_with_compound_shift_amount_expression_compiles_
+        // and_runs_correctly` above).
+        let source = r#"
+            fn f(x: i64, y: i64) -> i64 { return x + y; }
+            fn main() -> i64 {
+              return f(9223372036854775807, 1);
+            }
+        "#;
+        let checked = compile(source).expect("checked-add program compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module)
+            .expect("SSA-eligible checked-add must compile via SSA-LLVM");
+        assert!(
+            ll.contains("define internal void @__intent_trap(i8* %msg)")
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)"),
+            "expected the shared trap-with-message helper:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("integer overflow in int64_t add"),
+            "expected the checked-add overflow message to match ssa_backend_c.rs's own \
+             wording (C-style tyname, since this is the SSA path):\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("call void @__intent_trap(i8*")
+                && ll.contains(".msg.ovf.i64.add"),
+            "expected the add overflow oob block to call __intent_trap with the \
+             pre-defined message global:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug162_tree_llvm_checked_overflow_and_bounds_print_message_before_exit3() {
+        // BUG-162, tree-LLVM half (mirrors the SSA test above).
+        // Forced onto the tree path via a struct literal
+        // (ssa_path_supports rejects struct types). Message wording
+        // matches backend_c.rs's OWN convention here (short vāṇी
+        // tyname, e.g. "i64", not the C typedef "int64_t" -- the two
+        // C backends already spell this differently from each other;
+        // this fix matches each LLVM backend to its OWN paired C
+        // backend, not to the other one).
+        let source = r#"
+            struct Holder { x: i64, y: i64 }
+            fn f(h: Holder) -> i64 { return h.x * h.y; }
+            fn main() -> i64 {
+              let h: Holder = Holder { x: 9223372036854775807, y: 2 };
+              return f(h);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("struct-forced checked-mul compiles");
+        assert!(
+            !ll.contains("ModuleID = 'intent-ssa'"),
+            "expected this program to take the tree-LLVM path (sanity check on the test itself):\n{}",
+            &ll[..ll.len().min(500)]
+        );
+        assert!(
+            ll.contains("define internal void @__intent_trap(i8* %msg)")
+                && ll.contains("call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)"),
+            "expected the shared trap-with-message helper:\n{}",
+            ll
+        );
+        assert!(
+            ll.contains("integer overflow in i64 mul"),
+            "expected the checked-mul overflow message to match backend_c.rs's own \
+             wording (short vāṇी tyname, since this is the tree path):\n{}",
+            ll
+        );
+        // The bounds-check helper's own message includes the actual
+        // idx/len values (matches backend_c.rs's intent_check_bounds
+        // exactly), unlike the SSA path's static message -- confirmed
+        // separately by `tree_llvm_out_of_range_vec_index_aborts_
+        // instead_of_reading_garbage` above; just confirm the shared
+        // format-string global is present here too since every
+        // tree-LLVM program unconditionally gets the same preamble.
+        assert!(
+            ll.contains("index out of bounds: %lld, len %lld"),
+            "expected the tree-LLVM preamble to always define the dynamic bounds \
+             message, regardless of whether THIS program uses indexing:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug162_llvm_checked_div_rem_and_shift_do_not_double_emit_or_regress_var_source() {
+        // BUG-162 regression guard: division by zero, MIN/-1 overflow,
+        // and shift-range all get their own distinct messages (not a
+        // shared/confused one), and using a checked op that DOESN'T
+        // fail (in-range shift, non-zero divisor) must not somehow
+        // pull in an unrelated trap message.
+        let source = r#"
+            fn f(x: i64, y: i64, n: i64) -> i64 {
+              let d: i64 = x / y;
+              let s: i64 = x << n;
+              return d + s;
+            }
+            fn main() -> i64 { return f(10, 2, 3); }
+        "#;
+        let ll = compile_to_llvm(source).expect("checked div + shift compiles");
+        assert!(
+            ll.contains(".msg.divzero") && ll.contains("division by zero"),
+            "expected a division-by-zero message global even though this program's \
+             runtime values never trigger it (the guard is unconditional codegen):\n{}",
+            ll
+        );
+        assert!(
+            ll.contains(".msg.shift") && ll.contains("shift amount out of range"),
+            "expected a shift-range message global:\n{}",
+            ll
+        );
+        // Signed div's MIN/-1 overflow message must be its OWN
+        // distinct global from the plain divide-by-zero one (two
+        // different fail conditions inside the same checked-div
+        // helper need two different oob blocks/messages).
+        assert!(
+            ll.contains(".msg.ovf.i64.div") && ll.contains("integer overflow in i64 div"),
+            "expected the MIN/-1-overflow message to be distinct from the plain \
+             division-by-zero message:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug163_struct_field_vec_index_read_bounds_checked_on_tree_llvm() {
+        // BUG-163 (2026-08-10): found while manually testing BUG-162
+        // repros. `TypedExprKind::Index` on a struct-FIELD-based,
+        // non-bool `Vec<T>` base (e.g. `h.xs[h.i]`) had NO bounds
+        // check at all -- every sibling arm around it (Var-base Vec
+        // via BUG-108, this same FieldAccess block's own Vec<bool>
+        // sub-case via BUG-122, FieldAccess+Array via BUG-149) all
+        // call `@__intent_bounds_check`; this one arm was simply
+        // missed. A raw out-of-range index GEP'd straight past the
+        // heap buffer with no trap and no message at all (unlike
+        // every other bounds-check site, which BUG-162 gave a clean
+        // message to) -- confirmed pre-existing via `git stash`,
+        // unrelated to BUG-162 itself.
+        let source = r#"
+            struct Holder { xs: Vec<i64>, i: i64 }
+            fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let h: Holder = Holder { xs: xs, i: 7 };
+              return f(h);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("struct-field Vec index compiles");
+        assert!(
+            !ll.contains("ModuleID = 'intent-ssa'"),
+            "expected this program to take the tree-LLVM path (sanity check on the test itself):\n{}",
+            &ll[..ll.len().min(500)]
+        );
+        let bounds_check_calls = ll.matches("call void @__intent_bounds_check(").count();
+        assert!(
+            bounds_check_calls >= 1,
+            "expected h.xs[h.i] to emit a bounds check, got {} calls in:\n{}",
+            bounds_check_calls,
+            ll
+        );
+    }
+
+    #[test]
+    fn bug164_ssa_c_function_returning_vec_no_longer_falls_back_to_tree_c() {
+        // BUG-164 (2026-08-10): found investigating a localfuzz
+        // finding (20260810-124224-backend-divergence-e1322cfcd5)
+        // whose C-backend stderr wording ("index out of bounds: 5,
+        // len 5", the tree-C dynamic message) didn't match its LLVM
+        // stderr wording ("index out of bounds", the SSA-pair static
+        // message) even after BUG-162 fixed the underlying silence.
+        // Root cause: `emit_function_prototype`/`emit_function` in
+        // ssa_backend_c.rs spelled the function's RETURN type via a
+        // bare `c_type(&f.return_type)` call instead of
+        // `c_declarator` (used for every PARAMETER type in the very
+        // next few lines) -- `c_type` only covers the scalar/string
+        // subset and has no `Type::Vec` arm, so ANY function whose
+        // return type is `Vec<T>` failed SSA-C's `emit` entirely,
+        // silently falling the WHOLE PROGRAM back to tree-C, even
+        // though every OTHER Vec construct (indexing, push, len, ref
+        // params -- confirmed via direct bisection) already worked
+        // fine via SSA-C. Since SSA-LLVM has no equivalent gap, this
+        // caused the SAME program to take the SSA path on LLVM but
+        // the tree path on C, independently -- exposing the two
+        // C backends' own pre-existing wording difference as an
+        // LLVM-vs-C divergence that looked new.
+        let source = r#"
+            fn build_range(n: i64) -> Vec<i64> {
+              let xs: Vec<i64> = vec(0);
+              let i: i64 = 1;
+              while i < n {
+                xs = push(xs, i);
+                i = i + 1;
+              }
+              return xs;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = build_range(5);
+              return len(xs) as i64;
+            }
+        "#;
+        let checked = compile(source).expect("Vec-returning function compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module)
+            .expect("a Vec<T>-returning function must compile via SSA-C, not fall back to tree-C");
+        assert!(
+            c.contains("intent_vec_int64_t fn_build_range("),
+            "expected the return-type declarator to spell the Vec struct type \
+             directly in the function signature, got:\n{}",
+            &c[..c.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn bug164_ssa_c_var_sourced_vec_return_does_not_regress() {
+        // BUG-164 regression guard: a function returning an existing
+        // Var-sourced Vec (no loop-carry at all) must keep working --
+        // this already passed before the fix (it doesn't exercise the
+        // loop-carried block-param shape that originally surfaced the
+        // bug), so this just locks in that the fix doesn't disturb it.
+        let source = r#"
+            fn identity(xs: Vec<i64>) -> Vec<i64> {
+              return xs;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = identity(xs);
+              return len(ys) as i64;
+            }
+        "#;
+        let checked = compile(source).expect("identity Vec function compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module)
+            .expect("Var-sourced Vec return must still compile via SSA-C");
     }
 
     #[test]
@@ -48728,6 +49258,132 @@ função main() -> i64 {
         assert!(
             !c.contains("_intent_hm_k") && !c.contains("_intent_hm_v"),
             "a Var-sourced K/V must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn hashmap_get_contains_remove_free_fresh_owned_str_key() {
+        // BUG-160 (2026-08-10): same family as BUG-159, the sibling
+        // instance the narrow hashmap_insert fix deliberately didn't
+        // cover. hashmap_get/hashmap_contains_key/hashmap_remove
+        // don't clone K at all (only used for a lookup then
+        // discarded), but a fresh, never-bound OwnedStr key arg
+        // still has no owner to free it after the call. Same
+        // is_fresh_owned_str + free-after-call pattern, scoped to
+        // the key argument only.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), 100);
+              let r: Option<i64> = hashmap_get(ref m, i64_to_str(1));
+              let c: bool = hashmap_contains_key(ref m, i64_to_str(1));
+              let rm: Option<i64> = hashmap_remove(mut ref m, i64_to_str(1));
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        assert!(
+            c.matches("_intent_hm_k").count() >= 3 && c.matches("free((void*)_intent_hm_k)").count() >= 3,
+            "expected all 3 of get/contains_key/remove to bind + free a \
+             fresh key temp:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, i64> → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 4,
+            "expected 4 frees total (insert's fresh K + get/contains_key/ \
+             remove's fresh key each freed once):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn hashmap_get_contains_remove_do_not_double_free_owned_var_key() {
+        // BUG-160 regression guard, mirrors hashmap_insert's own.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              let k2: OwnedStr = i64_to_str(1);
+              let r: Option<i64> = hashmap_get(ref m, k2);
+              let k3: OwnedStr = i64_to_str(1);
+              let c: bool = hashmap_contains_key(ref m, k3);
+              let k4: OwnedStr = i64_to_str(1);
+              let rm: Option<i64> = hashmap_remove(mut ref m, k4);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        assert!(
+            !c.contains("_intent_hm_k"),
+            "a Var-sourced key must not go through the fresh-arg free \
+             path (that would double-free the binding's own scope-exit \
+             drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn trie_insert_contains_starts_with_delete_free_fresh_owned_str_key() {
+        // BUG-161 (2026-08-10): same family as BUG-159/160. Trie's
+        // key param is typed `Str` (not `OwnedStr` like hashmap's K),
+        // so the checker wraps a fresh OwnedStr arg in an implicit
+        // borrow cast (Cast { ty: Str, .. }) before it reaches
+        // codegen -- is_fresh_owned_str alone misses this shape since
+        // the outer type is Str, not OwnedStr. Fixed via the new
+        // is_fresh_owned_str_via_str_cast helper, which unwraps
+        // exactly that cast.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let _ = t.insert(i64_to_str(5));
+              let c: bool = t.contains(i64_to_str(5));
+              let sw: bool = t.starts_with(i64_to_str(5));
+              let d: bool = t.delete(i64_to_str(5));
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Trie key ops → C");
+        assert!(
+            c.matches("_intent_trie_k").count() >= 4
+                && c.matches("free((void*)_intent_trie_k)").count() >= 4,
+            "expected all 4 of insert/contains/starts_with/delete to bind \
+             + free a fresh key temp:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("Trie key ops → LLVM");
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 4,
+            "expected 4 frees, one per fresh-key trie call:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn trie_ops_do_not_double_free_owned_var_key() {
+        // BUG-161 regression guard, mirrors hashmap_insert's own.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let k1: OwnedStr = i64_to_str(5);
+              let _ = t.insert(k1);
+              let k2: OwnedStr = i64_to_str(5);
+              let c: bool = t.contains(k2);
+              let k3: OwnedStr = i64_to_str(5);
+              let sw: bool = t.starts_with(k3);
+              let k4: OwnedStr = i64_to_str(5);
+              let d: bool = t.delete(k4);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Trie key ops → C");
+        assert!(
+            !c.contains("_intent_trie_k"),
+            "a Var-sourced key must not go through the fresh-arg free \
              path (that would double-free the binding's own scope-exit \
              drop):\n{}",
             c

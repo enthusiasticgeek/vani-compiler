@@ -684,6 +684,24 @@ pub fn is_fresh_owned_str(expr: &TypedExpr) -> bool {
     is_fresh_non_copy_expr(expr)
 }
 
+/// True when `expr` is the checker's implicit OwnedStr->Str
+/// borrow cast (`TypedExprKind::Cast { ty: Type::Str, .. }`)
+/// wrapping a fresh `is_fresh_owned_str` value underneath. A
+/// builtin like `trie_insert(t, s: Str)` receives the cast
+/// node, not the raw OwnedStr call, so `is_fresh_owned_str`
+/// alone misses it (the outer type is Str, not OwnedStr) --
+/// BUG-161 (2026-08-10). On both backends the cast is a no-op
+/// reinterpretation (same pointer value), so freeing after use
+/// is safe whenever this returns true, for the same reason
+/// `is_fresh_owned_str` freeing is safe: nothing else owns the
+/// value once the call returns.
+pub fn is_fresh_owned_str_via_str_cast(expr: &TypedExpr) -> bool {
+    match &expr.kind {
+        TypedExprKind::Cast { expr: inner, ty: Type::Str } => is_fresh_owned_str(inner),
+        _ => false,
+    }
+}
+
 /// True when `expr` is a fresh heap-owning value of ANY
 /// non-Copy type (OwnedStr OR Vec<T>) whose only owner is
 /// the use site. Same conservative kind whitelist as

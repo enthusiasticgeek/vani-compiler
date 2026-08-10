@@ -11440,4 +11440,535 @@ real-subprocess `tests/run_end_to_end.rs` test on both backends).
 Full writeup in `docs/BUG_PATTERN_AUDIT_TODO_8.md`'s
 "hashmap_strstr/strv" section.
 
-Next free bug number is **BUG-160**.
+## BUG-160 (2026-08-10) -- hashmap_get/contains_key/remove fresh OwnedStr key leak, FIXED
+
+Round 9's cheapest pickup, exactly as scoped in `docs/BUG_PATTERN_AUDIT_
+TODO_9.md`'s Category 1: the same fresh-`OwnedStr`-argument leak family
+as BUG-159, in `hashmap_get`/`hashmap_contains_key`/`hashmap_remove`'s
+own key parameter. Unlike `_insert`, these three don't clone K into new
+storage at all (only used for a `strcmp` lookup then discarded), but
+the leak shape is identical: nothing frees the fresh temporary once the
+call returns, because nothing owns it.
+
+Fixed on both backends by reusing `is_fresh_owned_str` + free-after-call,
+scoped to the key argument for all three builtins (a single combined
+match arm in `backend_c.rs`, three near-identical `if` blocks in
+`backend_llvm.rs`). Same shape as BUG-159's own fix: tree-C wraps the
+call in a statement-expression binding the fresh key to a stable temp;
+LLVM just emits `call void @free(...)` on the SSA register after the
+call instruction.
+
+Verified: minimal repro clean under ASan (tree-C, gcc+ASan+LSan+UBSan)
+and valgrind (LLVM native AOT); Var-sourced key case confirmed to emit
+identically to before (no double-free). `vanic check examples` baseline
+unchanged. Corpus-wide sweep still flags exactly the same 4 baseline
+items (unaffected -- no example file exercised this call shape before).
+Full `cargo test --release` clean (2872+ lib tests, all e2e binaries, 0
+failed). 4 new regression tests (2 `src/lib.rs` compile-checks incl. a
+double-free regression guard, 2 real-subprocess `tests/
+run_end_to_end.rs` tests on both backends).
+
+## BUG-161 (2026-08-10) -- Trie key-op fresh OwnedStr leak, FIXED
+
+Round 9's second pickup: `trie_insert`/`trie_contains`/
+`trie_starts_with`/`trie_delete` (`Trie.insert(...)` etc. via method
+sugar) leak a fresh, never-bound `OwnedStr` key argument the same way.
+**Turned out to need one more layer than BUG-159/160**: Trie's key
+parameter is typed `Str`, not `OwnedStr` like HashMap's K, so the
+checker wraps a fresh OwnedStr argument in its implicit borrow cast
+(`TypedExprKind::Cast { ty: Type::Str, .. }`) before it reaches codegen.
+`is_fresh_owned_str(&args[1])` alone always returned `false` here --
+the outer expression's type is `Str`, not `OwnedStr` -- even though the
+value underneath is exactly the same kind of fresh temporary BUG-159/
+160 free correctly.
+
+Fixed by adding `crate::ir::is_fresh_owned_str_via_str_cast` (`src/
+ir.rs`, next to `is_fresh_owned_str`): matches specifically on
+`Cast { ty: Type::Str, .. }` wrapping an `is_fresh_owned_str` inner
+expression. Safe to free after use for the same reason `is_fresh_
+owned_str` freeing is safe (nothing else owns the value once the call
+returns) -- and the cast itself is a no-op reinterpretation on both
+backends (same pointer value: `(const char*)(...)` in C, a `bitcast-
+noop` in LLVM that returns the same SSA register unchanged), so
+freeing the post-cast value frees the correct allocation. Call sites
+now check `is_fresh_owned_str(&args[1]) ||
+is_fresh_owned_str_via_str_cast(&args[1])`. Deliberately NOT
+generalized beyond Trie's own 4 call sites -- the same cast-unwrapping
+would apply to ANY ordinary user function taking a `Str` parameter,
+which is exactly the general, much-larger fix `docs/
+BUG_PATTERN_AUDIT_TODO_9.md` explicitly scoped out of this round.
+
+Verified: `examples/language/english/trie.vani` uses `Str` literals
+only (never a fresh OwnedStr), so it was never affected and needed no
+re-check beyond confirming the fix doesn't touch its emitted code.
+Minimal repro (all 4 ops on a fresh key) clean under ASan and valgrind
+on both backends; Var-sourced key case confirmed to emit identically to
+before. `vanic check examples` baseline unchanged. Corpus-wide sweep
+still flags exactly the same 4 baseline items. Full `cargo test
+--release` clean. 4 new regression tests (2 `src/lib.rs` compile-checks
+incl. a double-free regression guard, 2 real-subprocess `tests/
+run_end_to_end.rs` tests on both backends).
+
+Both BUG-160 and BUG-161 close out Category 1's "confirmed leaking, not
+fixed" list from `docs/BUG_PATTERN_AUDIT_TODO_9.md` except the general,
+ordinary-user-function case, which remains deliberately unscoped/open
+for a future dedicated session.
+
+## BUG-162 (2026-08-10) -- LLVM runtime safety-guard traps exit silently, FIXED
+
+Round 9's Category 3 theme (from `docs/BUG_PATTERN_AUDIT_TODO_9.md`):
+localfuzz backend-divergence findings kept showing the identical
+shape -- an i64 checked-arithmetic overflow, or an out-of-range Vec
+index, correctly detected by BOTH backends (neither produces a wrong
+answer), but the OBSERVABLE behavior diverged: the C backend aborts
+loudly (`rc=134` + a descriptive `fprintf(stderr, ...)` message), the
+LLVM backend exits silently (`rc=3`, empty stderr). Not a correctness
+bug -- a real debuggability/backend-consistency gap. 7 localfuzz
+findings this round alone showed the pattern (6 overflow-family,
+1 bounds-family -- `20260810-113044-backend-divergence-b4d35be8e4`,
+which showed the SAME silent-vs-loud split for an "index out of
+bounds" trap, confirming the gap isn't overflow-specific).
+
+**Root cause**: every runtime safety-guard trap in both LLVM backends
+(`ssa_backend_llvm.rs`, `backend_llvm.rs`) calls `@exit(i32 3)`
+directly with no message at all -- `exit(3)` itself is a deliberate,
+correct design choice (NOT the bug -- see the BUG-106/113/115/117/120
+chain: a raw `abort()`'s SIGABRT makes `lli` misreport a clean,
+expected trap as an internal "PLEASE submit a bug report" crash dump,
+so every vāṇी runtime trap uses `exit(3)` instead), but unlike the C
+backends' equivalent guards, nothing ever prints WHY before exiting.
+
+**Fixed** on both `ssa_backend_llvm.rs` and `backend_llvm.rs`: added a
+shared `@__intent_trap(i8* %msg)` helper (`dprintf(2, msg); exit(3);
+unreachable`) and pointed every checked-arithmetic/bounds-check oob
+block at it with an appropriate message, instead of calling
+`@exit(i32 3)` directly. The exit code itself is untouched (still 3
+on both). Scope: checked Add/Sub/Mul overflow (signed + unsigned),
+Div/Rem-by-zero, signed `MIN / -1` overflow, Shl/Shr range, and the
+general Vec bounds-check helper (`@__intent_bounds_check`).
+
+Each LLVM backend matches its OWN paired C backend's message wording
+-- which turned out to already differ from each other, a pre-existing
+inconsistency not introduced by this fix: `ssa_backend_c.rs` spells
+the overflow message with the C typedef name (`"integer overflow in
+int64_t add"`), `backend_c.rs` (tree) uses the short vāṇी type name
+(`"integer overflow in i64 add"`); `ssa_backend_c.rs`'s bounds message
+is static (`"index out of bounds"`), `backend_c.rs`'s includes the
+actual idx/len values (`"index out of bounds: 7, len 3"`) -- tree-
+LLVM's fix reproduces that exactly, using the real `%idx`/`%len`
+values already available at the bounds-check call site via `dprintf`.
+Since `ssa_backend_llvm.rs` has no equivalent pre-scan-per-call-site
+mechanism issue (it already pre-scans all (type, op) combos actually
+used), its message globals are emitted lazily per combo; tree-LLVM's
+checked-arithmetic codegen is inline at each call site inside an
+already-open function body (where a global definition can't legally
+appear), so its messages are instead ALL pre-defined unconditionally
+in the true top-level preamble, and call sites just reference them by
+name (negligible bloat: 8 int types x 5 ops + 2 shared strings).
+
+**Deliberately NOT touched** (same silent-`exit(3)` shape, but out of
+this round's evidenced scope -- follow-up candidates for later):
+`requires`-clause violations (`backend_llvm.rs` line ~2491,
+silent -- unlike plain `assert`/`intent_assert_fail`, which already
+print via `dprintf`/BUG-106), the `#[bounded(N)]` recursion-bound
+guard (needs a DYNAMIC message with the function name + bound value,
+a different mechanism than this fix's static messages), and the
+Vec-builtin-specific bounds checks (`pop_mut`/`swap_remove`/`insert`
+each have their own already-C-message-prefixed guard, e.g.
+`"swap_remove: index out of bounds"`, that tree-LLVM's own copies of
+these builtins don't yet print).
+
+**Also found, NOT fixed, unrelated**: while testing bounds-check
+repros, hit a pre-existing crash -- a struct field holding a
+`Vec<i64>` that's then out-of-bounds-indexed crashes tree-LLVM with
+NO clean message (exact `rc` varies by repro shape, e.g. 101/107/117
+seen). Confirmed via `git stash` that this reproduces identically on
+the pre-BUG-162 code, so it's a separate, unrelated bug, not a
+regression from this fix. Not root-caused. New candidate for a future
+round (see `docs/BUG_PATTERN_AUDIT_TODO_9.md`).
+
+Verified: all 7 localfuzz repros from this round now print matching
+messages on both backends (spot-checked directly). `vanic check
+examples` baseline unchanged (923 ok). Corpus-wide `tools/
+leak_sweep.py` sweep still matches the 4-item baseline exactly (this
+fix doesn't touch allocation). Full `cargo test --release` clean
+(2875 lib tests + all 12 other test binaries, 0 failed). 5 new
+regression tests: 3 `src/lib.rs` compile-checks (SSA path via
+`crate::ssa::lower_program` + `crate::ssa_backend_llvm::emit`
+directly -- `compile_to_llvm` always goes through tree-LLVM and can't
+exercise the SSA half; tree path via `compile_to_llvm`; a div/rem/
+shift regression guard confirming distinct messages per fail
+condition), 2 real-subprocess `tests/run_end_to_end.rs` tests (one
+overflow case, one bounds case with the dynamic idx/len values,
+matching exit codes 3/134 preserved on both backends).
+
+## BUG-163 (2026-08-10) -- struct-field Vec<T> index read had NO bounds check on tree-LLVM, FIXED
+
+Found while manually testing BUG-162 repros. `h.xs[h.i]` (a `Vec<T>`
+living inside a struct FIELD, indexed directly, T non-bool) crashed
+tree-LLVM with NO message and an unstable exit code (101/107/117 all
+observed across repro variants) -- unlike every OTHER bounds-check
+trap, which BUG-162 gave a clean `rc=3` + message. Confirmed via `git
+stash` that this reproduces identically on the pre-BUG-162 code, so
+it's a separate, pre-existing bug, not a BUG-162 regression.
+
+**Root cause**: `src/backend_llvm.rs`'s `TypedExprKind::Index` handler
+has a dedicated arm for `array.kind == FieldAccess` (i.e. the Vec
+being indexed is itself a struct field, not a plain local). That arm
+has THREE sub-cases -- `Vec<bool>` (packed-bit read), `Array<T, N>`,
+and the general `Vec<T>` (non-bool) read -- and the general `Vec<T>`
+sub-case was simply missing the `@__intent_bounds_check` call every
+one of its siblings has: the Var-base Vec arm above it (BUG-108), this
+SAME FieldAccess block's own `Vec<bool>` sub-case (BUG-122), and the
+FieldAccess+Array sub-case in the same block (BUG-149). A raw
+out-of-range `h.i` GEP'd straight past the heap buffer with no trap at
+all -- not "traps with the wrong message," genuinely never reached ANY
+trap.
+
+**Fixed**: added the same `@__intent_bounds_check` call (load `.len`,
+check, then the existing data-pointer GEP+load), matching the sibling
+arms' shape exactly. `h.xs[h.i]` now gets the same clean `rc=3` +
+dynamic idx/len message tree-C already gives (`"index out of bounds:
+7, len 3"`) -- confirmed byte-identical between backends, both `vanic
+run` (JIT) and AOT `vanic build`. The write-path analog (`h.xs[h.i] =
+val`, direct assignment through a struct-field Vec index) turned out
+not to be valid vāṇी syntax at all (`vanic check` rejects it with
+"expected statement"), so there's no equivalent write-path bug to fix
+-- `IndexAssign`'s own codegen only handles a plain local Vec base
+with FIELD DESCENT after the index (`xs[i].field = val`), not a Vec
+living behind a field access before the index.
+
+Verified: element-type generalization confirmed (`Vec<f64>` struct
+field, same fix path, same correct message). In-bounds access on the
+same shape still returns the correct value (unaffected). `valgrind
+--leak-check=full` on the AOT binary: clean, no leaks introduced.
+`vanic check examples` baseline unchanged (923 ok). Corpus-wide `tools/
+leak_sweep.py` sweep still matches the 4-item baseline. Full `cargo
+test --release` clean (2876 lib tests + all 12 other test binaries, 0
+failed). 2 new regression tests (1 `src/lib.rs` compile-check, 1
+real-subprocess `tests/run_end_to_end.rs` test on both backends).
+
+## Localfuzz timeout findings (2026-08-10) -- all 8 confirmed corpus artifacts, not compiler bugs
+
+Investigated every "both backends timed out" localfuzz finding
+accumulated since round 8 (`cdec4c613b`, `d5870f7218`, `d8f20b7050`,
+`7b63fa98b6`, `e37418e21c`, `78bdde8bba`, `d669b7fd24`,
+`22c8c106e2`) by diffing each repro against its base example and
+re-running against the current (BUG-162/163-fixed) binary. All 8
+reproduce as genuine hangs on both backends -- but every single one
+is a genuinely broken MUTATED PROGRAM, not a compiler/runtime bug:
+
+- `cdec4c613b` (btreeset.vani), `e37418e21c` (control_flow.vani): a
+  loop increment (`i = i + 1;`) mutated to a decrement (`i = i +
+  -1;`) -- the loop condition (`i < N`) never becomes false.
+- `7b63fa98b6` (early_exit.vani, tibetan), `78bdde8bba` (early_exit.vani,
+  lao): the loop increment statement (`n = n + 1;`) deleted outright
+  -- same effect, condition never becomes false.
+- `d5870f7218`, `22c8c106e2` (async_cancel_auto.vani, pashto +
+  spanish): `sleep_ms(ms)`'s `ms` argument mutated from a small
+  constant to `9223372036854775807` (i64::MAX) -- the program
+  legitimately sleeps for ~292 million years; not a hang, a correct
+  (if absurd) `sleep_ms` call honoring its input.
+- `d8f20b7050` (mix_conc_mutex_struct.vani): a second `mutex_lock(ref
+  s.m)` call inserted before the original one, on the SAME
+  non-reentrant mutex, same thread -- a genuine self-deadlock from
+  the mutated program, not a compiler bug (though arguably a missed
+  static-analysis opportunity -- vāṇी's existing lock-order checker
+  doesn't currently catch same-thread double-lock in a straight-line
+  scope; noted as a possible future static-check candidate, not
+  pursued this session).
+- `d669b7fd24` (mix_conc_channel_send_recv.vani): the `channel_send`
+  call deleted -- `channel_recv` on the now-empty, sender-less
+  channel legitimately blocks forever.
+
+No fix needed for any of these; all are working-as-designed given
+genuinely broken input programs.
+
+## Localfuzz finding, initial diagnosis (SUPERSEDED by BUG-164 below -- the "no Vec support at all" framing was wrong)
+
+Keeping this section as-is for the record; see BUG-164 immediately
+below for what the ACTUAL root cause turned out to be once
+investigated further (explicitly requested as a follow-up) -- it was
+one specific, narrow return-type-spelling bug, not a missing feature.
+
+While investigating a wording mismatch on `20260810-124224-backend-
+divergence-e1322cfcd5` (LLVM printed the SSA-pair's static `"index out
+of bounds"`, C printed the tree-pair's dynamic `"index out of bounds:
+5, len 5"` -- BUG-162 fixed the SILENCE on both, but this exposed a
+separate wording divergence), root-caused via a direct call to
+`crate::ssa_backend_c::emit`: it explicitly rejects ANY `Vec<T>` type
+with `"type Vec(...) is outside the SSA-C scalar/string subset"`.
+SSA-LLVM has no such restriction. Since the two SSA/tree eligibility
+gates (`ssa_c_extra_reject`/`ssa_llvm_extra_reject` in `src/main.rs`)
+pass this specific program on BOTH sides (their narrow per-backend
+gaps don't cover Vec at all), the divergence comes from SSA-C's own
+emit function failing internally and silently falling back to tree-C
+-- a per-backend runtime fallback the architecture already documents
+as intentional (`emit_c_via_ssa`'s own comment: "Anything an SSA
+backend can't yet handle surfaces EmitError... and falls back
+per-backend"). This means ANY program using `Vec` can silently diverge
+between which path (SSA vs tree) each backend takes independently,
+which in turn means their exact trap message wording can differ even
+after BUG-162 -- not a new bug, a pre-existing, much larger
+architectural gap (SSA-C simply doesn't implement Vec at all) that's
+out of scope for a quick fix. Not pursued this session; noted as a
+future candidate (would mean either implementing Vec support in
+SSA-C, a large undertaking, or accepting the wording split as
+permanent and documenting it -- which the tutorial update below
+already does).
+
+## BUG-164 (2026-08-10) -- SSA-C rejected ANY Vec<T>-returning function, silently falling whole programs back to tree-C, FIXED
+
+The "SSA-C has no Vec support at all" item just above turned out, on
+closer investigation (explicitly requested as a follow-up), to be
+WRONG -- SSA-C already has substantial, working Vec support: `vec()`,
+indexing (checked and unchecked, `i64`/`u64` index types), `push`
+(both `let ys = push(xs, v)` and `xs = push(xs, v)` reassignment
+forms), `len`, `ref Vec<T>` / `mut ref Vec<T>` parameters, nested
+`Vec<Vec<T>>`, and `Vec<OwnedStr>` (heap-owning elements) ALL already
+worked, confirmed via direct bisection against `crate::ssa_backend_c::
+emit`. The actual, much narrower bug: `emit_function_prototype` and
+`emit_function` (both in `ssa_backend_c.rs`) spelled a function's
+RETURN type via a bare `c_type(&f.return_type)` call -- `c_type` only
+covers the scalar/string subset (its own error message says so) and
+has no `Type::Vec` arm at all. Every OTHER type position (parameters,
+block-param declarations, instruction-result declarations) already
+routed through `c_declarator`, which DOES fully support `Vec` (plus
+`Mutex`/`Guard`/`Channel`/`Atomic`) -- only the return-type spelling
+was left calling the narrower `c_type` directly. So ANY function whose
+OWN return type was `Vec<T>` (not just Vec used internally) failed
+`ssa_backend_c::emit` entirely with `"type Vec(...) is outside the
+SSA-C scalar/string subset"`, silently falling the WHOLE PROGRAM back
+to tree-C via `emit_c_via_ssa`'s existing fallback -- while the same
+program's LLVM side had no equivalent gap and took the SSA-LLVM fast
+path fine. This is exactly the shape localfuzz finding `e1322cfcd5`
+hit (`build_range(n: i64) -> Vec<i64>`, a `while` loop reassigning the
+Vec via `push`), and exactly why its C-side message ("index out of
+bounds: 5, len 5", the tree-C dynamic wording) didn't match its
+LLVM-side message ("index out of bounds", the SSA-pair static
+wording) even after BUG-162 fixed the underlying silence -- the two
+sides were on genuinely different backend PATHS for the same source.
+
+**Fixed**: both call sites now use `c_declarator(&f.return_type,
+"").trim_end().to_string()` instead of the bare `c_type(&f.return_type)`
+call, matching the parameter-declaration pattern immediately below
+each. As a side effect, this also fixes the identical latent bug for
+`Mutex<T>`/`Guard<T>`/`Channel<T,N>`-returning functions (same root
+cause, same fix, confirmed via a `Mutex<i64>`-returning function test)
+-- `Struct`/`Enum`/`Tuple`/`Closure`/`FnPtr` return types are NOT
+fixed by this change (structs are rejected earlier, at SSA LOWERING,
+not emit; the others were never confirmed reachable and remain
+whatever pre-existing behavior they had, out of scope here).
+
+Verified: `e1322cfcd5` and its `vec_bisect6`/`vec_bisect8`-style
+minimal reductions all now emit successfully via SSA-C; real
+`vanic run` output on `e1322cfcd5` now matches byte-for-byte between
+backends ("index out of bounds", `rc=3` LLVM / `rc=134` C -- exit
+codes deliberately still differ, only the message text was ever the
+gap). The base example (`examples/language/odia/control_flow.vani`)
+still produces correct output on both backends. Spot-checked 7 real
+corpus examples with Vec-returning functions (`array_proofs.vani`,
+`control_flow.vani`, `iter_combinators.vani`, `push_mut.vani`,
+`set_mut.vani`, `string_ops.vani`,
+`edge_vec_zip_different_lengths_guarded.vani`) -- LLVM/C output now
+identical on all 7 (previously C took the tree-C path for all of
+them; LLVM was already correct and unaffected, so matching it is
+strong correctness evidence). ASan/LSan/UBSan clean on 4 of those plus
+the `Vec<OwnedStr>`-returning and nested-`Vec<Vec<i64>>`-returning
+test cases (checking specifically for leaks/UAF in this newly-
+exercised return-path, given the codebase's history of Vec-ownership
+bugs). `vanic check examples` baseline unchanged (923 ok). Corpus-wide
+`tools/leak_sweep.py` sweep still matches the 4-item baseline exactly.
+Full `cargo test --release` clean, including both SSA crosscheck
+tests (`ssa_c_backend_matches_expected_exit_codes`,
+`ssa_llvm_backend_matches_expected_exit_codes`) which independently
+confirm no corpus-wide behavioral regression from this dispatch-path
+change. 3 new regression tests (2 `src/lib.rs` compile-checks via
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit` directly --
+including a Var-sourced, non-loop-carried regression guard -- 1
+real-subprocess `tests/run_end_to_end.rs` test confirming message
+parity with exit codes deliberately unchanged).
+
+## 3 more localfuzz findings (2026-08-10, after BUG-164 shipped) -- 1 stale, 1 more corpus artifact, 1 new characteristic documented (no fix)
+
+- `8ceea3f964` (korean/early_exit.vani, overflow-divergence shape) --
+  STALE. Re-ran against the current BUG-162-fixed binary: both
+  backends now print the identical message. The localfuzz harness ran
+  this against an older binary; not a new gap.
+- `e2447c8ead` (konkani/basics.vani, both-backends-timeout) -- another
+  confirmed corpus artifact (10th total): the fuzzer deleted a `i = i
+  - 1;` decrement from a countdown loop, a genuine infinite loop in
+  the mutated source. Same conclusion as the earlier 9.
+- `22a310f619` (german/control_flow.vani) -- a NEW, distinct shape:
+  ASYMMETRIC timeout (C finishes cleanly, LLVM hangs). Root cause:
+  the mutation changes a loop's start value to `i64::MIN`, creating a
+  ~9.2-quintillion-iteration loop. `gcc -O2` (`--backend=c`) and `llc`
+  (`vanic build`'s AOT path) both resolve the loop's final value via
+  standard induction-variable/closed-form analysis without literally
+  iterating -- confirmed by testing the AOT binary, which also
+  completes instantly. `lli` (what `vanic run`'s default JIT path
+  uses) has no equivalent optimization and hangs. NOT a compiler bug
+  -- codegen is correct and identical in spirit on both paths; the
+  gap is `lli`'s lack of loop-closed-form optimization, an inherent,
+  out-of-vāṇी's-control characteristic of using an interpreter for
+  the default `vanic run` execution strategy. Full writeup (including
+  why this isn't fixable without either patching upstream LLVM
+  tooling or changing `vanic run`'s default execution strategy
+  entirely -- a much bigger, separate design question) is in `docs/
+  BUG_PATTERN_AUDIT_TODO_9.md`'s "3 more findings, landed after
+  BUG-164 shipped" section. Logged as a known characteristic for
+  future reference, not a fix candidate.
+
+Next free bug number is **BUG-165**.
+
+## BUG-166 (2026-08-10) -- mojibake-corrupted async/await spellings (4 languages) + eprint zero non-English coverage + 2 dialect-purity violations, FIXED
+
+Triggered by a full Sanskrit/Hindi/Marathi structure-keyword parity
+audit (all 46 `is_structure_keyword_kind` TokenKinds x 3 dialects).
+
+- `src/parser.rs`'s `is_async_ident`/`is_await_ident` had been
+  byte-corrupted since their 2026-06-08 ship: the Devanagari/Chinese/
+  Japanese string literals were valid UTF-8 that had been misread as
+  Latin-1/Windows-1252 and re-encoded (double-encoding mojibake).
+  Silently broke `async`/`await` in Sanskrit, Hindi, Marathi, and
+  Mandarin -- Japanese's example accidentally worked because it used
+  literal ASCII `async`/`await`. Recovered the correct words from
+  clean, independently-typed copies in `docs/archive/
+  grammar_review_queue.md` and `tutorials/src/advanced/01_async.md`,
+  fixed via a byte-level Python script (the `Edit` tool's string
+  match failed on the corrupted bytes).
+- The doc comment above `canonicalize_entry_point_name` was similarly
+  mojibake-corrupted -- but the actual match arm (`"main" | "मुख्य" |
+  "प्रमुख" | "प्रधान" => "main"`) was never broken, only the comment
+  describing it. This confirms `मुख्य`/`प्रमुख`/`प्रधान`/`main` all
+  already work as entry-point aliases in every dialect, unconditional
+  on the file's declared `vani-lang` pragma.
+- `TokenKind::EPrint` had exactly one spelling in the whole lexer
+  (`"eprint"`, ASCII) -- zero non-English coverage. Added Sanskrit
+  `त्रुटिलिख`, Hindi `त्रुटिलिखो`, Marathi `दोषलिहा` (compounds of
+  the existing "error" root the compiler's own diagnostics use,
+  combined with the same "write" verb roots `print` already uses).
+- `examples/language/sanskrit/keywords.vani` and `examples/language/
+  hindi/keywords.vani` mixed in words from the WRONG dialect (e.g.
+  Hindi's `फलन` inside a `vani-lang: sanskrit` file) under their own
+  strict per-file pragma -- fixed to use only words the declared
+  dialect's `spelling_supports_dialect` table actually accepts.
+
+Regression test: `bug166_sanskrit_hindi_marathi_structure_keyword_parity`
+in `src/lib.rs` -- mechanically extracts every spelling from
+`devanagari_keyword`/`multi_word_devanagari_keyword` and the 46
+required TokenKinds from `is_structure_keyword_kind`, asserts every
+kind has >=1 spelling per dialect. Passed 46/46 after the eprint fix
+(previously 45/46, eprint the only gap).
+
+## BUG-167 (2026-08-10) -- SMT identifier sanitizer collapsed ALL non-ASCII chars to one underscore, aliasing distinct variables, FIXED (soundness bug)
+
+The most significant finding of this pass. `src/smt.rs`'s
+`sanitize(name: &str) -> String` (builds Z3/SMT-LIB symbol names for
+`requires`/`ensures`/`prove`/`invariant` verification) collapsed
+EVERY non-ASCII character to a single bare `_`. Two different
+single-character Devanagari parameter names (e.g. क and ख) both
+sanitized to the identical SMT symbol (`v__`), so Z3 treated two
+distinct program variables as aliased to one symbol.
+
+Found because a trivially-true `prove` clause (`क - ख >= 0` given
+`क >= ख` and `ख >= 0`) failed to discharge ("SMT solver returned
+'unknown'") while translating `verified.vani`'s parameter names to
+Devanagari. This is a formal-verification soundness bug, not merely
+a spurious-rejection one -- the same aliasing mechanism could in
+principle let an unsound claim pass by conflating two variables'
+constraints, not just fail a sound one.
+
+This exact bug class (collapse-to-single-underscore causing
+collision) was already found and fixed in `backend_c.rs`'s analogous
+`sanitize_ident` on 2026-08-04 via localfuzz with Burmese identifiers
+(`က`/`ခ`) -- confirming the fix approach matches established
+precedent. Fix: hex-encode each non-ASCII character's codepoint
+(`_{hex}_`) instead of collapsing -- an injective mapping.
+
+Regression test:
+`bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers`
+in `src/lib.rs`.
+
+## BUG-168 (2026-08-10) -- LLVM/C backends spliced raw non-ASCII source names into target-language symbols at several call sites, FIXED
+
+Found opportunistically while verifying BUG-166/167's fixes against
+real Sanskrit example files translated to use Devanagari identifiers.
+Both backends already have correct, injective sanitizers
+(`llvm_mangle_ident` in `backend_llvm.rs`, `sanitize_ident` in
+`backend_c.rs`) -- the bug was specific call sites forgetting to
+route through them, splicing the raw source identifier directly into
+an LLVM register name or C symbol instead.
+
+- `backend_llvm.rs`: 1 site, the match-arm-binding `.addr` value-copy
+  path -- `format!("{}.{}.addr", ctx.fresh_tmp(), bname)` used raw
+  `bname` instead of `llvm_mangle_ident(bname)`. Produced invalid
+  LLVM IR (`lli: error: expected '=' after instruction name`).
+- `backend_c.rs`: 7 sites, all fixed to route through the existing
+  `sanitize_ident(name)` helper instead of splicing the raw name:
+  match-arm binding declaration; `TypedExprKind::Block`'s
+  `TypedStmt::Let` and `TypedStmt::Reassign` handling (incl. a nested
+  `While`-inside-Block occurrence); a separate `prelude_stmts` Let
+  loop (if-let/try-let desugar preludes); `enum_variant_member`
+  (mixed-payload enum union member names); `ForIterShallowFree`'s
+  collection field; a closure affine-call's `__env_sv_` uid
+  construction. Produced invalid C (`cc: 'v__u917_' undeclared`) via
+  `try_question_op.vani`'s `?`-operator desugar, which synthesizes a
+  match-arm binding and a `let`-in-block using the source's
+  Devanagari-named local.
+
+No dedicated regression test yet -- caught and verified only via
+manual real-example-file compilation on both backends. Consider
+adding a `tests/run_end_to_end.rs` case with a Devanagari-named local
+crossing a `?`-operator desugar, on both backends.
+
+## Sanskrit/Hindi/Marathi identifier localization (2026-08-10) -- all 38 example files, DONE
+
+Follow-up to BUG-166's keyword-parity audit: per explicit request,
+extended "minimize English" from structure keywords to ALL
+user-chosen identifiers (function/parameter/variable/struct/field/
+enum-variant names) across all 14 Sanskrit + 12 Hindi + 12 Marathi
+example files, plus the README's Sanskrit/verbose-English "same
+program, three ways" block. Comments and string-literal content
+(program output text) were deliberately left in English -- only code
+identifiers were in scope.
+
+Two collision classes discovered and worked around during the sweep
+(neither is a bug -- both are the dialect-purity/type-alias systems
+working as designed against a naive translation):
+
+- `सूची` (bare, no visarga) is the shared Devanagari alias for the
+  `Vec<T>` type name across dialects -- using it standalone as a
+  variable name trips "expected identifier". Fixed by using `सूचिः`
+  (with trailing visarga) for Vec-typed locals/params instead, and
+  reusing numbered variants (`सूचिः२`, `सूचिः३`) for multiple Vec
+  values in one scope. Compound names (e.g. `सूचीयोग` = "list-sum")
+  are unaffected since they're a different token entirely.
+- `विकल्प` (bare) is Sanskrit's own spelling of the `enum` keyword --
+  using it standalone as a variable name in a `vani-lang: hindi` or
+  `vani-lang: marathi` file trips the dialect-purity check (Hindi/
+  Marathi's own `enum` keyword is `गणन`). Fixed by using a single
+  generic letter (`व`) for `Option`-typed parameters in those files'
+  `option_types.vani`/`try_question_op.vani` instead.
+- `अन्यथा` is a keyword alias for `else` -- can't be reused as a
+  `default:`-style parameter name; renamed to `मूलभूत`/`मूलभूतम्`
+  ("basic/fundamental", the idiomatic word for "default") instead.
+
+Known remaining unavoidable-English items (documented, no existing
+dialect-alias mechanism found): `_return` (the special identifier an
+`ensures` clause uses for a function's own return value -- hardcoded
+`const RETURN_NAME: &str = "_return"` in `checker.rs`, no alias
+mechanism unlike `main`); the `Box<T>` type name (no Devanagari alias
+in the lexer's type-name table, unlike `Vec`/`सूची` or `i64`/
+`पूर्णांक`); builtin FUNCTION names generally (`vec`, `sort`, `push`,
+`len`, `box`, etc. -- only language keywords and type names have
+dialect aliases, by design).
+
+Verified per-file: `vanic check` (must say `ok:`) plus a byte-exact
+diff of `vanic run` output (both the default LLVM backend and
+`--backend=c`) against a pre-translation baseline captured for all
+38 files before any edits. Full-corpus re-verification after all 38
+files: `cargo test --release` (2880 lib tests + 12 other suites, 0
+failed), `vanic check examples` (940 ok, unchanged from the BUG-167
+post-fix baseline), `tools/leak_sweep.py` (935 compiled+run clean,
+4 flagged -- matches `tools/leak_sweep_baseline.json` exactly).

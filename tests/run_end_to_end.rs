@@ -14211,3 +14211,338 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn hashmap_get_contains_remove_fresh_owned_str_key_runs_correctly_on_both_backends() {
+    // BUG-160 (2026-08-10): sibling of BUG-159 -- hashmap_get/
+    // hashmap_contains_key/hashmap_remove leaked a fresh, never-bound
+    // OwnedStr key argument (they don't clone K at all, only use it
+    // for a lookup then discard it, so nothing ever owned the
+    // temporary). Fixed by freeing the fresh key right after each
+    // call, on both backends. Real-subprocess run confirming correct
+    // output (the corpus-wide ASan sweep, not this test, confirms the
+    // leak itself is gone).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug160-hashmap-get-contains-remove-fresh-owned-str",
+        r#"
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, i64> = hashmap_new();
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), 100);
+  let r: Option<i64> = hashmap_get(ref m, i64_to_str(1));
+  let found: i64 = match r {
+    Option.Some(v) then v,
+    Option.None then -1,
+  };
+  let c: bool = hashmap_contains_key(ref m, i64_to_str(1));
+  let rm: Option<i64> = hashmap_remove(mut ref m, i64_to_str(1));
+  let removed: i64 = match rm {
+    Option.Some(v) then v,
+    Option.None then -1,
+  };
+  print found;
+  print c;
+  print removed;
+  print hashmap_len(ref m);
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "hashmap_get/contains_key/remove with fresh OwnedStr key should run \
+             cleanly ({args:?}), got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "100\ntrue\n100\n0",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn trie_ops_fresh_owned_str_key_run_correctly_on_both_backends() {
+    // BUG-161 (2026-08-10): same family as BUG-159/160. Trie's key
+    // param is typed Str, so a fresh OwnedStr arg arrives wrapped in
+    // the checker's implicit OwnedStr->Str borrow cast -- the plain
+    // is_fresh_owned_str check misses this shape (outer type is Str,
+    // not OwnedStr). Fixed via is_fresh_owned_str_via_str_cast, which
+    // unwraps exactly that cast on both backends. Real-subprocess run
+    // confirming correct output.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug161-trie-fresh-owned-str-key",
+        r#"
+fn main() -> i64 {
+  let t: Trie = trie_new();
+  let ins: bool = t.insert(i64_to_str(5));
+  let has: bool = t.contains(i64_to_str(5));
+  let pre: bool = t.starts_with(i64_to_str(5));
+  let del: bool = t.delete(i64_to_str(5));
+  print ins;
+  print has;
+  print pre;
+  print del;
+  return 0;
+}
+"#,
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+        vec!["run", src.to_str().unwrap()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert!(
+            output.status.success(),
+            "trie ops with fresh OwnedStr key should run cleanly ({args:?}), \
+             got status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "true\ntrue\ntrue\ntrue",
+            "wrong output ({args:?}), got stdout: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn bug162_checked_overflow_prints_message_on_llvm_matching_exit3_convention() {
+    // BUG-162 (2026-08-10): found via localfuzz backend-divergence
+    // findings -- an i64 add overflow is correctly detected by BOTH
+    // backends (neither produces a wrong answer), but the OBSERVABLE
+    // behavior diverged: C aborts loudly (rc=134 + a message), LLVM
+    // exited silently (rc=3, empty stderr). Fixed by printing the
+    // same kind of message on LLVM before its (deliberately
+    // unchanged) exit(3). Real-subprocess run confirming both the
+    // message text and the exit code on both backends. This plain
+    // 2-function shape is SSA-eligible on BOTH backends' own CLI
+    // dispatch (`main.rs`'s `ssa_path_supports`), so the message uses
+    // the SSA pair's own wording (C typedef style, "int64_t" -- see
+    // ssa_backend_c.rs/ssa_backend_llvm.rs), confirmed empirically;
+    // the tree-pair's own short-tyname wording ("i64") is covered by
+    // the struct-forced bounds-check test below and by
+    // `bug162_tree_llvm_checked_overflow_and_bounds_print_message_
+    // before_exit3` in src/lib.rs.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug162-checked-add-overflow",
+        r#"
+fn f(x: i64, y: i64) -> i64 { return x + y; }
+fn main() -> i64 {
+  return f(9223372036854775807, 1);
+}
+"#,
+    );
+    // LLVM: message now present, exit code unchanged (still 3, not
+    // switched to abort()'s SIGABRT -- see BUG-106/113/115/117/120).
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code must stay 3");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("integer overflow in int64_t add"),
+        "expected an overflow message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    // C: unchanged reference behavior (rc=134, its own message).
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("integer overflow in int64_t add"),
+        "expected an overflow message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}
+
+#[test]
+fn bug162_bounds_check_prints_idx_len_message_on_llvm_matching_exit3_convention() {
+    // BUG-162, bounds-check half. Forced onto the tree path via a
+    // struct literal (ssa_path_supports rejects struct types) so
+    // this exercises tree-LLVM's own `__intent_bounds_check`, whose
+    // message includes the actual idx/len values -- matching tree-
+    // C's `intent_check_bounds` exactly (unlike the SSA path's
+    // static "index out of bounds" message).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug162-tree-bounds-check",
+        r#"
+struct Marker { tag: i64 }
+fn f(m: Marker, xs: ref Vec<i64>, i: i64) -> i64 {
+  let _ = m;
+  return xs[i];
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let m: Marker = Marker { tag: 1 };
+  return f(m, ref xs, 7);
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code must stay 3");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}
+
+#[test]
+fn bug163_struct_field_vec_index_out_of_range_traps_cleanly_on_both_backends() {
+    // BUG-163 (2026-08-10): `h.xs[h.i]` (a Vec living inside a struct
+    // FIELD, indexed directly) had NO bounds check at all on
+    // tree-LLVM -- every sibling shape (Var-base Vec, this same
+    // struct-field arm's own Vec<bool> case, struct-field Array) was
+    // already checked; this one arm was simply missed. Before the
+    // fix: no message, no clean exit code (rc varied by repro shape
+    // -- 101/107/117 observed), a raw out-of-bounds heap read.
+    // Confirmed pre-existing via `git stash` (unrelated to BUG-162).
+    // After the fix: clean rc=3 + the same message tree-C already
+    // gave. Real-subprocess run on both `vanic run` and AOT
+    // `vanic build`, confirming both the message and a stable exit
+    // code.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug163-struct-field-vec-oob",
+        r#"
+struct Holder { xs: Vec<i64>, i: i64 }
+fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let h: Holder = Holder { xs: xs, i: 7 };
+  return f(h);
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM must trap cleanly with rc=3, not crash unpredictably");
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert!(
+        String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
+        "expected the exact idx/len bounds message on C's stderr, got: {:?}",
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+}
+
+#[test]
+fn bug164_vec_returning_function_now_matches_between_backends_on_c() {
+    // BUG-164 (2026-08-10): a function whose return type is `Vec<T>`
+    // used to fail SSA-C's `emit` entirely (`c_type` has no
+    // `Type::Vec` arm, and the return-type spelling bypassed
+    // `c_declarator`, which DOES support Vec), silently falling the
+    // whole program back to tree-C -- while the SAME program took the
+    // SSA-LLVM fast path fine. This caused the two C backends' own
+    // pre-existing message-wording difference (SSA-C: static "index
+    // out of bounds"; tree-C: dynamic "index out of bounds: N, len
+    // M") to surface as an apparent LLVM-vs-C divergence. This is the
+    // exact shape from localfuzz finding e1322cfcd5 (a `while` loop
+    // reassigning a Vec via `push`, then indexing out of range in a
+    // helper function taking `ref Vec<i64>`). Real-subprocess run
+    // confirming the C and LLVM messages now match (both take the SSA
+    // path, so both use the SSA-pair's static wording).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug164-ssa-c-vec-return",
+        r#"
+fn sum(xs: ref Vec<i64>) -> i64 {
+  let total: i64 = 0;
+  let i: u64 = 0;
+  let n: u64 = len(xs);
+  while i < n {
+    i = i + 1;
+    total = total + xs[i];
+  }
+  return total;
+}
+fn build_range(n: i64) -> Vec<i64> {
+  let xs: Vec<i64> = vec(0);
+  let i: i64 = 1;
+  while i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  return xs;
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = build_range(5);
+  let total: i64 = sum(ref xs);
+  return total;
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    // Exit codes deliberately still differ (LLVM: exit(3), C: raw
+    // abort()/SIGABRT -> 134) -- that split is intentional and
+    // untouched by this fix (see BUG-106/113/115/117/120). What
+    // BUG-164 fixes is the MESSAGE TEXT: before the fix, this program
+    // would take the SSA path on LLVM (static "index out of bounds")
+    // but silently fall back to tree-C (dynamic "index out of
+    // bounds: N, len M") -- now both take the SSA path, so both use
+    // the SSA-pair's own static wording.
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code unaffected");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert_eq!(
+        String::from_utf8_lossy(&llvm_out.stderr),
+        String::from_utf8_lossy(&c_out.stderr),
+        "stderr message text must match between backends now (both take the SSA path)"
+    );
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds trap (the loop reads xs[i] one past the end), got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+}

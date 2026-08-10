@@ -11,24 +11,30 @@
 // language per file. This file uses Hindi structure keywords
 // throughout; English `print` is replaced with the Hindi
 // alias `लिखो`.
+//
+// BUG-166 (2026-08-10): this file previously mixed in Marathi words
+// (परत, मान, खात्री) under the strict `vani-lang: hindi` pragma,
+// which the dialect-purity checker now correctly rejects. Every
+// keyword below is Hindi-only or shared tatsama, verified directly
+// against `spelling_supports_dialect` in src/lexer.rs.
 
-फलन add(a: i64, b: i64) -> i64 {
-  परत a + b;
+फलन जोड़(क: i64, ख: i64) -> i64 {
+  लौटाओ क + ख;
 }
 
-फलन double(x: i64) -> i64 {
-  परत x * 2;
+फलन दुगुना(ग: i64) -> i64 {
+  लौटाओ ग * 2;
 }
 
-फलन main() -> i64 {
-  मान a: i64 = 5;
-  मान b: i64 = 7;
-  मान sum: i64 = add(a, b);
-  मान doubled: i64 = double(sum);
+फलन मुख्य() -> i64 {
+  माना क: i64 = 5;
+  माना ख: i64 = 7;
+  माना योग: i64 = जोड़(क, ख);
+  माना घ: i64 = दुगुना(योग);
 
-  खात्री sum == 12;
-  खात्री doubled == 24;
+  सुनिश्चित योग == 12;
+  सुनिश्चित घ == 24;
 
-  लिखो "a=", a, " b=", b, " sum=", sum, " doubled=", doubled;
-  परत 0;
+  लिखो "a=", क, " b=", ख, " sum=", योग, " doubled=", घ;
+  लौटाओ 0;
 }

@@ -166,7 +166,7 @@ set of *logic-class* checks the compiler emits at runtime
 when SMT can't discharge them statically. When one fires, the
 program terminates -- but exactly HOW depends on the check
 and the backend, confirmed directly against a current build
-(2026-08-06) rather than assumed:
+(most recently 2026-08-10, BUG-162) rather than assumed:
 
 ### What can abort (or exit) -- verified message text
 
@@ -179,7 +179,7 @@ and the backend, confirmed directly against a current build
 | Integer overflow (SMT-unprovable site), **C backend only** | `a + b`, `a * b`, etc. on signed integers | `"integer overflow in <c-type> <op>"`, e.g. `"integer overflow in int64_t add"` (no file/line; the C-type spelling and exact wording differ slightly between the tree-C and SSA-C code paths, see the aside below) |
 | Divide / modulo by zero, **C backend only** | `a / b` / `a % b` when SMT can't prove `b != 0` | `"division by zero"` (no file/line) |
 | Shift past width, **C backend only** | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift amount out of range"` (no file/line) |
-| Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | **nothing** -- no stdout, no stderr, just a clean process exit. Confirmed directly (empty captures on both streams). |
+| Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | as of BUG-162 (2026-08-10), the same kind of message the C backend prints (see the 4 rows above) -- e.g. `"integer overflow in int64_t add"`, `"index out of bounds: 7, len 3"`. Before BUG-162: nothing at all, silently. **Wording caveat**: LLVM's message matches its OWN paired C backend's wording, not necessarily the OTHER C backend's -- `ssa_backend_c.rs` spells the type with the C typedef name (`"int64_t"`) and a static bounds message (`"index out of bounds"`, no operands); `backend_c.rs` (tree) spells it with the short vāṇी type name (`"i64"`) and a DYNAMIC bounds message with the actual values (`"index out of bounds: 7, len 3"`). Which pairing you get for a given program depends on whether it took the SSA fast path or the tree path on each side independently -- they don't always agree with each other, even post-fix (see the aside right after this table). |
 | `ensures` fails at a return site (SMT-unprovable clause) | Any `return EXPR;` where SMT couldn't prove the post-condition | `"assertion failed: postcondition violated in '<fn>'"` (as of 2026-08-07; matches `requires`'s wording pattern) |
 | `invariant` fails at loop entry (SMT-unprovable clause) | A `while`/`for` loop, checked once on the first pass through the body | `"assertion failed: loop invariant does not hold at loop entry in '<fn>'"` (`while`) or `"...does not hold at the for-loop's first iteration in '<fn>'"` (`for`), as of 2026-08-07 |
 | `invariant` fails after an iteration (SMT-unprovable clause) | Same loop, checked at the natural end of every iteration AND before every `continue` that targets it | `"assertion failed: loop invariant is not preserved by the loop body in '<fn>'"` (`while`) or `"...is not preserved by the for-loop body in '<fn>'"` (`for`) |
@@ -188,6 +188,26 @@ and the backend, confirmed directly against a current build
 That's it for the checks that exist. Every other operation
 either succeeds, returns a `Result<T, E>` / `Option<T>` for
 the caller to handle, or is structurally prevented (Row 1).
+
+**Aside -- why the SAME source line can print differently-worded
+messages on the two `--backend=c` runs, or even between LLVM and C.**
+There are actually TWO C backends (and two LLVM backends) under the
+hood: a fast "SSA" path for the common case, and a slower "tree"
+fallback for constructs the SSA path doesn't (yet) support -- picked
+per-program, independently on each of the four backend/path
+combinations. `Vec<T>` used to be one such gap as of early
+2026-08-10 (a program using `Vec` could take the SSA path on LLVM
+while silently falling back to tree-C on the C side, purely because a
+function's own RETURN type happened to be `Vec<T>`) -- fixed later
+the same day (BUG-164); `Vec` now takes the SSA path consistently on
+both backends whenever the rest of the program is otherwise eligible.
+Since the SSA and tree pairs already spell their OWN messages slightly
+differently from each other (see the wording caveat in the table
+above), a remaining, not-yet-audited construct could still trigger the
+same kind of split for some OTHER type or shape -- if you're scripting
+against these messages, match on a substring (e.g. `"integer
+overflow"`, `"index out of bounds"`) rather
+than the full exact string.
 
 **Aside -- `ensures` and `invariant` both have a runtime backstop now.**
 Both clauses used to be a purely compile-time SMT concept: if the
@@ -234,9 +254,12 @@ actually touched, and only on the paths those fixes covered:
    `requires` print their message, then the process exits
    cleanly with code `3`. Bounds / overflow / divide-by-zero /
    shift ALSO exit cleanly with code `3` -- as of BUG-120
-   (2026-08-06) -- but print nothing at all; earlier builds hit
-   a genuine hardware trap here (raw `sdiv`/bounds-unchecked
-   memory access) that `lli` reported as a misleading
+   (2026-08-06) -- and, as of BUG-162 (2026-08-10), print the
+   same kind of message the C backend does (see the wording
+   caveat above). Between BUG-120 and BUG-162 they exited clean
+   but silent; before BUG-120, they hit a genuine hardware trap
+   here (raw `sdiv`/bounds-unchecked memory access) that `lli`
+   reported as a misleading
    `PLEASE submit a bug report to
    https://github.com/llvm/llvm-project/issues/` crash banner
    for what was actually an ordinary, expected language-level
@@ -268,8 +291,10 @@ actually touched, and only on the paths those fixes covered:
    directly or via `vanic run --backend=c`) can show up for the
    SAME source-level trap depending on which check fired and
    which backend compiled it -- check the STDERR MESSAGE TEXT
-   (present on the C backend, absent on LLVM), not just the
-   exit code, if you need to detect which check actually fired.
+   (present on BOTH backends as of BUG-162 -- see the wording
+   caveat above for why the exact text can still differ), not
+   just the exit code, if you need to detect which check
+   actually fired.
    One more wrinkle, fixed 2026-08-07: raw `abort()` does NOT
    flush stdio the way `exit()` does, so any `print` output your
    program had already buffered before one of these 4 traps fired
@@ -697,13 +722,16 @@ named contract."
   pointers + scope-escape analysis remove the surface.
 - **Logic-class crashes** are **compile-time when SMT can
   prove**; otherwise a runtime termination at the operation --
-  clean and diagnosed on the LLVM backend for `assert`/
-  `requires`, silent (`exit(3)`, no message) for bounds/
-  overflow/div-by-zero/shift; on the C backend, `assert`/
-  `requires` also exit(3) with a message, but bounds/overflow/
-  div-by-zero/shift still raise a raw `SIGABRT` -- see "Row 2"
-  above for the verified details and the exact numbers each
-  path produces. `ensures` AND `invariant` now both fall back to a
+  clean and diagnosed (`exit(3)` + a message) on the LLVM
+  backend for ALL of assert / requires / bounds / overflow /
+  div-by-zero / shift, as of BUG-162 (2026-08-10; before that,
+  bounds/overflow/div-by-zero/shift exited clean but silent);
+  on the C backend, `assert`/`requires` also exit(3) with a
+  message, but bounds/overflow/div-by-zero/shift still raise a
+  raw `SIGABRT` -- see "Row 2" above for the verified details,
+  the exact numbers each path produces, and why the message
+  WORDING can still differ between backends even though both
+  now print something. `ensures` AND `invariant` now both fall back to a
   runtime guard on an undecidable clause, same as `requires`
   (2026-08-07). The surface is small and named: assert / prove /
   requires / ensures / invariant / index OOB / overflow /

@@ -293,7 +293,19 @@ fn emit_function_prototype(f: &Function, out: &mut String) -> Result<(), EmitErr
     if f.is_extern && crate::backend_c::is_known_libc_symbol(&f.name) {
         return Ok(());
     }
-    let ret_c = c_type(&f.return_type)?;
+    // BUG-164 (2026-08-10): `c_type` only covers the scalar/string
+    // subset (its own doc/error message) and has no `Type::Vec` arm
+    // -- but `c_declarator` (used for every PARAMETER type just
+    // below) already fully supports Vec (and Mutex/Guard/Channel/
+    // Atomic). A function whose RETURN type is `Vec<T>` used to hit
+    // this call site's bare `c_type` and fail with "type Vec(...) is
+    // outside the SSA-C scalar/string subset", silently falling the
+    // WHOLE PROGRAM back to tree-C -- even though every OTHER Vec
+    // construct already worked (indexing, push, len, ref params).
+    // Route through `c_declarator` with an empty name (the same
+    // "type + name" spelling minus the name) instead, matching the
+    // parameter loop below.
+    let ret_c = c_declarator(&f.return_type, "")?.trim_end().to_string();
     // Closure #269: `extern "C"` declarations emit an `extern`
     // prototype with the bare C symbol (no `fn_` prefix). The
     // body emit also skips for extern (see `emit_function`).
@@ -344,7 +356,8 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
         .unwrap();
         let _ = bound;
     }
-    let ret_c = c_type(&f.return_type)?;
+    // BUG-164: see the matching comment in `emit_function_prototype`.
+    let ret_c = c_declarator(&f.return_type, "")?.trim_end().to_string();
     write!(out, "{} fn_{}(", ret_c, f.name).unwrap();
     // Closure #202: see `emit_function_prototype` for why
     // empty parens must be `(void)`.

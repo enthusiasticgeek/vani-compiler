@@ -38,8 +38,8 @@ vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems l
 
 ```vani
 fn add(a: i64, b: i64) -> i64
-  requires a >= 0 && b >= 0
-  ensures  result == a + b
+requires a >= 0 && b >= 0;
+ensures _return == a + b;
 {
   return a + b;
 }
@@ -62,6 +62,69 @@ fn main() -> i64 {
 | `Vec::with_capacity(n)` | `vec_with_capacity(n)` | no path syntax |
 | `match Some(x) => …` | `match Opt.Some(x) then …` | `then` not `=>` |
 | `xs?` | `try xs` or `xs?` | both spellings compile |
+
+### Same program, three ways
+
+Every keyword above has alternate spellings — plain-English word forms
+for `->` / `let` / `return`, and full Devanagari for `// vani-lang:
+sanskrit` — so the same program reads however you speak. All three
+below type-check, run, and print the same value.
+
+**Verbose English** (`->` → `yields`, `let` → `assign`, `return` → `give_back`):
+
+```vani
+fn add(a: i64, b: i64) yields i64
+requires a >= 0 && b >= 0;
+ensures _return == a + b;
+{
+  give_back a + b;
+}
+
+fn main() yields i64 {
+  assign xs: Vec<i64> = vec(3, 1, 4, 1, 5);
+  sort(mut ref xs);
+  assign k: i64 = vec_kth_smallest(ref xs, 2);   // 3
+  prove 2 + 2 == 4;
+  print k;
+  give_back 0;
+}
+```
+
+**Sanskrit** (`// vani-lang: sanskrit`) — keywords, types, the entry
+point, and every identifier translated, so only what's structurally
+unavoidable stays in English:
+
+```vani
+// vani-lang: sanskrit
+
+कार्य योग(क: i64, ख: i64) -> i64
+अपेक्षित क >= 0 && ख >= 0;
+सुनिश्चयित _return == क + ख;
+{
+  पुनरागम क + ख;
+}
+
+कार्य मुख्य() -> i64 {
+  माना सूचिः: सूची<i64> = vec(3, 1, 4, 1, 5);
+  sort(परिवर्तनीय दृष्ट्या सूचिः);
+  माना घ: i64 = vec_kth_smallest(दृष्ट्या सूचिः, 2);   // 3
+  प्रमाण 2 + 2 == 4;
+  लिख घ;
+  पुनरागम 0;
+}
+```
+
+The Sanskrit version prints `३` — the same value `3`, rendered in
+Devanagari numerals to match the source script. The entry point can be
+spelled `मुख्य` (mukhya), `प्रमुख` (pramukh), `प्रधान` (pradhan), or
+`main` — the parser canonicalizes any of the four. `Vec<T>` can be
+written `सूची<T>` too (kept as `Vec<i64>` above for readability — both
+compile identically). What's left in English is structurally
+unavoidable in the current v1 surface: builtin function *names*
+(`vec`, `sort`, `vec_kth_smallest`) aren't translated (only language
+*keywords* and *type* names are), and `_return` — the identifier an
+`ensures` clause uses to refer to a function's own return value — has
+no dialect alias yet.
 
 ---
 

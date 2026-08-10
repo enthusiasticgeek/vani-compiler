@@ -14,21 +14,21 @@
 // new surface compiles identically — the dialect only changes
 // the keywords, not the AST.
 
-संरचना Bag {
-  contents: Box<Vec<i64>>,
+संरचना थैली {
+  सामग्री: Box<Vec<i64>>,
 }
 
-कार्य main() -> i64 {
-  माना v: Vec<i64> = vec(10, 20, 30);
-  माना b: Box<Vec<i64>> = box(v);
+कार्य मुख्य() -> i64 {
+  माना सूचिः: Vec<i64> = vec(10, 20, 30);
+  माना मञ्जूषा: Box<Vec<i64>> = box(सूचिः);
   लिख "constructed Box<Vec<i64>>";
 
-  माना v2: Vec<i64> = vec(7, 8, 9);
-  माना bag: Bag = Bag { contents: box(v2) };
+  माना सूचिः२: Vec<i64> = vec(7, 8, 9);
+  माना थैलिका: थैली = थैली { सामग्री: box(सूचिः२) };
   लिख "constructed Bag";
 
-  माना s: OwnedStr = "hi" + "!";
-  माना bs: Box<OwnedStr> = box(s);
+  माना पदम्: OwnedStr = "hi" + "!";
+  माना शब्दमञ्जूषा: Box<OwnedStr> = box(पदम्);
   लिख "constructed Box<OwnedStr>";
 
   पुनरागम 0;

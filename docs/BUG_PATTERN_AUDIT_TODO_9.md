@@ -1,12 +1,20 @@
-# vāṇी — Bug-pattern audit, round 9 (candidates, NOT started)
+# vāṇी — Bug-pattern audit, round 9
 
-**STATUS (2026-08-10): NOT STARTED.** This is a candidate list compiled
-at the end of round 8 (which is fully closed -- see
-`docs/BUG_PATTERN_AUDIT_TODO_8.md`), at direct request, so a future
-session can pick a theme without re-deriving this research from
-scratch. Nothing in this file has been fixed. Some items are well-
-root-caused already (cheap to pick up); others are raw localfuzz
-findings that still need root-causing.
+**STATUS (2026-08-10): Category 1's two cheapest pickups FIXED
+(BUG-160, BUG-161); Category 3's overflow/bounds-divergence theme also
+FIXED (BUG-162), plus the struct-field-Vec bounds crash it surfaced
+also FIXED (BUG-163), plus the SSA-C-vs-SSA-LLVM wording-mismatch gap
+it surfaced ALSO FIXED (BUG-164 -- turned out to be one narrow
+return-type-spelling bug, NOT "SSA-C has no Vec support" as first
+suspected); all 8 localfuzz timeout findings investigated and
+confirmed as corpus artifacts (genuinely broken mutated programs), not
+compiler bugs.** See `docs/TODO_CURRENT.md` for the full writeups.
+This is now a partial-progress candidate list, not a from-scratch one:
+Category 2 is untouched (by design -- those 4 are non-fixes); Category
+1's general (ordinary-user-function) case remains deliberately
+unscoped/open; Category 3's timeout cluster is fully resolved (no fix
+needed) and its SSA-C wording gap is ALSO fully resolved -- nothing
+outstanding in Category 3 as of BUG-164.
 
 Three source categories, each its own section below:
 1. More instances of BUG-159's exact bug family (OwnedStr auto-borrow
@@ -30,33 +38,22 @@ where the callee doesn't take ownership responsibility) recurs in
 several sibling positions that the narrow fix didn't touch. All
 confirmed via direct ASan testing, 2026-08-10.
 
+### FIXED (2026-08-10, BUG-160 + BUG-161 -- see docs/TODO_CURRENT.md)
+
+- **`hashmap_get(ref m, K)` / `hashmap_contains_key(ref m, K)` /
+  `hashmap_remove(mut ref m, K)`** -- BUG-160. Fixed via the same
+  `is_fresh_owned_str` + free-after-call pattern as `hashmap_insert`.
+- **`trie_insert` / `trie_contains` / `trie_starts_with` /
+  `trie_delete`** (all 4 siblings, not just `.insert(...)`) --
+  BUG-161. Needed one more layer than BUG-160: Trie's key param is
+  typed `Str`, so a fresh OwnedStr arg arrives wrapped in the
+  checker's implicit borrow cast; fixed via a new
+  `is_fresh_owned_str_via_str_cast` helper in `src/ir.rs` that
+  unwraps exactly that cast. `examples/language/english/trie.vani`
+  uses `Str` literals only and was never affected.
+
 ### Confirmed leaking, NOT fixed
 
-- **`hashmap_get(ref m, K)`** -- fresh `OwnedStr` K leaks. Repro:
-  ```vani
-  let r: Option<OwnedStr> = hashmap_get(ref m, i64_to_str(1));
-  ```
-  Leaks 2 bytes / 1 object under ASan.
-- **`hashmap_contains_key(ref m, K)`** -- same, fresh K leaks.
-- **`hashmap_remove(mut ref m, K)`** -- same, fresh K leaks. (Note:
-  unlike `_insert`, `_get`/`_contains_key`/`_remove` don't clone K
-  into new storage at all -- they only use it for a `strcmp` lookup
-  and then discard it. The exact "clone vs never-freed-source" shape
-  BUG-159's writeup describes for `_insert` doesn't apply the same
-  way here; still, root cause is the same category: nothing frees
-  the fresh temporary after the call, because nothing owns it.)
-  Combined repro (`contains_key` + `remove`) leaks 4 bytes / 2
-  objects.
-- **`trie_insert` / `Trie.insert(...)`** -- fresh `OwnedStr` key
-  leaks identically to `hashmap_insert`'s pre-fix behavior. Repro:
-  ```vani
-  let t: Trie = trie_new();
-  let _ = t.insert(i64_to_str(5));   // leaks
-  ```
-  Leaks 2 bytes / 1 object. NOT checked: `trie_contains`,
-  `trie_starts_with`, `trie_delete` (all take a Str-shaped key
-  argument too, per the same builtin family -- likely affected
-  identically, not individually verified this session).
 - **Ordinary user-defined functions taking a `Str` parameter** -- the
   general, pervasive case, confirmed via:
   ```vani
@@ -90,16 +87,18 @@ confirmed via direct ASan testing, 2026-08-10.
 
 ### Suggested approach for a future session
 
-Given `hashmap_get`/`_contains_key`/`_remove` are the SAME file,
-SAME function family, SAME fix pattern (`is_fresh_owned_str` +
-free-after-call) as the already-fixed `hashmap_insert`, they're the
-cheapest, lowest-risk pickup -- essentially finishing what BUG-159
-started, not a new investigation. `trie_insert` (and its Str-key
-siblings) is the next-cheapest, same pattern, different file. The
-general function-call-argument case is a separate, much larger
-undertaking that deserves its own dedicated session and explicit
-scoping conversation before starting -- do not fold it into a
-"quick" round-9 sweep.
+Both cheap pickups (`hashmap_get`/`_contains_key`/`_remove` as
+BUG-160, `trie_insert`/`_contains`/`_starts_with`/`_delete` as
+BUG-161) are now fixed -- see the FIXED subsection above. What
+remains in this category is only the general function-call-argument
+case (ordinary user functions taking `Str`), which is a separate,
+much larger undertaking that deserves its own dedicated session and
+explicit scoping conversation before starting -- do not fold it into
+a "quick" sweep. Note BUG-161 showed the general case is slightly
+bigger than BUG-159/160 alone suggested: any `Str`-typed parameter
+(not just `OwnedStr`-typed ones) needs the cast-unwrapping
+`is_fresh_owned_str_via_str_cast` check too, not just the direct
+`is_fresh_owned_str` check.
 
 ---
 
@@ -137,6 +136,15 @@ discovering these are already-decided non-fixes. All 4 have full
 
 ## Category 3: new localfuzz candidates since round 8 started (2026-08-09 evening onward, mostly untriaged)
 
+**Update (2026-08-10, later same day)**: 11 more findings landed since
+this section was first written (last one captured below was
+`b4cbb21d7a`). See the new subsections at the end of this category --
+"11 more findings (2026-08-10 04:14 onward)". None fixed or
+root-caused; this is still a raw inventory. The overflow-divergence
+theme below is now confirmed to be BROADER than integer overflow --
+one new finding shows the identical silent-vs-loud divergence for an
+"index out of bounds" trap.
+
 Source: `docs/TODO_LOCAL_STAGING.md` in the localfuzz worktree
 (`/home/virgo/source/vani-compiler-localfuzz`). Per the established
 localfuzz workflow, always re-verify against a freshly rebuilt `main`
@@ -144,9 +152,27 @@ before trusting any of these -- the worktree can go stale within a
 single day. None of these have been root-caused or fixed this
 session; this is a raw inventory, not a triage.
 
-### Likely ONE unified theme: LLVM backend's overflow-check exits silently, C backend's aborts loudly
+### FIXED (2026-08-10, BUG-162 -- see docs/TODO_CURRENT.md): LLVM backend's overflow/bounds-check traps exited silently, C backend's aborted loudly
 
-Two separate candidates show the identical shape:
+Two separate candidates originally showed the identical shape (kept
+below for the record); root-caused, fixed, and verified same-day, and
+turned out broader than "overflow-check" -- the SAME silent-vs-loud
+split also affected the general Vec bounds-check trap (confirmed via
+a THIRD localfuzz finding, `20260810-113044-backend-divergence-
+b4d35be8e4`, "index out of bounds"). Fixed by adding a shared
+`@__intent_trap(i8* %msg)` helper (prints via `dprintf` before the
+deliberately-unchanged `exit(3)`) to both `ssa_backend_llvm.rs` and
+`backend_llvm.rs`, scoped to: checked Add/Sub/Mul overflow, Div/Rem-
+by-zero, signed `MIN / -1` overflow, Shl/Shr range, and the general
+Vec bounds-check. Deliberately NOT extended to `requires`-clause
+violations, the `#[bounded(N)]` recursion guard (needs a dynamic
+message, different mechanism), or the Vec-builtin-specific bounds
+checks (`swap_remove`/`insert`/`pop_mut`) -- noted as follow-ups in
+`docs/TODO_CURRENT.md`'s own BUG-162 writeup, which has the full
+technical detail (message-wording nuances between the two C backends,
+verification results, etc.) -- not repeated here.
+
+Two of the originally-documented candidates, for reference:
 
 - **`20260809-221155-backend-divergence-56467d8c82`** -- repro:
   ```vani
@@ -177,6 +203,37 @@ Category 1. Worth checking whether this connects to Category 2 item
 3/4's i64::MIN/shift UB findings -- same neighborhood of the codebase
 (overflow/UB handling), not confirmed to be the same code path.
 
+### FIXED (2026-08-10, BUG-163 -- see docs/TODO_CURRENT.md): struct field holding a Vec crashed on tree-LLVM out-of-bounds, no clean message
+
+Found while manually testing BUG-162 repros (not from localfuzz, no
+finding directory); root-caused and fixed same-day. Root cause:
+`backend_llvm.rs`'s `TypedExprKind::Index` handler had a dedicated
+FieldAccess-base arm with 3 sub-cases (`Vec<bool>`, `Array`, general
+`Vec<T>`) -- the general `Vec<T>` sub-case was simply missing the
+`@__intent_bounds_check` call every sibling arm around it already had
+(BUG-108/122/149). Fixed by adding it, matching the sibling shape
+exactly. Full technical detail (including why the write-path analog
+turned out not to be valid syntax at all) is in `docs/TODO_CURRENT.md`.
+Repro, for reference:
+```vani
+struct Holder { xs: Vec<i64>, i: i64 }
+fn f(h: Holder) -> i64 { return h.xs[h.i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let h: Holder = Holder { xs: xs, i: 7 };
+  return f(h);
+}
+```
+Before the fix: tree-LLVM (both `vanic run` and AOT `vanic build`)
+crashed with NO stderr output at all and an unstable exit code across
+repro shape variants (101, 107, 117 all observed) -- not a clean
+`rc=3` + message like BUG-162 gives every other bounds-check trap.
+Tree-C on the same repro always ran correctly. Confirmed via `git
+stash` that this reproduced identically on the pre-BUG-162 code -- a
+separate, pre-existing bug, not a BUG-162 regression. After the fix:
+both backends give the identical `"index out of bounds: 7, len 3"`
+message with a clean, stable `rc=3`/`rc=134`.
+
 ### Needs root-cause investigation (no clear pattern yet)
 
 - **`20260809-192216-backend-divergence-77aaa194ce`** -- repro
@@ -194,13 +251,14 @@ Category 1. Worth checking whether this connects to Category 2 item
   root-cause review", repro/details not fully captured in the staging
   doc -- read `tools/localfuzz/findings/20260809-201604-backend-
   divergence-7b9b35c019/repro.vani` directly before starting.
-- **`20260810-015549-run-crash-cdec4c613b`** -- BOTH backends TIMED
-  OUT on the same input (`rc=null, timed_out=true` for both C and
-  LLVM). Needs investigation into whether this is a genuine compiler/
-  runtime hang (a real bug) or simply a fuzzer-mutated program that
-  legitimately contains an infinite loop (not a bug, a corpus
-  artifact) -- check the repro's actual control flow first before
-  assuming either.
+- **`20260810-015549-run-crash-cdec4c613b`** -- FIXED, i.e. investigated
+  and closed with no code change needed (2026-08-10): a mutant of
+  `btreeset.vani` where the drain loop's decrement (`j = j + 1;` ->
+  `j = j + -1;`) makes `j < 20` never go false. A genuine infinite
+  loop in the mutated SOURCE, not a compiler/runtime bug -- see the
+  "Localfuzz timeout findings" subsection in `docs/TODO_CURRENT.md`
+  for the full investigation of this and 7 siblings, all reaching the
+  same conclusion.
 - **`20260810-024150-backend-divergence-8e74a245e6`** -- marked
   "needs human/frontier root-cause review", no detail captured in the
   staging doc at all. Read the repro directly.
@@ -224,6 +282,165 @@ Category 1. Worth checking whether this connects to Category 2 item
   actual out-of-bounds access somewhere), but don't trust this
   description's account of WHICH backend does WHAT; re-derive from
   the raw repro + actual run output directly.
+
+### 11 more findings (2026-08-10 04:14 onward)
+
+All from the same localfuzz worktree, none root-caused or fixed. Raw
+`finding.json` data quoted directly; `fix_attempt.md`'s auto-generated
+hypotheses are qwen2.5-coder:1.5b drafts (per the established
+staleness/unreliability caveat above) and mostly say "no patch
+attempted -- needs frontier-model or human review from scratch", so
+not reproduced here except where noted.
+
+**More overflow/bounds-divergence-theme findings** (same shape as the
+2 originally documented above -- C aborts loudly with rc=134 + a
+message, LLVM exits silently with rc=3 + empty stderr):
+
+- `20260810-063522-backend-divergence-5e6cada3c6` (base
+  `examples/language/bengali/early_exit.vani`) -- "integer overflow in
+  int64_t add".
+- `20260810-074148-backend-divergence-2492443756` (base `examples/
+  language/english/loop_carried_overflow_not_elided.vani` -- note:
+  this is literally the SAME source file as Category 2 item 3's
+  baseline entry) -- "integer overflow in int64_t add".
+- `20260810-090537-backend-divergence-20dcfc064d` (base `examples/
+  language/catalan/control_flow.vani`) -- "integer overflow in
+  int64_t add".
+- `20260810-091328-backend-divergence-236442a7a6` (base `examples/
+  language/spanish/for_loops.vani`) -- "integer overflow in int64_t
+  add". A patch was auto-attempted and discarded (didn't apply/build).
+- `20260810-105409-backend-divergence-1f84ad9671` (base `examples/
+  language/english/vec_of_ref.vani`) -- "integer overflow in i64
+  mul" (the multiply variant, matching the very first `56467d8c82`
+  finding's op).
+- **`20260810-113044-backend-divergence-b4d35be8e4`** (base `examples/
+  language/english/bounds_elision.vani`) -- **"index out of bounds"**,
+  not overflow. Same rc=134-loud/rc=3-silent divergence. This is new
+  evidence the theme isn't overflow-specific: it looks like ANY LLVM
+  runtime safety-guard trap (bounds checks included, likely others)
+  exits silently, while C's aborts loudly with a message. Worth
+  checking generally where the LLVM backend emits its trap/abort logic
+  and whether a single shared fix (make it print like C's does before
+  exiting) covers overflow AND bounds AND whatever else uses the same
+  trap mechanism. A patch was auto-attempted and discarded here too.
+
+### 4 more findings, landed after BUG-162 shipped (2026-08-10, later)
+
+- `20260810-134722-backend-divergence-f1f2c603f4` (base `examples/
+  language/amharic/for_loops.vani`) -- "integer overflow in int64_t
+  add". Re-ran against the current (BUG-162-fixed) binary: FULLY
+  CLOSED, both backends now print the identical message. Confirms the
+  fix.
+- **`20260810-124224-backend-divergence-e1322cfcd5`** (base `examples/
+  language/odia/control_flow.vani`) -- an out-of-range Vec index.
+  FIXED (2026-08-10, BUG-164, at direct request as a follow-up).
+  Initial diagnosis (kept below for the record) suspected "SSA-C has
+  no Vec support at all" -- WRONG on closer investigation: SSA-C
+  already had substantial, working Vec support (indexing, push, len,
+  ref params, nested Vec, Vec<OwnedStr>, all confirmed via direct
+  bisection). The actual bug was one narrow spot:
+  `emit_function_prototype`/`emit_function` in `ssa_backend_c.rs`
+  spelled a function's RETURN type via a bare `c_type(&f.return_type)`
+  call instead of `c_declarator` (used for every parameter type right
+  below it) -- `c_type` has no `Type::Vec` arm, `c_declarator` does.
+  So only functions whose OWN return type was `Vec<T>` (like this
+  repro's `build_range(n: i64) -> Vec<i64>`) failed and fell back to
+  tree-C; Vec used any other way already worked via SSA-C. Fixed by
+  routing both call sites through `c_declarator`. Full writeup, original
+  (superseded) diagnosis, and verification results in
+  `docs/TODO_CURRENT.md`'s BUG-164 section.
+- `20260810-124633-run-crash-d669b7fd24` (mix_conc_channel_send_recv.vani)
+  and `20260810-142721-run-crash-22c8c106e2` (spanish/
+  async_cancel_auto.vani) -- both timeout findings, folded into the
+  "More timeout findings" list below (both investigated and closed as
+  corpus artifacts, not bugs).
+
+**More timeout findings, ALL INVESTIGATED AND CLOSED (2026-08-10, no
+code change needed)** -- both backends hang, `rc=null, timed_out=true`
+on both C and LLVM, same shape as `cdec4c613b` above. Every one of
+these (plus 2 more that landed even later, `d669b7fd24` and
+`22c8c106e2`, not yet in this doc when this subsection was first
+written) was root-caused by diffing against its base example; all 8
+total are genuinely broken mutated programs (infinite loops,
+deadlocks, or an absurd-but-correct multi-million-year sleep), not
+compiler/runtime bugs. Full investigation writeup in
+`docs/TODO_CURRENT.md`'s "Localfuzz timeout findings" section; one-line
+summary per finding:
+
+- `20260810-041441-run-crash-d5870f7218` (pashto/async_cancel_auto.vani)
+  -- `sleep_ms` argument mutated to i64::MAX.
+- `20260810-074640-run-crash-d8f20b7050` (mix_conc_mutex_struct.vani)
+  -- same non-reentrant mutex locked twice on one thread, self-deadlock.
+- `20260810-094706-run-crash-7b63fa98b6` (tibetan/early_exit.vani) --
+  loop increment statement deleted.
+- `20260810-101253-run-crash-e37418e21c` (spanish/control_flow.vani)
+  -- loop increment flipped to a decrement.
+- `20260810-103151-run-crash-78bdde8bba` (lao/early_exit.vani) -- same
+  as `7b63fa98b6`, deleted increment.
+- `20260810-124633-run-crash-d669b7fd24` (mix_conc_channel_send_recv.vani)
+  -- the `channel_send` call deleted; `channel_recv` blocks forever.
+- `20260810-142721-run-crash-22c8c106e2` (spanish/async_cancel_auto.vani)
+  -- same as `d5870f7218`, `sleep_ms` mutated to i64::MAX.
+
+No fix needed for any of these. One soft follow-up noted (not
+pursued): `d8f20b7050`'s same-thread double-lock is arguably a missed
+static-analysis opportunity for vāṇी's existing lock-order checker,
+which doesn't currently catch this pattern in a straight-line scope.
+
+### 3 more findings, landed after BUG-164 shipped (2026-08-10, later still)
+
+- `20260810-170656-backend-divergence-8ceea3f964` (base `examples/
+  language/korean/early_exit.vani`) -- the familiar overflow-
+  divergence shape (C: rc=134 + "integer overflow in int64_t add";
+  LLVM: rc=3, empty stderr). STALE, not a new gap: re-ran against the
+  current (BUG-162-fixed) binary and both backends now print the
+  identical message. The localfuzz harness evidently ran this one
+  against an older binary before BUG-162 landed/rebuilt. No action
+  needed -- this is a clean confirmation of BUG-162's fix, not a
+  regression.
+- `20260810-165451-run-crash-e2447c8ead` (base `examples/language/
+  konkani/basics.vani`) -- both backends hang. Same shape as the 8
+  above: diffing against the base example shows the fuzzer deleted
+  the `i = i - 1;` decrement from a `while i > 0 { ... }` countdown
+  loop, so `i` never reaches 0 -- a genuine infinite loop in the
+  mutated source, not a compiler/runtime bug. Brings the confirmed-
+  corpus-artifact timeout count to 9.
+- **`20260810-161013-run-crash-22a310f619`** (base `examples/
+  language/german/control_flow.vani`) -- NEW SHAPE, worth its own
+  writeup: unlike every other timeout finding, this one is
+  ASYMMETRIC -- C finishes cleanly (`rc=0`, correct output) while
+  LLVM (`vanic run`'s default, via `lli`) times out. Root cause,
+  confirmed directly: the mutation changes a loop's start value from
+  `0` to `-9223372036854775808 + 0` (`i64::MIN`), turning `while i < 5
+  { i = i + 1; }` into a ~9.2-quintillion-iteration loop (`5 -
+  i64::MIN` trips). `gcc -O2` (what `--backend=c` compiles with) and
+  `llc` (what `vanic build`'s AOT path uses) both apply standard
+  induction-variable / closed-form loop analysis and resolve `i`'s
+  final value directly WITHOUT literally executing the loop --
+  confirmed by testing `vanic build`'s AOT binary on this exact repro,
+  which also completes instantly, matching C. `lli`, the JIT
+  INTERPRETER `vanic run` uses by default, has no equivalent
+  optimization and executes each iteration literally, so it hangs on
+  any loop with an astronomically large trip count regardless of
+  whether the loop body has any real work in it. **Not a compiler bug**
+  -- both codegen paths (tree/SSA, C/LLVM) produce semantically
+  identical, correct code; the difference is entirely in the
+  EXECUTION strategy `vanic run` picks (JIT-interpret via `lli`) vs.
+  what `--backend=c` and `vanic build` do (compile with a real
+  optimizer). Not fixable without either (a) making `lli` itself
+  smarter about loop induction variables -- out of vāṇी's control,
+  that's upstream LLVM tooling -- or (b) `vanic run` switching its
+  default execution strategy away from `lli`, a much bigger design
+  question with its own tradeoffs (JIT startup latency, etc.), not
+  something to decide from one fuzzer finding. Documented here as a
+  known, inherent characteristic of `vanic run`'s current
+  architecture: an astronomically-large-trip-count loop (unlikely in
+  realistic programs, but not impossible -- e.g. a bug in a real
+  program's own loop bound computation) can make `vanic run`
+  APPEAR to hang even though the equivalent `--backend=c` or
+  `vanic build` invocation would return instantly. If this class of
+  finding recurs, this writeup is the reference; no new investigation
+  needed unless the mechanism looks different from this one.
 
 ---
 

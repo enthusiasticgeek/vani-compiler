@@ -375,6 +375,29 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // ConstraintElimination pass. No runtime cost; ignored if
     // the condition is already known.
     out.push_str("declare void @llvm.assume(i1)\n");
+    // BUG-162 (2026-08-10): every runtime safety-guard trap below
+    // (bounds check, checked-arithmetic overflow, division by zero,
+    // shift-range) called `@exit(i32 3)` directly with NO message --
+    // unlike the C backends' equivalent guards, which all print a
+    // descriptive `fprintf(stderr, ...)` before aborting. Found via
+    // localfuzz backend-divergence findings: both backends correctly
+    // detect the same fault (neither produces a wrong answer), but
+    // C exits loudly (rc=134 + a clear message) while LLVM exits
+    // silently (rc=3, empty stderr) -- a real debuggability gap, not
+    // a correctness bug (`intent_assert_fail` above already got this
+    // right, via `dprintf`; the exit(3)-not-abort() convention itself
+    // is correct and deliberate -- see BUG-106/113/115/117/120 -- so
+    // this fix only ADDS a message, it does not touch the exit code
+    // or switch back to abort()). `@__intent_trap` centralizes the
+    // "print then exit(3)" sequence so every guard below just passes
+    // its own message constant.
+    out.push_str(
+        "define internal void @__intent_trap(i8* %msg) alwaysinline noreturn {\n\
+         entry:\n  \
+           call i32 (i32, i8*, ...) @dprintf(i32 2, i8* %msg)\n  \
+           call void @exit(i32 3)\n  \
+           unreachable\n}\n",
+    );
     // Bounds-check helper used by Index / IndexAssign emit when
     // the SSA elision pass couldn't prove in-bounds. alwaysinline
     // makes LLVM expand the branch inline at every call site so
@@ -395,16 +418,18 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // their repros' genuine stack overflow, not this helper's own
     // controlled trap. `exit(3)` matches every other vāṇी runtime
     // trap's exit-code convention.
-    out.push_str(
-        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
+    let bounds_msg = emit_trap_msg_global(&mut out, ".msg.bounds", "index out of bounds\n");
+    out.push_str(&format!(
+        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {{\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
-           br i1 %ok, label %cont, label %oob, !prof !{!\"branch_weights\", i32 1048576, i32 1}\n\
-         oob:\n  call void @exit(i32 3)\n  unreachable\n\
+           br i1 %ok, label %cont, label %oob, !prof !{{!\"branch_weights\", i32 1048576, i32 1}}\n\
+         oob:\n  call void @__intent_trap(i8* {msg})\n  unreachable\n\
          cont:\n  \
            call void @llvm.assume(i1 %ok)\n  \
-           ret void\n}\n",
-    );
+           ret void\n}}\n",
+        msg = bounds_msg,
+    ));
     // BUG-110: overflow / divide-by-zero / shift-range guards for
     // Add/Sub/Mul, Div/Rem, Shl/Shr -- same `alwaysinline` void/
     // value-returning-helper shape as `@__intent_bounds_check`
@@ -423,6 +448,11 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         let intr_prefix = if signed { "s" } else { "u" };
         let intr_word = op_word;
         let _ = bits;
+        let ovf_msg = emit_trap_msg_global(
+            &mut out,
+            &format!(".msg.ovf.{}.{}", tyname, op_word),
+            &format!("integer overflow in {} {}\n", c_style_int_tyname(tyname), op_word),
+        );
         out.push_str(&format!(
             "define internal {w} @__intent_checked_{op_word}_{ty}({w} %a, {w} %b) alwaysinline {{\n\
              entry:\n  \
@@ -430,7 +460,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
                %r = extractvalue {{{w}, i1}} %pair, 0\n  \
                %ov = extractvalue {{{w}, i1}} %pair, 1\n  \
                br i1 %ov, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @exit(i32 3)\n  unreachable\n\
+             oob:\n  call void @__intent_trap(i8* {msg})\n  unreachable\n\
              cont:\n  \
                ret {w} %r\n}}\n",
             w = llvm_w,
@@ -438,8 +468,15 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
             ty = tyname,
             p = intr_prefix,
             iw = intr_word,
+            msg = ovf_msg,
         ));
     }
+    let divzero_msg = if !checked_divisor_tys.is_empty() || !checked_signed_div_rem_ops.is_empty()
+    {
+        Some(emit_trap_msg_global(&mut out, ".msg.divzero", "division by zero\n"))
+    } else {
+        None
+    };
     for tyname in &checked_divisor_tys {
         let (llvm_w, _signed, _bits) = int_type_info(tyname);
         out.push_str(&format!(
@@ -447,11 +484,12 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
              entry:\n  \
                %z = icmp eq {w} %x, 0\n  \
                br i1 %z, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @exit(i32 3)\n  unreachable\n\
+             oob:\n  call void @__intent_trap(i8* {msg})\n  unreachable\n\
              cont:\n  \
                ret {w} %x\n}}\n",
             w = llvm_w,
             ty = tyname,
+            msg = divzero_msg.as_deref().unwrap(),
         ));
     }
     // BUG-119: combined divide-by-zero + `MIN / -1`-overflow helper
@@ -463,17 +501,27 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         let (llvm_w, _signed, bits) = int_type_info(tyname);
         let min_val: i128 = -(1i128 << (bits - 1));
         let opcode = if *op_word == "div" { "sdiv" } else { "srem" };
+        let ovf_msg = emit_trap_msg_global(
+            &mut out,
+            &format!(".msg.ovf.{}.{}", tyname, op_word),
+            &format!("integer overflow in {} {}\n", c_style_int_tyname(tyname), op_word),
+        );
+        // Two distinct fail conditions (division by zero vs. MIN/-1
+        // overflow) need two distinct messages, so each gets its own
+        // `oob_*` block instead of sharing one -- see BUG-162's doc
+        // comment above `@__intent_trap`.
         out.push_str(&format!(
             "define internal {w} @__intent_checked_{op_word}_{ty}({w} %a, {w} %b) alwaysinline {{\n\
              entry:\n  \
                %z = icmp eq {w} %b, 0\n  \
-               br i1 %z, label %oob, label %nz1, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+               br i1 %z, label %oob_div0, label %nz1, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
              nz1:\n  \
                %amin = icmp eq {w} %a, {min}\n  \
                %bneg1 = icmp eq {w} %b, -1\n  \
                %ovf = and i1 %amin, %bneg1\n  \
-               br i1 %ovf, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @exit(i32 3)\n  unreachable\n\
+               br i1 %ovf, label %oob_ovf, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
+             oob_div0:\n  call void @__intent_trap(i8* {divzero_msg})\n  unreachable\n\
+             oob_ovf:\n  call void @__intent_trap(i8* {ovf_msg})\n  unreachable\n\
              cont:\n  \
                %r = {opcode} {w} %a, %b\n  \
                ret {w} %r\n}}\n",
@@ -482,8 +530,15 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
             ty = tyname,
             min = min_val,
             opcode = opcode,
+            divzero_msg = divzero_msg.as_deref().unwrap(),
+            ovf_msg = ovf_msg,
         ));
     }
+    let shift_msg = if !checked_shift_tys.is_empty() {
+        Some(emit_trap_msg_global(&mut out, ".msg.shift", "shift amount out of range\n"))
+    } else {
+        None
+    };
     for tyname in &checked_shift_tys {
         let (llvm_w, signed, bits) = int_type_info(tyname);
         let range_check = if signed {
@@ -502,12 +557,13 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
              entry:\n\
              {range_check}  \
                br i1 %bad, label %oob, label %cont, !prof !{{!\"branch_weights\", i32 1, i32 1048576}}\n\
-             oob:\n  call void @exit(i32 3)\n  unreachable\n\
+             oob:\n  call void @__intent_trap(i8* {msg})\n  unreachable\n\
              cont:\n  \
                ret {w} %x\n}}\n",
             w = llvm_w,
             ty = tyname,
             range_check = range_check,
+            msg = shift_msg.as_deref().unwrap(),
         ));
     }
     // Empty string global used by the per-element Vec
@@ -6195,6 +6251,69 @@ fn int_type_info(tyname: &str) -> (&'static str, bool, i64) {
         "u64" => ("i64", false, 64),
         other => unreachable!("int_type_info called with non-integer type name {other:?}"),
     }
+}
+
+/// BUG-162 (2026-08-10): the C-style spelling of an `int_type_name`
+/// result, used ONLY for runtime trap message text so it matches
+/// `ssa_backend_c.rs`'s own wording exactly (e.g. "integer overflow
+/// in int64_t add", not "integer overflow in i64 add").
+pub(crate) fn c_style_int_tyname(tyname: &str) -> &'static str {
+    match tyname {
+        "i8" => "int8_t",
+        "i16" => "int16_t",
+        "i32" => "int32_t",
+        "i64" => "int64_t",
+        "u8" => "uint8_t",
+        "u16" => "uint16_t",
+        "u32" => "uint32_t",
+        "u64" => "uint64_t",
+        other => unreachable!("c_style_int_tyname called with non-integer type name {other:?}"),
+    }
+}
+
+/// BUG-162 (2026-08-10): emits a private NUL-terminated byte-string
+/// constant holding `text` (a plain-ASCII message, `\n` is the only
+/// escape needed) to `preamble`, and returns the constant `getelementptr`
+/// expression usable directly as an `i8*` call argument (LLVM allows a
+/// constant-folded GEP expression inline at a call site, no separate
+/// instruction/register needed). `unique_name` must not collide with
+/// any other global in the module.
+pub(crate) fn emit_trap_msg_global(preamble: &mut String, unique_name: &str, text: &str) -> String {
+    preamble.push_str(&trap_msg_global_def(unique_name, text));
+    trap_msg_ref(unique_name, text)
+}
+
+/// The `@name = private unnamed_addr constant ...` definition line
+/// for a trap message, without emitting it anywhere -- callers that
+/// need to control exactly where the definition text lands (e.g.
+/// `backend_llvm.rs`'s tree-walking emitter, which must keep every
+/// global definition outside any function's `{ ... }` body) build
+/// this once, up front, in a true top-level preamble, then use
+/// `trap_msg_ref` at each call site to reference it without
+/// re-emitting the definition.
+pub(crate) fn trap_msg_global_def(unique_name: &str, text: &str) -> String {
+    let byte_len = text.len() + 1; // +1 for the NUL terminator.
+    let llvm_escaped = text.replace('\n', "\\0A");
+    format!(
+        "@{name} = private unnamed_addr constant [{len} x i8] c\"{txt}\\00\"\n",
+        name = unique_name,
+        len = byte_len,
+        txt = llvm_escaped,
+    )
+}
+
+/// The constant `getelementptr` expression referencing an already-
+/// defined trap message global (see `trap_msg_global_def`), usable
+/// directly as an `i8*` call argument. `text` must be byte-identical
+/// to what the matching `trap_msg_global_def`/`emit_trap_msg_global`
+/// call used, since the byte length is part of the GEP's element type.
+pub(crate) fn trap_msg_ref(unique_name: &str, text: &str) -> String {
+    let byte_len = text.len() + 1;
+    format!(
+        "getelementptr inbounds ([{len} x i8], [{len} x i8]* @{name}, i64 0, i64 0)",
+        len = byte_len,
+        name = unique_name,
+    )
 }
 
 fn llvm_type(ty: &Type) -> Result<&'static str, EmitError> {

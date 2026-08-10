@@ -20,36 +20,36 @@
 // payload type. LLVM tagged-union codegen ships in a
 // follow-up — for now run with `--backend=c`.
 
-गणन Opt { Some(i64), None }
+गणन वैकल्पिक { किञ्चित्(i64), रिक्तम् }
 
-फलन unwrap_or(o: Opt, def: i64) -> i64 {
-  लौटाओ मिलान o {
-    Opt.Some(v) तो v,
-    Opt.None तो def,
+फलन मूल्य_या(व: वैकल्पिक, मूलभूत: i64) -> i64 {
+  लौटाओ मिलान व {
+    वैकल्पिक.किञ्चित्(मूल्य) तो मूल्य,
+    वैकल्पिक.रिक्तम् तो मूलभूत,
   };
 }
 
-फलन is_some(o: Opt) -> i64 {
-  लौटाओ मिलान o {
-    Opt.Some(v) तो 1,
-    Opt.None तो 0,
+फलन कुछ_है(व: वैकल्पिक) -> i64 {
+  लौटाओ मिलान व {
+    वैकल्पिक.किञ्चित्(मूल्य) तो 1,
+    वैकल्पिक.रिक्तम् तो 0,
   };
 }
 
-फलन main() -> i64 {
-  माना a: Opt = Opt.Some(42);
-  माना b: Opt = Opt.None;
+फलन मुख्य() -> i64 {
+  माना क: वैकल्पिक = वैकल्पिक.किञ्चित्(42);
+  माना ख: वैकल्पिक = वैकल्पिक.रिक्तम्;
 
-  // Pattern destructure pulls the payload out into `v`.
-  माना x: i64 = unwrap_or(a, 0);
-  माना y: i64 = unwrap_or(b, 100);
+  // Pattern destructure pulls the payload out into `मूल्य`.
+  माना ग: i64 = मूल्य_या(क, 0);
+  माना घ: i64 = मूल्य_या(ख, 100);
 
-  सुनिश्चित x == 42;
-  सुनिश्चित y == 100;
-  सुनिश्चित is_some(a) == 1;
-  सुनिश्चित is_some(b) == 0;
+  सुनिश्चित ग == 42;
+  सुनिश्चित घ == 100;
+  सुनिश्चित कुछ_है(क) == 1;
+  सुनिश्चित कुछ_है(ख) == 0;
 
-  लिखो "Some(42) unwrapped =", x;
-  लिखो "None unwrapped with default 100 =", y;
+  लिखो "Some(42) unwrapped =", ग;
+  लिखो "None unwrapped with default 100 =", घ;
   लौटाओ 0;
 }
