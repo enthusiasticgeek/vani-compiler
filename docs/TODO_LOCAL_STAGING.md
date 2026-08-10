@@ -5131,3 +5131,12 @@ Fix attempt: `tools/localfuzz/findings/20260810-213509-backend-divergence-f1e094
 STATUS: needs human/frontier root-cause review.
 
 The `mandarin` corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/mandarin/early_exit.vani` generated a `backend-divergence` error for both the LLVM and C backends. The observed symptom was an integer overflow in the addition of `int64_t` values, leading to a crash during runtime. This issue affects both the frontend and backend executions of the vani compiler.
+
+---
+
+### Candidate: 20260810-214614-backend-divergence-0b78631397
+
+Repro: `tools/localfuzz/findings/20260810-214614-backend-divergence-0b78631397/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-214614-backend-divergence-0b78631397/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
