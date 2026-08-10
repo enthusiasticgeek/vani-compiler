@@ -5201,3 +5201,16 @@ The vani-compiler project encountered a backend-divergence issue, specifically i
     "rc": 1,
     "stdout": "",
     "stderr": "cc failed while compiling '/tmp/vanic-candidate-1907035-1786404549457083165.c' (left at this path for debugging):\n/tmp/vanic-candidate-1907035-1786404549457083165.c: In function \u2018fn_main\u2019:\n/tmp/vanic-candidate-1907035-1786404549457083165.c:330:56: error: called object \u2018v_f\u2019 is not a function or function pointer\n  330 |   int64_t v_result = ({ void* v_f = (fn___anon_fn_0); (v_f(1)); });\n      |                                                        ^~~\n/tmp/vanic-candidate-1907035-1786404549457083165.c:330:31: note: declared here\n  330 |   int64_t v_result = ({ void* v_f = (fn___anon_fn_0); (v_f(1)); });
+
+---
+
+### Candidate: 20260810-233742-backend-divergence-381d33b9f3
+
+Repro: `tools/localfuzz/findings/20260810-233742-backend-divergence-381d33b9f3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-233742-backend-divergence-381d33b9f3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Vani compiler attempted to run the given vani code on both LLVM and C backends with a test input. However, during the execution, it encountered an integer overflow error in the i64 multiplication operation, resulting in a crash (exit code 134) on both platforms. The observed symptom was a failure of the program to execute correctly due to this issue.
+
+This bug is related to backend-divergence as both backends produced different results for the same input, leading to crashes when attempting to run the final program with `vanic run`.
