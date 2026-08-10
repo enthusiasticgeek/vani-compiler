@@ -1,0 +1,42 @@
+[
+  {
+    "file": "examples/edge_cases/mix_conc_channel_send_recv.vani",
+    "klass": "ASAN_EXIT_99_UNCLASSIFIED",
+    "reason": "Round-8 audit (2026-08-09), triaged as a sweep-methodology artifact, not a compiler bug: the program's own legitimate return value (channel_recv returns the sent value, 99) collides with this sweep's ASAN_OPTIONS exitcode=99 convention for signaling a real ASan-detected problem. No sanitizer error is actually printed -- just a coincidental exit code match."
+  },
+  {
+    "file": "examples/language/english/bare_metal.vani",
+    "klass": "SEGV",
+    "reason": "Round-8 audit (2026-08-09), triaged as a methodology false positive: reads a hardcoded STM32 Cortex-M GPIO peripheral address (mmio_read_u32(0x40020014)) in a Reset_Handler meant for real embedded hardware or QEMU, not native userspace execution. Correctly crashes when run the 'wrong' way; not a compiler bug."
+  },
+  {
+    "file": "examples/language/english/echo_p3_locals_stress.vani",
+    "klass": "LEAK",
+    "reason": "BUG-157 (2026-08-09): fresh OwnedStr narrowed to Str (`let label: Str = i64_to_str(mode);`) leaks -- fixed in general, but DELIBERATELY left leaking inside async __poll_* functions. The general fix's first (unconditional) version turned this leak into a confirmed heap-use-after-free here, because the parse-time async state-machine transform's persistent-state hoisting (parser.rs's try_v31_transform) never sees a temp the checker introduces after it already ran. See docs/BUG_PATTERN_AUDIT_TODO_8.md and docs/TODO_CURRENT.md's BUG-157 sections. Do not 'fix' this by removing the __poll_ guard in checker.rs without also teaching the async transform to hoist checker-synthesized temps -- that reintroduces the UAF."
+  },
+  {
+    "file": "examples/language/english/echo_p3b_str_local.vani",
+    "klass": "LEAK",
+    "reason": "Same BUG-157 async-cluster leak as echo_p3_locals_stress.vani -- see that entry."
+  },
+  {
+    "file": "examples/language/english/hashmap_strstr.vani",
+    "klass": "LEAK",
+    "reason": "Same BUG-157 async-cluster leak as echo_p3_locals_stress.vani -- see that entry."
+  },
+  {
+    "file": "examples/language/english/hashmap_strv.vani",
+    "klass": "LEAK",
+    "reason": "Same BUG-157 async-cluster leak as echo_p3_locals_stress.vani -- see that entry."
+  },
+  {
+    "file": "examples/language/english/loop_carried_overflow_not_elided.vani",
+    "klass": "UBSAN_MAYBE",
+    "reason": "Round-8 audit (2026-08-09), triaged low severity, not fixed: the C backend emits vani's i64::MIN literal as `-(int64_t)9223372036854775808LL`, technically UB by the strict C standard (huge-unsigned-to-int64_t conversion + negating an unrepresentable value), but universally implemented as the intended two's-complement value via constant folding on every real compiler/CPU. The program's actual overflow-check logic (__builtin_add_overflow + abort()) is present and correct; this is purely about how the literal itself is spelled in the generated C, not a missing runtime check. No observed wrong output."
+  },
+  {
+    "file": "examples/language/english/sort_large_block_partition.vani",
+    "klass": "UBSAN_MAYBE",
+    "reason": "Round-8 audit (2026-08-09), triaged low severity, not fixed: UBSan reports 'left shift ... cannot be represented' -- vani's `<<` is meant to be a raw, always-well-defined bitwise operation, but the C backend emits it as C's native `<<` on a signed int64_t, which has stricter letter-of-the-standard UB rules when the shifted result doesn't fit. Universally implemented as a single machine SHL instruction in practice; no observed wrong output."
+  }
+]

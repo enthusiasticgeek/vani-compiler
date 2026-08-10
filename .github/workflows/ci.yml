@@ -90,3 +90,30 @@ jobs:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static -L /usr/riscv64-linux-gnu
         run: cargo test --lib --target riscv64gc-unknown-linux-gnu
+
+  # ── Memory-safety sweep: ASan + LeakSanitizer + UBSan over the example corpus
+  #
+  # Added after round 8's bug-pattern audit (2026-08-09), which found this
+  # kind of systematic sweep had never been run before and turned up two
+  # real bugs on its first pass (BUG-153/154, one of them a genuine
+  # heap-use-after-free) plus a third the same day (BUG-157). Every example
+  # under examples/ that passes `vanic check` is compiled to C with
+  # `-fsanitize=address,leak,undefined` (matching `vanic run --backend=c`'s
+  # own real compile flags) and run; a NEW finding not already tracked in
+  # tools/leak_sweep_baseline.json fails the job. See
+  # docs/BUG_PATTERN_AUDIT_TODO_8.md for the full methodology writeup and
+  # why each currently-baselined finding is there.
+  leak-sweep:
+    name: Memory-safety sweep (ASan/LSan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build vanic (release)
+        run: cargo build --release --bin vanic
+
+      - name: Run leak sweep against the checked-in baseline
+        run: python3 tools/leak_sweep.py

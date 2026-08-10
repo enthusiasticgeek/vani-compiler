@@ -245,18 +245,33 @@ case looks obviously correct.
 `tests/run_end_to_end.rs` (real-subprocess, both backends). Full
 writeup in `docs/TODO_CURRENT.md`'s BUG-157 section.
 
-## Worth doing next (not a confirmed lead, a process improvement)
+## Done: wired into CI (2026-08-09, same day)
 
-This sweep was ad hoc scratchpad tooling (a Python driver, not
-committed). Given how directly and quickly it found two real bugs --
-one of them (BUG-154) both general and severe -- it's worth turning
-into a real, checked-in script (`tools/leak_sweep.py` or similar) run
-periodically (or on every push, if the ~5-6 minute runtime is
-acceptable for CI), rather than a one-off. Round 9 or later should
-consider this as its own item, separate from picking a fresh audit
-theme -- infrastructure that catches an entire CLASS of future bugs
-automatically is worth more than any single additional hand-picked
-check.
+This sweep was ad hoc scratchpad tooling at first (a Python driver,
+not committed). Given how directly and quickly it found real bugs --
+BUG-154 general and severe, plus catching the BUG-157 near-miss UAF
+before it ever reached `main` -- it's now a real, checked-in tool:
+`tools/leak_sweep.py`, run as the `leak-sweep` job in
+`.github/workflows/ci.yml` on every push/PR to `main` (ubuntu-latest,
+~5-6 minutes: `cargo build --release --bin vanic` + the sweep itself).
+
+Known/already-triaged findings (the 2 methodology false positives, 2
+low-severity UBSan literal-spelling findings, and the BUG-157 async
+`__poll_*` cluster left deliberately open) are tracked in
+`tools/leak_sweep_baseline.json` with a `reason` field each, so CI
+only fails on a genuinely NEW finding -- not on rediscovering an
+already-documented one. The script also fails CI if a previously
+baselined finding stops reproducing (either the underlying bug got
+fixed -- good, remove the stale entry -- or the sweep methodology
+regressed -- bad, needs a look), so the baseline can't silently drift
+out of sync with reality. Full usage docs in `tools/README.md`.
+
+This only covers the C backend (ASan can't instrument already-
+emitted LLVM IR after the fact) and only `examples/` (not the
+`run_end_to_end.rs`-extracted corpus this round's manual sweep also
+covered) -- both reasonable scope cuts for a per-push CI gate;
+extending either is a fine future follow-up but not required for the
+CI job to be worth having.
 
 ## Process (mirrors rounds 1 through 7's own process sections)
 
