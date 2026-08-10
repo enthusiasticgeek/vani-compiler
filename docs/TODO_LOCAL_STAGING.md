@@ -5120,3 +5120,14 @@ The compiler should have caught the integer overflow error and ensured that the 
 
 **Status:**  
 needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-213509-backend-divergence-f1e094b0cf
+
+Repro: `tools/localfuzz/findings/20260810-213509-backend-divergence-f1e094b0cf/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-213509-backend-divergence-f1e094b0cf/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The `mandarin` corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/mandarin/early_exit.vani` generated a `backend-divergence` error for both the LLVM and C backends. The observed symptom was an integer overflow in the addition of `int64_t` values, leading to a crash during runtime. This issue affects both the frontend and backend executions of the vani compiler.
