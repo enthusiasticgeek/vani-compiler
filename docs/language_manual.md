@@ -118,6 +118,16 @@ Enable dialect purity per file:
 | `assert` | `सिद्धम्` *siddham* | `सुनिश्चित` *sunishcit* | `खात्री` *khātrī* |
 | `invariant` | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` | `अपरिवर्तनीय` |
 
+### I/O
+
+| English | Sanskrit | Hindi | Marathi |
+|---------|----------|-------|---------|
+| `print` | `लिख` *likha* | `लिखो` *likho* | `लिहा` *lihā* |
+| `eprint` | `त्रुटिलिख` *truṭilikha* | `त्रुटिलिखो` *truṭilikho* | `दोषलिहा` *doṣalihā* |
+
+`eprint`'s dialect coverage shipped 2026-08-10 (BUG-166) -- until
+then only the bare English spelling existed anywhere in the lexer.
+
 ### Concurrency
 
 | English | Sanskrit | Hindi | Marathi |

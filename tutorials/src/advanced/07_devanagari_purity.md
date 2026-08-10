@@ -85,10 +85,13 @@ These work without you doing anything special:
   `@intent_print_int_dev` in LLVM IR). Phase 1.1.
 - **Error labels** render in the matching script (`त्रुटिः` for
   Sanskrit, `त्रुटि` for Hindi, `चूक` for Marathi, etc.).
-- **Identifiers** can be Devanagari letters -- the LLVM
-  backend mangles non-ASCII codepoints via `_uHHHH` because LLVM
-  IR identifier grammar forbids non-ASCII; the C backend uses
-  the bytes directly.
+- **Identifiers** can be Devanagari letters -- both backends
+  mangle non-ASCII codepoints into a valid target-language
+  identifier (LLVM IR and C identifier grammar both forbid raw
+  non-ASCII bytes): LLVM via `llvm_mangle_ident`, C via
+  `sanitize_ident`, each hex-encoding every non-ASCII character's
+  codepoint (`_<hex>_`) so two different non-ASCII names never
+  collide into the same mangled symbol (BUG-168, 2026-08-10).
 
 ## The dialect roster
 
@@ -154,27 +157,31 @@ so adding spellings never breaks old files.
 // vani-lang: sanskrit
 उद्देश्य "factorial demo";
 
-कार्य factorial(n: i64) -> i64
-अपेक्षित n >= 0;
-अपेक्षित n <= 10;
+कार्य क्रमगुणित(क: i64) -> i64
+अपेक्षित क >= 0;
+अपेक्षित क <= 10;
 {
-  यदि n <= 1 {
+  यदि क <= 1 {
     पुनरागम 1;
   } अन्यथा {
-    पुनरागम n * factorial(n - 1);
+    पुनरागम क * क्रमगुणित(क - 1);
   }
 }
 
-कार्य main() -> i64 {
-  माना x: i64 = factorial(5);
-  सिद्धम् x == १२०;
-  लिख x;
+कार्य मुख्य() -> i64 {
+  माना ख: i64 = क्रमगुणित(5);
+  सिद्धम् ख == १२०;
+  लिख ख;
   पुनरागम 0;
 }
 ```
 
 Prints `१२०`. Same backend output as the English-keyword
-version, but the source reads like Sanskrit.
+version, but the source reads like Sanskrit -- including the
+entry-point name: `मुख्य`, `प्रमुख`, `प्रधान`, and plain `main`
+are all canonicalized to the same entry point regardless of the
+file's dialect, so a pure-Devanagari file need not spell it
+`main`.
 
 ## Per-dialect error rendering
 
