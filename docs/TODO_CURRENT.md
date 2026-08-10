@@ -11684,7 +11684,12 @@ is a genuinely broken MUTATED PROGRAM, not a compiler/runtime bug:
 No fix needed for any of these; all are working-as-designed given
 genuinely broken input programs.
 
-## New localfuzz finding, documented not fixed: SSA-C has no `Vec` support at all
+## Localfuzz finding, initial diagnosis (SUPERSEDED by BUG-164 below -- the "no Vec support at all" framing was wrong)
+
+Keeping this section as-is for the record; see BUG-164 immediately
+below for what the ACTUAL root cause turned out to be once
+investigated further (explicitly requested as a follow-up) -- it was
+one specific, narrow return-type-spelling bug, not a missing feature.
 
 While investigating a wording mismatch on `20260810-124224-backend-
 divergence-e1322cfcd5` (LLVM printed the SSA-pair's static `"index out
@@ -11712,4 +11717,76 @@ SSA-C, a large undertaking, or accepting the wording split as
 permanent and documenting it -- which the tutorial update below
 already does).
 
-Next free bug number is **BUG-164**.
+## BUG-164 (2026-08-10) -- SSA-C rejected ANY Vec<T>-returning function, silently falling whole programs back to tree-C, FIXED
+
+The "SSA-C has no Vec support at all" item just above turned out, on
+closer investigation (explicitly requested as a follow-up), to be
+WRONG -- SSA-C already has substantial, working Vec support: `vec()`,
+indexing (checked and unchecked, `i64`/`u64` index types), `push`
+(both `let ys = push(xs, v)` and `xs = push(xs, v)` reassignment
+forms), `len`, `ref Vec<T>` / `mut ref Vec<T>` parameters, nested
+`Vec<Vec<T>>`, and `Vec<OwnedStr>` (heap-owning elements) ALL already
+worked, confirmed via direct bisection against `crate::ssa_backend_c::
+emit`. The actual, much narrower bug: `emit_function_prototype` and
+`emit_function` (both in `ssa_backend_c.rs`) spelled a function's
+RETURN type via a bare `c_type(&f.return_type)` call -- `c_type` only
+covers the scalar/string subset (its own error message says so) and
+has no `Type::Vec` arm at all. Every OTHER type position (parameters,
+block-param declarations, instruction-result declarations) already
+routed through `c_declarator`, which DOES fully support `Vec` (plus
+`Mutex`/`Guard`/`Channel`/`Atomic`) -- only the return-type spelling
+was left calling the narrower `c_type` directly. So ANY function whose
+OWN return type was `Vec<T>` (not just Vec used internally) failed
+`ssa_backend_c::emit` entirely with `"type Vec(...) is outside the
+SSA-C scalar/string subset"`, silently falling the WHOLE PROGRAM back
+to tree-C via `emit_c_via_ssa`'s existing fallback -- while the same
+program's LLVM side had no equivalent gap and took the SSA-LLVM fast
+path fine. This is exactly the shape localfuzz finding `e1322cfcd5`
+hit (`build_range(n: i64) -> Vec<i64>`, a `while` loop reassigning the
+Vec via `push`), and exactly why its C-side message ("index out of
+bounds: 5, len 5", the tree-C dynamic wording) didn't match its
+LLVM-side message ("index out of bounds", the SSA-pair static
+wording) even after BUG-162 fixed the underlying silence -- the two
+sides were on genuinely different backend PATHS for the same source.
+
+**Fixed**: both call sites now use `c_declarator(&f.return_type,
+"").trim_end().to_string()` instead of the bare `c_type(&f.return_type)`
+call, matching the parameter-declaration pattern immediately below
+each. As a side effect, this also fixes the identical latent bug for
+`Mutex<T>`/`Guard<T>`/`Channel<T,N>`-returning functions (same root
+cause, same fix, confirmed via a `Mutex<i64>`-returning function test)
+-- `Struct`/`Enum`/`Tuple`/`Closure`/`FnPtr` return types are NOT
+fixed by this change (structs are rejected earlier, at SSA LOWERING,
+not emit; the others were never confirmed reachable and remain
+whatever pre-existing behavior they had, out of scope here).
+
+Verified: `e1322cfcd5` and its `vec_bisect6`/`vec_bisect8`-style
+minimal reductions all now emit successfully via SSA-C; real
+`vanic run` output on `e1322cfcd5` now matches byte-for-byte between
+backends ("index out of bounds", `rc=3` LLVM / `rc=134` C -- exit
+codes deliberately still differ, only the message text was ever the
+gap). The base example (`examples/language/odia/control_flow.vani`)
+still produces correct output on both backends. Spot-checked 7 real
+corpus examples with Vec-returning functions (`array_proofs.vani`,
+`control_flow.vani`, `iter_combinators.vani`, `push_mut.vani`,
+`set_mut.vani`, `string_ops.vani`,
+`edge_vec_zip_different_lengths_guarded.vani`) -- LLVM/C output now
+identical on all 7 (previously C took the tree-C path for all of
+them; LLVM was already correct and unaffected, so matching it is
+strong correctness evidence). ASan/LSan/UBSan clean on 4 of those plus
+the `Vec<OwnedStr>`-returning and nested-`Vec<Vec<i64>>`-returning
+test cases (checking specifically for leaks/UAF in this newly-
+exercised return-path, given the codebase's history of Vec-ownership
+bugs). `vanic check examples` baseline unchanged (923 ok). Corpus-wide
+`tools/leak_sweep.py` sweep still matches the 4-item baseline exactly.
+Full `cargo test --release` clean, including both SSA crosscheck
+tests (`ssa_c_backend_matches_expected_exit_codes`,
+`ssa_llvm_backend_matches_expected_exit_codes`) which independently
+confirm no corpus-wide behavioral regression from this dispatch-path
+change. 3 new regression tests (2 `src/lib.rs` compile-checks via
+`crate::ssa::lower_program` + `crate::ssa_backend_c::emit` directly --
+including a Var-sourced, non-loop-carried regression guard -- 1
+real-subprocess `tests/run_end_to_end.rs` test confirming message
+parity with exit codes deliberately unchanged).
+
+Next free bug number is **BUG-165**.

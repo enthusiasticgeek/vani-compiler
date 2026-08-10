@@ -3,17 +3,18 @@
 **STATUS (2026-08-10): Category 1's two cheapest pickups FIXED
 (BUG-160, BUG-161); Category 3's overflow/bounds-divergence theme also
 FIXED (BUG-162), plus the struct-field-Vec bounds crash it surfaced
-also FIXED (BUG-163); all 8 localfuzz timeout findings investigated
-and confirmed as corpus artifacts (genuinely broken mutated programs),
-not compiler bugs.** See `docs/TODO_CURRENT.md` for the full
-writeups. This is now a partial-progress candidate list, not a
-from-scratch one: Category 2 is untouched (by design -- those 4 are
-non-fixes); Category 1's general (ordinary-user-function) case remains
-deliberately unscoped/open; Category 3's timeout cluster is fully
-resolved (no fix needed -- see below), but it gained a new,
-much-larger, NOT-pursued candidate: SSA-C has no `Vec<T>` support at
-all, causing per-program SSA/tree divergence on the C side independent
-of anything BUG-162 touched.
+also FIXED (BUG-163), plus the SSA-C-vs-SSA-LLVM wording-mismatch gap
+it surfaced ALSO FIXED (BUG-164 -- turned out to be one narrow
+return-type-spelling bug, NOT "SSA-C has no Vec support" as first
+suspected); all 8 localfuzz timeout findings investigated and
+confirmed as corpus artifacts (genuinely broken mutated programs), not
+compiler bugs.** See `docs/TODO_CURRENT.md` for the full writeups.
+This is now a partial-progress candidate list, not a from-scratch one:
+Category 2 is untouched (by design -- those 4 are non-fixes); Category
+1's general (ordinary-user-function) case remains deliberately
+unscoped/open; Category 3's timeout cluster is fully resolved (no fix
+needed) and its SSA-C wording gap is ALSO fully resolved -- nothing
+outstanding in Category 3 as of BUG-164.
 
 Three source categories, each its own section below:
 1. More instances of BUG-159's exact bug family (OwnedStr auto-borrow
@@ -332,21 +333,22 @@ message, LLVM exits silently with rc=3 + empty stderr):
   fix.
 - **`20260810-124224-backend-divergence-e1322cfcd5`** (base `examples/
   language/odia/control_flow.vani`) -- an out-of-range Vec index.
-  Re-ran against the current binary: no longer silent on either side
-  (BUG-162 worked), but the exact WORDING still differs -- LLVM prints
-  the SSA-pair's static `"index out of bounds"`, C prints the
-  tree-pair's dynamic `"index out of bounds: 5, len 5"`. Root-caused:
-  this program uses `Vec<i64>`, and `ssa_backend_c::emit` explicitly
-  rejects ANY `Vec<T>` (`"type Vec(...) is outside the SSA-C scalar/
-  string subset"`) while SSA-LLVM has no such restriction -- so this
-  program's LLVM side takes the SSA fast path while its C side falls
-  back to tree-C, independently, for the same source. NOT a BUG-162
-  bug (the silence is fixed); a separate, much larger, pre-existing
-  architectural gap (SSA-C has no Vec support at all). See `docs/
-  TODO_CURRENT.md`'s "SSA-C has no Vec support at all" section for the
-  full writeup. Not fixed, not a quick pickup -- would mean either
-  implementing Vec in SSA-C or accepting the wording split as
-  permanent (current call: accept it, documented in the tutorials).
+  FIXED (2026-08-10, BUG-164, at direct request as a follow-up).
+  Initial diagnosis (kept below for the record) suspected "SSA-C has
+  no Vec support at all" -- WRONG on closer investigation: SSA-C
+  already had substantial, working Vec support (indexing, push, len,
+  ref params, nested Vec, Vec<OwnedStr>, all confirmed via direct
+  bisection). The actual bug was one narrow spot:
+  `emit_function_prototype`/`emit_function` in `ssa_backend_c.rs`
+  spelled a function's RETURN type via a bare `c_type(&f.return_type)`
+  call instead of `c_declarator` (used for every parameter type right
+  below it) -- `c_type` has no `Type::Vec` arm, `c_declarator` does.
+  So only functions whose OWN return type was `Vec<T>` (like this
+  repro's `build_range(n: i64) -> Vec<i64>`) failed and fell back to
+  tree-C; Vec used any other way already worked via SSA-C. Fixed by
+  routing both call sites through `c_declarator`. Full writeup, original
+  (superseded) diagnosis, and verification results in
+  `docs/TODO_CURRENT.md`'s BUG-164 section.
 - `20260810-124633-run-crash-d669b7fd24` (mix_conc_channel_send_recv.vani)
   and `20260810-142721-run-crash-22c8c106e2` (spanish/
   async_cancel_auto.vani) -- both timeout findings, folded into the

@@ -14470,3 +14470,79 @@ fn main() -> i64 {
         String::from_utf8_lossy(&c_out.stderr)
     );
 }
+
+#[test]
+fn bug164_vec_returning_function_now_matches_between_backends_on_c() {
+    // BUG-164 (2026-08-10): a function whose return type is `Vec<T>`
+    // used to fail SSA-C's `emit` entirely (`c_type` has no
+    // `Type::Vec` arm, and the return-type spelling bypassed
+    // `c_declarator`, which DOES support Vec), silently falling the
+    // whole program back to tree-C -- while the SAME program took the
+    // SSA-LLVM fast path fine. This caused the two C backends' own
+    // pre-existing message-wording difference (SSA-C: static "index
+    // out of bounds"; tree-C: dynamic "index out of bounds: N, len
+    // M") to surface as an apparent LLVM-vs-C divergence. This is the
+    // exact shape from localfuzz finding e1322cfcd5 (a `while` loop
+    // reassigning a Vec via `push`, then indexing out of range in a
+    // helper function taking `ref Vec<i64>`). Real-subprocess run
+    // confirming the C and LLVM messages now match (both take the SSA
+    // path, so both use the SSA-pair's static wording).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug164-ssa-c-vec-return",
+        r#"
+fn sum(xs: ref Vec<i64>) -> i64 {
+  let total: i64 = 0;
+  let i: u64 = 0;
+  let n: u64 = len(xs);
+  while i < n {
+    i = i + 1;
+    total = total + xs[i];
+  }
+  return total;
+}
+fn build_range(n: i64) -> Vec<i64> {
+  let xs: Vec<i64> = vec(0);
+  let i: i64 = 1;
+  while i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  return xs;
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = build_range(5);
+  let total: i64 = sum(ref xs);
+  return total;
+}
+"#,
+    );
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    // Exit codes deliberately still differ (LLVM: exit(3), C: raw
+    // abort()/SIGABRT -> 134) -- that split is intentional and
+    // untouched by this fix (see BUG-106/113/115/117/120). What
+    // BUG-164 fixes is the MESSAGE TEXT: before the fix, this program
+    // would take the SSA path on LLVM (static "index out of bounds")
+    // but silently fall back to tree-C (dynamic "index out of
+    // bounds: N, len M") -- now both take the SSA path, so both use
+    // the SSA-pair's own static wording.
+    assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code unaffected");
+    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert_eq!(
+        String::from_utf8_lossy(&llvm_out.stderr),
+        String::from_utf8_lossy(&c_out.stderr),
+        "stderr message text must match between backends now (both take the SSA path)"
+    );
+    assert!(
+        String::from_utf8_lossy(&llvm_out.stderr).contains("index out of bounds"),
+        "expected an out-of-bounds trap (the loop reads xs[i] one past the end), got: {:?}",
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+}

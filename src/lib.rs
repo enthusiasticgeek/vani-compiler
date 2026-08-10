@@ -42513,6 +42513,81 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug164_ssa_c_function_returning_vec_no_longer_falls_back_to_tree_c() {
+        // BUG-164 (2026-08-10): found investigating a localfuzz
+        // finding (20260810-124224-backend-divergence-e1322cfcd5)
+        // whose C-backend stderr wording ("index out of bounds: 5,
+        // len 5", the tree-C dynamic message) didn't match its LLVM
+        // stderr wording ("index out of bounds", the SSA-pair static
+        // message) even after BUG-162 fixed the underlying silence.
+        // Root cause: `emit_function_prototype`/`emit_function` in
+        // ssa_backend_c.rs spelled the function's RETURN type via a
+        // bare `c_type(&f.return_type)` call instead of
+        // `c_declarator` (used for every PARAMETER type in the very
+        // next few lines) -- `c_type` only covers the scalar/string
+        // subset and has no `Type::Vec` arm, so ANY function whose
+        // return type is `Vec<T>` failed SSA-C's `emit` entirely,
+        // silently falling the WHOLE PROGRAM back to tree-C, even
+        // though every OTHER Vec construct (indexing, push, len, ref
+        // params -- confirmed via direct bisection) already worked
+        // fine via SSA-C. Since SSA-LLVM has no equivalent gap, this
+        // caused the SAME program to take the SSA path on LLVM but
+        // the tree path on C, independently -- exposing the two
+        // C backends' own pre-existing wording difference as an
+        // LLVM-vs-C divergence that looked new.
+        let source = r#"
+            fn build_range(n: i64) -> Vec<i64> {
+              let xs: Vec<i64> = vec(0);
+              let i: i64 = 1;
+              while i < n {
+                xs = push(xs, i);
+                i = i + 1;
+              }
+              return xs;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = build_range(5);
+              return len(xs) as i64;
+            }
+        "#;
+        let checked = compile(source).expect("Vec-returning function compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module)
+            .expect("a Vec<T>-returning function must compile via SSA-C, not fall back to tree-C");
+        assert!(
+            c.contains("intent_vec_int64_t fn_build_range("),
+            "expected the return-type declarator to spell the Vec struct type \
+             directly in the function signature, got:\n{}",
+            &c[..c.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn bug164_ssa_c_var_sourced_vec_return_does_not_regress() {
+        // BUG-164 regression guard: a function returning an existing
+        // Var-sourced Vec (no loop-carry at all) must keep working --
+        // this already passed before the fix (it doesn't exercise the
+        // loop-carried block-param shape that originally surfaced the
+        // bug), so this just locks in that the fix doesn't disturb it.
+        let source = r#"
+            fn identity(xs: Vec<i64>) -> Vec<i64> {
+              return xs;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = identity(xs);
+              return len(ys) as i64;
+            }
+        "#;
+        let checked = compile(source).expect("identity Vec function compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module)
+            .expect("Var-sourced Vec return must still compile via SSA-C");
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

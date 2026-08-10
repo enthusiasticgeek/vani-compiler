@@ -195,18 +195,18 @@ There are actually TWO C backends (and two LLVM backends) under the
 hood: a fast "SSA" path for the common case, and a slower "tree"
 fallback for constructs the SSA path doesn't (yet) support -- picked
 per-program, independently on each of the four backend/path
-combinations. As of 2026-08-10, `Vec<T>` is one such gap: SSA-LLVM
-supports it, SSA-C does not (`"type Vec(...) is outside the SSA-C
-scalar/string subset"`) -- so a program using `Vec` can take the SSA
-path on the LLVM side while silently falling back to tree-C on the C
-side, for the exact same source. Since the SSA and tree pairs already
-spell their OWN messages slightly differently from each other (see the
-wording caveat in the table above), this means the message text for
-the identical trap, on the identical source file, can differ across
-`--backend=c` runs of DIFFERENT programs depending on which path each
-one happens to take -- not a bug, just a consequence of the fallback
-architecture. If you're scripting against these messages, match on a
-substring (e.g. `"integer overflow"`, `"index out of bounds"`) rather
+combinations. `Vec<T>` used to be one such gap as of early
+2026-08-10 (a program using `Vec` could take the SSA path on LLVM
+while silently falling back to tree-C on the C side, purely because a
+function's own RETURN type happened to be `Vec<T>`) -- fixed later
+the same day (BUG-164); `Vec` now takes the SSA path consistently on
+both backends whenever the rest of the program is otherwise eligible.
+Since the SSA and tree pairs already spell their OWN messages slightly
+differently from each other (see the wording caveat in the table
+above), a remaining, not-yet-audited construct could still trigger the
+same kind of split for some OTHER type or shape -- if you're scripting
+against these messages, match on a substring (e.g. `"integer
+overflow"`, `"index out of bounds"`) rather
 than the full exact string.
 
 **Aside -- `ensures` and `invariant` both have a runtime backstop now.**
