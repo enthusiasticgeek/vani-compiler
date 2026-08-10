@@ -11236,4 +11236,18 @@ real-subprocess, both backends). Full `cargo test --release` clean
 ASan/LeakSanitizer sweep re-run after the fix to confirm no other
 regressions -- see `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
 
+**IMPORTANT UPDATE, same day**: the "`__poll_*` caveat" above turned
+out to be misdiagnosed as async-specific. It's actually a GENERAL,
+pre-existing heap-use-after-free in the checker's `OwnedStr -> Str`
+auto-borrow, reachable from ordinary non-async code via
+`Stmt::FieldAssign` (`h.s = owned;` where `owned`'s scope is narrower
+than `h`'s) and `StructLit` field init (`return Holder { s: owned,
+.. };`) -- the async transform's `__poll_*` codegen just happens to
+synthesize the same `FieldAssign` shape internally. Found while
+writing the tutorial's workaround note for the async caveat -- the
+proposed two-`let` workaround itself use-after-frees, which is what
+led to finding the general repro. Full writeup, both minimal repros,
+and why it's not being fixed this session in
+`docs/BUG_PATTERN_AUDIT_TODO_8.md`'s "IMPORTANT UPDATE" section.
+
 Next free bug number is **BUG-158**.

@@ -191,6 +191,41 @@ fn main() -> i64 {
 The `owned` binding stays alive; only a read-only pointer is
 passed. `owned` is freed at end of `main`.
 
+The same auto-coercion also works when you narrow a **fresh**
+`OwnedStr`-producing call straight into a `Str`-typed `let`, with
+no intermediate `OwnedStr` binding of your own:
+
+```vani
+fn main() -> i64 {
+  let label: Str = i64_to_str(42);   // fresh OwnedStr narrowed to Str
+  print label;
+  return 0;
+}
+```
+
+The compiler transparently keeps an `OwnedStr` behind the scenes
+to own the allocation and free it at scope exit — `label` itself
+is just a read-only view into it, same as the function-argument
+case above. You don't need to write the two-step form
+(`let tmp: OwnedStr = i64_to_str(42); let label: Str = tmp;`)
+yourself; either form works identically.
+
+> **Caveat (async fn bodies only)**: inside an `async fn`, this
+> exact narrowing pattern (`let label: Str = <fresh OwnedStr
+> call>;`) currently leaks the allocation instead of freeing it.
+> The async state-machine transform hoists locals it recognizes
+> into persistent per-coroutine state before the checker ever sees
+> the body, and its handling of an `OwnedStr`-owns/`Str`-views-into
+> relationship across a suspend point isn't sound yet — the
+> compiler-managed temp described above isn't safe to introduce
+> there. Splitting it into two `let`s yourself
+> (`let tmp: OwnedStr = i64_to_str(mode); let label: Str = tmp;`)
+> is **not** a safe workaround either — it still compiles, but
+> trades the leak for a heap-use-after-free instead, which is
+> worse. There is currently no source-level workaround that avoids
+> both; the fix has to be in the async transform itself. Tracked in
+> `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
 ### Copying a `Str` literal into an `OwnedStr`
 
 To get an owned copy of a literal, concatenate with an empty

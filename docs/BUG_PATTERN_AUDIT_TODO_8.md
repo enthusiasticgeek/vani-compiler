@@ -2,13 +2,18 @@
 
 **STATUS (2026-08-09): 5 real bugs FIXED (BUG-153, BUG-154 -- the
 latter general and severe -- plus BUG-155/156/157, all fixed in
-same-day follow-up sessions at direct request). The async `__poll_*`
-leak cluster (4 files) is deliberately LEFT UNFIXED -- BUG-157's
-first attempt at fixing it turned the leak into a heap-use-after-free
-there; the general (non-async) case is fixed, the async case needs
-the parser's async transform itself to change, which is out of scope
-here. 2 false positives and 2 low-severity UB findings triaged, not
-fixed (see below for why).**
+same-day follow-up sessions at direct request). One finding
+DELIBERATELY LEFT OPEN, and it turned out bigger than first framed:
+the async `__poll_*` leak cluster (4 files) is not actually an async
+bug at all -- it's a GENERAL, pre-existing heap-use-after-free in the
+checker's `OwnedStr -> Str` auto-borrow reachable from ordinary
+non-async code (`h.s = owned;` field assignment, or a struct literal
+field init, where the `OwnedStr` source's own scope is narrower than
+the struct's) -- see the "IMPORTANT UPDATE" section below for the
+full story, found while writing the tutorial workaround note. Not
+fixed this session -- needs real escape-analysis design work, not a
+rushed attempt. 2 false positives and 2 low-severity UB findings
+triaged, not fixed (see below for why).**
 
 Directly requested: "pick a round-8 theme... my worry is always
 memory and leaks - this is absolutely uncompromised requirement for
@@ -244,6 +249,84 @@ case looks obviously correct.
 2 regression tests added to `src/lib.rs`, 1 to
 `tests/run_end_to_end.rs` (real-subprocess, both backends). Full
 writeup in `docs/TODO_CURRENT.md`'s BUG-157 section.
+
+## IMPORTANT UPDATE (2026-08-09, same day): the "async transform" framing above was wrong -- this is a GENERAL, non-async, pre-existing heap-use-after-free
+
+While updating the tutorial to explain the `__poll_` caveat, I tried
+to describe a source-level workaround for users hitting it (split
+`let label: Str = i64_to_str(mode);` into two `let`s, matching the
+already-confirmed-safe pattern). **That "workaround" also
+use-after-frees.** Testing it revealed the real bug is not in the
+async transform at all -- it's a general gap in the checker's
+`OwnedStr -> Str` auto-borrow that the async transform's own codegen
+happens to trigger, but which is fully reachable from ordinary,
+completely non-async code:
+
+```vani
+struct Holder { s: Str, n: i64 }
+fn main() -> i64 {
+  let h: Holder = Holder { s: "", n: 0 };
+  {
+    let owned: OwnedStr = i64_to_str(99);
+    h.s = owned;      // FieldAssign: OwnedStr auto-borrowed to Str
+  }                    // owned's scope ends HERE -- freed
+  print h.s;           // heap-use-after-free: h.s aliases owned's freed buffer
+  return 0;
+}
+```
+```vani
+struct Holder { s: Str, n: i64 }
+fn make() -> Holder {
+  let owned: OwnedStr = i64_to_str(77);
+  return Holder { s: owned, n: 1 };   // StructLit field init, same coercion
+}
+fn main() -> i64 {
+  let h: Holder = make();   // owned's scope (make's body) ends -- freed
+  print h.s;                // heap-use-after-free
+  return 0;
+}
+```
+Both confirmed via direct ASan runs: `heap-use-after-free` on the
+`print`/`fputs` read, `freed by` traced straight to the OwnedStr
+local's own ordinary scope-exit Drop. Root cause is the SAME
+`can_assign` assumption BUG-157 already found unsound for `Stmt::Let`
+("the OwnedStr binding stays live; its drop fires at the original
+scope's end") -- but here it's `Stmt::FieldAssign`'s own
+`coerce_checked` call (checker.rs ~line 14935) that has the identical
+gap: the source `OwnedStr` local's own (correctly-scoped, narrower)
+lifetime ends before the struct/container it was written into (which
+outlives that scope) is done reading the aliased `Str` view. The
+async transform's `__poll_*` codegen just happens to synthesize
+exactly this `FieldAssign` shape internally when hoisting a
+cross-state `Str` local -- it isn't the root cause, just one caller
+that reaches it. `StructLit`'s field-init coercion likely shares the
+identical gap (confirmed above); other escape vectors (`Vec` push, a
+struct passed by value into another escaping container, etc.) were
+not individually checked and should be assumed similarly affected
+until proven otherwise.
+
+**Deliberately NOT fixed this session.** This is more general and
+more severe than the narrow "hoist checker-synthesized temps" framing
+originally used above for the `__poll_` caveat, and a correct general
+fix needs real design work (either reject the coercion at compile
+time when the source's scope is provably narrower than the
+destination's -- a real escape-analysis feature that doesn't exist
+yet in any form -- or make the coercion an actual ownership transfer
+in these escaping-write positions specifically, suppressing the
+source's own drop, which needs to be done without breaking the
+already-correct, already-tested `Var`-to-already-live-binding case).
+Attempting this at the tail of an already very long session, right
+after the BUG-157 near-miss already demonstrated how easy it is to
+turn a leak into a worse UAF in this exact area, would repeat the
+same mistake at a larger scale. This needs a dedicated session with
+full attention, not a rushed attempt.
+
+`tools/leak_sweep_baseline.json`'s existing entries do NOT need
+updating for this -- neither of the two new repros above went through
+the sweep corpus (they're new minimal repros written to investigate
+the caveat, not files under `examples/`), so this remains an
+open, documented finding rather than something the CI sweep is
+currently either catching or missing.
 
 ## Done: wired into CI (2026-08-09, same day)
 
