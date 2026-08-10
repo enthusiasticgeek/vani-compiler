@@ -5177,3 +5177,27 @@ Repro: `tools/localfuzz/findings/20260810-231940-backend-divergence-c5692c451a/r
 Fix attempt: `tools/localfuzz/findings/20260810-231940-backend-divergence-c5692c451a/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-232910-backend-divergence-b7f876dbea
+
+Repro: `tools/localfuzz/findings/20260810-232910-backend-divergence-b7f876dbea/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-232910-backend-divergence-b7f876dbea/fix_attempt.md`
+
+## CANDIDATE BUG REPORT FOR THE VANI-COMPILER LOCAL STAGING LOG
+
+**Summary:**
+The vani-compiler project encountered a backend-divergence issue, specifically involving the function `fn_main` and its closure usage in a block expression.
+
+**Mutation Kind:** backend-divergence
+
+**Raw Result Data:**
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 1,
+    "stdout": "",
+    "stderr": "cc failed while compiling '/tmp/vanic-candidate-1907035-1786404549457083165.c' (left at this path for debugging):\n/tmp/vanic-candidate-1907035-1786404549457083165.c: In function \u2018fn_main\u2019:\n/tmp/vanic-candidate-1907035-1786404549457083165.c:330:56: error: called object \u2018v_f\u2019 is not a function or function pointer\n  330 |   int64_t v_result = ({ void* v_f = (fn___anon_fn_0); (v_f(1)); });\n      |                                                        ^~~\n/tmp/vanic-candidate-1907035-1786404549457083165.c:330:31: note: declared here\n  330 |   int64_t v_result = ({ void* v_f = (fn___anon_fn_0); (v_f(1)); });
