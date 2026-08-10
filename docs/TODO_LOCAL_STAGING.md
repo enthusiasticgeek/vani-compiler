@@ -4894,3 +4894,14 @@ Repro: `tools/localfuzz/findings/20260810-165451-run-crash-e2447c8ead/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260810-165451-run-crash-e2447c8ead/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-170656-backend-divergence-8ceea3f964
+
+Repro: `tools/localfuzz/findings/20260810-170656-backend-divergence-8ceea3f964/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-170656-backend-divergence-8ceea3f964/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+A vanic run with the mutant generated source produced a backend-divergence result, indicating that the C and LLVM backends produced different outputs for the same input. Specifically, LLVM crashed with an integer overflow error in the addition of two integers, while C did not crash but diverged by printing "integer overflow in int64_t add" and exiting with code 3. This suggests a potential bug related to handling large numbers or overflow in the `n = n + -9223372036854775808;` operation, which could be causing divergent behavior between different backends.
