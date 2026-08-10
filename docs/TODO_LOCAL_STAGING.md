@@ -4596,3 +4596,12 @@ The input corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/langu
 ಕಾರ್ಯ add(a: i64, b: i64) -> i64
 ಅಗತ್ಯ a >= 0;
 
+
+---
+
+### Candidate: 20260810-024150-backend-divergence-8e74a245e6
+
+Repro: `tools/localfuzz/findings/20260810-024150-backend-divergence-8e74a245e6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-024150-backend-divergence-8e74a245e6/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
