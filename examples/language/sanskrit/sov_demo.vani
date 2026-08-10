@@ -24,34 +24,34 @@
 
 उद्देश्य "Sanskrit SOV showcase — all verb-at-end shapes in one file";
 
-कार्य add(a: i64, b: i64) -> i64 {
-  a + b पुनरागम;
+कार्य योग(क: i64, ख: i64) -> i64 {
+  क + ख पुनरागम;
 }
 
-कार्य main() -> i64 {
+कार्य मुख्य() -> i64 {
   // SOV-S1: let-binding verb-at-end. Reads as
   // "doubled of type i64 [equals] 5 times 2 [is] let".
-  doubled: i64 = 5 * 2 माना;
-  triple: i64 = doubled * 3 / 2 माना;
+  द्विगुणित: i64 = 5 * 2 माना;
+  त्रिगुणित: i64 = द्विगुणित * 3 / 2 माना;
 
   // Existing SOV: prove + assert + print verb-at-end.
   2 + 2 == 4 प्रमाण;
-  triple >= doubled सिद्धम्;
-  "doubled = ", doubled, ", triple = ", triple लिख;
+  त्रिगुणित >= द्विगुणित सिद्धम्;
+  "doubled = ", द्विगुणित, ", triple = ", त्रिगुणित लिख;
 
   // Existing SOV: range-for (Sanskrit `प्रति`).
   // Note: `माना` (mānā) is always a let-binding (not re-
   // assignment); use the bare `=` operator for in-loop mutation.
-  acc: i64 = 0 माना;
-  i प्रति 0 से 3 तक {
-    acc = acc + i;
+  संकलनम्: i64 = 0 माना;
+  इ प्रति 0 से 3 तक {
+    संकलनम् = संकलनम् + इ;
   }
-  "loop sum = ", acc लिख;
+  "loop sum = ", संकलनम् लिख;
 
   // Function call + return verb-at-end. Print the result (so the
   // demo shows the computed value) and exit 0 (so the test
   // runner's exit-code gate sees success).
-  result: i64 = add(doubled, triple) माना;
-  "add(doubled, triple) = ", result लिख;
+  फलम्: i64 = योग(द्विगुणित, त्रिगुणित) माना;
+  "add(doubled, triple) = ", फलम् लिख;
   0 पुनरागम;
 }

@@ -7,21 +7,21 @@
 
 उद्देश्य "L2 follow-up — Box<Vec<T>> + Box<OwnedStr> recursive drop (Marathi)";
 
-संरचना Bag {
-  contents: Box<Vec<i64>>,
+संरचना पिशवी {
+  सामग्री: Box<Vec<i64>>,
 }
 
-कार्य main() -> i64 {
-  मान v: Vec<i64> = vec(10, 20, 30);
-  मान b: Box<Vec<i64>> = box(v);
+कार्य मुख्य() -> i64 {
+  मान क: Vec<i64> = vec(10, 20, 30);
+  मान ख: Box<Vec<i64>> = box(क);
   लिहा "constructed Box<Vec<i64>>";
 
-  मान v2: Vec<i64> = vec(7, 8, 9);
-  मान bag: Bag = Bag { contents: box(v2) };
+  मान ग: Vec<i64> = vec(7, 8, 9);
+  मान घ: पिशवी = पिशवी { सामग्री: box(ग) };
   लिहा "constructed Bag";
 
-  मान s: OwnedStr = "hi" + "!";
-  मान bs: Box<OwnedStr> = box(s);
+  मान ङ: OwnedStr = "hi" + "!";
+  मान च: Box<OwnedStr> = box(ङ);
   लिहा "constructed Box<OwnedStr>";
 
   परत 0;

@@ -958,6 +958,24 @@ fn to_fp(ty: &Type) -> Option<&'static str> {
     }
 }
 
+/// BUG-167 (2026-08-10): every non-ASCII character used to collapse
+/// to the same bare `_`, so any two multi-byte (e.g. Devanagari,
+/// Han, Cyrillic) identifiers of equal character COUNT sanitized to
+/// the IDENTICAL SMT symbol -- e.g. two different one-character
+/// Devanagari variable names (क, ख) both produced `v__`. Z3 then saw
+/// one aliased variable standing in for two distinct program
+/// variables, and either returned `unknown` (observed: a trivially
+/// true `prove` clause failed to discharge) or, more seriously,
+/// could silently accept an UNSOUND proof by conflating the two
+/// variables' constraints -- this is a formal-verification
+/// soundness bug, not just a spurious rejection, found auditing
+/// Sanskrit/Hindi/Marathi keyword parity when translating example
+/// identifiers to Devanagari for the first time surfaced it. Fixed
+/// by hex-encoding each non-ASCII character's codepoint instead of
+/// collapsing it -- this is an injective (collision-free) mapping
+/// from the full identifier to an ASCII-only, valid SMT-LIB simple
+/// symbol, so distinct source identifiers always sanitize to
+/// distinct SMT symbols regardless of script.
 fn sanitize(name: &str) -> String {
     let mut buf = String::with_capacity(name.len() + 1);
     buf.push('v');
@@ -966,6 +984,8 @@ fn sanitize(name: &str) -> String {
         if ch.is_ascii_alphanumeric() || ch == '_' {
             buf.push(ch);
         } else {
+            buf.push('_');
+            buf.push_str(&format!("{:x}", ch as u32));
             buf.push('_');
         }
     }

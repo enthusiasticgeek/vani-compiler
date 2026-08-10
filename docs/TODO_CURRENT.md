@@ -11820,3 +11820,155 @@ parity with exit codes deliberately unchanged).
   future reference, not a fix candidate.
 
 Next free bug number is **BUG-165**.
+
+## BUG-166 (2026-08-10) -- mojibake-corrupted async/await spellings (4 languages) + eprint zero non-English coverage + 2 dialect-purity violations, FIXED
+
+Triggered by a full Sanskrit/Hindi/Marathi structure-keyword parity
+audit (all 46 `is_structure_keyword_kind` TokenKinds x 3 dialects).
+
+- `src/parser.rs`'s `is_async_ident`/`is_await_ident` had been
+  byte-corrupted since their 2026-06-08 ship: the Devanagari/Chinese/
+  Japanese string literals were valid UTF-8 that had been misread as
+  Latin-1/Windows-1252 and re-encoded (double-encoding mojibake).
+  Silently broke `async`/`await` in Sanskrit, Hindi, Marathi, and
+  Mandarin -- Japanese's example accidentally worked because it used
+  literal ASCII `async`/`await`. Recovered the correct words from
+  clean, independently-typed copies in `docs/archive/
+  grammar_review_queue.md` and `tutorials/src/advanced/01_async.md`,
+  fixed via a byte-level Python script (the `Edit` tool's string
+  match failed on the corrupted bytes).
+- The doc comment above `canonicalize_entry_point_name` was similarly
+  mojibake-corrupted -- but the actual match arm (`"main" | "मुख्य" |
+  "प्रमुख" | "प्रधान" => "main"`) was never broken, only the comment
+  describing it. This confirms `मुख्य`/`प्रमुख`/`प्रधान`/`main` all
+  already work as entry-point aliases in every dialect, unconditional
+  on the file's declared `vani-lang` pragma.
+- `TokenKind::EPrint` had exactly one spelling in the whole lexer
+  (`"eprint"`, ASCII) -- zero non-English coverage. Added Sanskrit
+  `त्रुटिलिख`, Hindi `त्रुटिलिखो`, Marathi `दोषलिहा` (compounds of
+  the existing "error" root the compiler's own diagnostics use,
+  combined with the same "write" verb roots `print` already uses).
+- `examples/language/sanskrit/keywords.vani` and `examples/language/
+  hindi/keywords.vani` mixed in words from the WRONG dialect (e.g.
+  Hindi's `फलन` inside a `vani-lang: sanskrit` file) under their own
+  strict per-file pragma -- fixed to use only words the declared
+  dialect's `spelling_supports_dialect` table actually accepts.
+
+Regression test: `bug166_sanskrit_hindi_marathi_structure_keyword_parity`
+in `src/lib.rs` -- mechanically extracts every spelling from
+`devanagari_keyword`/`multi_word_devanagari_keyword` and the 46
+required TokenKinds from `is_structure_keyword_kind`, asserts every
+kind has >=1 spelling per dialect. Passed 46/46 after the eprint fix
+(previously 45/46, eprint the only gap).
+
+## BUG-167 (2026-08-10) -- SMT identifier sanitizer collapsed ALL non-ASCII chars to one underscore, aliasing distinct variables, FIXED (soundness bug)
+
+The most significant finding of this pass. `src/smt.rs`'s
+`sanitize(name: &str) -> String` (builds Z3/SMT-LIB symbol names for
+`requires`/`ensures`/`prove`/`invariant` verification) collapsed
+EVERY non-ASCII character to a single bare `_`. Two different
+single-character Devanagari parameter names (e.g. क and ख) both
+sanitized to the identical SMT symbol (`v__`), so Z3 treated two
+distinct program variables as aliased to one symbol.
+
+Found because a trivially-true `prove` clause (`क - ख >= 0` given
+`क >= ख` and `ख >= 0`) failed to discharge ("SMT solver returned
+'unknown'") while translating `verified.vani`'s parameter names to
+Devanagari. This is a formal-verification soundness bug, not merely
+a spurious-rejection one -- the same aliasing mechanism could in
+principle let an unsound claim pass by conflating two variables'
+constraints, not just fail a sound one.
+
+This exact bug class (collapse-to-single-underscore causing
+collision) was already found and fixed in `backend_c.rs`'s analogous
+`sanitize_ident` on 2026-08-04 via localfuzz with Burmese identifiers
+(`က`/`ခ`) -- confirming the fix approach matches established
+precedent. Fix: hex-encode each non-ASCII character's codepoint
+(`_{hex}_`) instead of collapsing -- an injective mapping.
+
+Regression test:
+`bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers`
+in `src/lib.rs`.
+
+## BUG-168 (2026-08-10) -- LLVM/C backends spliced raw non-ASCII source names into target-language symbols at several call sites, FIXED
+
+Found opportunistically while verifying BUG-166/167's fixes against
+real Sanskrit example files translated to use Devanagari identifiers.
+Both backends already have correct, injective sanitizers
+(`llvm_mangle_ident` in `backend_llvm.rs`, `sanitize_ident` in
+`backend_c.rs`) -- the bug was specific call sites forgetting to
+route through them, splicing the raw source identifier directly into
+an LLVM register name or C symbol instead.
+
+- `backend_llvm.rs`: 1 site, the match-arm-binding `.addr` value-copy
+  path -- `format!("{}.{}.addr", ctx.fresh_tmp(), bname)` used raw
+  `bname` instead of `llvm_mangle_ident(bname)`. Produced invalid
+  LLVM IR (`lli: error: expected '=' after instruction name`).
+- `backend_c.rs`: 7 sites, all fixed to route through the existing
+  `sanitize_ident(name)` helper instead of splicing the raw name:
+  match-arm binding declaration; `TypedExprKind::Block`'s
+  `TypedStmt::Let` and `TypedStmt::Reassign` handling (incl. a nested
+  `While`-inside-Block occurrence); a separate `prelude_stmts` Let
+  loop (if-let/try-let desugar preludes); `enum_variant_member`
+  (mixed-payload enum union member names); `ForIterShallowFree`'s
+  collection field; a closure affine-call's `__env_sv_` uid
+  construction. Produced invalid C (`cc: 'v__u917_' undeclared`) via
+  `try_question_op.vani`'s `?`-operator desugar, which synthesizes a
+  match-arm binding and a `let`-in-block using the source's
+  Devanagari-named local.
+
+No dedicated regression test yet -- caught and verified only via
+manual real-example-file compilation on both backends. Consider
+adding a `tests/run_end_to_end.rs` case with a Devanagari-named local
+crossing a `?`-operator desugar, on both backends.
+
+## Sanskrit/Hindi/Marathi identifier localization (2026-08-10) -- all 38 example files, DONE
+
+Follow-up to BUG-166's keyword-parity audit: per explicit request,
+extended "minimize English" from structure keywords to ALL
+user-chosen identifiers (function/parameter/variable/struct/field/
+enum-variant names) across all 14 Sanskrit + 12 Hindi + 12 Marathi
+example files, plus the README's Sanskrit/verbose-English "same
+program, three ways" block. Comments and string-literal content
+(program output text) were deliberately left in English -- only code
+identifiers were in scope.
+
+Two collision classes discovered and worked around during the sweep
+(neither is a bug -- both are the dialect-purity/type-alias systems
+working as designed against a naive translation):
+
+- `सूची` (bare, no visarga) is the shared Devanagari alias for the
+  `Vec<T>` type name across dialects -- using it standalone as a
+  variable name trips "expected identifier". Fixed by using `सूचिः`
+  (with trailing visarga) for Vec-typed locals/params instead, and
+  reusing numbered variants (`सूचिः२`, `सूचिः३`) for multiple Vec
+  values in one scope. Compound names (e.g. `सूचीयोग` = "list-sum")
+  are unaffected since they're a different token entirely.
+- `विकल्प` (bare) is Sanskrit's own spelling of the `enum` keyword --
+  using it standalone as a variable name in a `vani-lang: hindi` or
+  `vani-lang: marathi` file trips the dialect-purity check (Hindi/
+  Marathi's own `enum` keyword is `गणन`). Fixed by using a single
+  generic letter (`व`) for `Option`-typed parameters in those files'
+  `option_types.vani`/`try_question_op.vani` instead.
+- `अन्यथा` is a keyword alias for `else` -- can't be reused as a
+  `default:`-style parameter name; renamed to `मूलभूत`/`मूलभूतम्`
+  ("basic/fundamental", the idiomatic word for "default") instead.
+
+Known remaining unavoidable-English items (documented, no existing
+dialect-alias mechanism found): `_return` (the special identifier an
+`ensures` clause uses for a function's own return value -- hardcoded
+`const RETURN_NAME: &str = "_return"` in `checker.rs`, no alias
+mechanism unlike `main`); the `Box<T>` type name (no Devanagari alias
+in the lexer's type-name table, unlike `Vec`/`सूची` or `i64`/
+`पूर्णांक`); builtin FUNCTION names generally (`vec`, `sort`, `push`,
+`len`, `box`, etc. -- only language keywords and type names have
+dialect aliases, by design).
+
+Verified per-file: `vanic check` (must say `ok:`) plus a byte-exact
+diff of `vanic run` output (both the default LLVM backend and
+`--backend=c`) against a pre-translation baseline captured for all
+38 files before any edits. Full-corpus re-verification after all 38
+files: `cargo test --release` (2880 lib tests + 12 other suites, 0
+failed), `vanic check examples` (940 ok, unchanged from the BUG-167
+post-fix baseline), `tools/leak_sweep.py` (935 compiled+run clean,
+4 flagged -- matches `tools/leak_sweep_baseline.json` exactly).

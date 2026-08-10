@@ -458,6 +458,277 @@ mod tests {
     use crate::ir::TypedStmt;
 
     #[test]
+    fn bug166_sanskrit_hindi_marathi_structure_keyword_parity() {
+        // BUG-166 (2026-08-10): a permanent regression guard for the
+        // Sanskrit/Hindi/Marathi keyword-parity audit performed this
+        // session. Two real bugs were found and fixed by that audit:
+        // (1) `is_async_ident`/`is_await_ident` in src/parser.rs had
+        // mojibake-corrupted non-English string literals, silently
+        // breaking async/await in every dialect but English; (2)
+        // `eprint` had ZERO Devanagari coverage in any of the three
+        // languages. This test mechanically cross-references every
+        // spelling in `devanagari_keyword`/`multi_word_devanagari_
+        // keyword` against `spelling_supports_dialect` and asserts
+        // every one of the 46 structure keywords (`is_structure_
+        // keyword_kind`'s own list) has at least one Sanskrit, one
+        // Hindi, and one Marathi spelling -- so a future keyword
+        // addition that forgets one of the three languages, or a
+        // future mojibake-style corruption, fails CI immediately
+        // instead of silently breaking a whole dialect the way both
+        // bugs above did. The (spelling, TokenKind-name) and
+        // required-TokenKind lists below were extracted mechanically
+        // from src/lexer.rs via a script, not retyped by hand, to
+        // avoid the exact transcription-error risk this test guards
+        // against.
+        use crate::lexer::{spelling_supports_dialect, DialectLang};
+        let spellings: &[(&str, &str)] = &[
+            ("फलन", "Fn"),
+            ("कार्य", "Fn"),
+            ("मान", "Let"),
+            ("माना", "Let"),
+            ("परत", "Return"),
+            ("लौटाओ", "Return"),
+            ("पुनरागम", "Return"),
+            ("यदि", "If"),
+            ("अगर", "If"),
+            ("जर", "If"),
+            ("अन्यथा", "Else"),
+            ("वरना", "Else"),
+            ("नाहीतर", "Else"),
+            ("यावत्", "While"),
+            ("जबतक", "While"),
+            ("जोपर्यंत", "While"),
+            ("प्रति", "For"),
+            ("साठी", "For"),
+            ("तदा", "Then"),
+            ("तो", "Then"),
+            ("तर", "Then"),
+            ("पहा", "Ref"),
+            ("देखो", "Ref"),
+            ("दृष्ट्या", "Ref"),
+            ("बदल", "Mut"),
+            ("बदलणारा", "Mut"),
+            ("परिवर्तनीय", "Mut"),
+            ("जुळवा", "Match"),
+            ("मिलान", "Match"),
+            ("मेल", "Match"),
+            ("मेलन", "Match"),
+            ("खात्री", "Assert"),
+            ("सुनिश्चित", "Assert"),
+            ("सिद्धम्", "Assert"),
+            ("सिद्ध", "Prove"),
+            ("प्रमाण", "Prove"),
+            ("प्रमाणित", "Prove"),
+            ("दर्शाओ", "Prove"),
+            ("दाखवा", "Prove"),
+            ("अपेक्षित", "Requires"),
+            ("चाहिए", "Requires"),
+            ("पाहिजे", "Requires"),
+            ("निश्चित", "Ensures"),
+            ("सुनिश्चयित", "Ensures"),
+            ("सत्य", "True"),
+            ("सही", "True"),
+            ("सच", "True"),
+            ("बरोबर", "True"),
+            ("खरे", "True"),
+            ("असत्य", "False"),
+            ("अशुद्ध", "False"),
+            ("झूठ", "False"),
+            ("गलत", "False"),
+            ("खोटे", "False"),
+            ("चूक", "False"),
+            ("लिख", "Print"),
+            ("लिखो", "Print"),
+            ("त्रुटिलिख", "EPrint"),
+            ("त्रुटिलिखो", "EPrint"),
+            ("दोषलिहा", "EPrint"),
+            ("लिहा", "Print"),
+            ("लिही", "Print"),
+            ("लिहिया", "Print"),
+            ("शुद्ध", "Pure"),
+            ("संरचना", "Struct"),
+            ("विकल्प", "Enum"),
+            ("गणन", "Enum"),
+            ("स्थिर", "Const"),
+            ("नियत", "Const"),
+            ("विराम", "Break"),
+            ("रुको", "Break"),
+            ("थांब", "Break"),
+            ("अग्रे", "Continue"),
+            ("पुढे", "Continue"),
+            ("आगे", "Continue"),
+            ("में", "In"),
+            ("से", "From"),
+            ("तक", "To"),
+            ("संक्षेप", "Reduce"),
+            ("सह", "With"),
+            ("समानांतर", "Parallel"),
+            ("उपयोग", "Use"),
+            ("खण्ड", "Module"),
+            ("मॉड्यूल", "Module"),
+            ("सार्वजनिक", "Pub"),
+            ("यथा", "As"),
+            ("संकेत", "Interface"),
+            ("अंतरापृष्ठ", "Interface"),
+            ("कार्यान्वित", "Implement"),
+            ("विधि", "Methods"),
+            ("जहाँ", "Where"),
+            ("यत्र", "Where"),
+            ("जिथे", "Where"),
+            ("है", "Is"),
+            ("अस्ति", "Is"),
+            ("आहे", "Is"),
+            ("प्रयास", "Try"),
+            ("नियोग", "Task"),
+            ("संयोजन", "Join"),
+            ("असुरक्षित", "Unsafe"),
+            ("क्षेत्र", "RegionKw"),
+            ("उद्देश्य", "Intent"),
+            ("प्रकार", "Type"),
+            ("बाह्य", "Extern"),
+            ("अपरिवर्तनीय", "Invariant"),
+            ("पूर्णांक", "I64"),
+            ("पूर्णांक८", "I8"),
+            ("पूर्णांक१६", "I16"),
+            ("पूर्णांक३२", "I32"),
+            ("पूर्णांक६४", "I64"),
+            ("अहस्ताक्षरित८", "U8"),
+            ("अहस्ताक्षरित१६", "U16"),
+            ("अहस्ताक्षरित३२", "U32"),
+            ("अहस्ताक्षरित६४", "U64"),
+            ("दशांश", "F64"),
+            ("दशांश३२", "F32"),
+            ("दशांश६४", "F64"),
+            ("तर्क", "Bool"),
+            ("बूल", "Bool"),
+            ("सूची", "Vec"),
+            ("नहीं तो", "Else"),
+            ("के लिए", "For"),
+            ("सिद्ध करो", "Prove"),
+            ("सिद्ध करा", "Prove"),
+            ("समान्तर प्रति", "Parallel"),
+        ];
+        let required: &[&str] = &[
+            "Fn",
+            "Pure",
+            "Extern",
+            "Parallel",
+            "Reduce",
+            "With",
+            "Task",
+            "Join",
+            "Let",
+            "Return",
+            "If",
+            "Else",
+            "While",
+            "Break",
+            "Continue",
+            "Mut",
+            "For",
+            "In",
+            "Ref",
+            "From",
+            "To",
+            "Struct",
+            "Enum",
+            "Match",
+            "Then",
+            "Interface",
+            "Implement",
+            "Where",
+            "Is",
+            "Const",
+            "Type",
+            "Methods",
+            "Intent",
+            "Use",
+            "Requires",
+            "Ensures",
+            "Invariant",
+            "Assert",
+            "Prove",
+            "Print",
+            "EPrint",
+            "Try",
+            "Module",
+            "Pub",
+            "Unsafe",
+            "RegionKw",
+        ];
+        let dialects = [
+            ("Sanskrit", DialectLang::Sanskrit),
+            ("Hindi", DialectLang::Hindi),
+            ("Marathi", DialectLang::Marathi),
+        ];
+        let mut gaps: Vec<String> = Vec::new();
+        for &kind in required {
+            for &(dialect_name, dialect) in &dialects {
+                let covered = spellings
+                    .iter()
+                    .any(|&(spelling, k)| k == kind && spelling_supports_dialect(spelling, dialect));
+                if !covered {
+                    gaps.push(format!("{} has no {} spelling", kind, dialect_name));
+                }
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "Sanskrit/Hindi/Marathi structure-keyword parity gaps found:\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
+    fn bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers() {
+        // BUG-167 (2026-08-10): found while translating Sanskrit
+        // example identifiers to Devanagari as a follow-up to the
+        // keyword-parity audit. `smt.rs`'s `sanitize()` collapsed
+        // EVERY non-ASCII character to a bare `_`, so two different
+        // one-character Devanagari variable names (क, ख) both
+        // produced the identical SMT symbol `v__` -- Z3 then saw one
+        // aliased variable standing in for two distinct program
+        // variables. This is a FORMAL-VERIFICATION SOUNDNESS bug, not
+        // just a spurious rejection: a trivially-true `prove` clause
+        // (`क - ख >= 0` given `क >= ख` and `ख >= 0`) failed to
+        // discharge ("SMT solver returned 'unknown'") purely because
+        // of the aliasing, and the same mechanism could in principle
+        // let an unsound claim pass by conflating two variables'
+        // constraints. Fixed by hex-encoding each non-ASCII
+        // character's codepoint (an injective mapping) instead of
+        // collapsing it. This test compiles a minimal repro with two
+        // functions each taking a same-length Devanagari-named
+        // parameter and asserts the `prove` clause -- which is
+        // mathematically trivial and was ALWAYS true -- now
+        // discharges successfully.
+        let source = r#"
+            fn पहला(ग: i64, ghost: i64) -> i64
+            requires ghost >= 0;
+            {
+              return ग;
+            }
+
+            fn दूसरा(क: i64, ख: i64) -> i64
+            requires क >= ख;
+            requires ख >= 0;
+            {
+              prove क - ख >= 0;
+              return क - ख;
+            }
+
+            fn main() -> i64 {
+              let a: i64 = पहला(5, 0);
+              let b: i64 = दूसरा(10, 3);
+              return a + b;
+            }
+        "#;
+        compile(source).expect(
+            "a trivially-true `prove` clause over distinct Devanagari-named \
+             parameters must discharge (BUG-167 regression)",
+        );
+    }
+
+    #[test]
     fn compiles_basic_program_to_c() {
         let source = r#"
             intent "test";

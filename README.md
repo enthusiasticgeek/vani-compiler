@@ -90,33 +90,41 @@ fn main() yields i64 {
 }
 ```
 
-**Sanskrit** (`// vani-lang: sanskrit`; `main` is always literal — the
-entry point is never translated):
+**Sanskrit** (`// vani-lang: sanskrit`) — keywords, types, the entry
+point, and every identifier translated, so only what's structurally
+unavoidable stays in English:
 
 ```vani
 // vani-lang: sanskrit
 
-कार्य add(a: i64, b: i64) -> i64
-अपेक्षित a >= 0 && b >= 0;
-सुनिश्चयित _return == a + b;
+कार्य योग(क: i64, ख: i64) -> i64
+अपेक्षित क >= 0 && ख >= 0;
+सुनिश्चयित _return == क + ख;
 {
-  पुनरागम a + b;
+  पुनरागम क + ख;
 }
 
-कार्य main() -> i64 {
-  माना xs: Vec<i64> = vec(3, 1, 4, 1, 5);
-  sort(परिवर्तनीय दृष्ट्या xs);
-  माना k: i64 = vec_kth_smallest(दृष्ट्या xs, 2);   // 3
+कार्य मुख्य() -> i64 {
+  माना सूचिः: सूची<i64> = vec(3, 1, 4, 1, 5);
+  sort(परिवर्तनीय दृष्ट्या सूचिः);
+  माना घ: i64 = vec_kth_smallest(दृष्ट्या सूचिः, 2);   // 3
   प्रमाण 2 + 2 == 4;
-  लिख k;
+  लिख घ;
   पुनरागम 0;
 }
 ```
 
 The Sanskrit version prints `३` — the same value `3`, rendered in
-Devanagari numerals to match the source script. Builtin function names
-(`vec`, `sort`, `vec_kth_smallest`) and the reserved `main` entry point
-are never translated; only language keywords are.
+Devanagari numerals to match the source script. The entry point can be
+spelled `मुख्य` (mukhya), `प्रमुख` (pramukh), `प्रधान` (pradhan), or
+`main` — the parser canonicalizes any of the four. `Vec<T>` can be
+written `सूची<T>` too (kept as `Vec<i64>` above for readability — both
+compile identically). What's left in English is structurally
+unavoidable in the current v1 surface: builtin function *names*
+(`vec`, `sort`, `vec_kth_smallest`) aren't translated (only language
+*keywords* and *type* names are), and `_return` — the identifier an
+`ensures` clause uses to refer to a function's own return value — has
+no dialect alias yet.
 
 ---
 

@@ -18066,7 +18066,22 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 extracted, struct_ty, scr_v
                             ));
                         }
-                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), bname);
+                        // BUG-168 (2026-08-10): every sibling `.addr`
+                        // construction site in this file wraps the
+                        // source name in `llvm_mangle_ident` first
+                        // (hex-encoding non-ASCII bytes, since raw
+                        // Unicode isn't valid in an unquoted LLVM
+                        // identifier) -- this one match-arm-binding
+                        // site was missed, so a non-ASCII (e.g.
+                        // Devanagari) pattern-bound variable name
+                        // produced invalid LLVM IR (`lli`: "expected
+                        // '=' after instruction name"). Found
+                        // translating Sanskrit example identifiers.
+                        // Only the LLVM-visible symbol needs
+                        // mangling; `bname` itself stays the
+                        // original source name for the `ctx.locals`
+                        // lookup-table key below.
+                        let addr = format!("{}.{}.addr", ctx.fresh_tmp(), llvm_mangle_ident(bname));
                         out.push_str(&format!("  {} = alloca {}\n", addr, bty_ll));
                         out.push_str(&format!(
                             "  store {} {}, {}* {}\n",

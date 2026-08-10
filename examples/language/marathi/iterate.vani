@@ -8,46 +8,46 @@
 
 उद्देश्य "Iterate over arrays and Vecs with `for x in ref xs` and consuming `for x in xs`";
 
-कार्य sum_vec(xs: पहा Vec<i64>) -> i64 {
-  मान total: i64 = 0;
-  साठी x में पहा xs {
-    total = total + x;
+कार्य सूचीबेरीज(सूचिः: पहा Vec<i64>) -> i64 {
+  मान गोळाबेरीज: i64 = 0;
+  साठी क में पहा सूचिः {
+    गोळाबेरीज = गोळाबेरीज + क;
   }
-  परत total;
+  परत गोळाबेरीज;
 }
 
-कार्य max_in_array(xs: पहा [i64; 5]) -> i64 {
-  मान best: i64 = xs[0];
-  साठी x में पहा xs {
-    जर x > best {
-      best = x;
+कार्य कमाल(सारणी: पहा [i64; 5]) -> i64 {
+  मान उच्चतम: i64 = सारणी[0];
+  साठी क में पहा सारणी {
+    जर क > उच्चतम {
+      उच्चतम = क;
     }
   }
-  परत best;
+  परत उच्चतम;
 }
 
-कार्य count_positives(xs: पहा Vec<i64>) -> i64 {
-  मान count: i64 = 0;
-  साठी x में पहा xs {
-    जर x > 0 {
-      count = count + 1;
+कार्य धनगणना(सूचिः: पहा Vec<i64>) -> i64 {
+  मान गणना: i64 = 0;
+  साठी क में पहा सूचिः {
+    जर क > 0 {
+      गणना = गणना + 1;
     }
   }
-  परत count;
+  परत गणना;
 }
 
-कार्य main() -> i64 {
-  मान nums: Vec<i64> = vec(1, 2, 3, 4, 5);
-  मान total: i64 = sum_vec(पहा nums);
-  खात्री total == 15;
+कार्य मुख्य() -> i64 {
+  मान सूचिः: Vec<i64> = vec(1, 2, 3, 4, 5);
+  मान गोळाबेरीज: i64 = सूचीबेरीज(पहा सूचिः);
+  खात्री गोळाबेरीज == 15;
 
-  मान arr: [i64; 5] = [3, 7, 1, 9, 4];
-  मान m: i64 = max_in_array(पहा arr);
-  खात्री m == 9;
+  मान सारणी: [i64; 5] = [3, 7, 1, 9, 4];
+  मान उच्चतम: i64 = कमाल(पहा सारणी);
+  खात्री उच्चतम == 9;
 
-  मान mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
-  मान p: i64 = count_positives(पहा mixed);
-  खात्री p == 3;
+  मान सूचिः२: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  मान धनसंख्या: i64 = धनगणना(पहा सूचिः२);
+  खात्री धनसंख्या == 3;
 
   // Consuming `for x in xs` over a Vec<OwnedStr>: each
   // element is moved into x and freed at scope exit. The
@@ -55,16 +55,16 @@
   // Closure #159 — previously double-freed the per-element
   // heap because `intent_vec_<owned_str>__free` would walk
   // every slot after closure #127's deep-drop change.
-  मान owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
-  मान owned_total: i64 = 0;
-  साठी s में owned {
-    owned_total = owned_total + (len(s) यथा i64);
+  मान सूचिः३: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  मान कुलबेरीज: i64 = 0;
+  साठी क में सूचिः३ {
+    कुलबेरीज = कुलबेरीज + (len(क) यथा i64);
   }
-  खात्री owned_total == 6;
+  खात्री कुलबेरीज == 6;
 
-  लिहा total;
-  लिहा m;
-  लिहा p;
-  लिहा owned_total;
+  लिहा गोळाबेरीज;
+  लिहा उच्चतम;
+  लिहा धनसंख्या;
+  लिहा कुलबेरीज;
   परत 0;
 }

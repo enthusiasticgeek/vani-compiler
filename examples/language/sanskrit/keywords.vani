@@ -8,28 +8,35 @@
 
 // संस्कृत (saṁskṛta) — Sanskrit-keyword example.
 // Uses the classical-Sanskrit verbs for control flow and proof
-// constructs. `शुद्ध` = pure, `अपेक्षित` = requires, `निश्चित` = ensures.
+// constructs. `शुद्ध` = pure, `अपेक्षित` = requires, `सुनिश्चयित` = ensures.
+//
+// BUG-166 (2026-08-10): this file previously mixed in Hindi/Marathi
+// words (फलन, निश्चित, परत, मान, खात्री, लिखो) under the strict
+// `vani-lang: sanskrit` pragma, which the dialect-purity checker now
+// correctly rejects. Every keyword below is Sanskrit-only or shared
+// tatsama, verified directly against `spelling_supports_dialect` in
+// src/lexer.rs.
 
-शुद्ध फलन my_abs(n: i64) -> i64
-अपेक्षित n > 0 - 1000000;
-निश्चित _return >= 0;
+शुद्ध कार्य निरपेक्ष(क: i64) -> i64
+अपेक्षित क > 0 - 1000000;
+सुनिश्चयित _return >= 0;
 {
-  यदि n < 0 {
-    परत 0 - n;
+  यदि क < 0 {
+    पुनरागम 0 - क;
   } अन्यथा {
-    परत n;
+    पुनरागम क;
   }
 }
 
-फलन main() -> i64 {
-  मान x: i64 = 0 - 42;
-  मान y: i64 = my_abs(x);
+कार्य मुख्य() -> i64 {
+  माना ग: i64 = 0 - 42;
+  माना घ: i64 = निरपेक्ष(ग);
 
   // `सिद्ध` ≅ "prove" (siddha root, "established"). The verifier
-  // discharges this via my_abs's `ensures` clause.
-  सिद्ध y >= 0;
-  खात्री y == 42;
+  // discharges this via निरपेक्ष's `ensures` clause.
+  सिद्ध घ >= 0;
+  सिद्धम् घ == 42;
 
-  लिखो "x=", x, " |x|=", y;
-  परत 0;
+  लिख "x=", ग, " |x|=", घ;
+  पुनरागम 0;
 }

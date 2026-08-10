@@ -24,20 +24,20 @@
 
 उद्देश्य "Sanskrit async/await dialect lift smoke";
 
-अतुल्यकालिक कार्य delay(ms: i64, v: i64) -> i64 {
-  sleep_ms(ms);
-  पुनरागम v;
+अतुल्यकालिक कार्य विलम्ब(कालः: i64, मूल्य: i64) -> i64 {
+  sleep_ms(कालः);
+  पुनरागम मूल्य;
 }
 
-कार्य main() -> i64 {
+कार्य मुख्य() -> i64 {
   // v1 async-await desugar: each `अतुल्यकालिक कार्य` runs
   // synchronously to completion + returns `Future.Ready(v)`;
   // `प्रतीक्षा(…)` extracts the payload.
-  माना a: i64 = प्रतीक्षा(delay(5, 42));
-  माना b: i64 = प्रतीक्षा(delay(10, 7));
+  माना क: i64 = प्रतीक्षा(विलम्ब(5, 42));
+  माना ख: i64 = प्रतीक्षा(विलम्ब(10, 7));
 
-  सिद्धम् a == 42;
-  सिद्धम् b == 7;
-  लिख "delays:", a, b;
+  सिद्धम् क == 42;
+  सिद्धम् ख == 7;
+  लिख "delays:", क, ख;
   पुनरागम 0;
 }

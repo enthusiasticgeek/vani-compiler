@@ -1415,15 +1415,21 @@ impl Parser {
         let name_token = self.expect_ident()?;
         let name_span = name_token.span;
         // Devanagari surface (Phase 1) extension: the entry-point
-        // function can be spelled `main`, `à¤®à¥à¤–à¥à¤¯` (mukhya),
-        // `à¤ªà¥à¤°à¤®à¥à¤–` (pramukh), or `à¤ªà¥à¤°à¤§à¤¾à¤¨` (pradhan) -- all common
+        // function can be spelled `main`, `मुख्य` (mukhya),
+        // `प्रमुख` (pramukh), or `प्रधान` (pradhan) -- all common
         // Sanskrit/Hindi/Marathi words for "main / primary /
         // principal". The parser canonicalizes any of the
         // Devanagari forms to `main` so the checker's entry-point
         // lookup, the backends' symbol emission, and the runtime
         // all keep treating `main` as the unique entry. A program
         // that declares two of these forms (e.g. both `main` and
-        // `à¤®à¥à¤–à¥à¤¯`) errors at the existing duplicate-fn check.
+        // `मुख्य`) errors at the existing duplicate-fn check.
+        // BUG-166 follow-up (2026-08-10): this comment itself was
+        // mojibake-corrupted (same bug class fixed in is_async_ident/
+        // is_await_ident) -- the actual match arms below were never
+        // affected (canonicalize_entry_point_name has always had the
+        // correct bytes), so `मुख्य` has worked as an entry-point
+        // alias all along; only this doc comment was garbled.
         let name = canonicalize_entry_point_name(ident_text(name_token));
 
         // Optional generic parameter list: `<T1, T2, --¦>` after
@@ -6182,23 +6188,38 @@ fn is_type_name_start(c: char) -> bool {
 /// the English form OR one of the registered dialect aliases.
 ///
 /// Spellings: English `async` + Sanskrit-rooted Indo-Aryan
-/// `à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•` (atulyakÄlika) + Mandarin `å¼‚æ­¥` (yÃ¬bÃ¹) +
-/// Japanese `éžåŒæœŸ` (hidouki). For `await`: English + Indo-
-/// Aryan `à¤ªà¥à¤°à¤¤à¥€à¤•à¥à¤·à¤¾` (pratÄ«ká¹£Ä) + Mandarin `ç­‰å€™` (dÄ›nghÃ²u --
-/// distinct from `ç­‰å¾…` which is Mandarin's `join`) + Japanese
-/// `å¾…æ©Ÿ` (taiki). Grammar consultant pass (Tier 3) will
+/// अतुल्यकालिक (atulyakālika) + Mandarin 异步 (yìbù) +
+/// Japanese 非同期 (hidouki). For `await`: English + Indo-
+/// Aryan प्रतीक्षा (pratīkṣā) + Mandarin 等候 (děnghòu --
+/// distinct from 等待 which is Mandarin's `join`) + Japanese
+/// 待機 (taiki). Grammar consultant pass (Tier 3) will
 /// revise these against native-speaker active-use spellings.
+///
+/// BUG-166 (2026-08-10): these two functions' non-English string
+/// literals were byte-corrupted (mojibake -- a UTF-8 source
+/// apparently misread as Latin-1/Windows-1252 and re-encoded, then
+/// committed that way) since the original 2026-06-08 ship. The
+/// corrupted bytes never matched what any example file actually
+/// typed, so `async`/`await` silently stopped working in every
+/// dialect except English -- found auditing Sanskrit/Hindi/Marathi
+/// keyword parity, then confirmed the same corruption also broke
+/// Mandarin (Japanese's own example happened to use literal ASCII
+/// "async"/"await", so it never exercised its own dialect word and
+/// stayed accidentally green). Correct spellings recovered from
+/// clean, uncorrupted copies in docs/archive/grammar_review_queue.md
+/// and tutorials/src/advanced/01_async.md, then re-verified directly
+/// against the real example files that are supposed to use them.
 fn is_async_ident(name: &str) -> bool {
     matches!(
         name,
-        "async" | "à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•" | "å¼‚æ­¥" | "éžåŒæœŸ"
+        "async" | "अतुल्यकालिक" | "异步" | "非同期"
     )
 }
 
 fn is_await_ident(name: &str) -> bool {
     matches!(
         name,
-        "await" | "à¤ªà¥à¤°à¤¤à¥€à¤•à¥à¤·à¤¾" | "ç­‰å€™" | "å¾…æ©Ÿ"
+        "await" | "प्रतीक्षा" | "等候" | "待機"
     )
 }
 
