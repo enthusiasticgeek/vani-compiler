@@ -534,6 +534,13 @@ fn bengali_keyword(text: &str) -> Option<TokenKind> {
         "প্রকার" => TokenKind::Type,           // prakar (type — same Sanskrit root)
         "বাহ্যিক" => TokenKind::Extern,        // bahyik (external)
         "অপরিবর্তনীয়" => TokenKind::Invariant,// aparibartaniya (invariant)
+        // === BUG-169 PARITY (2026-08-10): 5 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "সংক্ষেপ" => TokenKind::Reduce,        // shongkkhep (reduction — same Sanskrit root)
+        "সহ" => TokenKind::With,               // shoho (with — same Sanskrit root)
+        "ত্রুটিলেখ" => TokenKind::EPrint,      // trutilekh (error-write; ত্রুটি "error" + লেখ "write")
+        "অসুরক্ষিত" => TokenKind::Unsafe,      // ashurokkhito (unsafe — same Sanskrit root)
+        "ক্ষেত্র" => TokenKind::RegionKw,      // kkhetro (region/area — same Sanskrit root)
         _ => return None,
     };
     Some(kind)
@@ -596,6 +603,22 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         "நோக்கம்" => TokenKind::Intent,            // nokkam (intent)
         "வகை" => TokenKind::Type,                  // vagai (type/kind)
         "மாறிலா" => TokenKind::Invariant,          // maarilaa (unchanging — invariant)
+        // === BUG-169 PARITY (2026-08-10): 14 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "தூய" => TokenKind::Pure,                  // thooya (pure)
+        "வெளி" => TokenKind::Extern,               // veli (external/outside)
+        "இணை" => TokenKind::Parallel,              // inai (parallel/pair)
+        "குறை" => TokenKind::Reduce,               // kurai (reduce/decrease)
+        "உடன்" => TokenKind::With,                 // udan (with)
+        "பணி" => TokenKind::Task,                  // pani (task/work)
+        "சேர்" => TokenKind::Join,                 // ser (join/add)
+        "எங்கே" => TokenKind::Where,               // engae (where)
+        "ஆகும்" => TokenKind::Is,                  // aakum (is/becomes)
+        "முறைகள்" => TokenKind::Methods,           // muraigal (methods/ways)
+        "பிழைஎழுது" => TokenKind::EPrint,          // pizhai-ezhuthu (error-write)
+        "முயற்சி" => TokenKind::Try,               // muyarchi (try/attempt)
+        "பாதுகாப்பற்ற" => TokenKind::Unsafe,       // paadhugaapatra (unsafe)
+        "பகுதி" => TokenKind::RegionKw,            // paguthi (region/part)
         _ => return None,
     };
     Some(kind)
@@ -642,6 +665,24 @@ fn telugu_keyword(text: &str) -> Option<TokenKind> {
         "ఉద్దేశం" => TokenKind::Intent,            // uddesam (intent — tatsama)
         "రకం" => TokenKind::Type,                  // rakam (type/kind)
         "మారని" => TokenKind::Invariant,           // maarani (not changing — invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "శుద్ధ" => TokenKind::Pure,                // shuddha (pure — tatsama)
+        "బాహ్య" => TokenKind::Extern,              // baahya (external — tatsama)
+        "సమాంతర" => TokenKind::Parallel,           // samaantara (parallel — tatsama)
+        "సంక్షేప" => TokenKind::Reduce,            // sankshepa (reduction — tatsama)
+        "తో" => TokenKind::With,                   // to (with)
+        "కార్యం" => TokenKind::Task,               // kaaryam (task — tatsama)
+        "సంయోగం" => TokenKind::Join,               // samyogam (union/join — tatsama)
+        "సంకేతం" => TokenKind::Interface,          // sanketam (signal/interface — tatsama)
+        "అమలు" => TokenKind::Implement,            // amalu (implementation)
+        "ఎక్కడ" => TokenKind::Where,               // ekkada (where)
+        "ఉంది" => TokenKind::Is,                   // undi (is/exists)
+        "పద్ధతులు" => TokenKind::Methods,          // paddhathulu (methods)
+        "లోపంరాయి" => TokenKind::EPrint,           // lopam-raayi (error-write)
+        "ప్రయత్నించు" => TokenKind::Try,           // prayatninchu (try/attempt)
+        "అసురక్షిత" => TokenKind::Unsafe,          // asurakshita (unsafe — tatsama)
+        "ప్రాంతం" => TokenKind::RegionKw,          // praantam (region/area)
         _ => return None,
     };
     Some(kind)
@@ -689,6 +730,24 @@ fn gujarati_keyword(text: &str) -> Option<TokenKind> {
         "ઉદ્દેશ" => TokenKind::Intent,             // uddhesh (intent — tatsama)
         "પ્રકાર" => TokenKind::Type,               // prakaar (type — tatsama)
         "અચળ" => TokenKind::Invariant,             // achal (invariant — "unchanging", tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "શુદ્ધ" => TokenKind::Pure,                // shuddh (pure — tatsama)
+        "બાહ્ય" => TokenKind::Extern,              // baahya (external — tatsama)
+        "સમાંતર" => TokenKind::Parallel,           // samaantar (parallel — tatsama)
+        "સંક્ષેપ" => TokenKind::Reduce,            // sankshep (reduction — tatsama)
+        "સાથે" => TokenKind::With,                 // saathe (with)
+        "નિયોગ" => TokenKind::Task,                // niyog (task — tatsama)
+        "સંયોજન" => TokenKind::Join,               // sanyojan (union/join — tatsama)
+        "સંકેત" => TokenKind::Interface,           // sanket (signal/interface — tatsama)
+        "અમલ" => TokenKind::Implement,             // amal (implementation)
+        "જ્યાં" => TokenKind::Where,                // jyaan (where)
+        "છે" => TokenKind::Is,                     // chhe (is)
+        "પદ્ધતિઓ" => TokenKind::Methods,           // paddhatio (methods)
+        "ભૂલલખો" => TokenKind::EPrint,             // bhool-lakho (error-write)
+        "પ્રયાસ" => TokenKind::Try,                // prayaas (try/attempt — tatsama)
+        "અસુરક્ષિત" => TokenKind::Unsafe,          // asurakshit (unsafe — tatsama)
+        "ક્ષેત્ર" => TokenKind::RegionKw,          // kshetra (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -736,6 +795,24 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
         "ਉਦੇਸ਼" => TokenKind::Intent,              // udesh (intent — tatsama)
         "ਕਿਸਮ" => TokenKind::Type,                 // kism (type)
         "ਅਟੱਲ" => TokenKind::Invariant,            // attal (unchanging — invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ਸ਼ੁੱਧ" => TokenKind::Pure,                 // shudh (pure — tatsama)
+        "ਬਾਹਰੀ" => TokenKind::Extern,              // baahri (external)
+        "ਸਮਾਂਤਰ" => TokenKind::Parallel,           // samaantar (parallel — tatsama)
+        "ਸੰਖੇਪ" => TokenKind::Reduce,              // sankhep (reduction — tatsama)
+        "ਨਾਲ" => TokenKind::With,                  // naal (with)
+        "ਨਿਯੋਗ" => TokenKind::Task,                // niyog (task — tatsama)
+        "ਸੰਯੋਜਨ" => TokenKind::Join,               // sanyojan (union/join — tatsama)
+        "ਸੰਕੇਤ" => TokenKind::Interface,           // sanket (signal/interface — tatsama)
+        "ਅਮਲ" => TokenKind::Implement,             // amal (implementation)
+        "ਜਿੱਥੇ" => TokenKind::Where,               // jitthe (where)
+        "ਹੈ" => TokenKind::Is,                     // hai (is)
+        "ਢੰਗ" => TokenKind::Methods,               // dhang (methods/ways)
+        "ਗਲਤੀਲਿਖੋ" => TokenKind::EPrint,           // galti-likho (error-write)
+        "ਕੋਸ਼ਿਸ਼" => TokenKind::Try,               // koshish (try/attempt)
+        "ਅਸੁਰੱਖਿਅਤ" => TokenKind::Unsafe,          // asurakhiat (unsafe — tatsama)
+        "ਖੇਤਰ" => TokenKind::RegionKw,             // khetar (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -785,6 +862,24 @@ fn kannada_keyword(text: &str) -> Option<TokenKind> {
         "ಉದ್ದೇಶ" => TokenKind::Intent,               // uddesha (intent — tatsama)
         "ಪ್ರಕಾರ" => TokenKind::Type,                 // prakaara (type — tatsama)
         "ಅಚಲ" => TokenKind::Invariant,               // achala (unchanging — tatsama invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ಶುದ್ಧ" => TokenKind::Pure,                  // shuddha (pure — tatsama)
+        "ಬಾಹ್ಯ" => TokenKind::Extern,                // baahya (external — tatsama)
+        "ಸಮಾನಾಂತರ" => TokenKind::Parallel,           // samaanaantara (parallel — tatsama)
+        "ಸಂಕ್ಷೇಪ" => TokenKind::Reduce,              // sankshepa (reduction — tatsama)
+        "ಜೊತೆ" => TokenKind::With,                   // jote (with)
+        "ನಿಯೋಗ" => TokenKind::Task,                  // niyoga (task — tatsama)
+        "ಸಂಯೋಜನೆ" => TokenKind::Join,                // samyojane (union/join — tatsama)
+        "ಸಂಕೇತ" => TokenKind::Interface,             // sanketa (signal/interface — tatsama)
+        "ಜಾರಿ" => TokenKind::Implement,              // jaari (in effect/implement)
+        "ಎಲ್ಲಿ" => TokenKind::Where,                 // elli (where)
+        "ಇದೆ" => TokenKind::Is,                      // ide (is/exists)
+        "ವಿಧಾನಗಳು" => TokenKind::Methods,            // vidhaanagalu (methods)
+        "ದೋಷಬರೆ" => TokenKind::EPrint,               // dosha-bare (error-write)
+        "ಪ್ರಯತ್ನ" => TokenKind::Try,                 // prayatna (try/attempt — tatsama)
+        "ಅಸುರಕ್ಷಿತ" => TokenKind::Unsafe,            // asurakshita (unsafe — tatsama)
+        "ಪ್ರದೇಶ" => TokenKind::RegionKw,             // pradesha (region/area)
         _ => return None,
     };
     Some(kind)
@@ -832,6 +927,24 @@ fn malayalam_keyword(text: &str) -> Option<TokenKind> {
         "ഉദ്ദേശ്യം" => TokenKind::Intent,            // uddeshyam (intent — tatsama)
         "തരം" => TokenKind::Type,                    // tharam (type)
         "അചലം" => TokenKind::Invariant,              // achalam (unchanging — tatsama invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ശുദ്ധം" => TokenKind::Pure,                 // shuddham (pure — tatsama)
+        "ബാഹ്യം" => TokenKind::Extern,               // baahyam (external — tatsama)
+        "സമാന്തരം" => TokenKind::Parallel,           // samaantharam (parallel — tatsama)
+        "സംക്ഷേപം" => TokenKind::Reduce,             // samkshepam (reduction — tatsama)
+        "കൂടെ" => TokenKind::With,                   // koode (with)
+        "നിയോഗം" => TokenKind::Task,                 // niyogam (task — tatsama)
+        "സംയോജനം" => TokenKind::Join,                // samyojanam (union/join — tatsama)
+        "സങ്കേതം" => TokenKind::Interface,           // sanketam (signal/interface — tatsama)
+        "നടപ്പിലാക്കുക" => TokenKind::Implement,     // nadappilaakkuka (implement)
+        "എവിടെ" => TokenKind::Where,                 // evide (where)
+        "ആണ്" => TokenKind::Is,                      // aanu (is)
+        "രീതികൾ" => TokenKind::Methods,              // reethikal (methods)
+        "പിശക്എഴുതുക" => TokenKind::EPrint,          // pishaku-ezhuthuka (error-write)
+        "ശ്രമിക്കുക" => TokenKind::Try,              // shramikkuka (try/attempt)
+        "അസുരക്ഷിതം" => TokenKind::Unsafe,           // asurakshitham (unsafe — tatsama)
+        "പ്രദേശം" => TokenKind::RegionKw,            // pradesham (region/area)
         _ => return None,
     };
     Some(kind)
@@ -877,6 +990,24 @@ fn odia_keyword(text: &str) -> Option<TokenKind> {
         "ଉଦ୍ଦେଶ୍ୟ" => TokenKind::Intent,              // uddeshya (intent — tatsama)
         "ପ୍ରକାର" => TokenKind::Type,                  // prakaara (type — tatsama)
         "ଅଚଳ" => TokenKind::Invariant,               // achala (unchanging — invariant, tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ଶୁଦ୍ଧ" => TokenKind::Pure,                   // shuddha (pure — tatsama)
+        "ବାହ୍ୟ" => TokenKind::Extern,                 // baahya (external — tatsama)
+        "ସମାନ୍ତର" => TokenKind::Parallel,             // samaantara (parallel — tatsama)
+        "ସଂକ୍ଷେପ" => TokenKind::Reduce,               // sankshepa (reduction — tatsama)
+        "ସହିତ" => TokenKind::With,                    // sahita (with — tatsama)
+        "ନିଯୋଗ" => TokenKind::Task,                   // niyoga (task — tatsama)
+        "ସଂଯୋଜନ" => TokenKind::Join,                  // sanyojana (union/join — tatsama)
+        "ସଙ୍କେତ" => TokenKind::Interface,             // sanketa (signal/interface — tatsama)
+        "ପ୍ରୟୋଗ" => TokenKind::Implement,             // prayoga (application/implement — tatsama)
+        "କେଉଁଠାରେ" => TokenKind::Where,               // keunthare (where)
+        "ଅଟେ" => TokenKind::Is,                       // ate (is)
+        "ପଦ୍ଧତି" => TokenKind::Methods,               // paddhati (methods — tatsama)
+        "ତ୍ରୁଟିଲେଖ" => TokenKind::EPrint,             // truti-lekha (error-write)
+        "ପ୍ରୟାସ" => TokenKind::Try,                   // prayaasa (try/attempt — tatsama)
+        "ଅସୁରକ୍ଷିତ" => TokenKind::Unsafe,             // asurakshita (unsafe — tatsama)
+        "କ୍ଷେତ୍ର" => TokenKind::RegionKw,             // kshetra (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -924,6 +1055,24 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "අරමුණ" => TokenKind::Intent,                 // aramuna (intent/purpose)
         "වර්ගය" => TokenKind::Type,                   // vargaya (type)
         "නිශ්චල" => TokenKind::Invariant,             // nishchala (motionless/invariant — tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ශුද්ධ" => TokenKind::Pure,                   // shuddha (pure — tatsama)
+        "බාහිර" => TokenKind::Extern,                 // baahira (external — tatsama)
+        "සමාන්තර" => TokenKind::Parallel,             // samaanthara (parallel — tatsama)
+        "සංක්ෂේප" => TokenKind::Reduce,               // sankshepa (reduction — tatsama)
+        "සමඟ" => TokenKind::With,                     // samaga (with)
+        "නියෝගය" => TokenKind::Task,                  // niyogaya (task — tatsama)
+        "සංයෝජනය" => TokenKind::Join,                 // sanyojanaya (union/join — tatsama)
+        "සංකේතය" => TokenKind::Interface,             // sanketaya (signal/interface — tatsama)
+        "ක්‍රියාත්මක" => TokenKind::Implement,        // kriyaathmaka (implement/put into action)
+        "කොහෙද" => TokenKind::Where,                  // koheda (where)
+        "වේ" => TokenKind::Is,                        // ve (is)
+        "ක්‍රම" => TokenKind::Methods,                // krama (methods/ways — tatsama)
+        "දෝෂයලියන්න" => TokenKind::EPrint,            // doshaya-liyanna (error-write)
+        "උත්සාහ" => TokenKind::Try,                   // uthsaaha (try/effort — tatsama)
+        "අනාරක්ෂිත" => TokenKind::Unsafe,             // anaarakshitha (unsafe — tatsama)
+        "ප්‍රදේශය" => TokenKind::RegionKw,            // pradeshaya (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -986,6 +1135,23 @@ fn urdu_keyword(text: &str) -> Option<TokenKind> {
         "مقصد" => TokenKind::Intent,           // maqsad (intent)
         "قسم" => TokenKind::Type,              // kism (type)
         "بیرونی" => TokenKind::Extern,         // bairooni (external)
+        // === BUG-169 PARITY (2026-08-10): 15 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "خالص" => TokenKind::Pure,             // khaalis (pure)
+        "متوازی" => TokenKind::Parallel,       // mutawaazi (parallel)
+        "تخفیف" => TokenKind::Reduce,          // takhfeef (reduction)
+        "ساتھ" => TokenKind::With,             // saath (with — Hindustani-shared)
+        "ٹاسک" => TokenKind::Task,             // task (loanword, matches فنکشن/ماڈیول convention)
+        "ملاپ" => TokenKind::Join,             // milaap (union/join — Hindustani-shared)
+        "دوران" => TokenKind::While,           // dauraan (during/while)
+        "جہاں" => TokenKind::Where,            // jahan (where — Hindustani-shared)
+        "ہے" => TokenKind::Is,                 // hai (is — Hindustani-shared)
+        "طریقے" => TokenKind::Methods,         // tareeqe (methods/ways)
+        "غیرمتغیر" => TokenKind::Invariant,    // ghair mutaghayyir (invariant, "non-variable")
+        "غلطیلکھو" => TokenKind::EPrint,       // ghaltilikho (error-write; غلطی "error" + لکھو "write")
+        "کوشش" => TokenKind::Try,              // koshish (try/attempt)
+        "غیرمحفوظ" => TokenKind::Unsafe,       // ghair mahfooz (unsafe, "non-protected")
+        "علاقہ" => TokenKind::RegionKw,        // ilaqa (region/area)
         _ => return None,
     };
     Some(kind)

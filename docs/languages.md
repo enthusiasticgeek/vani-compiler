@@ -35,22 +35,57 @@ single file into a different surface; mixing is not allowed within one file.
 | 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ Shipped — 91 aliases, 8 SOV shapes, 11 examples | Authors (primary) |
 | 2 | Hindi (*hindī*) | Devanagari | ✅ Shipped — 9 examples | Authors (primary) |
 | 3 | Marathi (*marāṭhī*) | Devanagari | ✅ Shipped — 9 examples | Authors (primary) |
-| 4 | Bengali (*baṅlā*) | Bengali (Brahmi) | ✅ Shipped | ❌ Needs review |
-| 5 | Gujarati (*gujarātī*) | Gujarati (Brahmi) | ✅ Shipped | ❌ Needs review |
-| 6 | Punjabi — Gurmukhi (*pañjābī*) | Gurmukhi (Brahmi) | ✅ Shipped | ❌ Needs review |
-| 6b | Punjabi — Shahmukhi | Perso-Arabic (RTL) | ✅ Shipped | ❌ Needs review |
-| 7 | Tamil (*tamiḻ*) | Tamil (Dravidian) | ✅ Shipped | ❌ Needs review |
-| 8 | Telugu (*telugu*) | Telugu | ✅ Shipped | ❌ Needs review |
-| 9 | Kannada (*kannaḍa*) | Kannada | ✅ Shipped | ❌ Needs review |
-| 10 | Malayalam (*malayāḷam*) | Malayalam | ✅ Shipped | ❌ Needs review |
-| 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | ✅ Shipped | ❌ Needs review |
-| 12 | Odia (*oṛiā*) | Odia (Brahmi) | ✅ Shipped | ❌ Needs review |
-| 13 | Assamese (*ɔxɔmia*) | Assamese/Bengali (Brahmi) | ✅ Shipped | ❌ Needs review |
-| 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) | ✅ Shipped | ❌ Needs review |
-| 15 | Nepali (*nepālī*) | Devanagari | ✅ Shipped | ❌ Needs review |
-| 16 | Konkani (*kõkaṇī*) | Devanagari | ✅ Shipped (Devanagari only) | ❌ Needs review |
-| 17 | Maithili (*maithilī*) | Devanagari | ✅ Shipped (Devanagari only) | ❌ Needs review |
-| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi) | ✅ Shipped | ❌ Needs review |
+| 4 | Bengali (*baṅlā*) | Bengali (Brahmi) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 5 | Gujarati (*gujarātī*) | Gujarati (Brahmi) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 6 | Punjabi — Gurmukhi (*pañjābī*) | Gurmukhi (Brahmi) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 6b | Punjabi — Shahmukhi | Perso-Arabic (RTL) | ✅ Shipped — inherits Urdu's 46/46, SOV supported | ❌ Needs review |
+| 7 | Tamil (*tamiḻ*) | Tamil (Dravidian) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 8 | Telugu (*telugu*) | Telugu | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 9 | Kannada (*kannaḍa*) | Kannada | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 10 | Malayalam (*malayāḷam*) | Malayalam | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 12 | Odia (*oṛiā*) | Odia (Brahmi) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+| 13 | Assamese (*ɔxɔmia*) | Assamese/Bengali (Brahmi) | ✅ Shipped — inherits Bengali's 46/46, SOV supported | ❌ Needs review |
+| 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) | ✅ Shipped — inherits Urdu's 46/46, SOV supported | ❌ Needs review |
+| 15 | Nepali (*nepālī*) | Devanagari | ✅ Shipped — inherits Sanskrit/Hindi/Marathi's 46/46, SOV supported | ❌ Needs review |
+| 16 | Konkani (*kõkaṇī*) | Devanagari | ✅ Shipped (Devanagari only) — inherits Sanskrit/Hindi/Marathi's 46/46, SOV supported | ❌ Needs review |
+| 17 | Maithili (*maithilī*) | Devanagari | ✅ Shipped (Devanagari only) — inherits Sanskrit/Hindi/Marathi's 46/46, SOV supported | ❌ Needs review |
+| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi) | ✅ Shipped — 46/46 structure keywords, SOV supported | ❌ Needs review |
+
+**BUG-169 (2026-08-10)**: a keyword-parity audit found rows 4-18 missing
+5-16 of the 46 required structure keywords each (`Pure`/`Extern`/
+`Parallel`/`Reduce`/`With`/`Task`/`Join`/`Interface`/`Implement`/`Where`/
+`Is`/`Methods`/`EPrint`/`Try`/`Unsafe`/`RegionKw` in various
+combinations across the 10 dialects with their own dedicated keyword
+table — Bengali, Tamil, Telugu, Gujarati, Punjabi, Kannada, Malayalam,
+Odia, Sinhala, Urdu). All fixed; a permanent regression test
+(`bug169_india_dialects_structure_keyword_parity` in `src/lib.rs`)
+mechanically re-derives coverage from `src/lexer.rs`'s own source on
+every test run, so a future keyword addition that misses a dialect
+fails CI immediately. Assamese/Sindhi/Punjabi-Shahmukhi (which have no
+dedicated table of their own — they inherit Bengali's / Urdu's / Urdu's
+respectively) and Nepali/Maithili/Konkani (inherit the Sanskrit/Hindi/
+Marathi union) automatically picked up the same fix; a second test
+(`bug169_union_inheritance_dialects_compile`) proves that inheritance
+holds end-to-end with a real compile.
+
+**SOV vs. SVO**: every Indian-subcontinent language in this table is
+verb-final (SOV) in natural word order — a well-known areal
+(Sprachbund) feature shared across the Indo-Aryan and Dravidian
+families here, with no SVO exceptions. The parser's SOV verb-at-end
+grammar (`x लिख;` = `print x;`, the `IDENT for ...` range-for shape,
+etc.) turned out to already be dialect-agnostic despite being
+documented and commented as "Devanagari SOV" throughout the codebase —
+the detectors key off `TokenKind`s (`Return`/`Print`/`EPrint`/`Assert`/
+`Prove`/`Let`/`For`), not the declared dialect, so SOV syntax works for
+any dialect whose keyword table maps to those kinds. Verified directly
+against Bengali (Brahmi), Tamil (Dravidian), and Urdu (Perso-Arabic,
+RTL) as of BUG-169 — representative samples across every script family
+in this table. The one piece that remains genuinely Devanagari-only is
+*multi-word* alias merging (e.g. Hindi's two-token "के लिए" for `for`)
+— a separate lexer feature from SOV grammar itself, since every
+dialect here already has its own single-token spelling for every SOV-
+eligible keyword.
 
 ---
 

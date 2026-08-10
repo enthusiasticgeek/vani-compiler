@@ -680,6 +680,153 @@ mod tests {
     }
 
     #[test]
+    fn bug169_india_dialects_structure_keyword_parity() {
+        // BUG-169 (2026-08-10): the "next round" India-languages
+        // keyword-parity audit, extending BUG-166's Sanskrit/Hindi/
+        // Marathi sweep to the 10 remaining Tier I dialects that
+        // have their OWN dedicated keyword table in src/lexer.rs
+        // (Bengali, Tamil, Telugu, Gujarati, Punjabi, Kannada,
+        // Malayalam, Odia, Sinhala, Urdu). Before this fix each of
+        // these was missing 5-16 of the 46 required structure
+        // keywords (Bengali the least-incomplete at 41/46; most of
+        // the Dravidian + remaining Indo-Aryan tables were missing
+        // Pure/Extern/Parallel/Reduce/With/Task/Join/Interface/
+        // Implement/Where/Is/Methods/EPrint/Try/Unsafe/RegionKw in
+        // various combinations) -- silent gaps, not compile errors,
+        // since an unmapped spelling in one of these dialects just
+        // never lexes as that keyword at all.
+        //
+        // Rather than hand-transcribe ~500 non-Latin spellings into
+        // this test (exactly the transcription-error risk BUG-166's
+        // own postmortem flagged, at 10x the scale here), this test
+        // reads src/lexer.rs's own source via `include_str!` and
+        // mechanically extracts each dialect function's `"spelling"
+        // => TokenKind::Kind` arms at test-run time -- so it can
+        // never drift from the actual implementation, and adding a
+        // new keyword never requires updating a second, parallel
+        // hand-copied list.
+        //
+        // The 5 dialects that have NO dedicated table (Nepali,
+        // Maithili, Konkani-Devanagari inherit the Sanskrit/Hindi/
+        // Marathi union; Sindhi, Punjabi-Shahmukhi inherit Urdu --
+        // see `spelling_supports_dialect` and the lexer's single
+        // shared `.or_else(devanagari_keyword)...or_else(urdu_
+        // keyword)` dispatch chain) are covered transitively: once
+        // their parent table is 46/46, they are too. That inheritance
+        // itself is checked end-to-end (real `compile()` calls using
+        // newly-added keywords) by `bug169_union_inheritance_dialects_compile`
+        // below, rather than re-parsed here.
+        let lexer_src: &str = include_str!("lexer.rs");
+
+        let required_kinds: &[&str] = &[
+            "Fn", "Pure", "Extern", "Parallel", "Reduce", "With", "Task", "Join", "Let",
+            "Return", "If", "Else", "While", "Break", "Continue", "Mut", "For", "In", "Ref",
+            "From", "To", "Struct", "Enum", "Match", "Then", "Interface", "Implement", "Where",
+            "Is", "Const", "Type", "Methods", "Intent", "Use", "Requires", "Ensures",
+            "Invariant", "Assert", "Prove", "Print", "EPrint", "Try", "Module", "Pub", "Unsafe",
+            "RegionKw",
+        ];
+
+        let dialect_fns: &[(&str, &str)] = &[
+            ("Bengali", "bengali_keyword"),
+            ("Tamil", "tamil_keyword"),
+            ("Telugu", "telugu_keyword"),
+            ("Gujarati", "gujarati_keyword"),
+            ("Punjabi", "punjabi_keyword"),
+            ("Kannada", "kannada_keyword"),
+            ("Malayalam", "malayalam_keyword"),
+            ("Odia", "odia_keyword"),
+            ("Sinhala", "sinhala_keyword"),
+            ("Urdu", "urdu_keyword"),
+        ];
+
+        // Extracts the `TokenKind::Xxx` identifiers appearing inside
+        // `fn {fn_name}(text: &str) -> Option<TokenKind> { ... }`'s
+        // body. Deliberately simple (no regex dependency): finds the
+        // function's opening brace, then scans to the matching `\n}\n`
+        // that closes it (every dialect function here is a single
+        // flat `match` with no nested `{ }` blocks, so brace-depth
+        // tracking isn't needed -- verified by inspection).
+        fn extract_kinds_for_fn(src: &str, fn_name: &str) -> Vec<String> {
+            let marker = format!("fn {fn_name}(text: &str) -> Option<TokenKind> {{");
+            let start = src
+                .find(&marker)
+                .unwrap_or_else(|| panic!("dialect fn `{fn_name}` not found in lexer.rs"));
+            let body_start = start + marker.len();
+            let close = src[body_start..]
+                .find("\n}\n")
+                .unwrap_or_else(|| panic!("no closing `}}` found for `{fn_name}`"));
+            let body = &src[body_start..body_start + close];
+            let mut kinds = Vec::new();
+            let mut rest = body;
+            while let Some(idx) = rest.find("TokenKind::") {
+                let after = &rest[idx + "TokenKind::".len()..];
+                let end = after
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                kinds.push(after[..end].to_string());
+                rest = &after[end..];
+            }
+            kinds
+        }
+
+        let mut gaps: Vec<String> = Vec::new();
+        for &(dialect_name, fn_name) in dialect_fns {
+            let kinds = extract_kinds_for_fn(lexer_src, fn_name);
+            for &required in required_kinds {
+                if !kinds.iter().any(|k| k == required) {
+                    gaps.push(format!("{dialect_name} ({fn_name}) has no {required} spelling"));
+                }
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "India-dialect structure-keyword parity gaps found:\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
+    fn bug169_union_inheritance_dialects_compile() {
+        // BUG-169 follow-up (2026-08-10): Nepali, Maithili, and
+        // Konkani-Devanagari have no dedicated keyword table -- they
+        // accept the union of Sanskrit/Hindi/Marathi spellings (see
+        // `spelling_supports_dialect`). Sindhi and Punjabi-Shahmukhi
+        // likewise have no dedicated table and accept whatever
+        // `urdu_keyword` recognizes (both map to `PrintLangMode::Urdu`
+        // too -- same Eastern Arabic-Indic numerals). This test
+        // proves that inheritance actually holds end-to-end, using
+        // one of the 16 keywords BUG-169 just added to the parent
+        // table in each case (Pure, from the Sanskrit/Hindi/Marathi
+        // and Urdu additions respectively) -- if a future change
+        // narrowed either union (e.g. gave one of these five its own
+        // dedicated table without updating the dispatch chain), this
+        // fails immediately instead of silently regressing five
+        // dialects at once.
+        let sanskrit_root_dialects = [
+            ("nepali", "शुद्ध"),
+            ("maithili", "शुद्ध"),
+            ("konkani", "शुद्ध"),
+        ];
+        for (pragma, pure_word) in sanskrit_root_dialects {
+            let source = format!(
+                "// vani-lang: {pragma}\n{pure_word} कार्य जोड(क: i64) -> i64 {{ पुनरागम क; }}\nकार्य main() -> i64 {{ पुनरागम जोड(2); }}\n"
+            );
+            compile(&source)
+                .unwrap_or_else(|e| panic!("{pragma} inherited Sanskrit's Pure keyword should compile: {e:?}"));
+        }
+
+        let urdu_root_dialects = ["sindhi", "punjabi-shahmukhi"];
+        for pragma in urdu_root_dialects {
+            let source = format!(
+                "// vani-lang: {pragma}\nخالص فنکشن جمع(ک: i64) -> i64 {{ واپس ک; }}\nفنکشن main() -> i64 {{ واپس جمع(2); }}\n"
+            );
+            compile(&source)
+                .unwrap_or_else(|e| panic!("{pragma} inherited Urdu's Pure keyword (خالص) should compile: {e:?}"));
+        }
+    }
+
+    #[test]
     fn bug167_smt_sanitize_does_not_alias_distinct_non_ascii_identifiers() {
         // BUG-167 (2026-08-10): found while translating Sanskrit
         // example identifiers to Devanagari as a follow-up to the
