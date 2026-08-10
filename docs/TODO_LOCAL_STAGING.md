@@ -4768,3 +4768,16 @@ Repro: `tools/localfuzz/findings/20260810-101253-run-crash-e37418e21c/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260810-101253-run-crash-e37418e21c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260810-103151-run-crash-78bdde8bba
+
+Repro: `tools/localfuzz/findings/20260810-103151-run-crash-78bdde8bba/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-103151-run-crash-78bdde8bba/fix_attempt.md`
+
+```log
+2023-04-15T12:34:56Z - Early Exit Test on Lao Language (vani-lang) began
+
+STATUS: needs human/frontier root-cause review.
+```
