@@ -4741,3 +4741,12 @@ fn main() -> i64 {
 ```json
 {
   "kind": "backend-divergence
+
+---
+
+### Candidate: 20260810-091328-backend-divergence-236442a7a6
+
+Repro: `tools/localfuzz/findings/20260810-091328-backend-divergence-236442a7a6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260810-091328-backend-divergence-236442a7a6/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
