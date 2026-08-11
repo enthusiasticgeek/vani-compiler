@@ -5685,3 +5685,48 @@ Fix attempt: `tools/localfuzz/findings/20260811-181558-backend-divergence-015dd8
 STATUS: needs human/frontier root-cause review.
 
 The generated source file, when compiled with `vanic run` and executed with different backends (LLVM and C), exhibits a runtime error due to an integer overflow in the `i64 add` operation at line 9 of the `describe` function. This results in divergent behavior across both backends.
+
+---
+
+### Candidate: 20260811-182520-backend-divergence-5ad72b6562
+
+Repro: `tools/localfuzz/findings/20260811-182520-backend-divergence-5ad72b6562/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-182520-backend-divergence-5ad72b6562/fix_attempt.md`
+
+### Staging Entry: vani-compiler/Examples/language/english/math_ops.vani
+
+**Date:** [Insert Date]
+
+**Time:** [Insert Time]
+
+---
+
+**Mutant Generated Source:**
+
+```vani
+// build & run:
+//   vanic run examples/language/english/math_ops.vani                          # LLVM backend
+//   vanic run examples/language/english/math_ops.vani --backend=c              # C backend
+//   vanic build examples/language/english/math_ops.vani -o /tmp/math && /tmp/math
+
+intent "Math surface — libm-backed scalar functions";
+
+// Eight builtins covering the most-used scalar math:
+//
+//   pow(base: f64, exp: f64) -> f64        — base^exp
+//   sqrt(x: f64) -> f64
+//   sin(x: f64) -> f64 / cos(x: f64) / tan(x: f64)
+//   floor(x: f64) -> f64                   — round toward -infty
+//   ceil(x: f64) -> f64                    — round toward +infty
+//   abs(x: i64) -> i64                     — signed integer absolute
+//   abs(x: f64) -> f64                     — floating absolute
+//
+// `abs` is overloaded on the argument type. All other math
+// builtins take f64 (with implicit numeric coercion at the
+// argument site) and return f64. Codegen calls libm directly:
+// the C backend uses `<math.h>` symbols, the LLVM backend
+// declares `@sqrt` / `@pow` / `@sin` / etc. and links against
+// `-lm` on POSIX (Windows ships these in the C runtime).
+
+fn main() -> i64 {
+  print "sqrt(16):", sqrt(16
