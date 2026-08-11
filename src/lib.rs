@@ -43489,6 +43489,49 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug178_abs_of_narrower_int_type_preserves_width_on_llvm_backend() {
+        // BUG-178 (2026-08-11): found via localfuzz (mutated
+        // examples/language/english/math_ops.vani, changing `let
+        // neg_i: i64` to `let neg_i: i32`). checker.rs's abs()
+        // overload preserves the argument's integer width (I8/I16/
+        // I32/I64 in -> same type out; see the "abs is overloaded:
+        // i64 or f64 first arg dictates the result type" comment),
+        // but the LLVM backend's `abs` builtin only ever called
+        // `@llabs(i64 ...)` directly on the raw argument value --
+        // for a narrower-than-i64 argument, that both fed a wrongly-
+        // typed operand into `@llabs` AND produced an i64-typed
+        // `dest` temp for what the checker declares as (e.g.) an
+        // I32-typed expression, so a downstream consumer's own
+        // sext-to-i64 (sized off the CHECKER's I32 result type)
+        // choked on an operand that was actually already i64 --
+        // `lli` rejected the module outright ("'%tN' defined with
+        // type 'i64' but expected 'i32'"). Fixed by widening the
+        // narrower argument to i64 (sext), calling `@llabs`, then
+        // truncating the i64 result back down to the original
+        // width so the emitted temp's LLVM type matches what the
+        // checker says the expression's type is.
+        let source = r#"
+            fn main() -> i64 {
+              let a: i8 = 0 - 100;
+              let b: i16 = 0 - 30000;
+              let c: i32 = 0 - 2000000000;
+              print "abs(i8):", abs(a);
+              print "abs(i16):", abs(b);
+              print "abs(i32):", abs(c);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("abs() on i8/i16/i32 locals must compile via tree-LLVM");
+        assert!(
+            ll.contains("trunc i64"),
+            "expected a truncate-back-to-original-width after the i64 \
+             @llabs call for a narrower argument:\n{}",
+            ll
+        );
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

@@ -12327,3 +12327,65 @@ files (18 failures, EXACT same file set as before this fix -- zero
 diff), `tools/leak_sweep.py` clean.
 
 Next free bug number is **BUG-178**.
+
+## Update 2026-08-11: BUG-178 CLOSED (found by localfuzz)
+
+Found by the ongoing localfuzz watch (harness refreshed onto BUG-177
+first; 10 new findings collapsing to 5 signatures). Triage of all 10:
+
+- 3/10: same accepted `abort()`-vs-`exit(3)` OVERFLOW-PANIC pattern as
+  BUG-177's batch -- left as-is, same prior decision.
+- 1/10: same pattern but a `RUST-PANIC: index out of bounds` message
+  instead of an overflow message -- still the same trap-mechanism
+  class, not new, left as-is.
+- 1/10: `examples/language/persian/early_exit.vani` timeout -- stale,
+  the finding predates a fix already on main (the file already has
+  its loop increment; matches the same missing-increment mutation
+  shape as BUG-177 batch's stale Malayalam finding).
+- 2/10: `echo_pool.vani` / `echo_p3d_vec_struct.vani` timeouts -- both
+  fuzzer mutations that DUPLICATE a blocking `tcp_accept()` call
+  (`let c = tcp_accept(server); let c = tcp_accept(server);`), which
+  legitimately deadlocks identically on both backends since only one
+  client connects per iteration. Not a compiler bug -- a broken
+  mutated program hanging exactly as it should.
+- 1/10: `echo_with_timeout.vani` backend-divergence (c.rc=0, llvm.rc=0,
+  differing stdout: C printed "echoed bytes: -2", LLVM printed
+  "echoed bytes: 6"). The mutation changed the pending-poll sentinel
+  check from `r != 0 - 2` to `r != -1 - 2` (i.e. checking against -3
+  instead of the real "still pending" value -2), so the mutated
+  program's own control flow is broken: it can return early on the
+  first non-blocking poll before the async I/O actually completes.
+  Confirmed non-deterministic (5/5 repeat runs on both backends gave
+  the correct "echoed bytes: 6" outright) -- a timing race exposed by
+  the fuzzer's own broken mutation, not a compiler bug.
+- 1/10: **BUG-178**, confirmed real and fixed. `examples/language/
+  english/math_ops.vani` mutated `let neg_i: i64` to `let neg_i:
+  i32`. checker.rs's `abs()` overload PRESERVES the argument's
+  integer width (I8/I16/I32/I64 in -> same type out; see the
+  existing "abs is overloaded: i64 or f64 first arg dictates the
+  result type" comment at `src/checker.rs:31921`), but `src/
+  backend_llvm.rs`'s `abs` builtin unconditionally called `@llabs(i64
+  {x})` on the raw argument value with no widening -- for a narrower
+  argument this fed a wrongly-typed operand straight into `@llabs`
+  (`lli` rejected the IR: `'%t60' defined with type 'i32' but
+  expected 'i64'`). Widening the argument alone wasn't sufficient
+  either: `@llabs`'s i64-typed result was then returned as-is for
+  what the checker declares an I32-typed expression, so a downstream
+  consumer's own sext (sized off the checker's I32 result type) then
+  choked on an operand that was actually already i64 (`'%t61' defined
+  with type 'i64' but expected 'i32'`). Fixed by widening the
+  narrower argument to i64 (sext) before the `@llabs` call, then
+  truncating the i64 result back down to the original width, so the
+  emitted temp's actual LLVM type matches what the checker says the
+  expression's type is -- mirroring how the C backend gets this right
+  "for free" via C's own implicit int-promotion/narrowing rules
+  around `llabs()`.
+
+Added `bug178_abs_of_narrower_int_type_preserves_width_on_llvm_backend`
+in `src/lib.rs`. Verification: `cargo test --release` (2894 lib tests
++ 12 other suites, 0 failed), `vanic check` across all 1040 example
+files (17 failures -- pre-existing xfail/embedded-gated files only,
+none reference `abs()`, no new failures), `tools/leak_sweep.py` clean
+(18 skipped / 4 flagged, matches baseline exactly).
+
+Next free bug number is **BUG-179**.
