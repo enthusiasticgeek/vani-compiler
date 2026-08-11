@@ -209,3 +209,132 @@ in BUG-172's original 66-file list, plus `hebrew/iterate.vani`, now
 passes on both backends. `cargo test --release --lib` and
 `tools/leak_sweep.py` both green (see the commit this shipped in for
 exact numbers).
+
+## Update 2026-08-11: BUG-174 CLOSED
+
+Fixed at the root, in this dedicated session, as planned above.
+`src/parser.rs`'s `Parser` struct now carries an `active_labels: Vec<
+String>` stack, pushed with the label name by `parse_labeled_loop_stmt`
+/ `parse_plain_ident_label_loop_stmt` before descending into a labeled
+loop's body (`parse_while_stmt`/`parse_for_stmt`) and popped after --
+so it's populated with every label lexically in scope at any point
+during parsing, correctly nesting for `'outer: for { 'inner: for {
+... } }`. `break`/`continue`'s bare-identifier-before-`;` heuristic now
+only takes the label interpretation when the identifier is actually on
+that stack; otherwise it falls through unconsumed, and the existing
+"parse a value expression" branch picks it up naturally (no other
+change needed there -- `break i;` where `i` isn't a live label now just
+parses as `break <expr:i>;`).
+
+One consequence worth flagging: `continue`'s value-less nature means a
+non-label identifier there now surfaces as a plain "expected ';'"
+parse error (the identifier is left unconsumed and `expect_keyword(
+"';'")` fails on it) instead of the old "no enclosing loop is labeled"
+checker error -- arguably clearer (it fires at the parse site, not
+after a spurious label-resolution attempt), but a different message if
+anything depended on the exact old wording.
+
+`examples/language/english/break_value.vani`'s `break (i);` workaround
+was reverted to the natural `break i;` (the parens are no longer
+load-bearing), and the surrounding dead-code loop was reshaped so that
+branch actually executes at runtime (previously `i` was hardcoded to
+`0 - 5`, always non-positive, so the `break i;` line was parse-tested
+but never runtime-tested) -- it now counts up from `0 - limit` so the
+break-with-value path genuinely fires and returns a real value.
+
+**Corpus-wide regression check**: this touches the shared break/
+continue parsing path used by literally every `.vani` file, so it got
+the full bar promised above -- `cargo test --release` (every test
+binary, 2885 lib tests + all integration suites, not just `--lib`),
+`vanic check` across the full 1040-file example corpus (21 pre-existing
+failures, none new -- see below), and `tools/leak_sweep.py` (clean,
+matches baseline). Also added three dedicated regression tests in
+`src/lib.rs` (`bug174_break_bare_ident_not_matching_active_label_
+parses_as_value`, `bug174_break_label_still_resolves_when_actually_in_
+scope`, `bug174_break_undeclared_bare_ident_reports_value_not_label_
+error`).
+
+**Found while doing the corpus-wide check, NOT a regression**: three
+`examples/edge_cases/mix_break_*.vani` files (`mix_break_inner_deeply_
+nested`, `mix_break_outer_single_loop`, `mix_break_positional`) fail
+`vanic check`, and their comments describe a "positional break" feature
+(`break inner`/`break outer`/`break middle` resolving by loop DEPTH
+POSITION rather than by matching a declared label name) that does not
+exist anywhere in the compiler -- grepped `checker.rs` and `parser.rs`
+for any positional/depth-based label resolution and found none; the
+checker's break/continue label lookup (`src/checker.rs` ~15825-15889)
+is a plain `loops.iter().rposition(|f| f.label.as_deref() == Some(
+name))` exact-string match, nothing positional. These files were
+already failing before this fix too (the old parser would have
+unconditionally treated `break outer;` etc. as a label reference, and
+since none of these files actually declare a loop labeled "outer" —
+they use plain unlabeled `while`/`for` — the OLD checker would have
+raised "no enclosing loop is labeled 'outer'"; the fix just changes
+which error fires, from that to "break value is only valid..."). Not
+fixed here -- filing as a new item, BUG-176, since implementing genuine
+positional break/continue is a real feature request, not a bug-fix,
+and out of scope for this session.
+
+## Update 2026-08-11: BUG-175 CLOSED
+
+Fixed in `src/lexer.rs`'s `lex_unicode_ident`: when the continuation
+loop encounters a `'` byte, it now peeks one byte further -- if another
+identifier-continuation byte (ASCII alnum/underscore or any non-ASCII
+byte) immediately follows, the `'` is folded into the current
+identifier and scanning continues; otherwise the loop stops there as
+before, leaving the `'` for the top-level dispatch's `lex_label` call.
+This means a fresh `'outer:` label at a real token boundary is
+unaffected (nothing precedes it that would make `lex_unicode_ident`
+even be the active consumer), while `פיבונאצ'י` now lexes as one
+identifier token (the geresh sits between two Hebrew letters, both
+identifier-continuation bytes).
+
+**Found immediately downstream, same session**: fixing the lexer
+exposed a SECOND, previously-unreachable bug -- neither SSA backend's
+identifier mangling was prepared for `'` to ever appear inside a lexed
+identifier, because it never could before. `src/backend_llvm.rs`'s
+`llvm_mangle_ident` special-cased "any ASCII byte passes through raw"
+(true before this fix, since the lexer never allowed a non-alnum ASCII
+byte mid-identifier -- but `'` isn't a valid LLVM bare-identifier
+character either, so it broke the emitted `.ll` text once it could
+occur); fixed by tightening the passthrough check to explicitly
+whitelist ASCII alnum + `_`, escaping everything else (ASCII or not)
+via the existing `_uHHHH` scheme. Also found three more call sites in
+`src/ssa_backend_llvm.rs` building `@__intent_depth_<name>` /
+`@__intent_dec_depth_<name>` symbol names for the `#[bounded(N)]`
+feature directly from the raw function name, bypassing
+`llvm_mangle_ident` entirely -- fixed to call it too, matching the
+already-correct function-name-emission call sites.
+
+The C backend turned out to have a DIFFERENT, more surprising root
+cause for the same symptom: `src/backend_c.rs`'s `sanitize_ident`
+already correctly escaped non-alnum/underscore characters (including
+`'`) -- but `vanic run --backend=c` doesn't go through `backend_c.rs`'s
+`emit_c`/`function_name` at all. It uses the separate, newer SSA-based
+C backend (`src/ssa_backend_c.rs`), which had NO identifier
+sanitization whatsoever -- it emits `fn_<raw name>` directly. This
+never mattered before because GCC accepts arbitrary raw UTF-8 bytes as
+an identifier-character extension, so unsanitized non-ASCII names
+happened to work by accident; only `'` (which starts a C character
+literal, breaking tokenization outright) ever exposed the gap. Made
+`sanitize_ident` `pub(crate)` and called it from `ssa_backend_c.rs`'s
+four function-identifier-emission sites (prototype, definition, call,
+`FnRef`) plus its two `#[bounded(N)]` depth-counter-name sites (mirror
+of the LLVM fix above), rather than inventing a second, parallel
+sanitizer.
+
+`examples/language/hebrew/iterate.vani`'s workaround (the function was
+renamed from `פיבונאצ'י` to `פיבונאצי`, dropping the geresh) was
+reverted -- the geresh spelling is restored and now compiles and runs
+correctly on both backends, serving as the regression test in the
+corpus sweep. Also added a dedicated `cargo test` regression
+(`bug175_apostrophe_mid_identifier_lexes_as_one_token_and_mangles_
+safely` in `src/lib.rs`) that compiles a geresh-containing identifier
+and asserts the raw Hebrew text does NOT appear un-mangled in either
+backend's emitted output.
+
+Same corpus-wide regression bar as BUG-174 above (this also touches a
+lexer path shared by every file) -- full `cargo test --release`, full
+`vanic check` sweep (1040 files, 21 pre-existing failures unrelated to
+this fix -- same list as BUG-174's update above, since both fixes were
+validated together), `tools/leak_sweep.py` clean.

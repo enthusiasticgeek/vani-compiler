@@ -12174,3 +12174,60 @@ file set as the pre-BUG-170 baseline, not just the same count),
 baseline exactly).
 
 Next free bug number is **BUG-171**.
+
+## BUG-171 through BUG-176 (2026-08-10/11) -- tracked in separate audit docs, summary pointer
+
+This round's detail lives in `docs/BUG_PATTERN_AUDIT_TODO_10.md` and
+`docs/BUG_PATTERN_AUDIT_TODO_11.md` instead of being written out here
+inline (both linked from `MEMORY.md`); this entry is just a pointer so
+the bug-number sequence in this file stays unbroken.
+
+- **BUG-171**: native-speaker linguistic review, Tiers A-E (real
+  word-choice mistakes across ~40 dialects, a 46-file `vec(0)`-is-not-
+  empty bug, cross-dialect keyword contamination, Prove-vs-Assert
+  mixups). Khmer/Burmese/Lao/Amharic + Tier E flagged as needing real
+  human review, not further AI passes.
+- **BUG-172**: 66 pre-existing example-corpus failures found while
+  checkpointing BUG-171 (unqualified `Some`/`None`, dropped `ref`,
+  `Box(...)` vs `box(...)`, block-bodied `match` arms, a genuine
+  Georgian type-name-recognition compiler bug, several dialect-specific
+  one-offs). All fixed.
+- **BUG-173**: `src/lsp.rs`'s completion-popup `XXX_KEYWORDS` arrays
+  had drifted 263 stale entries from `src/lexer.rs`'s real keyword
+  tables. Fixed by mechanically regenerating them from the lexer's own
+  source (`tools/regen_lsp_keywords.py`) instead of hand-editing, plus
+  a `cargo test` (`lsp_keyword_lists_match_lexer`) that fails CI on any
+  future re-drift.
+- **BUG-174**: `break`/`continue`'s bare-identifier-before-`;` parsing
+  unconditionally guessed "label reference" with no fallback to a
+  value expression, breaking legitimate `break i;` where `i` is just a
+  local variable. Fixed by tracking in-scope loop labels during
+  parsing (`Parser::active_labels`) and only taking the label reading
+  when the identifier actually matches one.
+- **BUG-175**: the lexer treated any bare `'` as an unconditional
+  `'label:` token start, even mid-identifier, breaking Hebrew geresh
+  notation (`פיבונאצ'י`). Fixed in `lex_unicode_ident` to fold `'`
+  into the current identifier when another identifier character
+  follows it. Exposed a second, previously-unreachable bug once fixed:
+  neither SSA backend's identifier mangling (`llvm_mangle_ident` in
+  `backend_llvm.rs`, and the completely unsanitized function-name
+  emission in `ssa_backend_c.rs`) was prepared for `'` to ever appear
+  in a lexed identifier; both fixed to escape it.
+- **BUG-176** (filed, NOT fixed): three `examples/edge_cases/mix_
+  break_*.vani` files test a "positional break" feature (`break
+  inner`/`outer`/`middle` resolving by loop-nesting DEPTH rather than
+  by a declared label name) that was never actually implemented
+  anywhere in the compiler -- found while corpus-checking the BUG-174
+  fix. These files were already failing before BUG-174 too (just with
+  a different error message). Genuine feature request, not a
+  regression; out of scope for the BUG-174/175 session.
+
+BUG-174/175 both touch parsing/lexing paths shared by every `.vani`
+file, so they got full corpus-wide verification: `cargo test --release`
+(every test binary: 2889 lib tests + 12 other suites, 0 failed),
+`vanic check` across all 1040 example files (21 pre-existing failures,
+same set before and after -- see BUG_PATTERN_AUDIT_TODO_10.md for the
+full breakdown of why each is unrelated), `tools/leak_sweep.py` (clean,
+matches baseline).
+
+Next free bug number is **BUG-177**.

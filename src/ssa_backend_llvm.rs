@@ -771,7 +771,7 @@ fn emit_function(
     if let Some(bound) = f.recursion_bound {
         out.push_str(&format!(
             "@__intent_depth_{} = thread_local global i32 0\n",
-            f.name
+            crate::backend_llvm::llvm_mangle_ident(&f.name)
         ));
         let _ = bound; // increment + check are emitted below
     }
@@ -815,7 +815,7 @@ fn emit_function(
     // actual entry block. Decrements before each `ret` are
     // injected at terminator emit time.
     if let Some(bound) = f.recursion_bound {
-        let counter = format!("@__intent_depth_{}", f.name);
+        let counter = format!("@__intent_depth_{}", crate::backend_llvm::llvm_mangle_ident(&f.name));
         let entry_id = f.entry.0;
         out.push_str(&format!("  %__bd_cur = load i32, i32* {}\n", counter));
         out.push_str("  %__bd_new = add i32 %__bd_cur, 1\n");
@@ -1030,7 +1030,7 @@ fn emit_function(
             // sites from colliding.
             if let Some(_bound) = f.recursion_bound {
                 if matches!(block.terminator, Terminator::Return(_)) {
-                    let counter = format!("@__intent_depth_{}", f.name);
+                    let counter = format!("@__intent_depth_{}", crate::backend_llvm::llvm_mangle_ident(&f.name));
                     let bid = block.id.0;
                     out.push_str(&format!(
                         "  %__bd_pre_{} = load i32, i32* {}\n", bid, counter
@@ -5346,7 +5346,7 @@ fn emit_instr(
             let fn_ptr_ty = llvm_type_string(&instr.ty)?;
             out.push_str(&format!(
                 "  %v_{} = bitcast {} @fn_{} to {}\n",
-                instr.result.0, fn_ptr_ty, name, fn_ptr_ty
+                instr.result.0, fn_ptr_ty, crate::backend_llvm::llvm_mangle_ident(name), fn_ptr_ty
             ));
         }
         InstrKind::CallIndirect { callee, args } => {

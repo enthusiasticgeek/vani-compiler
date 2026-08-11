@@ -166,19 +166,26 @@ fn main() -> i64 {
 
 ## Undefined label -> compile error
 
-Using a label that doesn't exist on any enclosing loop is caught at
-compile time -- no runtime surprise:
+`break label_name;` only takes the *label* interpretation when
+`label_name` actually names a loop that's currently in scope. If it
+doesn't match any enclosing loop's label, the compiler instead treats
+it as a **break value** (a `while`/`for` loop used as an expression can
+return a value via `break val;`, e.g. `let x = while ... { break val; };`)
+-- and since a plain `for`/`while` *statement* isn't being used as an
+expression, that's caught at compile time too, just with a different
+message:
 
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 outer: for i from 0 to 3 {
-  break nowhere;   /* error: no enclosing loop is labeled 'nowhere' */
+  break nowhere;   /* `nowhere` isn't a label in scope here, so this
+                       is read as a break VALUE instead */
 }
 ```
 
 ```
-error: no enclosing loop is labeled 'nowhere'
+error: 'break value' is only valid when the loop is used as an expression (e.g. `let x = while ... { break val; }`)
     break nowhere;
 ```
 

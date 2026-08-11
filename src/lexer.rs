@@ -6803,6 +6803,27 @@ impl<'a> Lexer<'a> {
                 || b >= 0x80
             {
                 self.advance();
+            } else if b == b'\'' {
+                // BUG-175 fix: some scripts use a bare `'` mid-word
+                // as legitimate orthography, not as the start of a
+                // `'label:` loop-label token -- e.g. Hebrew geresh
+                // in transliterations like `פיבונאצ'י` ("Fibonacci").
+                // Fold it into this identifier only when another
+                // identifier-continuation byte follows immediately
+                // after it; a genuine loop label never has an
+                // identifier byte glued directly onto a preceding
+                // identifier's `'` this way, so a standalone/trailing
+                // `'` still stops here and falls through to the
+                // top-level dispatch's `lex_label` as before.
+                let next_continues_ident = self
+                    .peek_next()
+                    .map(|nb| matches!(nb, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || nb >= 0x80)
+                    .unwrap_or(false);
+                if next_continues_ident {
+                    self.advance();
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
