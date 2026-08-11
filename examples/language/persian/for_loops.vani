@@ -2,7 +2,7 @@
 هدف "Persian for loops smoke-test";
 تابع main() -> i64 {
   فرض majmoo: i64 = 0;
-  هر i از 1 إلى 6 {
+  هر i از 1 به 6 {
     majmoo = majmoo + i;
   }
   ادعا majmoo == 15;

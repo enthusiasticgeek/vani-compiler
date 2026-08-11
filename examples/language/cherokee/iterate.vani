@@ -7,7 +7,7 @@
 ᎤᎲᏍᏛ "Cherokee Vec iteration smoke-test";
 
 ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
-  ᎠᏁᎳ arr: Vec<i64> = vec(0);
+  ᎠᏁᎳ arr: Vec<i64> = vec();
   arr = push(arr, 10);
   arr = push(arr, 20);
   arr = push(arr, 30);

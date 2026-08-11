@@ -9,7 +9,7 @@
   بېرته -1;
 }
 کار main() -> i64 {
-  ووایه v: Vec<i64> = vec(0);
+  ووایه v: Vec<i64> = vec();
   v = push(v, 3);
   v = push(v, 0);
   v = push(v, 7);

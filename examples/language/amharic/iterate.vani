@@ -7,7 +7,7 @@
 ዓላማ "Amharic Vec iteration smoke-test";
 
 ተግባር main() -> i64 {
-  ይሁን ዝርዝር: Vec<i64> = vec(0);
+  ይሁን ዝርዝር: Vec<i64> = vec();
   ዝርዝር = push(ዝርዝር, 10);
   ዝርዝር = push(ዝርዝር, 20);
   ዝርዝር = push(ዝርዝር, 30);

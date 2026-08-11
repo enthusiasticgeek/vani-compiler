@@ -559,7 +559,11 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         "செயல்பாடு" => TokenKind::Fn,           // seyalpaadu (function)
         "சார்பு" => TokenKind::Fn,                // saarbu (alt function)
         "கொள்" => TokenKind::Let,                  // kol (let/assume)
-        "இருக்க" => TokenKind::Let,               // irukka (let it be)
+        // Native-review fix (2026-08-10): removed "இருக்க"
+        // ("to be", infinitive) from TokenKind::Let -- "கொள்"
+        // above already covers this correctly (same mistake class
+        // as Swedish "vara"/Norwegian "være", both also "(to) be"
+        // wrongly registered for Let and fixed the same way).
         "கட்டமைப்பு" => TokenKind::Struct,        // kattamaippu (structure)
         "எண்ணுப்பெயர்" => TokenKind::Enum,        // ennuppeyar (enum)
         "மாறா" => TokenKind::Const,                // maaraa (unchanging)

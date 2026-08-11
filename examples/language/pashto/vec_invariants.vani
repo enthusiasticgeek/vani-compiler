@@ -1,7 +1,7 @@
 // vani-lang: pashto
 موخه "Pashto Vec invariants smoke-test";
 کار main() -> i64 {
-  ووایه لیست: Vec<i64> = vec(0);
+  ووایه لیست: Vec<i64> = vec();
   لیست = push(لیست, 10);
   لیست = push(لیست, 20);
   لیست = push(لیست, 30);

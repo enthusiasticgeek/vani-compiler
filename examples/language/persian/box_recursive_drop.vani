@@ -4,12 +4,12 @@
   contents: Box<Vec<i64>>,
 }
 تابع main() -> i64 {
-  فرض v: Vec<i64> = vec(0);
+  فرض v: Vec<i64> = vec();
   v = push(v, 10);
   v = push(v, 20);
   v = push(v, 30);
   فرض b: Box<Vec<i64>> = box(v);
-  فرض v2: Vec<i64> = vec(0);
+  فرض v2: Vec<i64> = vec();
   v2 = push(v2, 7);
   فرض کیف: Bag = Bag { contents: box(v2) };
   چاپ "Persian box recursive drop OK";

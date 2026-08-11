@@ -1,7 +1,7 @@
 // vani-lang: punjabi-shahmukhi
 مقصد "Punjabi Shahmukhi Vec invariants smoke-test";
 فنکشن main() -> i64 {
-  مانیں فہرست: Vec<i64> = vec(0);
+  مانیں فہرست: Vec<i64> = vec();
   فہرست = push(فہرست, 10);
   فہرست = push(فہرست, 20);
   فہرست = push(فہرست, 30);

@@ -1,7 +1,7 @@
 // vani-lang: persian
 هدف "Persian iterate smoke-test";
 تابع main() -> i64 {
-  فرض فهرست: Vec<i64> = vec(0);
+  فرض فهرست: Vec<i64> = vec();
   فهرست = push(فهرست, 10);
   فهرست = push(فهرست, 20);
   فهرست = push(فهرست, 30);

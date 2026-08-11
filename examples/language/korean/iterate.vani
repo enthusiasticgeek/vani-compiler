@@ -7,7 +7,7 @@
 목적 "Korean Vec iteration smoke-test";
 
 함수 main() -> i64 {
-  정의 배열: Vec<i64> = vec(0);
+  정의 배열: Vec<i64> = vec();
   배열 = push(배열, 10);
   배열 = push(배열, 20);
   배열 = push(배열, 30);

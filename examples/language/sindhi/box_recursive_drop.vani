@@ -4,12 +4,12 @@
   contents: Box<Vec<i64>>,
 }
 فنکشن main() -> i64 {
-  مانیں v: Vec<i64> = vec(0);
+  مانیں v: Vec<i64> = vec();
   v = push(v, 10);
   v = push(v, 20);
   v = push(v, 30);
   مانیں b: Box<Vec<i64>> = box(v);
-  مانیں v2: Vec<i64> = vec(0);
+  مانیں v2: Vec<i64> = vec();
   v2 = push(v2, 7);
   مانیں تھیلا: Bag = Bag { contents: box(v2) };
   لکھو "Sindhi box recursive drop OK";
