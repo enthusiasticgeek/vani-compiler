@@ -5476,3 +5476,31 @@ A vanic run of an example file `/home/virgo/source/vani-compiler-localfuzz/examp
 }
 
 കാര്യം count_positive(xs
+
+---
+
+### Candidate: 20260811-100044-backend-divergence-e134044b77
+
+Repro: `tools/localfuzz/findings/20260811-100044-backend-divergence-e134044b77/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-100044-backend-divergence-e134044b77/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  }
+}
+```
+
