@@ -29,6 +29,6 @@ fn main() -> i64 {
   }
   überprüfe i == 5;
 
-  ausführe sign(42);
+  drucken sign(42);
   zurück 0;
 }

@@ -10,7 +10,7 @@ scopo "break and continue in loops";
 
 funzione count_odd(limit: i64) -> i64 {
   sia count: i64 = 0;
-  per i da 1 fino limit {
+  per i da 1 finoa limit {
     se i * 2 == i + i {
       continuare;
     }

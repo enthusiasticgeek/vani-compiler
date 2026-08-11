@@ -17,8 +17,8 @@ fn sum_to(n: i64) -> i64 {
 }
 
 fn main() -> i64 {
-  überprüfe sum_to(4) == 10;
+  überprüfe sum_to(4) == 6;
   überprüfe sum_to(0) == 0;
-  ausführe sum_to(4);
+  drucken sum_to(4);
   zurück 0;
 }

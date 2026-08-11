@@ -4,8 +4,9 @@
 //   vanic run examples/language/german/keywords.vani              # LLVM
 //   vanic run examples/language/german/keywords.vani --backend=c  # C
 //
-// v1: non-ASCII German aliases (während, für, zurück, überprüfe, ausführe,
-// aufzählung, öffentlich) are active; pure-ASCII structure uses English.
+// v1: non-ASCII German aliases (während, für, zurück, überprüfe,
+// aufzählung, öffentlich) are active, plus the pure-ASCII `drucken`
+// (print); other pure-ASCII structure uses English.
 
 intent "German keyword showcase";
 
@@ -26,7 +27,7 @@ fn main() -> i64 {
   überprüfe x == 7;
   let y: i64 = max(10, 20);
   überprüfe y == 20;
-  ausführe x;
-  ausführe y;
+  drucken x;
+  drucken y;
   zurück 0;
 }

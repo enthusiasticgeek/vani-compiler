@@ -38825,14 +38825,14 @@ funzione main() -> i64 {
 scopo "for range test";
 funzione main() -> i64 {
   sia total: i64 = 0;
-  per i da 1 fino 5 {
+  per i da 1 finoa 5 {
     total = total + i;
   }
   affermare total == 10;
   ritornare 0;
 }
 "#;
-        compile(source).expect("Italian per-da-fino for-range must compile");
+        compile(source).expect("Italian per-da-finoa for-range must compile");
     }
 
     #[test]
@@ -39711,9 +39711,13 @@ função main() -> i64 {
         // Tier II dialect. Same v1 scope as Spanish + French —
         // only natural non-ASCII German keywords (umlauts ä/ö/ü
         // and ß) are registered (während, für, zurück,
-        // überprüfe, ausführe, möglichkeit, öffentlich,
-        // aufzählung, äußere); pure-ASCII forms (funktion,
-        // wenn, wahr, falsch) queued for v2.
+        // überprüfe, öffentlich, aufzählung, äußere), plus the
+        // pure-ASCII `drucken` (print) from the ascii-fallback
+        // table; other pure-ASCII forms (funktion, wenn, wahr,
+        // falsch) queued for v2. (Native-review pass, 2026-08-10:
+        // "ausführe"/"möglichkeit" used to be registered too, but
+        // they actually mean "execute"/"possibility", not "print"/
+        // "intent" -- removed; `drucken` replaces "ausführe" here.)
         let source = "// vani-lang: german\n\
                       intent \"basic German demo\";\n\
                       fn add(a: i64, b: i64) -> i64 {\n  \
@@ -39722,7 +39726,7 @@ função main() -> i64 {
                       fn main() -> i64 {\n  \
                         let x: i64 = add(20, 22);\n  \
                         überprüfe x == 42;\n  \
-                        ausführe x;\n  \
+                        drucken x;\n  \
                         zurück 0;\n\
                       }\n";
         crate::compile(source).expect("German basics compile");
@@ -39983,8 +39987,14 @@ função main() -> i64 {
         // Phase 8b.1 (2026-06-07): first Latin-script Tier II
         // dialect. v1 ships non-ASCII Spanish keywords only
         // (función, módulo, público, intención, métodos, región,
-        // enumeración, propósito, dónde). Pure-ASCII Spanish
+        // enumeración, propósito). Pure-ASCII Spanish
         // keywords queued for v2 once lexer threads pragma.
+        // (Native-review pass, 2026-08-10: this table used to also
+        // register "dónde" -- the interrogative "where?" -- for
+        // TokenKind::Where; removed, since vāṇी's `where` is a
+        // non-interrogative clause and the relative "donde" (no
+        // accent, already in spanish_ascii_keyword) is the
+        // grammatically correct register.)
         let source = "// vani-lang: spanish\n\
                       intención \"basic Spanish demo\";\n\
                       función add(a: i64, b: i64) -> i64 {\n  \

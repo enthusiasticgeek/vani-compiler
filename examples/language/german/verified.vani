@@ -19,7 +19,7 @@ requires lo >= 0;
 fn main() -> i64 {
   überprüfe clamp_low(0 - 5, 0) == 0;
   überprüfe clamp_low(10, 3) == 10;
-  ausführe clamp_low(0 - 5, 0);
-  ausführe clamp_low(10, 3);
+  drucken clamp_low(0 - 5, 0);
+  drucken clamp_low(10, 3);
   zurück 0;
 }

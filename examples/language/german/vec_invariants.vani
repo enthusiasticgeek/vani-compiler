@@ -22,11 +22,11 @@ fn main() -> i64 {
   prove i == 5;
   prove len(xs) == 5;
 
-  ausführe xs[0];
-  ausführe xs[1];
-  ausführe xs[2];
-  ausführe xs[3];
-  ausführe xs[4];
+  drucken xs[0];
+  drucken xs[1];
+  drucken xs[2];
+  drucken xs[3];
+  drucken xs[4];
 
   zurück 0;
 }

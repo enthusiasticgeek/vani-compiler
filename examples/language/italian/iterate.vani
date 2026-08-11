@@ -9,7 +9,7 @@ scopo "Vec iteration";
 funzione main() -> i64 {
   sia xs: Vec<i64> = vec(10, 20, 30);
   sia total: i64 = 0;
-  per i da 0 fino 3 {
+  per i da 0 finoa 3 {
     total = total + xs[i come u64];
   }
   affermare total == 60;

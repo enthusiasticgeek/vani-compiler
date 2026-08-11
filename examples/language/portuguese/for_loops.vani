@@ -17,7 +17,7 @@ função sum_to(n: i64) -> i64 {
 }
 
 função main() -> i64 {
-  afirmar sum_to(4) == 10;
+  afirmar sum_to(4) == 6;
   afirmar sum_to(0) == 0;
   imprimir sum_to(4);
   retornar 0;

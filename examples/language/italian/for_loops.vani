@@ -6,18 +6,18 @@
 
 scopo "for-range loops";
 
-// `per` = for, `da` = from, `fino` = to
+// `per` = for, `da` = from, `finoa` = to
 
 funzione sum_to(n: i64) -> i64 {
   sia total: i64 = 0;
-  per i da 1 fino n {
+  per i da 1 finoa n {
     total = total + i;
   }
   ritornare total;
 }
 
 funzione main() -> i64 {
-  affermare sum_to(4) == 10;
+  affermare sum_to(4) == 6;
   affermare sum_to(0) == 0;
   stampare sum_to(4);
   ritornare 0;

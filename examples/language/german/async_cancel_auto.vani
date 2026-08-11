@@ -17,6 +17,6 @@ fn main() -> i64 {
 
   überprüfe a == 42;
   überprüfe b == 7;
-  ausführe "delays:", a, b;
+  drucken "delays:", a, b;
   zurück 0;
 }

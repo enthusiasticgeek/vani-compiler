@@ -6,11 +6,14 @@
 //   vanic build examples/language/german/basics.vani -o /tmp/basics && /tmp/basics   # native binary
 //
 // Phase 10.1 v1: German-pragma files use natural non-ASCII German
-// aliases (für, während, zurück, überprüfe, möglichkeit, ausführe,
-// öffentlich, aufzählung, äußere) alongside English ASCII keywords
-// for the remaining structure words. Full German keyword coverage
-// (including pure-ASCII forms like `funktion`, `wenn`, `wahr`,
-// `falsch`, V2 + subordinate-SOV grammar) is queued for v2.
+// aliases (für, während, zurück, überprüfe, öffentlich, aufzählung,
+// äußere) alongside English ASCII keywords for the remaining
+// structure words (e.g. `drucken` for print -- native-review pass,
+// 2026-08-10: "ausführe" used to be registered for print, but it
+// actually means "execute", not "print"; removed). Full German
+// keyword coverage (including pure-ASCII forms like `funktion`,
+// `wenn`, `wahr`, `falsch`, V2 + subordinate-SOV grammar) is queued
+// for v2.
 
 intent "Compute a small score with checked constraints";
 
@@ -30,6 +33,6 @@ fn main() -> i64 {
   let answer = bounded_score(20);
   prove 2 + 2 == 4;
   überprüfe answer >= 0;
-  ausführe answer;
+  drucken answer;
   zurück 0;
 }

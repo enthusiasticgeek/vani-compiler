@@ -3581,7 +3581,11 @@ fn italian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "mentre" => TokenKind::While,         // while
         "per" => TokenKind::For,              // for / "for each"
         "da" => TokenKind::From,              // from
-        "fino" => TokenKind::To,              // until / to
+        "finoa" => TokenKind::To,             // fino-a (until-to, fused) --
+                                              // native-review fix: bare "fino"
+                                              // is grammatically incomplete for
+                                              // this meaning, Italian needs
+                                              // "fino a" ("conta fino a 10")
         "rompere" => TokenKind::Break,        // break
         "interrompere" => TokenKind::Break,   // interrupt (alt)
         "continuare" => TokenKind::Continue,  // continue
@@ -4181,7 +4185,11 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "retourne" => TokenKind::Return,      // return! (imperative)
         "si" => TokenKind::If,                // if
         "sinon" => TokenKind::Else,           // else
-        "tandis" => TokenKind::While,         // while
+        "tantque" => TokenKind::While,        // tant-que (as-long-as, fused) --
+                                              // native-review fix: bare "tandis"
+                                              // is grammatically incomplete in
+                                              // French, it only means "while" as
+                                              // part of "tandis que"
         "pour" => TokenKind::For,             // for
         "dans" => TokenKind::In,              // in
         "depuis" => TokenKind::From,          // from
@@ -4203,6 +4211,20 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "vrai" => TokenKind::True,            // true
         "faux" => TokenKind::False,           // false
         "imprimer" => TokenKind::Print,       // print
+        "imprime" => TokenKind::Print,        // print! (imperative) -- native-
+                                              // review fix: was in the NATIVE
+                                              // table as accented "imprimé" (a
+                                              // past participle, "printed" --
+                                              // grammatically odd as a command),
+                                              // but the correct imperative form
+                                              // "imprime" has no accent, so it
+                                              // belongs here in the ASCII table
+                                              // instead (the native table is
+                                              // only reachable for non-ASCII
+                                              // text -- a pure-ASCII spelling
+                                              // placed there is unreachable dead
+                                              // code, the same bug class BUG-170
+                                              // found in Pashto)
         "afficher" => TokenKind::Print,       // display (alt)
         // === PURITY / PARALLEL ===
         "pur" => TokenKind::Pure,             // pure
@@ -4217,7 +4239,13 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "est" => TokenKind::Is,               // is
         // === CONCURRENCY ===
         "essayer" => TokenKind::Try,          // try
-        "tache" => TokenKind::Task,           // task (no accent alt)
+        "travail" => TokenKind::Task,         // work/task -- native-review fix:
+                                              // "tache" (no accent) is a REAL,
+                                              // different French word meaning
+                                              // "stain"; only "tâche" (with the
+                                              // circumflex) means "task", so the
+                                              // accent-free spelling silently
+                                              // meant something else entirely
         "joindre" => TokenKind::Join,         // join
         // === EMBEDDED ===
         "dangereux" => TokenKind::Unsafe,     // dangerous
@@ -4340,10 +4368,15 @@ fn spanish_keyword(text: &str) -> Option<TokenKind> {
         "métodos" => TokenKind::Methods,      // methods
         "región" => TokenKind::RegionKw,      // region
         // === BOUNDS ===
-        // `dónde` (interrogative "where?") is distinct from `donde`
-        // (relative "where"); both have a use, but only the accented
-        // form is non-ASCII so safe to register without pragma gate.
-        "dónde" => TokenKind::Where,          // where (interrogative)
+        // Native-review fix (2026-08-10): this table used to register
+        // `dónde` (interrogative "where?", as in "¿Dónde estás?") for
+        // TokenKind::Where. vāṇी's `where` is a non-interrogative
+        // clause/statement usage, so the grammatically correct
+        // register is the RELATIVE `donde` (no accent, "el lugar
+        // donde vivo" = "the place where I live") -- which
+        // `spanish_ascii_keyword` already registers correctly.
+        // Removed the mismatched interrogative entry rather than
+        // keep a wrong-register non-ASCII duplicate.
         _ => return None,
     };
     Some(kind)
@@ -4357,6 +4390,16 @@ fn spanish_keyword(text: &str) -> Option<TokenKind> {
 /// etc.) don't accidentally collide with user identifiers in
 /// non-pragma files. Pragma threading queued for v2 to unlock
 /// the full German keyword set.
+///
+/// Native-review pass (2026-08-10): removed 3 semantically wrong
+/// entries found while auditing this table -- "auflösen" (means
+/// "to dissolve/resolve", not "break") -> `TokenKind::Break`,
+/// "ausführen"/"ausführe" (means "to execute", not "to print") ->
+/// `TokenKind::Print`, "möglichkeit" (means "possibility", not
+/// "intent") -> `TokenKind::Intent`. All three concepts are already
+/// correctly covered by `german_ascii_keyword` ("brechen", "drucken"/
+/// "schreiben", "absicht" respectively), so no replacement was
+/// needed here.
 fn german_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
@@ -4367,7 +4410,6 @@ fn german_keyword(text: &str) -> Option<TokenKind> {
         "während" => TokenKind::While,         // while (has ä)
         "für" => TokenKind::For,               // for (has ü)
         "zurück" => TokenKind::Return,         // return / back (has ü)
-        "auflösen" => TokenKind::Break,        // resolve / break (has ö)
         // === REFS / MUT ===
         "veränderlich" => TokenKind::Mut,      // changeable / mutable (has ä)
         "veränderbar" => TokenKind::Mut,       // alt mutable form (has ä)
@@ -4377,13 +4419,9 @@ fn german_keyword(text: &str) -> Option<TokenKind> {
         "überprüfe" => TokenKind::Assert,      // verify! imperative (has ü)
         "prüfen" => TokenKind::Assert,         // check (has ü)
         "prüfe" => TokenKind::Assert,          // check! imperative (has ü)
-        // === PRINT ===
-        "ausführen" => TokenKind::Print,       // execute (has ü)
-        "ausführe" => TokenKind::Print,        // execute! imperative (has ü)
         // === CONCURRENCY ===
         "ausführbar" => TokenKind::Task,       // executable / task (has ü)
         // === SOV-S7 PARITY ===
-        "möglichkeit" => TokenKind::Intent,    // possibility / intent (has ö)
         "äußere" => TokenKind::Extern,         // external (has ä + ß)
         "äußerer" => TokenKind::Extern,        // external (declined form, has ä + ß)
         _ => return None,
@@ -4670,7 +4708,6 @@ fn french_keyword(text: &str) -> Option<TokenKind> {
         // === PRINT ===
         "écrire" => TokenKind::Print,        // to write
         "écris" => TokenKind::Print,         // write! (imperative)
-        "imprimé" => TokenKind::Print,       // printed (past participle alt)
         // === BOUNDS ===
         "où" => TokenKind::Where,            // where (très naturel)
         // === CONCURRENCY ===
@@ -4692,11 +4729,18 @@ fn french_keyword(text: &str) -> Option<TokenKind> {
 /// first statement parser applies directly — no SOV plumbing.
 /// Uses Arabic 0-9 numerals (Cyrillic numeric letter notation is
 /// archaic, not used in modern Russian).
+///
+/// Native-review pass (2026-08-10): removed "дело" ("matter/
+/// affair/business", not "work/function") from `TokenKind::Fn` --
+/// "функция" alone already covers it correctly. Also fixed
+/// "попытка" (a noun, "an attempt") -> `TokenKind::Try` to
+/// "попробуй" (the imperative "try!"), matching the imperative
+/// mood already used by this table's other command-like entries
+/// ("смотри", "верни").
 fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
         "функция" => TokenKind::Fn,           // funktsiya (function — loanword)
-        "дело" => TokenKind::Fn,              // delo (work — alt)
         "пусть" => TokenKind::Let,            // pust' (let — natural Russian)
         "структура" => TokenKind::Struct,     // struktura (structure)
         "перечисление" => TokenKind::Enum,    // perechislenie (enumeration)
@@ -4748,7 +4792,7 @@ fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
         "где" => TokenKind::Where,            // gde (where)
         "есть" => TokenKind::Is,              // yest' (is — Russian copula)
         // === CONCURRENCY ===
-        "попытка" => TokenKind::Try,          // popytka (attempt/try)
+        "попробуй" => TokenKind::Try,         // poprobuy (try! — imperative)
         "задача" => TokenKind::Task,          // zadacha (task)
         "соединить" => TokenKind::Join,       // soyedinit' (join/unite)
         // === EMBEDDED ===
