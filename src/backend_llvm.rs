@@ -285,25 +285,34 @@ pub(crate) fn host_ionbf_value() -> i32 {
 /// Devanagari-script vāṇी identifiers (e.g. `द्विपदगुणक`) fail to
 /// emit with the raw byte sequence. Mangle each non-ASCII char to
 /// `_uHHHH` (uppercase hex of the Unicode codepoint) so the result
-/// is a valid bare identifier. ASCII-only names pass through
-/// untouched (so existing examples keep their canonical IR).
+/// is a valid bare identifier. ASCII alphanumeric/underscore names
+/// pass through untouched (so existing examples keep their
+/// canonical IR).
 ///
 /// Example:
 ///   `द्विपदगुणक` → `_u0926_u094D_u0935_u093F_u092A_u0926_u0917_u0941_u0923_u0915`
+///
+/// BUG-175 follow-up (2026-08-11): a bare ASCII char that isn't
+/// alphanumeric/underscore (e.g. `'`, from Hebrew geresh notation
+/// mid-identifier like `פיבונאצ'י`, now legal after the BUG-175
+/// lexer fix) used to pass through this function untouched under
+/// the old `code < 0x80` check -- but `'` isn't actually a valid
+/// LLVM bare-identifier character either, so it broke the emitted
+/// `.ll` text. Only whitelist the characters that are ACTUALLY
+/// safe (ASCII alnum + `_`); escape everything else, ASCII or not.
 pub(crate) fn llvm_mangle_ident(name: &str) -> String {
-    if name.bytes().all(|b| b < 0x80) {
+    if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return name.to_string();
     }
     let mut out = String::with_capacity(name.len() * 2);
     for ch in name.chars() {
-        let code = ch as u32;
-        if code < 0x80 {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
             out.push(ch);
         } else {
             // Pad to at least 4 hex digits; codepoints > 0xFFFF
             // get more (chars > U+FFFF naturally extend the
             // format width).
-            out.push_str(&format!("_u{:04X}", code));
+            out.push_str(&format!("_u{:04X}", ch as u32));
         }
     }
     out

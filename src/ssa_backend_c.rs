@@ -312,7 +312,7 @@ fn emit_function_prototype(f: &Function, out: &mut String) -> Result<(), EmitErr
     if f.is_extern {
         write!(out, "extern {} {}(", ret_c, f.name).unwrap();
     } else {
-        write!(out, "{} fn_{}(", ret_c, f.name).unwrap();
+        write!(out, "{} fn_{}(", ret_c, crate::backend_c::sanitize_ident(&f.name)).unwrap();
     }
     // Closure #202: empty-param prototypes must say `(void)`,
     // not `()`. Empty parens mean "unspecified prototype" in
@@ -345,8 +345,8 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
     // fall-through). Increments + bound check happen at fn
     // entry below.
     if let Some(bound) = f.recursion_bound {
-        let counter_name = format!("__intent_depth_{}", f.name);
-        let dec_helper = format!("__intent_dec_depth_{}", f.name);
+        let counter_name = format!("__intent_depth_{}", crate::backend_c::sanitize_ident(&f.name));
+        let dec_helper = format!("__intent_dec_depth_{}", crate::backend_c::sanitize_ident(&f.name));
         writeln!(out, "static __thread int {} = 0;", counter_name).unwrap();
         writeln!(
             out,
@@ -358,7 +358,7 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
     }
     // BUG-164: see the matching comment in `emit_function_prototype`.
     let ret_c = c_declarator(&f.return_type, "")?.trim_end().to_string();
-    write!(out, "{} fn_{}(", ret_c, f.name).unwrap();
+    write!(out, "{} fn_{}(", ret_c, crate::backend_c::sanitize_ident(&f.name)).unwrap();
     // Closure #202: see `emit_function_prototype` for why
     // empty parens must be `(void)`.
     if f.params.is_empty() {
@@ -375,8 +375,8 @@ fn emit_function(f: &Function, out: &mut String) -> Result<(), EmitError> {
 
     // Closure #286: bounded-recursion entry sequence.
     if let Some(bound) = f.recursion_bound {
-        let counter_name = format!("__intent_depth_{}", f.name);
-        let dec_helper = format!("__intent_dec_depth_{}", f.name);
+        let counter_name = format!("__intent_depth_{}", crate::backend_c::sanitize_ident(&f.name));
+        let dec_helper = format!("__intent_dec_depth_{}", crate::backend_c::sanitize_ident(&f.name));
         writeln!(
             out,
             "  int __depth_guard __attribute__((cleanup({}))) = 0;\n  (void)__depth_guard;",
@@ -2666,7 +2666,7 @@ fn emit_instr(
             let symbol = if is_extern {
                 name.clone()
             } else {
-                format!("fn_{}", name)
+                format!("fn_{}", crate::backend_c::sanitize_ident(name))
             };
             writeln!(
                 out,
@@ -2747,7 +2747,7 @@ fn emit_instr(
             // C function names decay to function pointers in
             // non-call contexts. Emit the bare prefixed
             // identifier as the SSA value's source.
-            writeln!(out, "  v_{} = fn_{};", instr.result.0, name).unwrap();
+            writeln!(out, "  v_{} = fn_{};", instr.result.0, crate::backend_c::sanitize_ident(name)).unwrap();
         }
         InstrKind::CallIndirect { callee, args } => {
             // Indirect call through a fn-pointer SSA operand.

@@ -41,6 +41,18 @@ struct Parser {
     /// references and non-literal const initializers aren't
     /// supported here. T0.0 follow-up (closure #120).
     const_int_values: std::collections::HashMap<String, i128>,
+    /// Names of loop labels currently in scope while parsing a
+    /// labeled loop's body (pushed by `parse_labeled_loop_stmt`
+    /// / `parse_plain_ident_label_loop_stmt` before descending
+    /// into the body, popped after). BUG-174 fix: `break`/
+    /// `continue` only interpret a bare identifier immediately
+    /// before `;` as a label reference when it's actually on
+    /// this stack -- otherwise it falls through to being parsed
+    /// as a break VALUE expression (`break i;`), instead of the
+    /// old unconditional "any bare ident before `;` is a label"
+    /// guess that broke ordinary local variables named the same
+    /// as no label at all.
+    active_labels: Vec<String>,
 }
 
 impl Parser {
@@ -51,6 +63,7 @@ impl Parser {
             errors: Vec::new(),
             current_type_params: std::collections::HashSet::new(),
             const_int_values: std::collections::HashMap::new(),
+            active_labels: Vec::new(),
         }
     }
 
@@ -2821,11 +2834,24 @@ impl Parser {
             let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
-            } else if let TokenKind::Ident(_) = &self.current().kind {
-                // `break label_name;` -- any named loop label
-                if self.tokens.get(self.pos + 1)
-                    .map(|t| matches!(t.kind, TokenKind::Semicolon))
-                    .unwrap_or(false)
+            } else if let TokenKind::Ident(name) = &self.current().kind {
+                // `break label_name;` -- BUG-174 fix: only take the
+                // label interpretation when `name` is actually an
+                // in-scope loop label; otherwise a bare identifier
+                // before `;` (e.g. `break i;` where `i` is just a
+                // local variable) falls through to being parsed as
+                // the break VALUE expression below, instead of the
+                // old unconditional guess that broke that case.
+                // BUG-176: `inner`/`outer`/`middle` are reserved
+                // positional break targets (resolved by loop-nesting
+                // depth in the checker, see `resolve_positional_loop_
+                // target`) -- they take the label slot even when no
+                // active DECLARED label has that literal name.
+                let name = name.clone();
+                if (self.active_labels.iter().any(|l| l == &name) || is_reserved_positional_loop_target(&name))
+                    && self.tokens.get(self.pos + 1)
+                        .map(|t| matches!(t.kind, TokenKind::Semicolon))
+                        .unwrap_or(false)
                 {
                     let t = self.bump();
                     if let TokenKind::Ident(name) = t.kind { Some(name) } else { unreachable!() }
@@ -2851,11 +2877,20 @@ impl Parser {
             let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
-            } else if let TokenKind::Ident(_) = &self.current().kind {
-                // `continue label_name;` -- any named loop label
-                if self.tokens.get(self.pos + 1)
-                    .map(|t| matches!(t.kind, TokenKind::Semicolon))
-                    .unwrap_or(false)
+            } else if let TokenKind::Ident(name) = &self.current().kind {
+                // `continue label_name;` -- BUG-174 fix, same
+                // rationale as `break` above: only an in-scope
+                // label counts; `continue` never takes a value, so
+                // a non-label identifier here now falls through to
+                // the `expect_keyword("';'")` below and reports a
+                // clear syntax error instead of a misleading
+                // "no enclosing loop is labeled" checker error.
+                // BUG-176: see the matching `break` comment above.
+                let name = name.clone();
+                if (self.active_labels.iter().any(|l| l == &name) || is_reserved_positional_loop_target(&name))
+                    && self.tokens.get(self.pos + 1)
+                        .map(|t| matches!(t.kind, TokenKind::Semicolon))
+                        .unwrap_or(false)
                 {
                     let t = self.bump();
                     if let TokenKind::Ident(name) = t.kind { Some(name) } else { unreachable!() }
@@ -4205,22 +4240,27 @@ impl Parser {
         let label_tok = self.bump();
         let label_name = if let TokenKind::Ident(name) = label_tok.kind { name } else { unreachable!() };
         self.expect_keyword("':' after loop label", |kind| matches!(kind, TokenKind::Colon))?;
-        if self.check(|kind| matches!(kind, TokenKind::While)) {
-            let mut stmt = self.parse_while_stmt()?;
-            if let Stmt::While { ref mut label, .. } = stmt { *label = Some(label_name); }
-            Ok(stmt)
+        self.active_labels.push(label_name.clone());
+        let result = if self.check(|kind| matches!(kind, TokenKind::While)) {
+            self.parse_while_stmt().map(|mut stmt| {
+                if let Stmt::While { ref mut label, .. } = stmt { *label = Some(label_name.clone()); }
+                stmt
+            })
         } else if self.check(|kind| matches!(kind, TokenKind::For)) {
-            let mut stmt = self.parse_for_stmt()?;
-            match stmt {
-                Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
-                    *label = Some(label_name);
+            self.parse_for_stmt().map(|mut stmt| {
+                match stmt {
+                    Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
+                        *label = Some(label_name.clone());
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            Ok(stmt)
+                stmt
+            })
         } else {
             Err(Diagnostic::new(label_tok.span, "loop label must be followed by 'while' or 'for'"))
-        }
+        };
+        self.active_labels.pop();
+        result
     }
 
     fn parse_labeled_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -4231,27 +4271,32 @@ impl Parser {
             unreachable!()
         };
         self.expect_keyword("':' after loop label", |kind| matches!(kind, TokenKind::Colon))?;
-        if self.check(|kind| matches!(kind, TokenKind::While)) {
-            let mut stmt = self.parse_while_stmt()?;
-            if let Stmt::While { ref mut label, .. } = stmt {
-                *label = Some(label_name);
-            }
-            Ok(stmt)
-        } else if self.check(|kind| matches!(kind, TokenKind::For)) {
-            let mut stmt = self.parse_for_stmt()?;
-            match stmt {
-                Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
-                    *label = Some(label_name);
+        self.active_labels.push(label_name.clone());
+        let result = if self.check(|kind| matches!(kind, TokenKind::While)) {
+            self.parse_while_stmt().map(|mut stmt| {
+                if let Stmt::While { ref mut label, .. } = stmt {
+                    *label = Some(label_name.clone());
                 }
-                _ => {}
-            }
-            Ok(stmt)
+                stmt
+            })
+        } else if self.check(|kind| matches!(kind, TokenKind::For)) {
+            self.parse_for_stmt().map(|mut stmt| {
+                match stmt {
+                    Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
+                        *label = Some(label_name.clone());
+                    }
+                    _ => {}
+                }
+                stmt
+            })
         } else {
             Err(Diagnostic::new(
                 label_tok.span,
                 "loop label must be followed by 'while' or 'for'",
             ))
-        }
+        };
+        self.active_labels.pop();
+        result
     }
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -6171,7 +6216,34 @@ fn ident_text(token: Token) -> String {
 /// correctly accepts any letter from those scripts without ALSO
 /// accepting genuinely-lowercase Latin/Cyrillic/etc. letters (which
 /// stay rejected, preserving the convention everywhere it applies).
+/// BUG-176: `break`/`continue inner|outer|middle` are reserved
+/// positional targets (resolved by loop-nesting depth in the
+/// checker's `resolve_positional_loop_target`, not by matching a
+/// declared label name). The parser only needs to know these three
+/// literal words should take the "label" slot instead of falling
+/// through to the value-expression parse, even when no active
+/// DECLARED label has that exact name.
+fn is_reserved_positional_loop_target(name: &str) -> bool {
+    matches!(name, "inner" | "outer" | "middle")
+}
+
 fn is_type_name_start(c: char) -> bool {
+    // BUG-174 (2026-08-11): Georgian Mkhedruli is caseless in
+    // everyday use, but Unicode still assigns it general category
+    // Ll ("lowercase") -- unlike the genuinely caseless scripts
+    // above (Devanagari, Thai, CJK, ...), which Unicode leaves
+    // uncased entirely. That makes `is_alphabetic() &&
+    // !is_lowercase()` false for ordinary Georgian text, since
+    // `is_lowercase()` is true, so no plain Georgian identifier
+    // could ever satisfy this check even though the script has no
+    // real case distinction a user could "get right". Explicitly
+    // accept the main Georgian block (U+10A0..U+10FF: Asomtavruli +
+    // Mkhedruli) and the Mtavruli capitals extension
+    // (U+1C90..U+1CBF) the same way the caseless-script branch
+    // does for the others.
+    if ('\u{10A0}'..='\u{10FF}').contains(&c) || ('\u{1C90}'..='\u{1CBF}').contains(&c) {
+        return true;
+    }
     c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())
 }
 

@@ -12,17 +12,17 @@
 }
 
 လုပ်ဆောင်ချက် main() -> i64 {
-  ထား စာရင်း: Node = Node {
+  ထား ပစ္စည်း: Node = Node {
     တန်ဖိုး: 1,
-    နောက်တစ်ခု: Some(Box(Node {
+    နောက်တစ်ခု: Option.Some(box(Node {
       တန်ဖိုး: 2,
-      နောက်တစ်ခု: Some(Box(Node {
+      နောက်တစ်ခု: Option.Some(box(Node {
         တန်ဖိုး: 3,
-        နောက်တစ်ခု: None,
+        နောက်တစ်ခု: Option.None,
       })),
     })),
   };
-  သေချာ စာရင်း.တန်ဖိုး == 1;
+  သေချာ ပစ္စည်း.တန်ဖိုး == 1;
   ပုံနှိပ် "Burmese box recursive drop OK";
   ပြန် 0;
 }

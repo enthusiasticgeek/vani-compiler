@@ -10,15 +10,15 @@
 
 ᏗᎦᏬᏂᎯᏍᏗ safe_div(a: i64, b: i64) -> Option<i64> {
   ᎢᏳᏃ b == 0 {
-    ᏗᎬᏎᏗ None;
+    ᏗᎬᏎᏗ Option.None;
   } ᎪᎯ {
-    ᏗᎬᏎᏗ Some(a / b);
+    ᏗᎬᏎᏗ Option.Some(a / b);
   }
 }
 
 ᏗᎦᏬᏂᎯᏍᏗ chain(a: i64, b: i64) -> Option<i64> {
   ᎠᏁᎳ v: i64 = safe_div(a, b)?;
-  ᏗᎬᏎᏗ Some(v * 2);
+  ᏗᎬᏎᏗ Option.Some(v * 2);
 }
 
 ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {

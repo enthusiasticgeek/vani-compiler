@@ -8,28 +8,31 @@
 
 ལས་ཀ parse_pos(x: i64) -> Option<i64> {
   གལ་ཏེ x <= 0 {
-    ལོག None;
+    ལོག Option.None;
   } གཞན {
-    ལོག Some(x);
+    ལོག Option.Some(x);
   }
 }
 
 ལས་ཀ double_pos(x: i64) -> Option<i64> {
   ཡོད་པར་ཤོག v: i64 = parse_pos(x)?;
-  ལོག Some(v * 2);
+  ལོག Option.Some(v * 2);
+}
+
+ལས་ཀ unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  ལོག མཐུན o {
+    Option.Some(v) དེ་ནས v,
+    Option.None དེ་ནས def,
+  };
 }
 
 ལས་ཀ main() -> i64 {
   ཡོད་པར་ཤོག r1: Option<i64> = double_pos(5);
   ཡོད་པར་ཤོག r2: Option<i64> = double_pos(-3);
-  མཐུན r1 {
-    Some(v) དེ་ནས ངེས v == 10;
-    None དེ་ནས ངེས 1 == 0;
-  }
-  མཐུན r2 {
-    Some(v) དེ་ནས ངེས 1 == 0;
-    None དེ་ནས ངེས 1 == 1;
-  }
+  ཡོད་པར་ཤོག v1: i64 = unwrap_or(r1, 0 - 999);
+  ངེས v1 == 10;
+  ཡོད་པར་ཤོག v2: i64 = unwrap_or(r2, 0 - 999);
+  ངེས v2 == 0 - 999;
   པར "Tibetan try-? OK";
   ལོག 0;
 }

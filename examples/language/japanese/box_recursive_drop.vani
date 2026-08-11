@@ -14,11 +14,11 @@
 関数 main() -> i64 {
   代入 リスト: Node = Node {
     値: 1,
-    次: Some(Box(Node {
+    次: Option.Some(box(Node {
       値: 2,
-      次: Some(Box(Node {
+      次: Option.Some(box(Node {
         値: 3,
-        次: None,
+        次: Option.None,
       })),
     })),
   };

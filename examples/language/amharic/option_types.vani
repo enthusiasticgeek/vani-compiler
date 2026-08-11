@@ -10,14 +10,14 @@
 
 ተግባር ደህና_ክፈፍ(a: i64, b: i64) -> Option<i64> {
   ከ b == 0 {
-    መልስ None;
+    መልስ Option.None;
   }
-  መልስ Some(a / b);
+  መልስ Option.Some(a / b);
 }
 
 ተግባር ሰንሰለት(a: i64, b: i64) -> Option<i64> {
   ይሁን v: i64 = ደህና_ክፈፍ(a, b)?;
-  መልስ Some(v * 2);
+  መልስ Option.Some(v * 2);
 }
 
 ተግባር main() -> i64 {

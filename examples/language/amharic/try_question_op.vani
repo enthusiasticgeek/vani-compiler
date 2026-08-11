@@ -10,14 +10,14 @@
 
 ተግባር ፈትሽ(n: i64) -> Option<i64> {
   ከ n < 0 {
-    መልስ None;
+    መልስ Option.None;
   }
-  መልስ Some(n * 3);
+  መልስ Option.Some(n * 3);
 }
 
 ተግባር አሰላ(n: i64) -> Option<i64> {
   ይሁን v: i64 = ፈትሽ(n)?;
-  መልስ Some(v + 1);
+  መልስ Option.Some(v + 1);
 }
 
 ተግባር main() -> i64 {

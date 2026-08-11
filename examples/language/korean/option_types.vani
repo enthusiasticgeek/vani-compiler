@@ -8,21 +8,22 @@
 
 함수 안전나누기(a: i64, b: i64) -> Option<i64> {
   만약 b == 0 {
-    반환 None;
+    반환 Option.None;
   }
-  반환 Some(a / b);
+  반환 Option.Some(a / b);
+}
+
+함수 풀기(o: Option<i64>, 기본값: i64) -> i64 {
+  반환 일치 o {
+    Option.Some(v) 그러면 v,
+    Option.None 그러면 기본값,
+  };
 }
 
 함수 main() -> i64 {
   정의 결과: Option<i64> = 안전나누기(10, 2);
-  일치 결과 {
-    Some(v) 그러면 {
-      확인 v == 5;
-      출력 "Korean option OK", v;
-    }
-    None 그러면 {
-      확인 false;
-    }
-  }
+  정의 v: i64 = 풀기(결과, 0 - 999);
+  확인 v == 5;
+  출력 "Korean option OK", v;
   반환 0;
 }

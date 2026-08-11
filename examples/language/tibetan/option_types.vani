@@ -8,23 +8,26 @@
 
 ལས་ཀ safe_div(a: i64, b: i64) -> Option<i64> {
   གལ་ཏེ b == 0 {
-    ལོག None;
+    ལོག Option.None;
   } གཞན {
-    ལོག Some(a / b);
+    ལོག Option.Some(a / b);
   }
+}
+
+ལས་ཀ unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  ལོག མཐུན o {
+    Option.Some(v) དེ་ནས v,
+    Option.None དེ་ནས def,
+  };
 }
 
 ལས་ཀ main() -> i64 {
   ཡོད་པར་ཤོག r1: Option<i64> = safe_div(10, 2);
   ཡོད་པར་ཤོག r2: Option<i64> = safe_div(5, 0);
-  མཐུན r1 {
-    Some(v) དེ་ནས ངེས v == 5;
-    None དེ་ནས ངེས 1 == 0;
-  }
-  མཐུན r2 {
-    Some(v) དེ་ནས ངེས 1 == 0;
-    None དེ་ནས ངེས 1 == 1;
-  }
+  ཡོད་པར་ཤོག v1: i64 = unwrap_or(r1, 0 - 999);
+  ངེས v1 == 5;
+  ཡོད་པར་ཤོག v2: i64 = unwrap_or(r2, 0 - 999);
+  ངེས v2 == 0 - 999;
   པར "Tibetan option types OK";
   ལོག 0;
 }

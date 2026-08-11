@@ -43203,6 +43203,252 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug174_break_bare_ident_not_matching_active_label_parses_as_value() {
+        // BUG-174 (2026-08-11): `break i;` / `continue i;` used to
+        // unconditionally treat ANY bare identifier immediately
+        // before `;` as a loop-label reference, with no fallback to
+        // parsing it as a break VALUE expression -- so `break i;`
+        // where `i` is just an ordinary local variable (no label
+        // named `i` anywhere) failed with a misleading "no
+        // enclosing loop is labeled 'i'" from the checker. Fixed by
+        // tracking in-scope loop labels during parsing and only
+        // taking the label interpretation when the identifier
+        // actually matches an active label. This compiles and runs
+        // a `break i;` where `i` is a plain local (not a label) and
+        // asserts the runtime value it breaks with is correct.
+        let source = r#"
+            fn first_positive(limit: i64) -> i64 {
+              let n: i64 = 0 - limit;
+              let result: i64 = while true {
+                let i: i64 = n;
+                n = n + 1;
+                if i > 0 {
+                  break i;
+                }
+              };
+              return result;
+            }
+            fn main() -> i64 {
+              return first_positive(10);
+            }
+        "#;
+        let checked = compile(source).expect("break i; (value, not label) must compile");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+        assert!(c.contains("fn_main"), "expected a main function in emitted C:\n{}", &c[..c.len().min(500)]);
+    }
+
+    #[test]
+    fn bug174_break_label_still_resolves_when_actually_in_scope() {
+        // Regression guard for the BUG-174 fix above: a genuine
+        // `break 'label;` / `break label;` targeting an ACTUAL
+        // active loop label must still resolve as a label break,
+        // not get reinterpreted as a value expression now that bare
+        // identifiers default to the value interpretation.
+        let source = r#"
+            fn main() -> i64 {
+              let found: i64 = 0;
+              'outer: for i from 0 to 5 {
+                for j from 0 to 5 {
+                  if i + j == 6 {
+                    found = i + j;
+                    break 'outer;
+                  }
+                }
+              }
+              return found;
+            }
+        "#;
+        let checked = compile(source).expect("break 'outer; must still resolve as a label break");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+    }
+
+    #[test]
+    fn bug174_break_undeclared_bare_ident_reports_value_not_label_error() {
+        // BUG-174 follow-up: once a bare identifier before `;` no
+        // longer defaults to "assume it's a label", a truly
+        // undeclared identifier in `break` position (no matching
+        // label AND the enclosing loop isn't used as an expression)
+        // must still be rejected at compile time -- just with the
+        // "break value" diagnostic instead of the old "no enclosing
+        // loop is labeled" one, since the parser now reads it as a
+        // break-value expression.
+        let source = r#"
+            fn main() -> i64 {
+              outer: for i from 0 to 3 {
+                break nowhere;
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("break of an undeclared, non-label identifier must fail to compile");
+        let msg = format!("{:?}", err);
+        assert!(
+            msg.contains("break value") && msg.contains("only valid when the loop is used as an expression"),
+            "expected a break-value diagnostic, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn bug175_apostrophe_mid_identifier_lexes_as_one_token_and_mangles_safely() {
+        // BUG-175 (2026-08-11): the lexer used to treat ANY bare `'`
+        // as the unconditional start of a `'label:` loop-label
+        // token, even mid-identifier -- breaking scripts that use a
+        // literal apostrophe/geresh inside ordinary words (e.g.
+        // Hebrew geresh transliterations like `פיבונאצ'י`,
+        // "Fibonacci"). Fixed in `lex_unicode_ident` to fold a `'`
+        // into the current identifier when another identifier
+        // character immediately follows it, and only start a fresh
+        // `lex_label` token when `'` sits at an actual token
+        // boundary. This also exercises the follow-on fix: neither
+        // SSA backend's identifier mangling passed a raw `'`
+        // through into emitted LLVM/C text (which would have been
+        // its own syntax error in both) -- both must escape it like
+        // any other non-identifier character.
+        let source = "// vani-lang: hebrew\nפונקציה פיבונאצ'י(א: i64) -> i64 {\n  החזר א;\n}\nפונקציה main() -> i64 {\n  החזר פיבונאצ'י(5);\n}\n";
+        let checked = compile(source).expect("identifier containing a mid-word geresh must lex as one token and compile");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+
+        // Both backends legitimately emit OTHER apostrophes in their
+        // fixed boilerplate (e.g. LLVM's `; ModuleID = 'intent-ssa'`
+        // header), so assert against the specific raw, un-mangled
+        // Hebrew identifier text instead of "no apostrophe anywhere".
+        let c = crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+        assert!(
+            !c.contains("פיבונאצ"),
+            "emitted C must not contain the raw un-mangled Hebrew identifier:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        assert!(c.contains("fn_"), "expected a mangled function name in emitted C");
+
+        let llvm = crate::ssa_backend_llvm::emit(&module).expect("must emit via SSA-LLVM");
+        assert!(
+            !llvm.contains("פיבונאצ"),
+            "emitted LLVM IR must not contain the raw un-mangled Hebrew identifier:\n{}",
+            &llvm[..llvm.len().min(2000)]
+        );
+        assert!(llvm.contains("@fn_"), "expected a mangled function name in emitted LLVM IR");
+    }
+
+    #[test]
+    fn bug176_positional_break_inner_outer_middle_resolve_by_depth() {
+        // BUG-176 (2026-08-11): `break inner|outer|middle;` /
+        // `continue inner|outer|middle;` are reserved positional
+        // targets that resolve by loop-NESTING DEPTH, not by
+        // matching a declared label -- `inner` = innermost enclosing
+        // loop (same as plain break/continue), `outer` = outermost,
+        // `middle` = second-from-innermost (collapsing to `outer`
+        // when there are only 1 or 2 loops). This was documented as
+        // the intended behavior in three pre-existing
+        // examples/edge_cases/mix_break_*.vani files but never
+        // actually implemented anywhere in the compiler -- found
+        // while corpus-checking the BUG-174 fix (filed as BUG-176)
+        // and implemented here. Crucially, the target loop for
+        // `outer`/`middle` need NOT have an explicit `label:` at
+        // all (see the single-loop and two/three-loop cases below,
+        // none of which declare any label) -- the checker
+        // synthesizes one on the fly (`LoopFrame.label`) and the
+        // existing labeled-break codegen machinery picks it up via
+        // each loop's "popped frame's label" construction, with no
+        // separate positional-jump logic needed downstream.
+        //
+        // Runtime correctness for all three keywords, at 1/2/3 loop
+        // nesting depths, is verified end-to-end (both backends,
+        // exact expected values from each file's own comments) via
+        // the three examples/edge_cases/mix_break_*.vani files in
+        // the full corpus sweep; this test locks in that all three
+        // shapes at least compile and emit via both SSA backends.
+        let sources = [
+            // inner: 3-deep nest, `break inner;` only exits the
+            // innermost loop (same as plain `break;`).
+            r#"
+            fn main() -> i64 {
+              let count: i64 = 0;
+              for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break inner; }
+                    count = count + 1;
+                  }
+                }
+              }
+              return count;
+            }
+            "#,
+            // outer: a single UNLABELED loop -- `break outer;` must
+            // still resolve (to that same loop, since it's the only
+            // one) without any declared label anywhere.
+            r#"
+            fn main() -> i64 {
+              let x: i64 = 0;
+              while x < 10 {
+                if x == 5 { break outer; }
+                x = x + 1;
+              }
+              return x;
+            }
+            "#,
+            // middle: 3-deep UNLABELED nest -- `continue middle;`
+            // targets the second-from-innermost (the middle) loop.
+            r#"
+            fn main() -> i64 {
+              let total: i64 = 0;
+              for a from 0 to 3 {
+                for b from 0 to 3 {
+                  for c from 0 to 3 {
+                    if c == 1 { continue middle; }
+                    total = total + 1;
+                  }
+                }
+              }
+              return total;
+            }
+            "#,
+        ];
+        for source in sources {
+            let checked = compile(source)
+                .unwrap_or_else(|e| panic!("positional break/continue must compile: {:?}", e));
+            let (module, errs) = crate::ssa::lower_program(&checked.ir);
+            assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+            crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+            crate::ssa_backend_llvm::emit(&module).expect("must emit via SSA-LLVM");
+        }
+    }
+
+    #[test]
+    fn bug176_positional_break_still_prefers_a_real_label_of_the_same_name() {
+        // Regression guard: if a loop is ACTUALLY labeled `inner`/
+        // `outer`/`middle` (a user coincidentally choosing one of
+        // the reserved words as a real label), the exact-name label
+        // lookup must still win over positional resolution -- this
+        // already falls out of the checker trying `loops.iter().
+        // rposition(...)` before `resolve_positional_loop_target`,
+        // but is worth locking in explicitly.
+        let source = r#"
+            fn main() -> i64 {
+              let count: i64 = 0;
+              inner: for i from 0 to 5 {
+                for j from 0 to 5 {
+                  if j == 2 { break inner; }
+                  count = count + 1;
+                }
+              }
+              return count;
+            }
+        "#;
+        let checked = compile(source)
+            .expect("break inner; targeting a REAL label named 'inner' must still compile");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

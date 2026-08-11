@@ -6,7 +6,7 @@
 
 záměr "Czech vec iteration";
 
-funkce soucet_vec(v: Vec<i64>) -> i64 {
+funkce soucet_vec(v: ref Vec<i64>) -> i64 {
   let soucet: i64 = 0;
   pro i od 0 do len(v) {
     soucet = soucet + v[i];
@@ -14,7 +14,7 @@ funkce soucet_vec(v: Vec<i64>) -> i64 {
   vrať soucet;
 }
 
-funkce max_vec(v: Vec<i64>) -> i64 {
+funkce max_vec(v: ref Vec<i64>) -> i64 {
   let m: i64 = v[0];
   pro i od 1 do len(v) {
     pokud v[i] > m {
@@ -26,9 +26,9 @@ funkce max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   let v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  tvrď soucet_vec(v) == 23;
-  tvrď max_vec(v) == 9;
-  vypiš "soucet =", soucet_vec(v);
-  vypiš "max =", max_vec(v);
+  tvrď soucet_vec(ref v) == 23;
+  tvrď max_vec(ref v) == 9;
+  vypiš "soucet =", soucet_vec(ref v);
+  vypiš "max =", max_vec(ref v);
   vrať 0;
 }

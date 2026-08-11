@@ -1097,6 +1097,14 @@ const KEYWORDS: &[&str] = &[
 /// Return the keyword list for the given dialect pragma tag.
 /// The user's `// vani-lang: <tag>` pragma gates which dialect's
 /// keywords are surfaced in the completion popup.
+///
+/// The `XXX_KEYWORDS` arrays below are mechanically extracted from
+/// the corresponding `xxx_keyword`/`xxx_ascii_keyword` match arms in
+/// `src/lexer.rs` (every `"word" => TokenKind::...` key), not
+/// hand-typed — see BUG-173 (docs/BUG_PATTERN_AUDIT_TODO_11.md).
+/// Re-run `tools/regen_lsp_keywords.py` after editing any dialect's
+/// keyword table in `lexer.rs` to keep these in sync; a `cargo test`
+/// (`lsp_keyword_lists_match_lexer`) fails if they drift.
 fn dialect_keywords_for(tag: &str) -> &'static [&'static str] {
     match tag {
         "mandarin" | "chinese" | "zh" => MANDARIN_KEYWORDS,
@@ -1141,470 +1149,365 @@ fn dialect_keywords_for(tag: &str) -> &'static [&'static str] {
 /// FLOW / REFS / MATCH / VERIFICATION / BOOL+PRINT / PURITY /
 /// INTERFACES / BOUNDS / CONCURRENCY / EMBEDDED / SOV-S7).
 const MANDARIN_KEYWORDS: &[&str] = &[
-    "函数", "让", "结构", "结构体", "枚举", "常量",
-    "公开", "模块", "使用", "作为",
-    "返回", "如果", "否则", "当", "对于", "从", "到",
-    "中断", "继续", "那么",
-    "引用", "可变",
-    "匹配",
-    "断言", "证明", "要求", "保证", "不变量",
-    "真", "假", "打印", "输出",
-    "纯", "纯粹", "并行",
-    "接口", "实现", "方法",
-    "其中",
-    "尝试", "任务", "等待", "合并",
-    "不安全", "区域",
-    "目的", "意图", "类型", "外部",
+    "函数", "让", "结构", "结构体", "枚举", "常量", "公开", "模块", "使用", "作为", "返回", "如果",
+    "否则", "当", "对于", "从", "到", "中断", "继续", "那么", "引用", "可变", "匹配", "断言",
+    "证明", "要求", "保证", "不变量", "真", "假", "打印", "输出", "纯", "纯粹", "并行", "接口",
+    "实现", "方法", "其中", "尝试", "任务", "等待", "合并", "不安全", "区域", "目的", "意图",
+    "类型", "外部", "减少", "与", "在", "是", "错误打印",
 ];
 
 /// Phase 2 — Devanagari Indo-Aryan keyword union (Sanskrit /
 /// Hindi / Marathi / Nepali / Maithili / Konkani). The lexer
 /// accepts the union of these spellings; the LSP suggests them
 /// all so a user mid-typing can pick any natural spelling.
-/// Compact list (most-used keywords); not exhaustive.
 const DEVANAGARI_KEYWORDS: &[&str] = &[
-    // Declarations.
-    "कार्य", "फलन",        // fn (Sanskrit / Hindi)
-    "माना", "मान",          // let (Sanskrit-rooted alts)
-    "संरचना",              // struct
-    "विकल्प",               // enum
-    "स्थिर",               // const
-    // Visibility / modules.
-    "सार्वजनिक",          // pub
-    "मॉड्यूल",             // module
-    "उपयोग",              // use
-    "रूप_में",            // as
-    // Control flow.
-    "पुनरागम", "वापस",    // return
-    "यदि",                 // if
-    "अन्यथा",              // else
-    "जब_तक",              // while
-    "तोड़ो", "विराम",     // break
-    "जारी",                // continue
-    "तदा",                 // then
-    "के_लिए",             // for
-    // Refs + mut.
-    "संदर्भ",              // ref
-    "परिवर्तनीय",        // mut
-    // Match.
-    "मेल", "मिलान",       // match
-    // Verification.
-    "सिद्धम्",              // assert
-    "प्रमाण",              // prove
-    "अपेक्षित",           // requires
-    "गारंटी",              // ensures
-    // Bool + print.
-    "सत्य",                // true
-    "असत्य",               // false
-    "लिख", "मुद्रण",      // print
-    // Concurrency.
-    "प्रयास",              // try
-    "कार्य_अनुसूची",    // task
-    // Intent.
-    "उद्देश्य", "लक्ष्य", // intent
+    "फलन", "कार्य", "मान", "माना", "परत", "लौटाओ", "पुनरागम", "यदि", "अगर",
+    "जर", "अन्यथा", "वरना", "नाहीतर", "यावत्", "जबतक", "जोपर्यंत", "प्रति",
+    "साठी", "तदा", "तो", "तर", "पहा", "देखो", "दृष्ट्या", "बदल", "बदलणारा",
+    "परिवर्तनीय", "जुळवा", "मिलान", "मेल", "मेलन", "खात्री", "सुनिश्चित",
+    "सिद्धम्", "सिद्ध", "प्रमाण", "प्रमाणित", "दर्शाओ", "दाखवा",
+    "अपेक्षित", "चाहिए", "पाहिजे", "निश्चित", "सुनिश्चयित", "सत्य", "सही",
+    "सच", "बरोबर", "खरे", "असत्य", "अशुद्ध", "झूठ", "गलत", "खोटे", "चूक",
+    "लिख", "लिखो", "त्रुटिलिख", "त्रुटिलिखो", "दोषलिहा", "लिहा", "लिही",
+    "लिहिया", "शुद्ध", "संरचना", "विकल्प", "गणन", "स्थिर", "नियत", "विराम",
+    "रुको", "थांब", "अग्रे", "पुढे", "आगे", "में", "से", "तक", "संक्षेप",
+    "सह", "समानांतर", "उपयोग", "खण्ड", "मॉड्यूल", "सार्वजनिक", "यथा",
+    "संकेत", "अंतरापृष्ठ", "कार्यान्वित", "विधि", "जहाँ", "यत्र", "जिथे",
+    "है", "अस्ति", "आहे", "प्रयास", "नियोग", "संयोजन", "असुरक्षित",
+    "क्षेत्र", "उद्देश्य", "प्रकार", "बाह्य", "अपरिवर्तनीय", "पूर्णांक",
+    "पूर्णांक८", "पूर्णांक१६", "पूर्णांक३२", "पूर्णांक६४", "अहस्ताक्षरित८",
+    "अहस्ताक्षरित१६", "अहस्ताक्षरित३२", "अहस्ताक्षरित६४", "दशांश",
+    "दशांश३२", "दशांश६४", "तर्क", "बूल", "सूची",
 ];
 
 const BENGALI_KEYWORDS: &[&str] = &[
-    "ফাংশন", "কাজ", "মান", "ধরো", "গঠন", "গণনা", "স্থির",
-    "সর্বজনীন", "খণ্ড", "ব্যবহার", "হিসাবে",
-    "ফেরত", "প্রত্যাবর্তন", "যদি", "নাহলে", "অন্যথা",
-    "যতক্ষণ", "প্রতি", "মধ্যে", "থেকে", "পর্যন্ত",
-    "বিরাম", "এগিয়ে", "তবে",
-    "দেখ", "পরিবর্তনীয়", "মেলে", "মিলান",
-    "নিশ্চিত", "প্রমাণ", "প্রয়োজনীয়", "সুনিশ্চিত",
-    "সত্য", "ঠিক", "অসত্য", "মিথ্যা", "ভুল", "লেখ", "লিখো",
-    "শুদ্ধ", "সমান্তরাল",
-    "সংকেত", "কার্যান্বিত", "বিধি", "যেখানে", "হয়",
-    "চেষ্টা", "নিয়োগ", "যোগ",
-    "উদ্দেশ্য", "প্রকার", "বাহ্যিক", "অপরিবর্তনীয়",
+    "ফাংশন", "কাজ", "মান", "ধরো", "গঠন", "গণনা", "স্থির", "সর্বজনীন",
+    "খণ্ড", "ব্যবহার", "হিসাবে", "ফেরত", "প্রত্যাবর্তন", "যদি", "নাহলে",
+    "অন্যথা", "যতক্ষণ", "প্রতি", "মধ্যে", "থেকে", "পর্যন্ত", "বিরাম",
+    "এগিয়ে", "তবে", "দেখ", "পরিবর্তনীয়", "মেলে", "মিলান", "নিশ্চিত",
+    "প্রমাণ", "প্রয়োজনীয়", "সুনিশ্চিত", "সত্য", "ঠিক", "অসত্য", "মিথ্যা",
+    "ভুল", "লেখ", "লিখো", "শুদ্ধ", "সমান্তরাল", "সংকেত", "কার্যান্বিত",
+    "বিধি", "যেখানে", "হয়", "চেষ্টা", "নিয়োগ", "যোগ", "উদ্দেশ্য",
+    "প্রকার", "বাহ্যিক", "অপরিবর্তনীয়", "সংক্ষেপ", "সহ", "ত্রুটিলেখ",
+    "অসুরক্ষিত", "ক্ষেত্র",
 ];
 
 const TAMIL_KEYWORDS: &[&str] = &[
-    "செயல்பாடு", "சார்பு", "கொள்",
-    "கட்டமைப்பு", "எண்ணுப்பெயர்", "மாறா",
-    "பொது", "தொகுதி", "பயன்படுத்து", "ஆக",
-    "திருப்பு", "என்றால்", "எனில்", "இல்லாவிட்டால்",
-    "வரை", "ஒவ்வொரு", "உள்", "இருந்து", "வரைக்கும்",
-    "நிறுத்து", "தொடர்", "அப்போது",
-    "பார்", "மாறக்கூடிய", "பொருந்து",
-    "உறுதி", "நிரூபி", "தேவை",
-    "உண்மை", "பொய்", "அச்சிடு",
-    "தூய்மை", "இணையான",
-    "முயற்சி", "பணி",
-    "நோக்கம்", "வகை", "வெளிப்புற",
+    "செயல்பாடு", "சார்பு", "கொள்", "கட்டமைப்பு", "எண்ணுப்பெயர்", "மாறா",
+    "பொது", "தொகுதி", "பயன்படுத்து", "ஆக", "திருப்பு", "என்றால்", "எனில்",
+    "இல்லாவிட்டால்", "வரை", "ஒவ்வொரு", "உள்", "இருந்து", "வரைக்கும்",
+    "நிறுத்து", "தொடர்", "அப்போது", "பார்", "மாறக்கூடிய", "பொருந்து",
+    "உறுதி", "நிரூபி", "தேவை", "உறுதிப்படுத்து", "மெய்", "பொய்", "எழுது",
+    "அச்சிடு", "இடைமுகம்", "செயல்படுத்து", "நோக்கம்", "வகை", "மாறிலா",
+    "தூய", "வெளி", "இணை", "குறை", "உடன்", "பணி", "சேர்", "எங்கே", "ஆகும்",
+    "முறைகள்", "பிழைஎழுது", "முயற்சி", "பாதுகாப்பற்ற", "பகுதி",
 ];
 
 const TELUGU_KEYWORDS: &[&str] = &[
-    "ఫంక్షన్", "పని", "విలువ", "ఉండనీ", "నిర్మాణం",
-    "జాబితా", "స్థిర",
-    "బహిరంగ", "మాడ్యూల్", "వాడు", "గా",
-    "తిరిగివ్వు", "ఒకవేళ", "లేకుంటే",
-    "వరకు", "కోసం", "లో", "నుండి",
-    "ఆపు", "కొనసాగించు", "అప్పుడు",
-    "చూడు", "మార్చదగిన", "జతపర్చు",
-    "నిర్ధారించు", "నిరూపించు", "అవసరం",
-    "నిజం", "అబద్ధం", "ముద్రించు",
-    "స్వచ్ఛమైన", "సమాంతర",
-    "ప్రయత్నించు", "పని_సమూహం",
-    "ఉద్దేశ్యం", "రకం", "బాహ్య",
+    "ఫంక్షన్", "పని", "అనుకో", "నిర్మాణం", "గణన", "స్థిరం", "ప్రజా",
+    "మాడ్యూల్", "ఉపయోగించు", "గా", "తిరిగి", "అయితే", "లేకపోతే", "వరకు",
+    "ప్రతి", "లో", "నుండి", "వరకూ", "ఆపు", "కొనసాగించు", "అప్పుడు", "చూడు",
+    "మార్చదగిన", "సరిపోలు", "నిర్ధారించు", "నిరూపించు", "అవసరం", "నిశ్చయం",
+    "నిజం", "అబద్ధం", "రాయి", "ముద్రించు", "ఉద్దేశం", "రకం", "మారని",
+    "శుద్ధ", "బాహ్య", "సమాంతర", "సంక్షేప", "తో", "కార్యం", "సంయోగం",
+    "సంకేతం", "అమలు", "ఎక్కడ", "ఉంది", "పద్ధతులు", "లోపంరాయి",
+    "ప్రయత్నించు", "అసురక్షిత", "ప్రాంతం",
 ];
 
 const GUJARATI_KEYWORDS: &[&str] = &[
-    "ફંક્શન", "કાર્ય", "ચલ", "ધારો", "રચના",
-    "ગણતરી", "સ્થિર",
-    "જાહેર", "મોડ્યુલ", "ઉપયોગ", "તરીકે",
-    "પરત", "જો", "નહીં_તો",
-    "જ્યાં_સુધી", "દરેક_માટે", "માં", "થી",
-    "અટકો", "ચાલુ_રાખો", "તો",
-    "સંદર્ભ", "ફેરફારયોગ્ય", "મેળ",
-    "ખાતરી", "સાબિત", "જરૂરી",
-    "સત્ય", "અસત્ય", "છાપો",
-    "શુદ્ધ", "સમાંતર",
-    "પ્રયત્ન", "કાર્ય_સ્કેડ",
-    "ઉદ્દેશ", "પ્રકાર", "બાહ્ય",
+    "કાર્ય", "ફંકશન", "માનો", "ધારો", "રચના", "ગણના", "સ્થિર", "જાહેર",
+    "ખંડ", "વાપરો", "તરીકે", "પાછા", "જો", "નહીંતર", "જ્યારે", "પ્રતિ",
+    "માં", "થી", "સુધી", "વિરામ", "ચાલુ", "પછી", "જુઓ", "પરિવર્તનીય",
+    "મેળવો", "નિશ્ચિત", "પ્રમાણ", "જરૂરી", "ખાતરી", "સાચું", "ખોટું",
+    "લખો", "છાપો", "ઉદ્દેશ", "પ્રકાર", "અચળ", "શુદ્ધ", "બાહ્ય", "સમાંતર",
+    "સંક્ષેપ", "સાથે", "નિયોગ", "સંયોજન", "સંકેત", "અમલ", "જ્યાં", "છે",
+    "પદ્ધતિઓ", "ભૂલલખો", "પ્રયાસ", "અસુરક્ષિત", "ક્ષેત્ર",
 ];
 
 const PUNJABI_KEYWORDS: &[&str] = &[
-    "ਫੰਕਸ਼ਨ", "ਕੰਮ", "ਮੁੱਲ", "ਮੰਨੋ", "ਬਣਤਰ",
-    "ਸੂਚੀ", "ਸਥਿਰ",
-    "ਜਨਤਕ", "ਮੋਡੀਊਲ", "ਵਰਤੋ", "ਵਜੋਂ",
-    "ਵਾਪਸ", "ਜੇ", "ਨਹੀਂ_ਤਾਂ",
-    "ਜਦੋਂ_ਤੱਕ", "ਹਰ_ਇੱਕ", "ਵਿੱਚ", "ਤੋਂ",
-    "ਰੋਕੋ", "ਜਾਰੀ", "ਫਿਰ",
-    "ਹਵਾਲਾ", "ਬਦਲਣਯੋਗ", "ਮੇਲ",
-    "ਪੱਕਾ", "ਸਾਬਿਤ", "ਲੋੜੀਂਦਾ",
-    "ਸੱਚ", "ਝੂਠ", "ਛਾਪੋ",
-    "ਸ਼ੁੱਧ", "ਸਮਾਂਤਰ",
-    "ਕੋਸ਼ਿਸ਼", "ਕੰਮ_ਸਮੂਹ",
-    "ਇਰਾਦਾ", "ਕਿਸਮ", "ਬਾਹਰੀ",
+    "ਕਾਰਜ", "ਫੰਕਸ਼ਨ", "ਮੰਨੋ", "ਰਚਨਾ", "ਗਣਨਾ", "ਸਥਿਰ", "ਜਨਤਕ", "ਖੰਡ",
+    "ਵਰਤੋ", "ਵਜੋਂ", "ਮੁੜੋ", "ਜੇ", "ਵਰਨਾ", "ਜਦੋਂ", "ਹਰ", "ਵਿੱਚ", "ਤੋਂ",
+    "ਤੱਕ", "ਵਿਰਾਮ", "ਜਾਰੀ", "ਤਦ", "ਵੇਖੋ", "ਬਦਲਣਯੋਗ", "ਮੇਲ", "ਨਿਸ਼ਚਿਤ",
+    "ਪ੍ਰਮਾਣ", "ਲੋੜੀਂਦਾ", "ਯਕੀਨੀ", "ਸੱਚ", "ਝੂਠ", "ਲਿਖੋ", "ਛਾਪੋ", "ਉਦੇਸ਼",
+    "ਕਿਸਮ", "ਅਟੱਲ", "ਸ਼ੁੱਧ", "ਬਾਹਰੀ", "ਸਮਾਂਤਰ", "ਸੰਖੇਪ", "ਨਾਲ", "ਨਿਯੋਗ",
+    "ਸੰਯੋਜਨ", "ਸੰਕੇਤ", "ਅਮਲ", "ਜਿੱਥੇ", "ਹੈ", "ਢੰਗ", "ਗਲਤੀਲਿਖੋ", "ਕੋਸ਼ਿਸ਼",
+    "ਅਸੁਰੱਖਿਅਤ", "ਖੇਤਰ",
 ];
 
 const KANNADA_KEYWORDS: &[&str] = &[
-    "ಕಾರ್ಯ", "ಕೆಲಸ", "ಮೌಲ್ಯ", "ತಿಳಿದುಕೊ", "ರಚನೆ",
-    "ಪಟ್ಟಿ", "ಸ್ಥಿರ",
-    "ಸಾರ್ವಜನಿಕ", "ಘಟಕ", "ಬಳಸು", "ಆಗಿ",
-    "ಹಿಂತಿರುಗು", "ಒಂದುವೇಳೆ", "ಇಲ್ಲದಿದ್ದರೆ",
-    "ತನಕ", "ಪ್ರತಿಯೊಂದಕ್ಕೂ", "ಒಳಗೆ", "ಇಂದ",
-    "ನಿಲ್ಲಿಸು", "ಮುಂದುವರೆ", "ಆಗ",
-    "ಉಲ್ಲೇಖ", "ಬದಲಾಯಿಸಬಹುದಾದ", "ಹೊಂದಿಸು",
-    "ಖಾತ್ರಿ", "ಸಾಬೀತು", "ಅಗತ್ಯ",
-    "ನಿಜ", "ಸುಳ್ಳು", "ಮುದ್ರಿಸು",
-    "ಶುದ್ಧ", "ಸಮಾನಾಂತರ",
-    "ಪ್ರಯತ್ನ", "ಕಾರ್ಯ_ಗುಂಪು",
-    "ಉದ್ದೇಶ", "ಪ್ರಕಾರ", "ಬಾಹ್ಯ",
+    "ಕಾರ್ಯ", "ಫಂಕ್ಷನ್", "ಊಹಿಸಿ", "ಮಾನ್ಯ", "ರಚನೆ", "ಎಣಿಕೆ", "ಸ್ಥಿರ",
+    "ಸಾರ್ವಜನಿಕ", "ಖಂಡ", "ಬಳಸಿ", "ಆಗಿ", "ಹಿಂದಿರುಗಿ", "ಮರಳಿ", "ಆದರೆ",
+    "ಇಲ್ಲದಿದ್ದರೆ", "ತನಕ", "ಪ್ರತಿ", "ರಲ್ಲಿ", "ಇಂದ", "ಗೆ", "ನಿಲ್ಲಿ",
+    "ಮುಂದುವರಿಸಿ", "ನಂತರ", "ನೋಡಿ", "ಪರಿವರ್ತನೀಯ", "ಹೊಂದಾಣಿಕೆ", "ಖಚಿತಪಡಿಸಿ",
+    "ಸಾಬೀತುಪಡಿಸಿ", "ಅಗತ್ಯ", "ಖಚಿತ", "ಸತ್ಯ", "ಸರಿ", "ಸುಳ್ಳು", "ತಪ್ಪು",
+    "ಬರೆ", "ಮುದ್ರಿಸಿ", "ಉದ್ದೇಶ", "ಪ್ರಕಾರ", "ಅಚಲ", "ಶುದ್ಧ", "ಬಾಹ್ಯ",
+    "ಸಮಾನಾಂತರ", "ಸಂಕ್ಷೇಪ", "ಜೊತೆ", "ನಿಯೋಗ", "ಸಂಯೋಜನೆ", "ಸಂಕೇತ", "ಜಾರಿ",
+    "ಎಲ್ಲಿ", "ಇದೆ", "ವಿಧಾನಗಳು", "ದೋಷಬರೆ", "ಪ್ರಯತ್ನ", "ಅಸುರಕ್ಷಿತ", "ಪ್ರದೇಶ",
 ];
 
 const ODIA_KEYWORDS: &[&str] = &[
-    "ଫଙ୍କସନ", "କାର୍ଯ", "ମୂଲ୍ୟ", "ଧର", "ଗଠନ",
-    "ତାଲିକା", "ସ୍ଥିର",
-    "ସାର୍ବଜନୀନ", "ଖଣ୍ଡ", "ବ୍ୟବହାର", "ଭାବରେ",
-    "ଫେରି", "ଯଦି", "ନହେଲେ",
-    "ଯେ_ପର୍ଯ୍ୟନ୍ତ", "ପ୍ରତ୍ୟେକ", "ଭିତରେ", "ଠାରୁ",
-    "ବନ୍ଦ", "ଜାରି", "ତେବେ",
-    "ସନ୍ଦର୍ଭ", "ପରିବର୍ତ୍ତନୀୟ", "ମିଳ",
-    "ନିଶ୍ଚିତ", "ପ୍ରମାଣ", "ଆବଶ୍ୟକ",
-    "ସତ୍ୟ", "ମିଥ୍ୟା", "ଲେଖ",
-    "ଶୁଦ୍ଧ", "ସମାନ୍ତର",
-    "ଉଦ୍ଦେଶ୍ୟ", "ପ୍ରକାର", "ବାହ୍ୟ",
+    "କାର୍ଯ୍ୟ", "ଫଙ୍କସନ୍", "ମନେକର", "ଗଠନ", "ଗଣନା", "ସ୍ଥିର", "ସର୍ବସାଧାରଣ",
+    "ଖଣ୍ଡ", "ବ୍ୟବହାର", "ଭାବେ", "ଫେରନ୍ତୁ", "ଯଦି", "ଅନ୍ୟଥା", "ଯେତେବେଳେ",
+    "ପ୍ରତି", "ରେ", "ରୁ", "ପର୍ଯ୍ୟନ୍ତ", "ବନ୍ଦ", "ଜାରି", "ତାହେଲେ", "ଦେଖନ୍ତୁ",
+    "ପରିବର୍ତ୍ତନୀୟ", "ମେଳ", "ନିଶ୍ଚିତ", "ପ୍ରମାଣ", "ଆବଶ୍ୟକ", "ସୁନିଶ୍ଚିତ",
+    "ସତ୍ୟ", "ମିଥ୍ୟା", "ଲେଖ", "ଛାପନ୍ତୁ", "ଉଦ୍ଦେଶ୍ୟ", "ପ୍ରକାର", "ଅଚଳ",
+    "ଶୁଦ୍ଧ", "ବାହ୍ୟ", "ସମାନ୍ତର", "ସଂକ୍ଷେପ", "ସହିତ", "ନିଯୋଗ", "ସଂଯୋଜନ",
+    "ସଙ୍କେତ", "ପ୍ରୟୋଗ", "କେଉଁଠାରେ", "ଅଟେ", "ପଦ୍ଧତି", "ତ୍ରୁଟିଲେଖ", "ପ୍ରୟାସ",
+    "ଅସୁରକ୍ଷିତ", "କ୍ଷେତ୍ର",
 ];
 
 const URDU_KEYWORDS: &[&str] = &[
-    "فنکشن", "کام", "قدر", "فرض_کرو", "ڈھانچہ",
-    "فہرست", "ثابت",
-    "عوامی", "ماڈیول", "استعمال", "بطور",
-    "واپسی", "اگر", "ورنہ",
-    "جب_تک", "ہر_ایک", "میں", "سے",
-    "روکو", "جاری", "پھر",
-    "حوالہ", "تبدیل_پذیر", "ملاپ",
-    "یقینی", "ثابت_کرو", "ضروری",
-    "سچ", "جھوٹ", "لکھو",
-    "خالص", "متوازی",
-    "کوشش", "کام_گروہ",
-    "مقصد", "قسم", "بیرونی",
+    "فنکشن", "کام", "مانیں", "فرض", "ساخت", "شمار", "ثابت", "عوامی",
+    "ماڈیول", "حصہ", "استعمال", "بطور", "واپس", "لوٹاؤ", "اگر", "ورنہ",
+    "ہر", "میں", "سے", "تک", "بند", "جاری", "تب", "دیکھیں", "بدلنا",
+    "ملان", "مماثلت", "یقینی", "ثبوت", "درکار", "ضمانت", "سچ", "جھوٹ",
+    "لکھو", "چھاپو", "رابطہ", "نافذ", "مقصد", "قسم", "بیرونی", "خالص",
+    "متوازی", "تخفیف", "ساتھ", "ٹاسک", "ملاپ", "دوران", "جہاں", "ہے",
+    "طریقے", "غیرمتغیر", "غلطیلکھو", "کوشش", "غیرمحفوظ", "علاقہ",
 ];
 
 const PERSIAN_KEYWORDS: &[&str] = &[
-    "تابع", "کار", "مقدار", "فرض_کن", "ساختار",
-    "فهرست", "ثابت",
-    "عمومی", "ماژول", "استفاده", "به_عنوان",
-    "برگشت", "اگر", "وگرنه",
-    "تا_زمانی", "برای_هر", "در", "از",
-    "توقف", "ادامه", "آنگاه",
-    "مرجع", "قابل_تغییر", "تطابق",
-    "اطمینان", "اثبات", "لازم",
-    "درست", "غلط", "چاپ",
-    "خالص", "موازی",
-    "تلاش", "وظیفه",
-    "هدف", "نوع", "خارجی",
+    "تابع", "فانکشن", "فرض", "بگذار", "ساختار", "شمارش", "ثابت", "عمومی",
+    "بخش", "استفاده", "بعنوان", "بازگشت", "اگر", "وگرنه", "تا", "هر", "در",
+    "از", "بشکن", "ادامه", "سپس", "ببین", "تغییرپذیر", "تطبیق", "ادعا",
+    "اثبات", "نیاز", "تضمین", "درست", "نادرست", "چاپ", "بنویس", "هدف",
+    "نوع", "خارجی", "خالص", "موازی", "کاهش", "با", "وظیفه", "پیوستن", "به",
+    "رابط", "اجرا", "کجا", "است", "روش", "تغییرناپذیر", "خطاچاپ", "تلاش",
+    "ناامن", "منطقه",
 ];
 
 const KOREAN_KEYWORDS: &[&str] = &[
-    "함수", "정의", "구조체", "열거", "상수",
-    "공개", "모듈", "사용", "로서",
-    "반환", "돌려주기", "만약", "만일", "아니면",
-    "동안", "각각", "안에", "에서", "까지",
-    "중단", "계속", "그러면",
-    "참조", "가변", "일치",
-    "확인", "증명", "필요", "보장",
-    "참", "거짓", "출력", "쓰기",
-    "순수", "병렬",
-    "인터페이스", "구현", "메서드", "여기서", "이다",
-    "시도", "작업", "결합",
-    "위험", "영역",
-    "목적", "타입", "외부", "불변",
+    "함수", "정의", "구조체", "열거", "상수", "공개", "모듈", "사용", "로서", "반환", "돌려주기",
+    "만약", "만일", "아니면", "동안", "각각", "안에", "에서", "까지", "중단", "계속", "그러면",
+    "참조", "가변", "일치", "확인", "증명", "필요", "보장", "참", "거짓", "출력", "쓰기", "순수",
+    "병렬", "인터페이스", "구현", "메서드", "여기서", "이다", "시도", "작업", "결합", "위험", "영역",
+    "목적", "타입", "외부", "불변", "축소", "함께", "오류출력",
 ];
 
 const JAPANESE_KEYWORDS: &[&str] = &[
-    "関数", "代入", "構造体", "列挙", "定数",
-    "公開", "モジュール", "単位", "使用", "として",
-    "戻る", "返す", "もし", "そうでなければ",
-    "の間", "間", "中断", "続行", "ならば",
-    "対象", "から", "まで",
-    "参照", "可変", "一致", "マッチ",
-    "確認", "証明", "前提", "保証",
-    "真", "偽", "表示", "書く",
-    "純粋", "並列",
-    "インターフェース", "実装", "メソッド", "ここで", "は",
-    "試行", "タスク", "結合",
-    "危険", "領域",
-    "目的", "意図", "型", "外部", "不変",
+    "関数", "代入", "構造体", "列挙", "定数", "公開", "モジュール", "単位", "使用", "として", "戻る",
+    "返す", "もし", "そうでなければ", "の間", "間", "中断", "続行", "ならば", "対象", "から", "まで",
+    "参照", "可変", "一致", "マッチ", "確認", "証明", "前提", "保証", "真", "偽", "表示", "書く",
+    "純粋", "並列", "インターフェース", "実装", "メソッド", "ここで", "は", "試行", "タスク", "結合",
+    "危険", "領域", "目的", "意図", "型", "外部", "不変", "削減", "と", "中", "エラー表示",
 ];
 
 const ARABIC_KEYWORDS: &[&str] = &[
-    "دالة", "تعريف", "بنية", "تعداد", "ثابت",
-    "عام", "وحدة", "استخدام", "باعتباره",
-    "إرجاع", "إذا", "وإلا",
-    "طالما", "لكل", "في", "من", "إلى",
-    "توقف", "استمر", "إذن",
-    "مرجع", "قابل_للتغيير", "تطابق",
-    "تأكيد", "إثبات", "يتطلب",
-    "صحيح", "خطأ", "اطبع",
-    "نقي", "متوازي",
-    "حاول", "مهمة",
-    "غرض", "نوع", "خارجي",
+    "دالة", "ليكن", "بنية", "تعداد", "قيمة_ثابتة", "عام", "وحدة", "استخدم",
+    "أرجع", "إرجاع", "إذا", "وإلا", "بينما", "لكل", "في", "من", "إلى",
+    "كسر", "استمر", "ثم", "مرجع", "متغير", "طابق", "تأكد", "أثبت", "يتطلب",
+    "يضمن", "صحيح", "خطأ", "اطبع", "نقي", "متوازي", "واجهة", "نفذ", "طرق",
+    "حيث", "هو", "حاول", "مهمة", "اربط", "غير_آمن", "منطقة", "هدف", "نوع",
+    "خارجي", "مستقر", "تقليل", "مع", "خطأاطبع",
 ];
 
 const HEBREW_KEYWORDS: &[&str] = &[
-    "פונקציה", "הגדרה", "מבנה", "ספירה", "קבוע",
-    "ציבורי", "מודול", "השתמש", "בתור",
-    "החזר", "אם", "אחרת",
-    "כל_עוד", "לכל", "בתוך", "מ", "עד",
-    "עצור", "המשך", "אז",
-    "הפניה", "ניתן_לשינוי", "התאמה",
-    "אמת", "שקר", "הדפס",
-    "טהור", "מקביל",
-    "נסה", "משימה",
-    "מטרה", "סוג", "חיצוני",
+    "פונקציה", "פעולה", "יהי", "מבנה", "ספירה", "קבוע", "ציבורי", "מודול",
+    "מודולים", "השתמש", "החזר", "חזרה", "אם", "אחרת", "כאשר", "לכל",
+    "בתוך", "מתוך", "עד", "שבור", "הפסק", "המשך", "אז", "הפנייה", "משתנה",
+    "התאם", "ודא", "הוכח", "דורש", "מבטיח", "אמת", "שקר", "הדפס", "כתוב",
+    "טהור", "מקבילי", "ממשק", "ממש", "שיטות", "איפה", "הוא", "נסה",
+    "משימה", "חיבור", "מסוכן", "אזור", "מטרה", "סוג", "טיפוס", "חיצוני",
+    "בלתי_משתנה", "הפחתה", "עם", "שגיאההדפס",
 ];
 
 const RUSSIAN_KEYWORDS: &[&str] = &[
-    "функция", "пусть", "структура", "перечисление", "константа",
-    "публичный", "модуль", "использовать", "как",
-    "вернуть", "если", "иначе",
-    "пока", "для", "в", "из", "до",
-    "прервать", "продолжить", "тогда",
-    "ссылка", "изменяемый", "сопоставить",
-    "утвердить", "доказать", "требует",
-    "истина", "ложь", "вывести",
-    "чистый", "параллельный",
-    "попробуй", "задача",
-    "намерение", "тип", "внешний",
+    "функция", "пусть", "структура", "перечисление", "постоянная",
+    "публичный", "общий", "модуль", "использовать", "как", "вернуть",
+    "верни", "если", "иначе", "пока", "для", "в", "от", "до", "прервать",
+    "продолжить", "тогда", "смотри", "изменяемый", "совпадение",
+    "утверждать", "доказать", "требует", "гарантирует", "истина", "верно",
+    "ложь", "неверно", "печатать", "писать", "чистый", "параллельный",
+    "интерфейс", "реализовать", "методы", "где", "есть", "попробуй",
+    "задача", "соединить", "небезопасно", "область", "цель", "тип",
+    "внешний", "инвариант", "сократить", "совместно", "ошибкапечатать",
 ];
 
 const SPANISH_KEYWORDS: &[&str] = &[
-    "funcion", "sea", "estructura", "enumeracion", "constante",
-    "publico", "modulo", "usar", "como",
-    "retornar", "si", "sino",
-    "mientras", "para", "en", "desde", "hasta",
-    "romper", "continuar", "entonces",
-    "referencia", "mutable", "coincidir",
-    "afirmar", "probar", "requiere",
-    "verdadero", "falso", "imprimir",
-    "puro", "paralelo",
-    "intentar", "tarea",
-    "intencion", "tipo", "externo",
+    "función", "enumeración", "público", "módulo", "intención",
+    "propósito", "métodos", "región", "funcion", "sea", "estructura",
+    "constante", "enumeracion", "publico", "modulo", "usar", "como",
+    "regresar", "retornar", "volver", "si", "sino", "mientras", "para",
+    "en", "desde", "hasta", "romper", "continuar", "entonces", "ver",
+    "mutable", "coincidir", "afirmar", "demostrar", "requiere",
+    "garantiza", "verdadero", "falso", "imprimir", "escribir", "puro",
+    "paralelo", "interfaz", "implementar", "metodos", "donde", "es",
+    "intentar", "tarea", "unir", "inseguro", "region", "intencion", "tipo",
+    "externo", "invariante", "reducir", "con", "errorimprimir",
 ];
 
 const FRENCH_KEYWORDS: &[&str] = &[
-    "fonction", "soit", "structure", "enumeration", "constante",
-    "public", "module", "utiliser", "comme",
-    "retourner", "si", "sinon",
-    "tantque", "pour", "dans", "depuis", "jusqua",
-    "arreter", "continuer", "alors",
-    "reference", "mutable", "correspondre",
-    "asserter", "prouver", "requiert",
-    "vrai", "faux", "imprimer",
-    "pur", "parallele",
-    "essayer", "travail",
-    "intention", "type", "externe",
+    "énumération", "référence", "vérifier", "vérifie", "démontrer",
+    "démontre", "vérité", "écrire", "écris", "où", "tâche", "parallèle",
+    "méthodes", "implémenter", "région", "étranger", "fonction", "soit",
+    "structure", "constante", "public", "module", "utiliser", "comme",
+    "retourner", "retourne", "si", "sinon", "tantque", "pour", "dans",
+    "depuis", "vers", "interrompre", "continuer", "alors", "voir",
+    "muable", "correspondre", "affirmer", "prouver", "exige", "garantit",
+    "vrai", "faux", "imprimer", "imprime", "afficher", "pur", "interface",
+    "implementer", "methodes", "ou", "est", "essayer", "travail",
+    "joindre", "dangereux", "but", "objectif", "type", "externe",
+    "invariant", "parallele", "reduire", "avec", "enumeration", "region",
+    "erreurimprimer",
 ];
 
 const GERMAN_KEYWORDS: &[&str] = &[
-    "funktion", "sei", "struktur", "aufzaehlung", "konstante",
-    "oeffentlich", "modul", "nutzen", "als",
-    "zurueck", "wenn", "sonst",
-    "solange", "fuer", "in", "von", "bis",
-    "abbrechen", "fortsetzen", "dann",
-    "verweis", "veraenderlich", "abgleichen",
-    "behaupten", "beweisen", "erfordert",
-    "wahr", "falsch", "ausgeben",
-    "rein", "parallel",
-    "versuchen", "aufgabe",
-    "absicht", "typ", "extern",
+    "aufzählung", "öffentlich", "während", "für", "zurück", "veränderlich",
+    "veränderbar", "übereinstimmen", "überprüfen", "überprüfe", "prüfen",
+    "prüfe", "ausführbar", "äußere", "äußerer", "funktion", "sei",
+    "struktur", "konstante", "modul", "verwenden", "als", "zurueck",
+    "wenn", "sonst", "solange", "jede", "in", "von", "bis", "brechen",
+    "weiter", "dann", "sehen", "wandelbar", "passend", "behaupten",
+    "beweisen", "benoetigt", "garantiert", "wahr", "falsch", "drucken",
+    "schreiben", "rein", "parallel", "schnittstelle", "implementieren",
+    "methoden", "wo", "ist", "versuchen", "aufgabe", "verbinden",
+    "unsicher", "absicht", "typ", "extern", "unveraenderlich",
+    "reduzieren", "mit", "aufzaehlung", "oeffentlich", "bereich",
+    "fehlerdrucken",
 ];
 
 const PORTUGUESE_KEYWORDS: &[&str] = &[
-    "funcao", "seja", "estrutura", "enumeracao", "constante",
-    "publico", "modulo", "usar", "como",
-    "retornar", "se", "senao",
-    "enquanto", "para", "em", "de", "ate",
-    "parar", "continuar", "entao",
-    "referencia", "mutavel", "corresponder",
-    "afirmar", "provar", "requer",
-    "verdadeiro", "falso", "imprimir",
-    "puro", "paralelo",
-    "tentar", "tarefa",
-    "intencao", "tipo", "externo",
+    "função", "enumeração", "público", "módulo", "senão", "então", "até",
+    "referência", "mutável", "métodos", "intenção", "propósito", "região",
+    "funcao", "seja", "estrutura", "constante", "enumeracao", "publico",
+    "modulo", "usar", "como", "retornar", "retorne", "se", "senao",
+    "enquanto", "para", "em", "desde", "ate", "parar", "interromper",
+    "continuar", "entao", "ver", "mutavel", "combinar", "corresponder",
+    "afirmar", "provar", "demonstrar", "requer", "garante", "verdadeiro",
+    "falso", "imprimir", "escrever", "puro", "paralelo", "interface",
+    "implementar", "metodos", "onde", "eh", "tentar", "tarefa", "juntar",
+    "unir", "inseguro", "regiao", "intencao", "proposito", "objetivo",
+    "tipo", "externo", "invariante", "reduzir", "com", "erroimprimir",
 ];
 
 const ITALIAN_KEYWORDS: &[&str] = &[
-    "funzione", "sia", "struttura", "enumerazione", "costante",
-    "pubblico", "modulo", "usare", "come",
-    "restituire", "se", "altrimenti",
-    "mentre", "per", "in", "da", "finoa",
-    "fermare", "continuare", "allora",
-    "riferimento", "mutabile", "abbinare",
-    "asserire", "provare", "richiede",
-    "vero", "falso", "stampare",
-    "puro", "parallelo",
-    "provare", "compito",
-    "intenzione", "tipo", "esterno",
+    "funzione", "sia", "struttura", "enumerazione", "costante", "pubblico",
+    "modulo", "usare", "come", "ritornare", "ritorna", "se", "altrimenti",
+    "mentre", "per", "da", "finoa", "rompere", "interrompere",
+    "continuare", "allora", "vedere", "mutevole", "corrispondere",
+    "combaciare", "affermare", "dimostrare", "richiede", "garantisce",
+    "vero", "falso", "stampare", "scrivere", "puro", "parallelo",
+    "interfaccia", "implementare", "metodi", "dove", "tentare", "compito",
+    "unire", "insicuro", "regione", "scopo", "intenzione", "obiettivo",
+    "tipo", "esterno", "invariante", "ridurre", "con", "in", "risulta",
+    "errorestampare",
 ];
 
 const TURKISH_KEYWORDS: &[&str] = &[
-    "fonksiyon", "olsun", "yapı", "numaralandırma", "sabit",
-    "genel", "modül", "kullan", "olarak",
-    "dön", "eğer", "yoksa",
-    "olduğu_sürece", "için", "içinde", "dan", "kadar",
-    "kes", "devam", "o_zaman",
-    "referans", "değişken", "eşleştir",
-    "doğrula", "kanıtla", "gerektirir",
-    "doğru", "yanlış", "yazdır",
-    "saf", "paralel",
-    "dene", "görev",
-    "niyet", "tip", "dış",
+    "işlev", "dön", "döndür", "eğer", "için", "içinde", "kır", "gör",
+    "değişken", "eşle", "doğrula", "kanıtla", "doğru", "yanlış", "yazdır",
+    "arayüz", "görev", "birleştir", "güvensiz", "bölge", "amaç", "dış",
+    "değişmez", "yapı", "sıralama", "modül", "saf", "paralel", "azalt",
+    "ile", "olsun", "yoksa", "iken", "devam", "den", "kadar", "sonra",
+    "uygula", "nerede", "olur", "sabit", "tip", "metotlar", "kullan",
+    "gerek", "garanti", "hatayazdır", "dene", "genel", "fonksiyon", "yapi",
+    "siralama", "modul", "olarak", "geri", "don", "icin", "kir",
+    "degisken", "esle", "dogrula", "kanitla", "dogru", "yanlis", "yazdir",
+    "arayuz", "gorev", "guvensiz", "bolge", "amac", "dis", "degismez",
+    "birlestir", "eger", "icinde", "bak", "hatayazdir",
 ];
 
 const POLISH_KEYWORDS: &[&str] = &[
-    "funkcja", "niech", "struktura", "wyliczenie", "stala",
-    "publiczny", "modul", "uzyj", "jako",
-    "zwroc", "jesli", "inaczej",
-    "dopoki", "dla", "w", "od", "do",
-    "przerwij", "kontynuuj", "wtedy",
-    "referencja", "zmienny", "dopasuj",
-    "zapewnij", "udowodnij", "wymaga",
-    "prawda", "falsz", "wypisz",
-    "czysty", "rownolegle",
-    "sprobuj", "zadanie",
-    "zamiar", "typ", "zewnetrzny",
+    "wróć", "zwróć", "jeśli", "dopóki", "potwierdź", "fałsz", "równoległy",
+    "spróbuj", "połącz", "zewnętrzny", "stała", "moduł", "użyj", "funkcja",
+    "niech", "struktura", "wyliczenie", "stala", "publiczny", "modul",
+    "uzyj", "jako", "zwroc", "wroc", "jesli", "inaczej", "dopoki", "dla",
+    "w", "od", "przerwij", "kontynuuj", "wtedy", "zobacz", "zmienny",
+    "dopasuj", "potwierdz", "udowodnij", "wymaga", "gwarantuje", "prawda",
+    "falsz", "drukuj", "wypisz", "czysty", "rownolegly", "interfejs",
+    "zaimplementuj", "metody", "gdzie", "jest", "sprobuj", "zadanie",
+    "polacz", "niebezpieczny", "cel", "intencja", "typ", "zewnetrzny",
+    "niezmienny", "zmniejsz", "razem", "do", "obszar", "bladdrukuj",
 ];
 
 const INDONESIAN_KEYWORDS: &[&str] = &[
-    "fungsi", "biarkan", "struktur", "enumerasi", "konstanta",
-    "publik", "modul", "gunakan", "sebagai",
-    "kembalikan", "jika", "jika_tidak",
-    "selama", "untuk", "dalam", "dari", "hingga",
-    "hentikan", "lanjutkan", "maka",
-    "referensi", "dapat_diubah", "cocokkan",
-    "tegaskan", "buktikan", "memerlukan",
-    "benar", "salah", "cetak",
-    "murni", "paralel",
-    "coba", "tugas",
-    "niat", "tipe", "eksternal",
+    "fungsi", "biarkan", "misalkan", "struktur", "enumerasi", "tetap",
+    "publik", "umum", "modul", "pakai", "sebagai", "kembali", "kembalikan",
+    "jika", "selainnya", "lainnya", "selama", "untuk", "dalam", "dari",
+    "sampai", "hingga", "berhenti", "lanjutkan", "maka", "lihat",
+    "dapatberubah", "berubah", "cocokkan", "padanan", "pastikan",
+    "buktikan", "perlu", "jamin", "benar", "salah", "cetak", "tulis",
+    "murni", "paralel", "antarmuka", "terapkan", "implementasi", "metode",
+    "dimana", "adalah", "coba", "tugas", "gabungkan", "bahaya", "wilayah",
+    "tujuan", "niat", "tipe", "jenis", "eksternal", "invarian", "kurangi",
+    "dengan", "kesalahancetak",
 ];
 
 const MALAY_KEYWORDS: &[&str] = &[
-    "fungsi", "biar", "struktur", "penghitungan", "pemalar",
-    "awam", "modul", "guna", "sebagai",
-    "pulangkan", "jika", "sebaliknya",
-    "selagi", "untuk", "dalam", "dari", "hingga",
-    "henti", "teruskan", "maka",
-    "rujukan", "boleh_ubah", "padankan",
-    "sahkan", "buktikan", "memerlukan",
-    "benar", "salah", "cetak",
-    "tulen", "selari",
-    "cuba", "tugasan",
-    "niat", "jenis", "luaran",
+    "fungsi", "biarkan", "struktur", "penghitungan", "pemalar", "awam",
+    "modul", "guna", "sebagai", "kembali", "jika", "selainnya", "selama",
+    "untuk", "dalam", "dari", "hingga", "berhenti", "teruskan", "maka",
+    "lihat", "berubah", "padan", "pastikan", "buktikan", "memerlukan",
+    "menjamin", "benar", "palsu", "cetak", "tulis", "tulen", "selari",
+    "antaramuka", "laksanakan", "kaedah", "tempat", "adalah", "cuba",
+    "tugasan", "gabung", "tidakselamat", "kawasan", "tujuan", "jenis",
+    "luaran", "tetap", "kurangkan", "dengan", "ralatcetak",
 ];
 
 const SWAHILI_KEYWORDS: &[&str] = &[
-    "kazi", "iwe", "muundo", "orodha", "kisicho_badilika",
-    "wazi", "moduli", "tumia", "kama",
-    "rudisha", "ikiwa", "vinginevyo",
-    "hadi", "kwa", "ndani", "kutoka",
-    "simama", "endelea", "basi",
-    "rejea", "inayobadilika", "linganisha",
-    "thibitisha", "thibitisha", "inahitaji",
-    "kweli", "uwongo", "chapisha",
-    "safi", "sambamba",
-    "jaribu", "kazi_ndogo",
-    "nia", "aina", "nje",
+    "kazi", "acha", "muundo", "orodha", "thabiti", "umma", "moduli",
+    "tumia", "kama", "rudi", "kama_ni", "ikiwa", "vinginevyo", "wakati",
+    "kwa", "ndani", "kutoka", "hadi", "vunja", "endelea", "kisha",
+    "tazama", "badilika", "linganisha", "thibitisha", "thibitisha_kuwa",
+    "thibitisha_kabisa", "hitaji", "hakikisha", "kweli", "uongo",
+    "chapisha", "andika", "safi", "sambamba", "kiolesura", "tekeleza",
+    "njia", "wapi", "ni", "jaribu", "jukumu", "unganisha", "hatari",
+    "eneo", "lengo", "aina", "nje", "isiyobadilika", "punguza", "na",
+    "kosachapisha",
 ];
 
 const DUTCH_KEYWORDS: &[&str] = &[
-    "functie", "laat", "structuur", "opsomming", "constante",
-    "publiek", "module", "gebruik", "als",
-    "geef_terug", "als", "anders",
-    "zolang", "voor", "in", "van", "tot",
-    "stop", "ga_door", "dan",
-    "verwijzing", "veranderlijk", "pas_aan",
-    "bevestig", "bewijzen", "vereist",
-    "waar", "onwaar", "druk_af",
-    "puur", "parallel",
-    "probeer", "taak",
-    "intentie", "type", "extern",
+    "functie", "laat", "structuur", "opsomming", "constante", "openbaar",
+    "module", "gebruik", "als", "terug", "indien", "anders", "zolang",
+    "voor", "in", "van", "tot", "stop", "verder", "dan", "zie",
+    "veranderlijk", "vergelijk", "bevestig", "bewijs", "vereist",
+    "verzekert", "waar", "onwaar", "druk", "schrijf", "zuiver", "parallel",
+    "interface", "implementeer", "methoden", "waar_is", "is", "probeer",
+    "taak", "verbind", "onveilig", "gebied", "doel", "type", "extern",
+    "invariant", "verminder", "met", "foutdruk",
 ];
 
 const THAI_KEYWORDS: &[&str] = &[
-    "ฟังก์ชัน", "ให้", "โครงสร้าง", "การนับ", "ค่าคงที่",
-    "สาธารณะ", "โมดูล", "ใช้", "เป็น",
-    "คืนค่า", "ถ้า", "ไม่เช่นนั้น",
-    "ตราบใดที่", "สำหรับ", "ใน", "จาก", "ถึง",
-    "หยุด", "ดำเนินต่อ", "แล้ว",
-    "อ้างอิง", "เปลี่ยนแปลงได้", "จับคู่",
-    "ยืนยัน", "พิสูจน์", "ต้องการ",
-    "จริง", "เท็จ", "พิมพ์",
-    "บริสุทธิ์", "คู่ขนาน",
-    "ลอง", "งาน",
-    "เจตนา", "ชนิด", "ภายนอก",
+    "ฟังก์ชัน", "ให้", "โครงสร้าง", "การแจงนับ", "คงที่", "สาธารณะ",
+    "โมดูล", "ใช้", "เป็น", "คืน", "ถ้า", "ไม่เช่นนั้น", "ขณะที่",
+    "สำหรับ", "ใน", "จาก", "ถึง", "หยุด", "ดำเนินต่อ", "แล้ว", "ดู",
+    "เปลี่ยนแปลงได้", "ตรงกัน", "ยืนยัน", "พิสูจน์", "ต้องการ",
+    "รับประกัน", "จริง", "เท็จ", "พิมพ์", "บริสุทธิ์", "ขนาน",
+    "อินเทอร์เฟซ", "ดำเนินการ", "วิธีการ", "ที่ไหน", "คือ", "ลอง", "งาน",
+    "รวม", "ไม่ปลอดภัย", "พื้นที่", "จุดประสงค์", "ชนิด", "ภายนอก",
+    "ไม่เปลี่ยน", "ลด", "กับ", "ข้อผิดพลาดพิมพ์",
 ];
 
 const HUNGARIAN_KEYWORDS: &[&str] = &[
-    "fuggveny", "legyen", "struktura", "felsorolas", "allando",
-    "nyilvanos", "modul", "hasznal", "mint",
-    "visszater", "ha", "kulonben",
-    "amig", "minden", "ben", "tol", "ig",
-    "kilepes", "folytatas", "akkor",
-    "hivatkozas", "valtoztathato", "egyezes",
-    "allitas", "bizonyitas", "megkovetel",
-    "igaz", "hamis", "kiir",
-    "tiszta", "parhuzamos",
-    "probal", "feladat",
-    "szandek", "tipus", "kulso",
+    "függvény", "visszatér", "különben", "amíg", "törj", "nézd", "változó",
+    "állítsd", "bizonyítsd", "igényel", "garantál", "párhuzamos",
+    "felület", "metódusok", "próbáld", "egyesít", "veszélyes", "tartomány",
+    "cél", "típus", "külső", "állandó", "felsorolás", "nyilvános",
+    "használd", "tiszta", "csökkent", "együtt", "feladat", "legyen", "ha",
+    "folytat", "minden", "belül", "kezdve", "határig", "szerkezet",
+    "illeszkedik", "akkor", "megvalósít", "ahol", "van", "változatlan",
+    "nyomtat", "hibanyomtat", "modul", "mint", "folytasd", "egyezzen",
+    "igaz", "hamis", "nyomtass", "fuggveny", "valtozo", "valositsd_meg",
+    "kulso", "parhuzamos", "csokkent", "egyutt", "egyesit", "visszater",
+    "kulonben", "amig", "torj", "belul", "nezd", "hatarig", "felsorolas",
+    "felulet", "allando", "tipus", "metodusok", "cel", "hasznald",
+    "igenyel", "garantal", "valtozatlan", "allitsd", "bizonyitsd",
+    "hibanyomtass", "probald", "nyilvanos", "veszelyes", "tartomany",
 ];
 
 const CZECH_KEYWORDS: &[&str] = &[
-    "funkce", "nech", "struktura", "vycet", "konstanta",
-    "verejny", "modul", "pouzij", "jako",
-    "vrat", "kdyz", "jinak",
-    "dokud", "pro", "v", "od", "do",
-    "prerus", "pokracuj", "pak",
-    "odkaz", "menitelny", "shoda",
-    "tvrdit", "dokazat", "vyzaduje",
-    "pravda", "nepravda", "vytiskni",
-    "cisty", "paralelni",
-    "zkus", "ukol",
-    "zamer", "typ", "externi",
+    "nechť", "vrať", "přeruš", "pokračuj", "tvrď", "dokaž", "vyžaduje",
+    "zajišťuje", "vypiš", "čistý", "paralelní", "rozhraní", "úloha",
+    "nebezpečný", "záměr", "vnější", "neměnný", "výčet", "veřejný",
+    "použij", "proměnný", "odpovídej", "funkce", "zmenši", "spolu", "spoj",
+    "pokud", "jinak", "dokud", "pro", "uvnitř", "viz", "od", "do",
+    "struktura", "pak", "implementuj", "kde", "je", "konstanta", "typ",
+    "metody", "chybavypiš", "zkus", "modul", "oblast", "jako", "jestli",
+    "pravda", "nepravda", "tiskni", "nechtt", "vrat", "prerus", "pokracuj",
+    "tvrd", "dokaz", "vyzaduje", "zajistuje", "vypis", "cisty",
+    "paralelni", "rozhrani", "uloha", "nebezpecny", "zamer", "vnejsi",
+    "nemenny", "vycet", "verejny", "pouzij", "promenny", "odpovidej",
+    "zmensi", "uvnitr", "chybatiskni",
 ];
 
 const TYPE_NAMES: &[&str] = &[
@@ -3269,5 +3172,104 @@ mod tests {
                 required, labels
             );
         }
+    }
+
+    #[test]
+    fn lsp_keyword_lists_match_lexer() {
+        // BUG-173 (2026-08-11): the XXX_KEYWORDS completion-popup
+        // arrays above used to be hand-typed once and never
+        // mechanically re-synced with lexer.rs's real keyword
+        // tables -- 263 entries had drifted stale (suggesting words
+        // that no longer lex as that keyword) before this was
+        // caught. The arrays are now generated by
+        // `tools/regen_lsp_keywords.py` directly from lexer.rs's
+        // match arms, so a stale entry can only reappear if
+        // lexer.rs is edited without re-running that script. This
+        // test reads lexer.rs via `include_str!` at test time
+        // (mirroring `bug170_global_dialects_structure_keyword_parity`
+        // in src/lib.rs) and fails loudly if any XXX_KEYWORDS entry
+        // no longer appears as a match key in its mapped lexer
+        // function(s), instead of silently rotting again.
+        let lexer_src: &str = include_str!("lexer.rs");
+
+        fn extract_words_for_fn(src: &str, fn_name: &str) -> Vec<String> {
+            let marker = format!("fn {fn_name}(text: &str) -> Option<TokenKind> {{");
+            let start = src
+                .find(&marker)
+                .unwrap_or_else(|| panic!("dialect fn `{fn_name}` not found in lexer.rs"));
+            let body_start = start + marker.len();
+            let close = src[body_start..]
+                .find("\n}\n")
+                .unwrap_or_else(|| panic!("no closing `}}` found for `{fn_name}`"));
+            let body = &src[body_start..body_start + close];
+            let mut words = Vec::new();
+            let mut rest = body;
+            while let Some(q1) = rest.find('"') {
+                let after_q1 = &rest[q1 + 1..];
+                let Some(q2) = after_q1.find('"') else { break };
+                let word = &after_q1[..q2];
+                let after_q2 = &after_q1[q2 + 1..];
+                let tail = after_q2.trim_start();
+                if let Some(rest_after_arrow) = tail.strip_prefix("=>") {
+                    if rest_after_arrow.trim_start().starts_with("TokenKind::") {
+                        words.push(word.to_string());
+                    }
+                }
+                rest = after_q2;
+            }
+            words
+        }
+
+        let mapping: &[(&[&str], &[&str])] = &[
+            (MANDARIN_KEYWORDS, &["mandarin_keyword"]),
+            (DEVANAGARI_KEYWORDS, &["devanagari_keyword"]),
+            (BENGALI_KEYWORDS, &["bengali_keyword"]),
+            (TAMIL_KEYWORDS, &["tamil_keyword"]),
+            (TELUGU_KEYWORDS, &["telugu_keyword"]),
+            (GUJARATI_KEYWORDS, &["gujarati_keyword"]),
+            (PUNJABI_KEYWORDS, &["punjabi_keyword"]),
+            (KANNADA_KEYWORDS, &["kannada_keyword"]),
+            (ODIA_KEYWORDS, &["odia_keyword"]),
+            (URDU_KEYWORDS, &["urdu_keyword"]),
+            (PERSIAN_KEYWORDS, &["persian_keyword"]),
+            (KOREAN_KEYWORDS, &["korean_keyword"]),
+            (JAPANESE_KEYWORDS, &["japanese_keyword"]),
+            (ARABIC_KEYWORDS, &["arabic_keyword"]),
+            (HEBREW_KEYWORDS, &["hebrew_keyword"]),
+            (RUSSIAN_KEYWORDS, &["cyrillic_keyword"]),
+            (SPANISH_KEYWORDS, &["spanish_keyword", "spanish_ascii_keyword"]),
+            (FRENCH_KEYWORDS, &["french_keyword", "french_ascii_keyword"]),
+            (GERMAN_KEYWORDS, &["german_keyword", "german_ascii_keyword"]),
+            (PORTUGUESE_KEYWORDS, &["portuguese_keyword", "portuguese_ascii_keyword"]),
+            (ITALIAN_KEYWORDS, &["italian_ascii_keyword"]),
+            (TURKISH_KEYWORDS, &["turkish_keyword", "turkish_ascii_keyword"]),
+            (POLISH_KEYWORDS, &["polish_keyword", "polish_ascii_keyword"]),
+            (INDONESIAN_KEYWORDS, &["indonesian_ascii_keyword"]),
+            (MALAY_KEYWORDS, &["malay_ascii_keyword"]),
+            (SWAHILI_KEYWORDS, &["swahili_ascii_keyword"]),
+            (DUTCH_KEYWORDS, &["dutch_ascii_keyword"]),
+            (THAI_KEYWORDS, &["thai_keyword"]),
+            (HUNGARIAN_KEYWORDS, &["hungarian_keyword", "hungarian_ascii_keyword"]),
+            (CZECH_KEYWORDS, &["czech_keyword", "czech_ascii_keyword"]),
+        ];
+
+        let mut stale: Vec<String> = Vec::new();
+        for (lsp_words, fn_names) in mapping {
+            let mut lexer_words: Vec<String> = Vec::new();
+            for fn_name in *fn_names {
+                lexer_words.extend(extract_words_for_fn(lexer_src, fn_name));
+            }
+            for w in *lsp_words {
+                if !lexer_words.iter().any(|lw| lw == w) {
+                    stale.push(format!("{:?} (from {:?})", w, fn_names));
+                }
+            }
+        }
+        assert!(
+            stale.is_empty(),
+            "LSP keyword lists have drifted from lexer.rs -- re-run \
+             tools/regen_lsp_keywords.py. Stale entries:\n{}",
+            stale.join("\n")
+        );
     }
 }

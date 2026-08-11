@@ -6,7 +6,7 @@
 
 propòsit "Catalan vec iteration";
 
-funció suma_vec(v: Vec<i64>) -> i64 {
+funció suma_vec(v: ref Vec<i64>) -> i64 {
   sigui total: i64 = 0;
   per i des 0 fins len(v) {
     total = total + v[i];
@@ -14,7 +14,7 @@ funció suma_vec(v: Vec<i64>) -> i64 {
   retorna total;
 }
 
-funció max_vec(v: Vec<i64>) -> i64 {
+funció max_vec(v: ref Vec<i64>) -> i64 {
   sigui m: i64 = v[0];
   per i des 1 fins len(v) {
     si v[i] > m {
@@ -26,9 +26,9 @@ funció max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   sigui v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  afirma suma_vec(v) == 23;
-  afirma max_vec(v) == 9;
-  imprimeix "suma =", suma_vec(v);
-  imprimeix "max =", max_vec(v);
+  afirma suma_vec(ref v) == 23;
+  afirma max_vec(ref v) == 9;
+  imprimeix "suma =", suma_vec(ref v);
+  imprimeix "max =", max_vec(ref v);
   retorna 0;
 }

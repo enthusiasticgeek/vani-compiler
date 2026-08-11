@@ -11,12 +11,20 @@
 intent "break value and labeled loops";
 
 fn search_first_positive(limit: i64) -> i64 {
+  let n: i64 = 0 - limit;
   let result: i64 = while true {
-    let i: i64 = 0 - 5;
+    let i: i64 = n;
+    n = n + 1;
     if i > 0 {
+      // Regression test for BUG-174 (fixed): `break i;` used to
+      // be ambiguously parsed as "break to the loop label named
+      // i" even though no such label is in scope here -- the
+      // parser now only takes the label interpretation when the
+      // identifier matches an actual active loop label. This
+      // path actually executes (n counts up from -limit), so it
+      // exercises both the parse AND the runtime break-value.
       break i;
     }
-    break 42;
   };
   return result;
 }

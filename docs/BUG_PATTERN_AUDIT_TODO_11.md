@@ -87,3 +87,36 @@ for name, body in re.findall(r'const (\w+_KEYWORDS): &\[&str\] = &\[(.*?)\];', l
     if missing:
         print(f"{name} ({len(missing)} of {len(words)} stale): {missing}")
 ```
+
+## Update 2026-08-11: BUG-173 CLOSED
+
+Took the "cheaper interim step" this doc flagged, but made it also do
+the actual re-sync instead of just detecting drift: `tools/
+regen_lsp_keywords.py` mechanically extracts every `"word" =>
+TokenKind::...` match key from each dialect's `xxx_keyword`/
+`xxx_ascii_keyword` function(s) in `src/lexer.rs` and rewrites the
+corresponding `const XXX_KEYWORDS` array in `src/lsp.rs` from that
+authoritative source -- no hand-guessing at what the "current" correct
+word is, which is what made a manual fix of 263 entries risky. Re-ran
+it once to fix all 263 stale entries across all ~30 covered dialects in
+one mechanical pass (verified via the script's own `--check` mode:
+before the regen it reported drift, after it reported "already up to
+date").
+
+Also added the drift-detection regression test recommended above --
+`lsp_keyword_lists_match_lexer` in `src/lsp.rs`'s test module -- so a
+FUTURE keyword-table edit in `lexer.rs` that isn't followed by
+re-running `tools/regen_lsp_keywords.py` now fails CI instead of
+silently rotting again the way the original 263 entries did.
+
+The full architectural fix (sharing one literal table between the
+lexer's `match` and the LSP's completion list, eliminating the
+duplication entirely) is still not done -- that remains a larger,
+separate refactor if ever wanted. The regen script + test combination
+closes the actual bug (stale suggestions in the completion popup)
+without it.
+
+Did NOT expand LSP dialect coverage beyond the ~30 already-covered
+dialects (BUG-173 was about existing entries going stale, not about
+adding new dialect support to the LSP) -- that would be a feature
+request, filed separately if wanted.

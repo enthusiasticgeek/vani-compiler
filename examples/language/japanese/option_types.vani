@@ -8,21 +8,22 @@
 
 関数 安全な割り算(a: i64, b: i64) -> Option<i64> {
   もし b == 0 {
-    戻る None;
+    戻る Option.None;
   }
-  戻る Some(a / b);
+  戻る Option.Some(a / b);
+}
+
+関数 展開(o: Option<i64>, 既定値: i64) -> i64 {
+  戻る 一致 o {
+    Option.Some(v) ならば v,
+    Option.None ならば 既定値,
+  };
 }
 
 関数 main() -> i64 {
   代入 結果: Option<i64> = 安全な割り算(10, 2);
-  一致 結果 {
-    Some(v) ならば {
-      確認 v == 5;
-      表示 "Japanese option OK", v;
-    }
-    None ならば {
-      確認 false;
-    }
-  }
+  代入 v: i64 = 展開(結果, 0 - 999);
+  確認 v == 5;
+  表示 "Japanese option OK", v;
   戻る 0;
 }

@@ -164,21 +164,64 @@ fn main() -> i64 {
 
 ---
 
+## Bonus: `inner`/`outer`/`middle` work without declaring a label too
+
+`inner`, `outer`, and `middle` are also reserved **positional**
+targets -- they resolve by loop-nesting *depth*, not by matching a
+declared label, so they work even on completely unlabeled loops:
+
+- `inner` -- the innermost enclosing loop (same as a bare
+  `break;`/`continue;`).
+- `outer` -- the outermost enclosing loop.
+- `middle` -- the second-from-innermost loop (with only one or two
+  loops, this collapses to the same loop as `outer`).
+
+```vani
+fn main() -> i64 {
+  let x: i64 = 0;
+  while x < 10 {          /* no label at all */
+    if x == 5 {
+      break outer;         /* still works -- "outer" here means
+                               "the outermost loop", which happens
+                               to be the only loop */
+    }
+    x = x + 1;
+  }
+  return x;                /* 5 */
+}
+```
+
+If any of your OWN loops happen to be labeled exactly `inner`,
+`outer`, or `middle`, that real label always wins over the positional
+meaning -- no ambiguity. In general, prefer explicit named labels
+(as in the sections above) when clarity matters; the positional
+shortcut is mainly useful for quick, unlabeled nested loops where
+adding a name for every level feels like overkill.
+
+---
+
 ## Undefined label -> compile error
 
-Using a label that doesn't exist on any enclosing loop is caught at
-compile time -- no runtime surprise:
+`break label_name;` only takes the *label* interpretation when
+`label_name` actually names a loop that's currently in scope. If it
+doesn't match any enclosing loop's label, the compiler instead treats
+it as a **break value** (a `while`/`for` loop used as an expression can
+return a value via `break val;`, e.g. `let x = while ... { break val; };`)
+-- and since a plain `for`/`while` *statement* isn't being used as an
+expression, that's caught at compile time too, just with a different
+message:
 
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 outer: for i from 0 to 3 {
-  break nowhere;   /* error: no enclosing loop is labeled 'nowhere' */
+  break nowhere;   /* `nowhere` isn't a label in scope here, so this
+                       is read as a break VALUE instead */
 }
 ```
 
 ```
-error: no enclosing loop is labeled 'nowhere'
+error: 'break value' is only valid when the loop is used as an expression (e.g. `let x = while ... { break val; }`)
     break nowhere;
 ```
 

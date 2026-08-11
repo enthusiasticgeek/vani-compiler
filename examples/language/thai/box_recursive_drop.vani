@@ -14,11 +14,11 @@
 ฟังก์ชัน main() -> i64 {
   ให้ รายการ: Node = Node {
     ค่า: 1,
-    ถัดไป: Some(Box(Node {
+    ถัดไป: Option.Some(box(Node {
       ค่า: 2,
-      ถัดไป: Some(Box(Node {
+      ถัดไป: Option.Some(box(Node {
         ค่า: 3,
-        ถัดไป: None,
+        ถัดไป: Option.None,
       })),
     })),
   };

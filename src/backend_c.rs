@@ -22784,7 +22784,7 @@ fn local_name(name: &str) -> String {
 /// if they were already identical (impossible in a program that
 /// type-checked, since the checker enforces no-shadowing/no-
 /// duplicate-name within the same scope on the ORIGINAL names).
-fn sanitize_ident(name: &str) -> String {
+pub(crate) fn sanitize_ident(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {

@@ -6,7 +6,7 @@
 
 cél "Hungarian vec iteration";
 
-fuggveny osszeg_vec(v: Vec<i64>) -> i64 {
+fuggveny osszeg_vec(v: ref Vec<i64>) -> i64 {
   legyen osszeg: i64 = 0;
   minden i from 0 to len(v) {
     osszeg = osszeg + v[i];
@@ -14,7 +14,7 @@ fuggveny osszeg_vec(v: Vec<i64>) -> i64 {
   visszatér osszeg;
 }
 
-fuggveny max_vec(v: Vec<i64>) -> i64 {
+fuggveny max_vec(v: ref Vec<i64>) -> i64 {
   legyen m: i64 = v[0];
   minden i from 1 to len(v) {
     ha v[i] > m {
@@ -26,9 +26,9 @@ fuggveny max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   legyen v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  állítsd osszeg_vec(v) == 23;
-  állítsd max_vec(v) == 9;
-  nyomtass "osszeg =", osszeg_vec(v);
-  nyomtass "max =", max_vec(v);
+  állítsd osszeg_vec(ref v) == 23;
+  állítsd max_vec(ref v) == 9;
+  nyomtass "osszeg =", osszeg_vec(ref v);
+  nyomtass "max =", max_vec(ref v);
   visszatér 0;
 }

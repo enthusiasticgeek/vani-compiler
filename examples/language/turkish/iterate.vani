@@ -6,7 +6,7 @@
 
 amaç "Turkish vec iteration";
 
-işlev vec_toplam(v: Vec<i64>) -> i64 {
+işlev vec_toplam(v: ref Vec<i64>) -> i64 {
   olsun toplam: i64 = 0;
   için i den 0 kadar len(v) {
     toplam = toplam + v[i];
@@ -14,7 +14,7 @@ işlev vec_toplam(v: Vec<i64>) -> i64 {
   dön toplam;
 }
 
-işlev vec_maks(v: Vec<i64>) -> i64 {
+işlev vec_maks(v: ref Vec<i64>) -> i64 {
   olsun m: i64 = v[0];
   için i den 1 kadar len(v) {
     eğer v[i] > m {
@@ -26,9 +26,9 @@ işlev vec_maks(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   olsun v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  doğrula vec_toplam(v) == 23;
-  doğrula vec_maks(v) == 9;
-  yazdır "toplam =", vec_toplam(v);
-  yazdır "maks =", vec_maks(v);
+  doğrula vec_toplam(ref v) == 23;
+  doğrula vec_maks(ref v) == 9;
+  yazdır "toplam =", vec_toplam(ref v);
+  yazdır "maks =", vec_maks(ref v);
   dön 0;
 }

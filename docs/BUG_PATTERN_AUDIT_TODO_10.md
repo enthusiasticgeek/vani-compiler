@@ -89,3 +89,252 @@ Re-run `vanic check examples` fresh (file set may have shifted) to get a
 current failing-file list, then work Category A and B first since they're
 each a single, well-understood, mechanical pattern across many files —
 higher fix-value per minute than Category C's one-offs.
+
+## Update 2026-08-11: Categories A and B fixed; BUG-174 filed from Category C triage
+
+Categories A (31 files, unqualified `Some`/`None`) and B (16 files,
+dropped `ref`) are both fixed and verified clean on both backends.
+Category A triage also turned up two more mechanical mistakes bundled
+into the same files: `Box(...)` should be `box(...)` (lowercase builtin)
+in 9 dialects' `box_recursive_drop.vani`, and 8 dialects'
+`option_types.vani`/`try_question_op.vani` used `match` as a bare
+statement with block-bodied arms, which vāṇी doesn't support (`match`
+must be an expression bound via `let`, arms are single comma-separated
+expressions) -- rewritten as small `unwrap_or`-style helper functions
+per dialect, following the same design English's canonical
+`option_types.vani` already uses. Category B triage found Greek needed
+its own native `αναφορά` instead of the bare English `ref` alias (Greek
+enforces a language-purity gate that rejects mixing an English alias
+into an otherwise-Greek file) and a genuine builtin-name collision
+(Greek's helper functions were named `vec_sum`/`vec_max`, which are
+actual compiler builtins) -- both fixed.
+
+**BUG-174** (new, found during Category C triage, NOT fixed): the
+`break`/`continue` statement parser (`src/parser.rs` around line 2820)
+treats any bare identifier immediately followed by `;` as a loop-label
+reference, with no fallback to "value expression" if no such label is
+in scope -- validation of whether the label actually exists happens
+later, in the checker, by which point the parser has already committed
+to the wrong interpretation. Confirmed via `examples/language/english/
+break_value.vani` (the canonical reference file for the break-value
+feature itself): `break i;` inside `if i > 0 { break i; }` fails with
+"no enclosing loop is labeled 'i'" even though `i` is an ordinary local
+variable and there is no label named `i` anywhere in the function.
+`break (i);` (parenthesized) unambiguously parses as a value expression
+and works correctly -- fixed the example file this way, with a comment
+pointing at this entry, since editing the parser's disambiguation logic
+is a bigger, riskier change (it's the general break/continue label path,
+used throughout the corpus) that deserves its own dedicated session with
+full regression coverage rather than a rushed fix bundled into a
+BUG-172 cleanup pass. A more correct compiler-level fix would track
+in-scope loop labels during parsing and only take the label
+interpretation when the identifier actually matches one of them.
+
+Category C's remaining untriaged files: georgian (5 files), hebrew/
+keywords.vani, polish/early_exit.vani, tibetan/verified.vani, and the
+konkani/maithili/nepali cluster (control_flow.vani, for_loops.vani,
+keywords.vani, plus maithili/nepali's early_exit.vani) -- still open as
+of this update.
+
+## Update 2026-08-11: BUG-172 fully closed
+
+All of Category C is now fixed:
+
+- **Georgian (5 files)**: all were the SAME root cause, a genuine
+  compiler bug, not a translation mistake -- `src/parser.rs`'s
+  `is_type_name_start` (~line 6175) rejects any bare identifier used as
+  a struct/enum type reference unless it "starts uppercase" by Unicode's
+  case properties, with an explicit fallback for genuinely caseless
+  scripts (Devanagari, Thai, CJK, Arabic, Myanmar, ...). Georgian
+  Mkhedruli is caseless in everyday use but Unicode still assigns it
+  general category Ll ("lowercase"), so the caseless-script fallback
+  never triggered and NO ordinary Georgian struct/enum name could ever
+  be referenced. Fixed by explicitly accepting the Georgian Unicode
+  block (U+10A0..U+10FF) and the Mtavruli capitals extension
+  (U+1C90..U+1CBF) in `is_type_name_start`, alongside the existing
+  script-specific logic. Pure compiler fix -- none of the 5 Georgian
+  example files needed any changes at all.
+- **hebrew/keywords.vani**: the file's own helper function was named
+  `חיבור` ("addition"), which collides with Hebrew's OWN keyword table
+  entry for `TokenKind::Join` -- a self-collision within one dialect's
+  table, not cross-dialect fallback contamination like the earlier
+  Persian/Urdu findings. Renamed to `חבר`.
+- **polish/early_exit.vani**: used the single-character variable name
+  `w`, which is Polish's own keyword for `In` -- same single-character-
+  identifier-collision class as the BUG-170 `i`/`v`/`s`/`z`/`e`
+  incident. Renamed to `lista`.
+- **tibetan/verified.vani**: two distinct pre-existing logic bugs, not
+  just syntax. (1) The `requires`/`ensures`-style clauses (Tibetan's
+  `དགོས`) were written INSIDE the function body instead of between the
+  signature and the opening `{` (compare the working
+  `examples/language/persian/verified.vani`, which has the clause on
+  its own line right before `{`) -- simply invalid syntax, so the
+  clauses were never attached as real preconditions at all. (2) Once
+  moved to the correct position, two genuine spec bugs surfaced:
+  `clamp`'s precondition wrongly required `x <= hi`, which is
+  self-defeating for a clamp function (the test suite explicitly calls
+  `clamp(15, 1, 10)` to exercise clamping x *above* the range) -- removed,
+  keeping only the sensible `lo <= hi`. And `safe_subtract`'s
+  postcondition `result >= 0` isn't actually provable from `a >= b`
+  alone (i64 subtraction can overflow when a and b are far enough
+  apart) -- the working Persian `safe_sub` has a second precondition,
+  `b >= 0`, that Tibetan's was missing; added it.
+- **konkani/maithili/nepali cluster (11 files)**: all eleven were the
+  same `सिद्ध` (Sanskrit/Hindi/Marathi's `Prove`, reached via the
+  lexer's non-ASCII fallback chain) vs `सुनिश्चित` (`Assert`, these three
+  dialects' own correct word) mistake already found and fixed earlier
+  in this dialect's `iterate.vani`/`early_exit.vani` during the BUG-171
+  Tier C checkpoint -- confirming that memory note's prediction that
+  this cluster likely had more instances of the same pattern. Fixed
+  identically.
+
+**Found opportunistically while re-running the full corpus check after
+the above** (not in the original BUG-172 file list; pre-existing, not
+caused by this session): `examples/language/hebrew/iterate.vani`'s
+helper function was named `פיבונאצ'י` ("Fibonacci", using Hebrew geresh
+notation for the transliterated foreign sound) -- the lexer's
+loop-label tokenizer (`lex_label`, `src/lexer.rs` ~line 7126) treats
+any bare `'` as the start of a `'label:` token unconditionally, with no
+awareness that `'` is also legitimate Hebrew orthography embedded
+inside an identifier. This is filed as **BUG-175**: fixing it properly
+means teaching the lexer to only dispatch to `lex_label` when the `'`
+appears at a fresh token boundary (not mid-identifier) -- a real lexer
+change affecting the shared label-tokenizing path, not scoped narrowly
+enough to fix safely alongside a BUG-172 cleanup pass. Worked around by
+renaming the function to `פיבונאצי` (dropping the geresh) in the
+example file; the underlying lexer gap is unfixed.
+
+Full `vanic check examples` after all of the above: every file that was
+in BUG-172's original 66-file list, plus `hebrew/iterate.vani`, now
+passes on both backends. `cargo test --release --lib` and
+`tools/leak_sweep.py` both green (see the commit this shipped in for
+exact numbers).
+
+## Update 2026-08-11: BUG-174 CLOSED
+
+Fixed at the root, in this dedicated session, as planned above.
+`src/parser.rs`'s `Parser` struct now carries an `active_labels: Vec<
+String>` stack, pushed with the label name by `parse_labeled_loop_stmt`
+/ `parse_plain_ident_label_loop_stmt` before descending into a labeled
+loop's body (`parse_while_stmt`/`parse_for_stmt`) and popped after --
+so it's populated with every label lexically in scope at any point
+during parsing, correctly nesting for `'outer: for { 'inner: for {
+... } }`. `break`/`continue`'s bare-identifier-before-`;` heuristic now
+only takes the label interpretation when the identifier is actually on
+that stack; otherwise it falls through unconsumed, and the existing
+"parse a value expression" branch picks it up naturally (no other
+change needed there -- `break i;` where `i` isn't a live label now just
+parses as `break <expr:i>;`).
+
+One consequence worth flagging: `continue`'s value-less nature means a
+non-label identifier there now surfaces as a plain "expected ';'"
+parse error (the identifier is left unconsumed and `expect_keyword(
+"';'")` fails on it) instead of the old "no enclosing loop is labeled"
+checker error -- arguably clearer (it fires at the parse site, not
+after a spurious label-resolution attempt), but a different message if
+anything depended on the exact old wording.
+
+`examples/language/english/break_value.vani`'s `break (i);` workaround
+was reverted to the natural `break i;` (the parens are no longer
+load-bearing), and the surrounding dead-code loop was reshaped so that
+branch actually executes at runtime (previously `i` was hardcoded to
+`0 - 5`, always non-positive, so the `break i;` line was parse-tested
+but never runtime-tested) -- it now counts up from `0 - limit` so the
+break-with-value path genuinely fires and returns a real value.
+
+**Corpus-wide regression check**: this touches the shared break/
+continue parsing path used by literally every `.vani` file, so it got
+the full bar promised above -- `cargo test --release` (every test
+binary, 2885 lib tests + all integration suites, not just `--lib`),
+`vanic check` across the full 1040-file example corpus (21 pre-existing
+failures, none new -- see below), and `tools/leak_sweep.py` (clean,
+matches baseline). Also added three dedicated regression tests in
+`src/lib.rs` (`bug174_break_bare_ident_not_matching_active_label_
+parses_as_value`, `bug174_break_label_still_resolves_when_actually_in_
+scope`, `bug174_break_undeclared_bare_ident_reports_value_not_label_
+error`).
+
+**Found while doing the corpus-wide check, NOT a regression**: three
+`examples/edge_cases/mix_break_*.vani` files (`mix_break_inner_deeply_
+nested`, `mix_break_outer_single_loop`, `mix_break_positional`) fail
+`vanic check`, and their comments describe a "positional break" feature
+(`break inner`/`break outer`/`break middle` resolving by loop DEPTH
+POSITION rather than by matching a declared label name) that does not
+exist anywhere in the compiler -- grepped `checker.rs` and `parser.rs`
+for any positional/depth-based label resolution and found none; the
+checker's break/continue label lookup (`src/checker.rs` ~15825-15889)
+is a plain `loops.iter().rposition(|f| f.label.as_deref() == Some(
+name))` exact-string match, nothing positional. These files were
+already failing before this fix too (the old parser would have
+unconditionally treated `break outer;` etc. as a label reference, and
+since none of these files actually declare a loop labeled "outer" —
+they use plain unlabeled `while`/`for` — the OLD checker would have
+raised "no enclosing loop is labeled 'outer'"; the fix just changes
+which error fires, from that to "break value is only valid..."). Not
+fixed here -- filing as a new item, BUG-176, since implementing genuine
+positional break/continue is a real feature request, not a bug-fix,
+and out of scope for this session.
+
+## Update 2026-08-11: BUG-175 CLOSED
+
+Fixed in `src/lexer.rs`'s `lex_unicode_ident`: when the continuation
+loop encounters a `'` byte, it now peeks one byte further -- if another
+identifier-continuation byte (ASCII alnum/underscore or any non-ASCII
+byte) immediately follows, the `'` is folded into the current
+identifier and scanning continues; otherwise the loop stops there as
+before, leaving the `'` for the top-level dispatch's `lex_label` call.
+This means a fresh `'outer:` label at a real token boundary is
+unaffected (nothing precedes it that would make `lex_unicode_ident`
+even be the active consumer), while `פיבונאצ'י` now lexes as one
+identifier token (the geresh sits between two Hebrew letters, both
+identifier-continuation bytes).
+
+**Found immediately downstream, same session**: fixing the lexer
+exposed a SECOND, previously-unreachable bug -- neither SSA backend's
+identifier mangling was prepared for `'` to ever appear inside a lexed
+identifier, because it never could before. `src/backend_llvm.rs`'s
+`llvm_mangle_ident` special-cased "any ASCII byte passes through raw"
+(true before this fix, since the lexer never allowed a non-alnum ASCII
+byte mid-identifier -- but `'` isn't a valid LLVM bare-identifier
+character either, so it broke the emitted `.ll` text once it could
+occur); fixed by tightening the passthrough check to explicitly
+whitelist ASCII alnum + `_`, escaping everything else (ASCII or not)
+via the existing `_uHHHH` scheme. Also found three more call sites in
+`src/ssa_backend_llvm.rs` building `@__intent_depth_<name>` /
+`@__intent_dec_depth_<name>` symbol names for the `#[bounded(N)]`
+feature directly from the raw function name, bypassing
+`llvm_mangle_ident` entirely -- fixed to call it too, matching the
+already-correct function-name-emission call sites.
+
+The C backend turned out to have a DIFFERENT, more surprising root
+cause for the same symptom: `src/backend_c.rs`'s `sanitize_ident`
+already correctly escaped non-alnum/underscore characters (including
+`'`) -- but `vanic run --backend=c` doesn't go through `backend_c.rs`'s
+`emit_c`/`function_name` at all. It uses the separate, newer SSA-based
+C backend (`src/ssa_backend_c.rs`), which had NO identifier
+sanitization whatsoever -- it emits `fn_<raw name>` directly. This
+never mattered before because GCC accepts arbitrary raw UTF-8 bytes as
+an identifier-character extension, so unsanitized non-ASCII names
+happened to work by accident; only `'` (which starts a C character
+literal, breaking tokenization outright) ever exposed the gap. Made
+`sanitize_ident` `pub(crate)` and called it from `ssa_backend_c.rs`'s
+four function-identifier-emission sites (prototype, definition, call,
+`FnRef`) plus its two `#[bounded(N)]` depth-counter-name sites (mirror
+of the LLVM fix above), rather than inventing a second, parallel
+sanitizer.
+
+`examples/language/hebrew/iterate.vani`'s workaround (the function was
+renamed from `פיבונאצ'י` to `פיבונאצי`, dropping the geresh) was
+reverted -- the geresh spelling is restored and now compiles and runs
+correctly on both backends, serving as the regression test in the
+corpus sweep. Also added a dedicated `cargo test` regression
+(`bug175_apostrophe_mid_identifier_lexes_as_one_token_and_mangles_
+safely` in `src/lib.rs`) that compiles a geresh-containing identifier
+and asserts the raw Hebrew text does NOT appear un-mangled in either
+backend's emitted output.
+
+Same corpus-wide regression bar as BUG-174 above (this also touches a
+lexer path shared by every file) -- full `cargo test --release`, full
+`vanic check` sweep (1040 files, 21 pre-existing failures unrelated to
+this fix -- same list as BUG-174's update above, since both fixes were
+validated together), `tools/leak_sweep.py` clean.

@@ -8,26 +8,30 @@
 
 函数 解析(n: i64) -> Option<i64> {
   如果 n < 0 {
-    返回 None;
+    返回 Option.None;
   }
-  返回 Some(n * 3);
+  返回 Option.Some(n * 3);
 }
 
 函数 计算(n: i64) -> Option<i64> {
   让 v: i64 = 解析(n)?;
-  返回 Some(v + 1);
+  返回 Option.Some(v + 1);
+}
+
+函数 解开(o: Option<i64>, 默认值: i64) -> i64 {
+  返回 匹配 o {
+    Option.Some(v) 那么 v,
+    Option.None 那么 默认值,
+  };
 }
 
 函数 main() -> i64 {
   让 好的: Option<i64> = 计算(4);
-  匹配 好的 {
-    Some(v) 那么 { 断言 v == 13; }
-    None 那么 { 断言 false; }
-  }
+  让 v1: i64 = 解开(好的, 0 - 999);
+  断言 v1 == 13;
   让 坏的: Option<i64> = 计算(-1);
-  匹配 坏的 {
-    Some(_) 那么 { 断言 false; }
-    None 那么 { 打印 "Mandarin ? op OK"; }
-  }
+  让 v2: i64 = 解开(坏的, 0 - 999);
+  断言 v2 == 0 - 999;
+  打印 "Mandarin ? op OK";
   返回 0;
 }
