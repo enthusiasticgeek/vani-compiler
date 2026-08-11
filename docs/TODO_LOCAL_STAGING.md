@@ -5405,3 +5405,12 @@ fn main() -> i64 {
     n = n + -9223372036854775808;
   }
   assert n ==
+
+---
+
+### Candidate: 20260811-051305-backend-divergence-aae40962b2
+
+Repro: `tools/localfuzz/findings/20260811-051305-backend-divergence-aae40962b2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-051305-backend-divergence-aae40962b2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
