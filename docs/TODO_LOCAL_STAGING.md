@@ -5432,3 +5432,47 @@ Repro: `tools/localfuzz/findings/20260811-054533-backend-divergence-fa7d51bbcc/r
 Fix attempt: `tools/localfuzz/findings/20260811-054533-backend-divergence-fa7d51bbcc/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-085210-run-crash-b7130c49f7
+
+Repro: `tools/localfuzz/findings/20260811-085210-run-crash-b7130c49f7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-085210-run-crash-b7130c49f7/fix_attempt.md`
+
+### Staging Entry for vani-compiler Local Fuzzing
+
+#### Summary
+A vanic run of an example file `/home/virgo/source/vani-compiler-localfuzz/examples/language/malayalam/early_exit.vani` resulted in a crash due to an early exit condition.
+
+#### Environment Information
+- **Operating System**: Linux
+- **Vanic Version**: [Insert the version of vanic used, e.g., `v1.2.34567890`]
+- **Compiler Backend**: C
+
+#### Reproducible Source Code
+```vani
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/early_exit.vani              # LLVM
+//   vanic run examples/language/malayalam/early_exit.vani --backend=c  # C
+
+ഉദ്ദേശ्यം "break and continue for early exit and skip";
+
+// `നിർത്തുക` = break, `തുടരുക` = continue
+
+കാര്യം find_first_negative(xs: നോക്കുക Vec<i64>) -> i64 {
+  കരുതുക i: u64 = 0;
+  കരുതുക result: i64 = 0 - 1;
+  വരെ i < len(xs) {
+    എങ്കിൽ xs[i] < 0 {
+      result = xs[i];
+      നിർത്തുക;
+    }
+    i = i + 1;
+  }
+  തിരികെ result;
+}
+
+കാര്യം count_positive(xs
