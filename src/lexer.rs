@@ -2053,7 +2053,12 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
         "ìṣù" => TokenKind::Module,            // module
         "lò" => TokenKind::Use,                // use
         "bí_ti" => TokenKind::As,              // as
-        "iṣẹ" => TokenKind::Task,              // task
+        // Native-review fix (2026-08-10): was "iṣẹ" (bare, no
+        // tone mark) -- a minimal pair with "iṣẹ́" => Fn above,
+        // differing only by a diacritic that's easy to drop when
+        // typing. Switched to a distinct root to remove the
+        // collision risk (unused in examples/, so zero-risk fix).
+        "ojúṣe" => TokenKind::Task,            // duty / responsibility
         "ọ̀nà" => TokenKind::Struct,           // way / structure
         "ibo" => TokenKind::Where,             // where (ASCII actually)
         "gbangba" => TokenKind::Pub,           // public (ASCII)
@@ -2086,7 +2091,10 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
 /// ɓ/ɗ/ƙ/ƴ.
 fn hausa_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
-        "ɗaya" => TokenKind::Parallel,         // parallel (uses ɗ)
+        // Native-review fix (2026-08-10): removed "ɗaya" ("one",
+        // the numeral) from TokenKind::Parallel -- no clear
+        // connection to "parallel"; "madaidaici" in the ASCII
+        // table already covers Parallel correctly.
         "ƙarya" => TokenKind::False,           // lie (uses ƙ)
         "nau'i" => TokenKind::Type,            // kind (apostrophe)
         // (Most Hausa keywords are pure ASCII; only a few use
