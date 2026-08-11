@@ -5868,3 +5868,20 @@ Repro: `tools/localfuzz/findings/20260811-234527-backend-divergence-cb6b8490e2/r
 Fix attempt: `tools/localfuzz/findings/20260811-234527-backend-divergence-cb6b8490e2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-235545-run-crash-891b61d6c1
+
+Repro: `tools/localfuzz/findings/20260811-235545-run-crash-891b61d6c1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-235545-run-crash-891b61d6c1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+In this stage, we have observed a crash when running the `early_exit.vani` program with the LLVM backend and JIT via lli. The mutant/source code exhibits an early exit condition where it breaks out of the loop before completing its intended execution. This results in a crash or unexpected termination of the program.
+
+The mutation that introduced this issue is the conditional jump instruction (`if`) inside the `फलन पहला_ऋणात्मक` function. When the value at index 3 in the vector is less than zero, it causes an early exit by breaking out of the loop without completing the rest of the code.
+
+The same mutation affects the `फलन धनात्मक_गणना` function, where the condition for exiting the loop is set to be less than or equal to zero instead of being strictly less than zero. This can lead to an infinite loop if not properly handled.
+
+To resolve this issue, we need to investigate the logic behind the conditional jumps and ensure that they correctly handle the early exit conditions without causing unintended behavior.
