@@ -5665,3 +5665,12 @@ When running the `control_flow.vani` file with either the LLVM or C backend, it 
 The bug affects both LLVM and C backends.
 
 ### Status: Needs Human/frontier Root-Cause Review.
+
+---
+
+### Candidate: 20260811-181229-backend-divergence-29a00bfa20
+
+Repro: `tools/localfuzz/findings/20260811-181229-backend-divergence-29a00bfa20/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-181229-backend-divergence-29a00bfa20/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
