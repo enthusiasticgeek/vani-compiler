@@ -5588,3 +5588,12 @@ Repro: `tools/localfuzz/findings/20260811-145939-backend-divergence-68881f0548/r
 Fix attempt: `tools/localfuzz/findings/20260811-145939-backend-divergence-68881f0548/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-155155-run-crash-6b9473a3c2
+
+Repro: `tools/localfuzz/findings/20260811-155155-run-crash-6b9473a3c2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-155155-run-crash-6b9473a3c2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
