@@ -5214,3 +5214,12 @@ STATUS: needs human/frontier root-cause review.
 Vani compiler attempted to run the given vani code on both LLVM and C backends with a test input. However, during the execution, it encountered an integer overflow error in the i64 multiplication operation, resulting in a crash (exit code 134) on both platforms. The observed symptom was a failure of the program to execute correctly due to this issue.
 
 This bug is related to backend-divergence as both backends produced different results for the same input, leading to crashes when attempting to run the final program with `vanic run`.
+
+---
+
+### Candidate: 20260811-004450-backend-divergence-4ce2b3b4d7
+
+Repro: `tools/localfuzz/findings/20260811-004450-backend-divergence-4ce2b3b4d7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-004450-backend-divergence-4ce2b3b4d7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
