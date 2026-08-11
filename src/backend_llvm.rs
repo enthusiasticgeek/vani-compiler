@@ -16019,10 +16019,28 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             dest, x
                         ));
                     }
-                    _ => {
+                    Type::I64 | Type::U64 => {
                         out.push_str(&format!(
                             "  {} = call i64 @llabs(i64 {})\n",
                             dest, x
+                        ));
+                    }
+                    other => {
+                        // abs() preserves the argument's integer
+                        // width (checker: I8/I16/I32 in -> same
+                        // out), but @llabs only operates on i64.
+                        // Widen, call, then truncate back down so
+                        // `dest` stays type-compatible with the
+                        // checker's declared result type.
+                        let x64 = widen_int_to_64(&x, other, ctx, out, true);
+                        let abs64 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = call i64 @llabs(i64 {})\n",
+                            abs64, x64
+                        ));
+                        out.push_str(&format!(
+                            "  {} = trunc i64 {} to {}\n",
+                            dest, abs64, llvm_type(other)
                         ));
                     }
                 }
