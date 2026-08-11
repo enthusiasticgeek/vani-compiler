@@ -5223,3 +5223,55 @@ Repro: `tools/localfuzz/findings/20260811-004450-backend-divergence-4ce2b3b4d7/r
 Fix attempt: `tools/localfuzz/findings/20260811-004450-backend-divergence-4ce2b3b4d7/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-011554-backend-divergence-4eade90fc9
+
+Repro: `tools/localfuzz/findings/20260811-011554-backend-divergence-4eade90fc9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-011554-backend-divergence-4eade90fc9/fix_attempt.md`
+
+**STAGING ENTRY**
+
+```
+#vanic run examples/language/danish/try_question_op.vani --backend=c
+
+VANIC v1.0.8 (2023-04-01)
+ LLVM version: 15.0.0
+
+[INFO] Running with arguments:
+/home/virgo/source/vani-compiler-localfuzz/examples/language/danish/try_question_op.vani --backend=c
+```
+
+**Mutation Number**: `0`
+**Generated Source File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/danish/try_question_op.vani`
+**Mutant Source**:
+```vani
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/try_question_op.vani              # LLVM
+//   vanic run examples/language/danish/try_question_op.vani --backend=c  # C
+
+formaal "Danish postfix ? early-return sugar on payloaded enums";
+
+optaelling Opt { Some(i64), None }
+
+funktion doblet_q(o: Opt) -> Opt {
+  lad v: i64 = o?;
+  returner Opt.Some(v * -9223372036854775808);
+}
+
+funktion udpak_eller(o: Opt, standard: i64) -> i64 {
+  returner match o {
+    Opt.Some(v) saa v,
+    Opt.None    saa standard,
+  };
+}
+
+fn main() -> i64 {
+  lad a: Opt = doblet_q(Opt.Some(5));
+  bekraeft udpak_eller(a, 0) == 10;
+
+  lad b: Opt = doblet_q(Opt.None);
+  bekraeft udpak_eller(b, 99) == 99
