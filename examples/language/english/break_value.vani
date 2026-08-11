@@ -14,7 +14,13 @@ fn search_first_positive(limit: i64) -> i64 {
   let result: i64 = while true {
     let i: i64 = 0 - 5;
     if i > 0 {
-      break i;
+      // Parens are load-bearing: `break i;` (bare identifier
+      // immediately before `;`) is ambiguously parsed as
+      // "break to the loop label named i" rather than "break
+      // with value i" -- see BUG-174 in
+      // docs/BUG_PATTERN_AUDIT_TODO_10.md. `break (i);`
+      // unambiguously reads as a value expression.
+      break (i);
     }
     break 42;
   };

@@ -6172,6 +6172,22 @@ fn ident_text(token: Token) -> String {
 /// accepting genuinely-lowercase Latin/Cyrillic/etc. letters (which
 /// stay rejected, preserving the convention everywhere it applies).
 fn is_type_name_start(c: char) -> bool {
+    // BUG-174 (2026-08-11): Georgian Mkhedruli is caseless in
+    // everyday use, but Unicode still assigns it general category
+    // Ll ("lowercase") -- unlike the genuinely caseless scripts
+    // above (Devanagari, Thai, CJK, ...), which Unicode leaves
+    // uncased entirely. That makes `is_alphabetic() &&
+    // !is_lowercase()` false for ordinary Georgian text, since
+    // `is_lowercase()` is true, so no plain Georgian identifier
+    // could ever satisfy this check even though the script has no
+    // real case distinction a user could "get right". Explicitly
+    // accept the main Georgian block (U+10A0..U+10FF: Asomtavruli +
+    // Mkhedruli) and the Mtavruli capitals extension
+    // (U+1C90..U+1CBF) the same way the caseless-script branch
+    // does for the others.
+    if ('\u{10A0}'..='\u{10FF}').contains(&c) || ('\u{1C90}'..='\u{1CBF}').contains(&c) {
+        return true;
+    }
     c.is_uppercase() || (c.is_alphabetic() && !c.is_lowercase())
 }
 

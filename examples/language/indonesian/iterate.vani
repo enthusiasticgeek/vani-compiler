@@ -6,7 +6,7 @@
 
 tujuan "Indonesian vec iteration";
 
-fungsi jumlah_vec(v: Vec<i64>) -> i64 {
+fungsi jumlah_vec(v: ref Vec<i64>) -> i64 {
   biarkan total: i64 = 0;
   untuk i dari 0 sampai len(v) {
     total = total + v[i];
@@ -14,7 +14,7 @@ fungsi jumlah_vec(v: Vec<i64>) -> i64 {
   kembali total;
 }
 
-fungsi maks_vec(v: Vec<i64>) -> i64 {
+fungsi maks_vec(v: ref Vec<i64>) -> i64 {
   biarkan m: i64 = v[0];
   untuk i dari 1 sampai len(v) {
     jika v[i] > m {
@@ -26,9 +26,9 @@ fungsi maks_vec(v: Vec<i64>) -> i64 {
 
 fungsi main() -> i64 {
   biarkan v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  pastikan jumlah_vec(v) == 23;
-  pastikan maks_vec(v) == 9;
-  cetak "jumlah =", jumlah_vec(v);
-  cetak "maks =", maks_vec(v);
+  pastikan jumlah_vec(ref v) == 23;
+  pastikan maks_vec(ref v) == 9;
+  cetak "jumlah =", jumlah_vec(ref v);
+  cetak "maks =", maks_vec(ref v);
   kembali 0;
 }

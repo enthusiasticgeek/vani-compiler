@@ -6,9 +6,9 @@
 
 དམིགས་ཡུལ "Tibetan verified arithmetic smoke-test";
 
-ལས་ཀ clamp(x: i64, lo: i64, hi: i64) -> i64 {
-  དགོས x <= hi;
-  དགོས lo <= hi;
+ལས་ཀ clamp(x: i64, lo: i64, hi: i64) -> i64
+དགོས lo <= hi;
+{
   གལ་ཏེ x < lo {
     ལོག lo;
   } གཞན གལ་ཏེ x > hi {
@@ -18,8 +18,10 @@
   }
 }
 
-ལས་ཀ safe_subtract(a: i64, b: i64) -> i64 {
-  དགོས a >= b;
+ལས་ཀ safe_subtract(a: i64, b: i64) -> i64
+དགོས a >= b;
+དགོས b >= 0;
+{
   ཡོད་པར་ཤོག result: i64 = a - b;
   བསྒྲུབས result >= 0;
   ལོག result;

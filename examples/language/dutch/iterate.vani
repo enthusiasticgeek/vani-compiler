@@ -6,7 +6,7 @@
 
 doel "Dutch vec iteration";
 
-functie som_vec(v: Vec<i64>) -> i64 {
+functie som_vec(v: ref Vec<i64>) -> i64 {
   laat som: i64 = 0;
   voor i van 0 tot len(v) {
     som = som + v[i];
@@ -14,7 +14,7 @@ functie som_vec(v: Vec<i64>) -> i64 {
   terug som;
 }
 
-functie max_vec(v: Vec<i64>) -> i64 {
+functie max_vec(v: ref Vec<i64>) -> i64 {
   laat m: i64 = v[0];
   voor i van 1 tot len(v) {
     indien v[i] > m {
@@ -26,9 +26,9 @@ functie max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   laat v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  bevestig som_vec(v) == 23;
-  bevestig max_vec(v) == 9;
-  druk "som =", som_vec(v);
-  druk "max =", max_vec(v);
+  bevestig som_vec(ref v) == 23;
+  bevestig max_vec(ref v) == 9;
+  druk "som =", som_vec(ref v);
+  druk "max =", max_vec(ref v);
   terug 0;
 }

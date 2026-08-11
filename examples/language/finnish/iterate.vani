@@ -6,7 +6,7 @@
 
 tarkoitus "Finnish vec iteration";
 
-funktio summa_vec(v: Vec<i64>) -> i64 {
+funktio summa_vec(v: ref Vec<i64>) -> i64 {
   olkoon summa: i64 = 0;
   jokaiselle i lähtien 0 asti len(v) {
     summa = summa + v[i];
@@ -14,7 +14,7 @@ funktio summa_vec(v: Vec<i64>) -> i64 {
   palaa summa;
 }
 
-funktio max_vec(v: Vec<i64>) -> i64 {
+funktio max_vec(v: ref Vec<i64>) -> i64 {
   olkoon m: i64 = v[0];
   jokaiselle i lähtien 1 asti len(v) {
     jos v[i] > m {
@@ -26,9 +26,9 @@ funktio max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   olkoon v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  vahvista summa_vec(v) == 23;
-  vahvista max_vec(v) == 9;
-  tulosta "summa =", summa_vec(v);
-  tulosta "max =", max_vec(v);
+  vahvista summa_vec(ref v) == 23;
+  vahvista max_vec(ref v) == 9;
+  tulosta "summa =", summa_vec(ref v);
+  tulosta "max =", max_vec(ref v);
   palaa 0;
 }

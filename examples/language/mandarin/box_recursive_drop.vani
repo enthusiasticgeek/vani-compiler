@@ -14,11 +14,11 @@
 函数 main() -> i64 {
   让 列表: Node = Node {
     值: 1,
-    下一个: Some(Box(Node {
+    下一个: Option.Some(box(Node {
       值: 2,
-      下一个: Some(Box(Node {
+      下一个: Option.Some(box(Node {
         值: 3,
-        下一个: None,
+        下一个: Option.None,
       })),
     })),
   };

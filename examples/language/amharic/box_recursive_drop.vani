@@ -14,11 +14,11 @@
 ተግባር main() -> i64 {
   ይሁን ዝርዝር: Node = Node {
     ዋጋ: 1,
-    ቀጣይ: Some(Box(Node {
+    ቀጣይ: Option.Some(box(Node {
       ዋጋ: 2,
-      ቀጣይ: Some(Box(Node {
+      ቀጣይ: Option.Some(box(Node {
         ዋጋ: 3,
-        ቀጣይ: None,
+        ቀጣይ: Option.None,
       })),
     })),
   };

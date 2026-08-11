@@ -89,3 +89,123 @@ Re-run `vanic check examples` fresh (file set may have shifted) to get a
 current failing-file list, then work Category A and B first since they're
 each a single, well-understood, mechanical pattern across many files —
 higher fix-value per minute than Category C's one-offs.
+
+## Update 2026-08-11: Categories A and B fixed; BUG-174 filed from Category C triage
+
+Categories A (31 files, unqualified `Some`/`None`) and B (16 files,
+dropped `ref`) are both fixed and verified clean on both backends.
+Category A triage also turned up two more mechanical mistakes bundled
+into the same files: `Box(...)` should be `box(...)` (lowercase builtin)
+in 9 dialects' `box_recursive_drop.vani`, and 8 dialects'
+`option_types.vani`/`try_question_op.vani` used `match` as a bare
+statement with block-bodied arms, which vāṇी doesn't support (`match`
+must be an expression bound via `let`, arms are single comma-separated
+expressions) -- rewritten as small `unwrap_or`-style helper functions
+per dialect, following the same design English's canonical
+`option_types.vani` already uses. Category B triage found Greek needed
+its own native `αναφορά` instead of the bare English `ref` alias (Greek
+enforces a language-purity gate that rejects mixing an English alias
+into an otherwise-Greek file) and a genuine builtin-name collision
+(Greek's helper functions were named `vec_sum`/`vec_max`, which are
+actual compiler builtins) -- both fixed.
+
+**BUG-174** (new, found during Category C triage, NOT fixed): the
+`break`/`continue` statement parser (`src/parser.rs` around line 2820)
+treats any bare identifier immediately followed by `;` as a loop-label
+reference, with no fallback to "value expression" if no such label is
+in scope -- validation of whether the label actually exists happens
+later, in the checker, by which point the parser has already committed
+to the wrong interpretation. Confirmed via `examples/language/english/
+break_value.vani` (the canonical reference file for the break-value
+feature itself): `break i;` inside `if i > 0 { break i; }` fails with
+"no enclosing loop is labeled 'i'" even though `i` is an ordinary local
+variable and there is no label named `i` anywhere in the function.
+`break (i);` (parenthesized) unambiguously parses as a value expression
+and works correctly -- fixed the example file this way, with a comment
+pointing at this entry, since editing the parser's disambiguation logic
+is a bigger, riskier change (it's the general break/continue label path,
+used throughout the corpus) that deserves its own dedicated session with
+full regression coverage rather than a rushed fix bundled into a
+BUG-172 cleanup pass. A more correct compiler-level fix would track
+in-scope loop labels during parsing and only take the label
+interpretation when the identifier actually matches one of them.
+
+Category C's remaining untriaged files: georgian (5 files), hebrew/
+keywords.vani, polish/early_exit.vani, tibetan/verified.vani, and the
+konkani/maithili/nepali cluster (control_flow.vani, for_loops.vani,
+keywords.vani, plus maithili/nepali's early_exit.vani) -- still open as
+of this update.
+
+## Update 2026-08-11: BUG-172 fully closed
+
+All of Category C is now fixed:
+
+- **Georgian (5 files)**: all were the SAME root cause, a genuine
+  compiler bug, not a translation mistake -- `src/parser.rs`'s
+  `is_type_name_start` (~line 6175) rejects any bare identifier used as
+  a struct/enum type reference unless it "starts uppercase" by Unicode's
+  case properties, with an explicit fallback for genuinely caseless
+  scripts (Devanagari, Thai, CJK, Arabic, Myanmar, ...). Georgian
+  Mkhedruli is caseless in everyday use but Unicode still assigns it
+  general category Ll ("lowercase"), so the caseless-script fallback
+  never triggered and NO ordinary Georgian struct/enum name could ever
+  be referenced. Fixed by explicitly accepting the Georgian Unicode
+  block (U+10A0..U+10FF) and the Mtavruli capitals extension
+  (U+1C90..U+1CBF) in `is_type_name_start`, alongside the existing
+  script-specific logic. Pure compiler fix -- none of the 5 Georgian
+  example files needed any changes at all.
+- **hebrew/keywords.vani**: the file's own helper function was named
+  `חיבור` ("addition"), which collides with Hebrew's OWN keyword table
+  entry for `TokenKind::Join` -- a self-collision within one dialect's
+  table, not cross-dialect fallback contamination like the earlier
+  Persian/Urdu findings. Renamed to `חבר`.
+- **polish/early_exit.vani**: used the single-character variable name
+  `w`, which is Polish's own keyword for `In` -- same single-character-
+  identifier-collision class as the BUG-170 `i`/`v`/`s`/`z`/`e`
+  incident. Renamed to `lista`.
+- **tibetan/verified.vani**: two distinct pre-existing logic bugs, not
+  just syntax. (1) The `requires`/`ensures`-style clauses (Tibetan's
+  `དགོས`) were written INSIDE the function body instead of between the
+  signature and the opening `{` (compare the working
+  `examples/language/persian/verified.vani`, which has the clause on
+  its own line right before `{`) -- simply invalid syntax, so the
+  clauses were never attached as real preconditions at all. (2) Once
+  moved to the correct position, two genuine spec bugs surfaced:
+  `clamp`'s precondition wrongly required `x <= hi`, which is
+  self-defeating for a clamp function (the test suite explicitly calls
+  `clamp(15, 1, 10)` to exercise clamping x *above* the range) -- removed,
+  keeping only the sensible `lo <= hi`. And `safe_subtract`'s
+  postcondition `result >= 0` isn't actually provable from `a >= b`
+  alone (i64 subtraction can overflow when a and b are far enough
+  apart) -- the working Persian `safe_sub` has a second precondition,
+  `b >= 0`, that Tibetan's was missing; added it.
+- **konkani/maithili/nepali cluster (11 files)**: all eleven were the
+  same `सिद्ध` (Sanskrit/Hindi/Marathi's `Prove`, reached via the
+  lexer's non-ASCII fallback chain) vs `सुनिश्चित` (`Assert`, these three
+  dialects' own correct word) mistake already found and fixed earlier
+  in this dialect's `iterate.vani`/`early_exit.vani` during the BUG-171
+  Tier C checkpoint -- confirming that memory note's prediction that
+  this cluster likely had more instances of the same pattern. Fixed
+  identically.
+
+**Found opportunistically while re-running the full corpus check after
+the above** (not in the original BUG-172 file list; pre-existing, not
+caused by this session): `examples/language/hebrew/iterate.vani`'s
+helper function was named `פיבונאצ'י` ("Fibonacci", using Hebrew geresh
+notation for the transliterated foreign sound) -- the lexer's
+loop-label tokenizer (`lex_label`, `src/lexer.rs` ~line 7126) treats
+any bare `'` as the start of a `'label:` token unconditionally, with no
+awareness that `'` is also legitimate Hebrew orthography embedded
+inside an identifier. This is filed as **BUG-175**: fixing it properly
+means teaching the lexer to only dispatch to `lex_label` when the `'`
+appears at a fresh token boundary (not mid-identifier) -- a real lexer
+change affecting the shared label-tokenizing path, not scoped narrowly
+enough to fix safely alongside a BUG-172 cleanup pass. Worked around by
+renaming the function to `פיבונאצי` (dropping the geresh) in the
+example file; the underlying lexer gap is unfixed.
+
+Full `vanic check examples` after all of the above: every file that was
+in BUG-172's original 66-file list, plus `hebrew/iterate.vani`, now
+passes on both backends. `cargo test --release --lib` and
+`tools/leak_sweep.py` both green (see the commit this shipped in for
+exact numbers).

@@ -14,11 +14,11 @@
 ໜ້າທີ່ main() -> i64 {
   ໃຫ້ ລາຍການ: Node = Node {
     ຄ່າ: 1,
-    ຕໍ່ໄປ: Some(Box(Node {
+    ຕໍ່ໄປ: Option.Some(box(Node {
       ຄ່າ: 2,
-      ຕໍ່ໄປ: Some(Box(Node {
+      ຕໍ່ໄປ: Option.Some(box(Node {
         ຄ່າ: 3,
-        ຕໍ່ໄປ: None,
+        ຕໍ່ໄປ: Option.None,
       })),
     })),
   };

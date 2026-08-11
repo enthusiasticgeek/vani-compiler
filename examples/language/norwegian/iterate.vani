@@ -6,7 +6,7 @@
 
 formål "Norwegian vec iteration";
 
-funksjon sum_vec(v: Vec<i64>) -> i64 {
+funksjon sum_vec(v: ref Vec<i64>) -> i64 {
   la sum: i64 = 0;
   for i fra 0 til len(v) {
     sum = sum + v[i];
@@ -14,7 +14,7 @@ funksjon sum_vec(v: Vec<i64>) -> i64 {
   returner sum;
 }
 
-funksjon max_vec(v: Vec<i64>) -> i64 {
+funksjon max_vec(v: ref Vec<i64>) -> i64 {
   la m: i64 = v[0];
   for i fra 1 til len(v) {
     hvis v[i] > m {
@@ -26,9 +26,9 @@ funksjon max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   la v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  bekreft sum_vec(v) == 23;
-  bekreft max_vec(v) == 9;
-  skriv "sum =", sum_vec(v);
-  skriv "max =", max_vec(v);
+  bekreft sum_vec(ref v) == 23;
+  bekreft max_vec(ref v) == 9;
+  skriv "sum =", sum_vec(ref v);
+  skriv "max =", max_vec(ref v);
   returner 0;
 }

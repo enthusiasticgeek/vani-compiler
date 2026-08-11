@@ -10,15 +10,15 @@
 
 ᠴᠠᠭ parse_pos(x: i64) -> Option<i64> {
   ᠬᠡᠷᠪᠡ x <= 0 {
-    ᠪᠤᠴᠠ None;
+    ᠪᠤᠴᠠ Option.None;
   } ᠡᠰᠡᠪᠡᠯ {
-    ᠪᠤᠴᠠ Some(x);
+    ᠪᠤᠴᠠ Option.Some(x);
   }
 }
 
 ᠴᠠᠭ double_pos(x: i64) -> Option<i64> {
   ᠶᠠᠪᠤᠭᠤᠯ v: i64 = parse_pos(x)?;
-  ᠪᠤᠴᠠ Some(v * 2);
+  ᠪᠤᠴᠠ Option.Some(v * 2);
 }
 
 ᠴᠠᠭ main() -> i64 {

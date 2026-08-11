@@ -14,11 +14,11 @@
 មុខងារ main() -> i64 {
   អោយ បញ្ជី: Node = Node {
     តម្លៃ: 1,
-    បន្ទាប់: Some(Box(Node {
+    បន្ទាប់: Option.Some(box(Node {
       តម្លៃ: 2,
-      បន្ទាប់: Some(Box(Node {
+      បន្ទាប់: Option.Some(box(Node {
         តម្លៃ: 3,
-        បន្ទាប់: None,
+        បន្ទាប់: Option.None,
       })),
     })),
   };

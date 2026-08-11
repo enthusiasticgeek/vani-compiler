@@ -12,9 +12,9 @@
 }
 
 ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
-  ᎠᏁᎳ n3: Node = Node { val: 30, next: None };
-  ᎠᏁᎳ n2: Node = Node { val: 20, next: Some(Box(n3)) };
-  ᎠᏁᎳ n1: Node = Node { val: 10, next: Some(Box(n2)) };
+  ᎠᏁᎳ n3: Node = Node { val: 30, next: Option.None };
+  ᎠᏁᎳ n2: Node = Node { val: 20, next: Option.Some(box(n3)) };
+  ᎠᏁᎳ n1: Node = Node { val: 10, next: Option.Some(box(n2)) };
   ᎯᏍᏗᏎᏍᏗ n1.val == 10;
   ᎠᎴᏂᏍᎬᎢ "Cherokee box recursive drop OK";
   ᏗᎬᏎᏗ 0;

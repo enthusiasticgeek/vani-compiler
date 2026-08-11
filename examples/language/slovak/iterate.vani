@@ -6,7 +6,7 @@
 
 účel "Slovak vec iteration";
 
-funkcia sucet_vec(v: Vec<i64>) -> i64 {
+funkcia sucet_vec(v: ref Vec<i64>) -> i64 {
   nech sucet: i64 = 0;
   pre i od 0 do len(v) {
     sucet = sucet + v[i];
@@ -14,7 +14,7 @@ funkcia sucet_vec(v: Vec<i64>) -> i64 {
   vráť sucet;
 }
 
-funkcia max_vec(v: Vec<i64>) -> i64 {
+funkcia max_vec(v: ref Vec<i64>) -> i64 {
   nech m: i64 = v[0];
   pre i od 1 do len(v) {
     ak v[i] > m {
@@ -26,9 +26,9 @@ funkcia max_vec(v: Vec<i64>) -> i64 {
 
 fn main() -> i64 {
   nech v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
-  potvrď sucet_vec(v) == 23;
-  potvrď max_vec(v) == 9;
-  vytlač "sucet =", sucet_vec(v);
-  vytlač "max =", max_vec(v);
+  potvrď sucet_vec(ref v) == 23;
+  potvrď max_vec(ref v) == 9;
+  vytlač "sucet =", sucet_vec(ref v);
+  vytlač "max =", max_vec(ref v);
   vráť 0;
 }

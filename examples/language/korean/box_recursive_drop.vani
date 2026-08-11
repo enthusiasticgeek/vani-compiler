@@ -14,11 +14,11 @@
 함수 main() -> i64 {
   정의 목록: Node = Node {
     값: 1,
-    다음: Some(Box(Node {
+    다음: Option.Some(box(Node {
       값: 2,
-      다음: Some(Box(Node {
+      다음: Option.Some(box(Node {
         값: 3,
-        다음: None,
+        다음: Option.None,
       })),
     })),
   };
