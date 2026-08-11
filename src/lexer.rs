@@ -1851,9 +1851,15 @@ fn slovak_ascii_keyword(text: &str) -> Option<TokenKind> {
 fn finnish_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "tehtävä" => TokenKind::Task,          // task
-        "rajapintä" => TokenKind::Interface,   // interface (variant)
-        "vahvistä" => TokenKind::Assert,       // (rare variant)
-        "muuttumatön" => TokenKind::Invariant, // unchanging (variant)
+        // Native-review fix (2026-08-10): removed "rajapintä",
+        // "vahvistä", "muuttumatön" -- these appear to be
+        // artificially-umlauted misspellings of the correctly-
+        // spelled "rajapinta"/"vahvista"/"muuttumaton" (all three
+        // already in finnish_ascii_keyword), violating Finnish
+        // vowel harmony (front ä/ö don't mix with the words' own
+        // back a/o/u vowels; none of the three genuinely take an
+        // umlaut). "tehtävä"/"käytä"/"missä"/"lähtien" below are
+        // all real words that do naturally take ä, kept as-is.
         "käytä" => TokenKind::Use,             // use!
         "missä" => TokenKind::Where,           // where
         "lähtien" => TokenKind::From,          // from
@@ -2147,7 +2153,10 @@ fn hausa_ascii_keyword(text: &str) -> Option<TokenKind> {
 /// resolution. Second Nordic dialect after Swedish; uses å/æ/ø.
 fn norwegian_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
-        "være" => TokenKind::Let,              // "be"
+        // Native-review fix (2026-08-10): removed "være" ("(to)
+        // be", infinitive) from TokenKind::Let -- "la" (the correct
+        // imperative "let", already in norwegian_ascii_keyword and
+        // already ASCII-safe) covers this correctly.
         "påstå" => TokenKind::Assert,          // claim / assert
         "prøv" => TokenKind::Try,              // try!
         "formål" => TokenKind::Intent,         // purpose
@@ -2724,7 +2733,10 @@ fn swedish_keyword(text: &str) -> Option<TokenKind> {
 fn swedish_ascii_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "funktion" => TokenKind::Fn,           // function
-        "vara" => TokenKind::Let,              // be
+        // Native-review fix (2026-08-10): removed "vara" ("(to) be",
+        // infinitive) from TokenKind::Let -- "lat" (below, the
+        // no-diacritic form of the correct "låt") already covers
+        // this correctly.
         "struktur" => TokenKind::Struct,       // structure
         "konstant" => TokenKind::Const,        // constant
         "offentlig" => TokenKind::Pub,         // public
@@ -3823,7 +3835,15 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "אם" => TokenKind::If,                // im (if)
         "אחרת" => TokenKind::Else,            // aheret (else / otherwise)
         "כאשר" => TokenKind::While,           // kasher (while / when)
-        "עבור" => TokenKind::For,             // avur (for / "on behalf of")
+        "לכל" => TokenKind::For,              // le-kol (for each) -- native-
+                                              // review fix: was "עבור"
+                                              // ("for"/"on behalf of",
+                                              // benefactive), which doesn't
+                                              // read as introducing loop
+                                              // iteration; "לכל" mirrors the
+                                              // same successful pattern
+                                              // already used by the closely
+                                              // related Arabic table ("لكل")
         "בתוך" => TokenKind::In,              // betoch (inside)
         "מתוך" => TokenKind::From,            // mitokh (from)
         "עד" => TokenKind::To,                // ad (until)
@@ -4609,7 +4629,10 @@ fn mandarin_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
         "函数" => TokenKind::Fn,             // hánshù (function)
-        "函数主要" => TokenKind::Fn,         // alt with main; kept for completeness
+        // Native-review fix (2026-08-10): removed "函数主要"
+        // ("function main", a compound meaning specifically the
+        // *entry-point* function) -- not a valid general synonym
+        // for the `fn` keyword, which declares ANY function.
         "让" => TokenKind::Let,              // ràng (let / make)
         "结构" => TokenKind::Struct,         // jiégòu (structure)
         "结构体" => TokenKind::Struct,       // jiégòutǐ (struct body)
