@@ -5674,3 +5674,14 @@ Repro: `tools/localfuzz/findings/20260811-181229-backend-divergence-29a00bfa20/r
 Fix attempt: `tools/localfuzz/findings/20260811-181229-backend-divergence-29a00bfa20/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-181558-backend-divergence-015dd82614
+
+Repro: `tools/localfuzz/findings/20260811-181558-backend-divergence-015dd82614/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-181558-backend-divergence-015dd82614/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The generated source file, when compiled with `vanic run` and executed with different backends (LLVM and C), exhibits a runtime error due to an integer overflow in the `i64 add` operation at line 9 of the `describe` function. This results in divergent behavior across both backends.
