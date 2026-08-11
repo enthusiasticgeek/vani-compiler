@@ -5794,3 +5794,59 @@ methods on Tracker {
 }
 
 fn main() -> i64
+
+---
+
+### Candidate: 20260811-221927-backend-divergence-d2acbc38c4
+
+Repro: `tools/localfuzz/findings/20260811-221927-backend-divergence-d2acbc38c4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-221927-backend-divergence-d2acbc38c4/fix_attempt.md`
+
+STAGING: vani-compiler-localfuzz/examples/language/urdu/keywords.vani
+
+Finding kind: backend-divergence
+
+Mutant/generated source:
+```vani
+// vani-lang: urdu
+مقصد "Urdu keywords smoke-test";
+ساخت نقطہ {
+  x: i64,
+  y: i64,
+}
+شمار رنگ { سرخ, سبز, نیلا }
+فنکشن جمع(ک: i64, خ: i64) -> i64 {
+  واپس ک + خ;
+}
+فنکشن main() -> i64 {
+  مانیں ن: نقطہ = نقطہ { x: 3, y: 4 };
+  یقینی ن.x == 3;
+  یقینی جمع(9223372036854775807, 3) == 5;
+  یقینی جمع(2, 3) == 5;
+  لکھو "Urdu keywords OK";
+  واپس 0;
+}
+```
+
+Finding kind: backend-divergence
+
+Raw result data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in i64 add\n",
+    "timed_out": false
+  }
+}
+```
+
+STATUS: needs human/frontier root-cause review.
