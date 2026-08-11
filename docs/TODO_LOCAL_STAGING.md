@@ -5331,3 +5331,31 @@ fungsi main() -> i64 {
 ```json
 {
 
+
+---
+
+### Candidate: 20260811-024609-backend-divergence-63cfbf275d
+
+Repro: `tools/localfuzz/findings/20260811-024609-backend-divergence-63cfbf275d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-024609-backend-divergence-63cfbf275d/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  }
+}
+```
+
