@@ -5528,3 +5528,26 @@ The test case demonstrates the typical pattern of a phase-2 narrow control flow 
 The backend-divergence finding suggests that there might be a bug in the C backend's handling of asynchronous control flow, specifically in how it manages suspended I/O operations. Given that LLVM runs without issues, this indicates that the problem lies within the C-specific implementation or optimizations of the compiler's runtime.
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-112015-backend-divergence-1cee1dafb9
+
+Repro: `tools/localfuzz/findings/20260811-112015-backend-divergence-1cee1dafb9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-112015-backend-divergence-1cee1dafb9/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+Base Corpus File: /home/virgo/source/vani-compiler-localfuzz/examples/language/sinhala/try_question_op.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/try_question_op.vani              # LLVM
+//   vanic run examples/language/sinhala/try_question_op.vani --backend=c  # C
+
+
