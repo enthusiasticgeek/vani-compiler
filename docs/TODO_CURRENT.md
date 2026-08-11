@@ -12276,3 +12276,54 @@ failures, exactly the prior 21 minus these 3 -- diffed file set, not
 just count), `tools/leak_sweep.py` clean.
 
 Next free bug number is **BUG-177**.
+
+## Update 2026-08-11: BUG-177 CLOSED (found by localfuzz)
+
+Found by `tools/localfuzz` (after refreshing the harness's worktree,
+which had drifted 3 commits / the whole BUG-173..176 round behind
+main -- see `feedback_vani_localfuzz_staleness` in memory). Triaged
+18 findings across 3 signatures:
+
+- 15/18: `abort()`-vs-`exit(3)` exit-code difference on overflow/div/
+  shift/bounds traps (C backends abort/SIGABRT=134, LLVM backends
+  clean exit(3)) -- same message printed on both, just a different
+  OS-level trap mechanism. Consistent across BOTH C backends (tree-C
+  and SSA-C), so treated as accepted/intentional design, not a bug --
+  left as-is per explicit decision, though it's the same class of
+  inconsistency BUG-120/MATH-3 already fixed specifically for
+  `assert`, just never extended to these other trap sites.
+- 2/18: both stale. One was a fuzzer-generated program with a
+  genuinely missing loop increment (invalid input, not a compiler
+  bug -- correctly hangs on both backends, consistently). The other
+  was `examples/language/malayalam/early_exit.vani`'s real
+  missing-increment infinite loop, but it was ALREADY fixed on main
+  before the finding's timestamp -- a stale pre-refresh snapshot, not
+  live.
+- 1/18: **BUG-177**, confirmed real and fixed. A closure/fn-pointer
+  bound to a local INSIDE a block-expression (`let result = { let f =
+  fn(x: i64) -> i64 { ... }; f(1) };`, as opposed to an ordinary
+  top-level `let`) failed to compile via the C backend --
+  `TypedStmt::Let`'s block-expression handler in `src/backend_c.rs`
+  used plain `"{} v_{}"` prefix-style formatting (`c_type_name`),
+  which collapses a function-pointer type to the generic `void*`
+  storage spelling -- valid for STORING a function pointer, not for
+  CALLING one, so `v_f(1)` failed with "called object is not a
+  function or function pointer" even though the checker accepted the
+  program and LLVM ran it correctly (this type falls outside the
+  SSA-C scalar/string subset, so it always fell back to tree-C). The
+  top-level `let` statement handler already used `format_declarator`
+  (proper `R (*name)(T)` declarator syntax) for exactly this reason;
+  the block-expression handler just hadn't been updated to match.
+  Fixed by switching it to the same call -- `format_declarator`'s
+  fallback arm for plain scalar/aggregate types produces the
+  identical prefix spelling `c_type_name` did, so this is a strict
+  superset fix with no behavior change for the existing working
+  cases.
+
+Added `bug177_closure_local_inside_block_expression_compiles_via_tree_c`
+in `src/lib.rs`. Verification: `cargo test --release` (2892 lib tests
++ 12 other suites, 0 failed), `vanic check` across all 1040 example
+files (18 failures, EXACT same file set as before this fix -- zero
+diff), `tools/leak_sweep.py` clean.
+
+Next free bug number is **BUG-178**.
