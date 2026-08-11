@@ -5551,3 +5551,31 @@ Mutant/generated source:
 //   vanic run examples/language/sinhala/try_question_op.vani --backend=c  # C
 
 
+
+---
+
+### Candidate: 20260811-121132-run-crash-d837ae7ce8
+
+Repro: `tools/localfuzz/findings/20260811-121132-run-crash-d837ae7ce8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-121132-run-crash-d837ae7ce8/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
