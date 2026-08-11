@@ -5275,3 +5275,59 @@ fn main() -> i64 {
 
   lad b: Opt = doblet_q(Opt.None);
   bekraeft udpak_eller(b, 99) == 99
+
+---
+
+### Candidate: 20260811-014423-backend-divergence-e7820fef09
+
+Repro: `tools/localfuzz/findings/20260811-014423-backend-divergence-e7820fef09/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-014423-backend-divergence-e7820fef09/fix_attempt.md`
+
+Staging Entry:
+
+**Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/malay/basics.vani`
+
+**Mutant/generated Source:**
+```vani
+// vani-lang: malay
+//
+// build & run:
+//   vanic run examples/language/malay/basics.vani                          # LLVM
+//   vanic run examples/language/malay/basics.vani --backend=c              # C
+//
+// Phase 13.10 v1: second basic-Latin Tier II dialect after
+// Indonesian. Malay (Bahasa Melayu) is linguistically a sibling
+// of Indonesian; the keyword set diverges in several places
+// (`palsu` vs `salah`, `awam` vs `umum`, `pemalar` vs `tetap`,
+// `selari` vs `paralel`, `kaedah` vs `metode`, etc.).
+
+tujuan "Compute a small score with checked constraints";
+tujuan "Compute a small score with checked constraints";
+
+fungsi add(a: i64, b: i64) -> i64 {
+  kembali a + b;
+}
+
+fungsi bounded_score(base: i64) -> i64
+memerlukan base >= 0;
+{
+  biarkan doubled: i64 = base * 2;
+  pastikan doubled >= base;
+  kembali add(doubled, 9223372036854775807);
+}
+
+fungsi main() -> i64 {
+  biarkan answer = bounded_score(20);
+  buktikan 2 + 2 == 4;
+  pastikan answer >= 0;
+  cetak answer;
+  kembali 0;
+}
+```
+
+**Finding Kind:** backend-divergence
+
+**Raw Result Data:**
+```json
+{
+
