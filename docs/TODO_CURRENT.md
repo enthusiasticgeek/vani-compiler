@@ -12231,3 +12231,48 @@ full breakdown of why each is unrelated), `tools/leak_sweep.py` (clean,
 matches baseline).
 
 Next free bug number is **BUG-177**.
+
+## Update 2026-08-11: BUG-176 CLOSED
+
+Implemented positional `break`/`continue inner|outer|middle` as
+documented in the three pre-existing `examples/edge_cases/mix_break_
+*.vani` files' own comments -- `inner` resolves to the innermost
+enclosing loop (same as a bare `break;`/`continue;`), `outer` to the
+outermost, `middle` to the second-from-innermost (collapsing to
+`outer` when there are only 1 or 2 loops, matching `mix_break_outer_
+single_loop.vani`'s documented `loops[max(0, len-2)]` formula).
+
+`src/checker.rs` gained `resolve_positional_loop_target(name, len)`,
+tried as a fallback in `Stmt::Break`/`Stmt::Continue` handling only
+after the existing exact-name label lookup fails (so a loop literally
+labeled `inner`/`outer`/`middle` by coincidence still wins via its
+real name, unaffected). The target loop need not have any declared
+label at all -- the checker had ALREADY-EXISTING but previously-unused
+plumbing for exactly this (`LoopFrame.label` mutated in place, then
+read back at each loop's "popped frame's label" construction site
+feeding the final `TypedStmt::While`/`For`/`ForIter`/loop-expression
+node -- see the "a nested `break outer/middle` may have assigned a
+synthetic label to this frame" comments already in the checker before
+this fix), which this fix simply completes: synthesize a
+`__pos_break_<body_scope_depth>` label once per target frame if it
+doesn't already have a real one, reuse it for repeat references to the
+same frame. `src/parser.rs` needed one small change: the BUG-174 fix's
+active-label check now also accepts the three reserved words even
+when not a currently-declared label, via `is_reserved_positional_loop_
+target`, so they still take the "label" AST slot instead of falling
+through to a value-expression parse.
+
+All three `mix_break_*.vani` files now compile AND run with the exact
+values their own comments predicted, on both backends: `mix_break_
+inner_deeply_nested` -> 399, `mix_break_outer_single_loop` -> 5 then
+0, `mix_break_positional` -> 0, 3, 3.
+
+Two new regression tests in `src/lib.rs`
+(`bug176_positional_break_inner_outer_middle_resolve_by_depth`,
+`bug176_positional_break_still_prefers_a_real_label_of_the_same_name`).
+Full verification: `cargo test --release` (2891 lib tests + 12 other
+suites, 0 failed), `vanic check` across all 1040 example files (18
+failures, exactly the prior 21 minus these 3 -- diffed file set, not
+just count), `tools/leak_sweep.py` clean.
+
+Next free bug number is **BUG-177**.

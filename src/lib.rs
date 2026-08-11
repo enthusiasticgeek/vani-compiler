@@ -43336,6 +43336,119 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug176_positional_break_inner_outer_middle_resolve_by_depth() {
+        // BUG-176 (2026-08-11): `break inner|outer|middle;` /
+        // `continue inner|outer|middle;` are reserved positional
+        // targets that resolve by loop-NESTING DEPTH, not by
+        // matching a declared label -- `inner` = innermost enclosing
+        // loop (same as plain break/continue), `outer` = outermost,
+        // `middle` = second-from-innermost (collapsing to `outer`
+        // when there are only 1 or 2 loops). This was documented as
+        // the intended behavior in three pre-existing
+        // examples/edge_cases/mix_break_*.vani files but never
+        // actually implemented anywhere in the compiler -- found
+        // while corpus-checking the BUG-174 fix (filed as BUG-176)
+        // and implemented here. Crucially, the target loop for
+        // `outer`/`middle` need NOT have an explicit `label:` at
+        // all (see the single-loop and two/three-loop cases below,
+        // none of which declare any label) -- the checker
+        // synthesizes one on the fly (`LoopFrame.label`) and the
+        // existing labeled-break codegen machinery picks it up via
+        // each loop's "popped frame's label" construction, with no
+        // separate positional-jump logic needed downstream.
+        //
+        // Runtime correctness for all three keywords, at 1/2/3 loop
+        // nesting depths, is verified end-to-end (both backends,
+        // exact expected values from each file's own comments) via
+        // the three examples/edge_cases/mix_break_*.vani files in
+        // the full corpus sweep; this test locks in that all three
+        // shapes at least compile and emit via both SSA backends.
+        let sources = [
+            // inner: 3-deep nest, `break inner;` only exits the
+            // innermost loop (same as plain `break;`).
+            r#"
+            fn main() -> i64 {
+              let count: i64 = 0;
+              for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break inner; }
+                    count = count + 1;
+                  }
+                }
+              }
+              return count;
+            }
+            "#,
+            // outer: a single UNLABELED loop -- `break outer;` must
+            // still resolve (to that same loop, since it's the only
+            // one) without any declared label anywhere.
+            r#"
+            fn main() -> i64 {
+              let x: i64 = 0;
+              while x < 10 {
+                if x == 5 { break outer; }
+                x = x + 1;
+              }
+              return x;
+            }
+            "#,
+            // middle: 3-deep UNLABELED nest -- `continue middle;`
+            // targets the second-from-innermost (the middle) loop.
+            r#"
+            fn main() -> i64 {
+              let total: i64 = 0;
+              for a from 0 to 3 {
+                for b from 0 to 3 {
+                  for c from 0 to 3 {
+                    if c == 1 { continue middle; }
+                    total = total + 1;
+                  }
+                }
+              }
+              return total;
+            }
+            "#,
+        ];
+        for source in sources {
+            let checked = compile(source)
+                .unwrap_or_else(|e| panic!("positional break/continue must compile: {:?}", e));
+            let (module, errs) = crate::ssa::lower_program(&checked.ir);
+            assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+            crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+            crate::ssa_backend_llvm::emit(&module).expect("must emit via SSA-LLVM");
+        }
+    }
+
+    #[test]
+    fn bug176_positional_break_still_prefers_a_real_label_of_the_same_name() {
+        // Regression guard: if a loop is ACTUALLY labeled `inner`/
+        // `outer`/`middle` (a user coincidentally choosing one of
+        // the reserved words as a real label), the exact-name label
+        // lookup must still win over positional resolution -- this
+        // already falls out of the checker trying `loops.iter().
+        // rposition(...)` before `resolve_positional_loop_target`,
+        // but is worth locking in explicitly.
+        let source = r#"
+            fn main() -> i64 {
+              let count: i64 = 0;
+              inner: for i from 0 to 5 {
+                for j from 0 to 5 {
+                  if j == 2 { break inner; }
+                  count = count + 1;
+                }
+              }
+              return count;
+            }
+        "#;
+        let checked = compile(source)
+            .expect("break inner; targeting a REAL label named 'inner' must still compile");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

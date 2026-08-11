@@ -11755,6 +11755,27 @@ fn check_function(
     }
 }
 
+/// BUG-176: `break`/`continue inner|outer|middle` are reserved
+/// positional targets, resolved by loop-nesting DEPTH rather than by
+/// matching a declared label name -- `inner` is always the innermost
+/// enclosing loop (same as a bare `break;`/`continue;`), `outer` is
+/// always the outermost, and `middle` is the second-from-innermost
+/// (collapsing to the outermost when there are only 1 or 2 loops, so
+/// it never falls "past" `outer`). `len` is the number of currently
+/// open enclosing loops (`loops.len()`, always >= 1 at call sites --
+/// the empty case is rejected before this runs). Returns `None` for
+/// any other name, so real named-label lookup (tried first at call
+/// sites) always wins if a loop happens to be labeled one of these
+/// words literally.
+fn resolve_positional_loop_target(name: &str, len: usize) -> Option<usize> {
+    match name {
+        "inner" => Some(len - 1),
+        "outer" => Some(0),
+        "middle" => Some(if len >= 2 { len - 2 } else { 0 }),
+        _ => None,
+    }
+}
+
 #[derive(Clone)]
 struct LoopFrame {
     pre_env: Env,
@@ -15827,13 +15848,35 @@ fn check_one_stmt(
                 Some(name) => {
                     match loops.iter().rposition(|f| f.label.as_deref() == Some(name)) {
                         Some(idx) => (idx, Some(name.to_string())),
-                        None => {
-                            diagnostics.push(Diagnostic::new(
-                                *span,
-                                format!("no enclosing loop is labeled '{}'", name),
-                            ));
-                            return false;
-                        }
+                        None => match resolve_positional_loop_target(name, loops.len()) {
+                            // BUG-176: `inner`/`outer`/`middle` target a
+                            // loop by depth, not by name -- that loop
+                            // may not have a real label at all (e.g. a
+                            // plain unlabeled `while`). Reuse its
+                            // existing label if it has one; otherwise
+                            // synthesize one once and stash it on the
+                            // frame so the eventual `TypedStmt::While`/
+                            // `For` picks it up too (see the "popped
+                            // frame's label" comments at each loop's
+                            // pop site) -- codegen's existing labeled-
+                            // break machinery then just works, no
+                            // separate positional-jump logic needed.
+                            Some(idx) => {
+                                let synthetic = loops[idx].label.clone().unwrap_or_else(|| {
+                                    let s = format!("__pos_break_{}", loops[idx].body_scope_depth);
+                                    loops[idx].label = Some(s.clone());
+                                    s
+                                });
+                                (idx, Some(synthetic))
+                            }
+                            None => {
+                                diagnostics.push(Diagnostic::new(
+                                    *span,
+                                    format!("no enclosing loop is labeled '{}'", name),
+                                ));
+                                return false;
+                            }
+                        },
                     }
                 }
             };
@@ -15877,19 +15920,31 @@ fn check_one_stmt(
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("continue")));
                 return false;
             }
-            let frame = if let Some(name) = label {
+            let (frame, emit_label): (LoopFrame, Option<String>) = if let Some(name) = label {
                 match loops.iter().rposition(|f| f.label.as_deref() == Some(name)) {
-                    Some(idx) => loops[idx].clone(),
-                    None => {
-                        diagnostics.push(Diagnostic::new(
-                            *span,
-                            format!("no enclosing loop is labeled '{}'", name),
-                        ));
-                        return false;
-                    }
+                    Some(idx) => (loops[idx].clone(), Some(name.to_string())),
+                    None => match resolve_positional_loop_target(name, loops.len()) {
+                        // BUG-176: same positional-target resolution as
+                        // `break` above.
+                        Some(idx) => {
+                            let synthetic = loops[idx].label.clone().unwrap_or_else(|| {
+                                let s = format!("__pos_break_{}", loops[idx].body_scope_depth);
+                                loops[idx].label = Some(s.clone());
+                                s
+                            });
+                            (loops[idx].clone(), Some(synthetic))
+                        }
+                        None => {
+                            diagnostics.push(Diagnostic::new(
+                                *span,
+                                format!("no enclosing loop is labeled '{}'", name),
+                            ));
+                            return false;
+                        }
+                    },
                 }
             } else {
-                loops.last().cloned().unwrap()
+                (loops.last().cloned().unwrap(), None)
             };
             emit_drops_through_loop(env, frame.body_scope_depth, body);
             validate_loop_balance(
@@ -15899,7 +15954,7 @@ fn check_one_stmt(
                 "continue with inconsistent move state",
                 diagnostics,
             );
-            body.push(TypedStmt::Continue { label: label.clone() });
+            body.push(TypedStmt::Continue { label: emit_label });
             true
         }
         Stmt::TaskSpawn { name, body: task_body, span } => {

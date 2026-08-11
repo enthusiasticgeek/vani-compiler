@@ -2842,8 +2842,13 @@ impl Parser {
                 // local variable) falls through to being parsed as
                 // the break VALUE expression below, instead of the
                 // old unconditional guess that broke that case.
+                // BUG-176: `inner`/`outer`/`middle` are reserved
+                // positional break targets (resolved by loop-nesting
+                // depth in the checker, see `resolve_positional_loop_
+                // target`) -- they take the label slot even when no
+                // active DECLARED label has that literal name.
                 let name = name.clone();
-                if self.active_labels.iter().any(|l| l == &name)
+                if (self.active_labels.iter().any(|l| l == &name) || is_reserved_positional_loop_target(&name))
                     && self.tokens.get(self.pos + 1)
                         .map(|t| matches!(t.kind, TokenKind::Semicolon))
                         .unwrap_or(false)
@@ -2880,8 +2885,9 @@ impl Parser {
                 // the `expect_keyword("';'")` below and reports a
                 // clear syntax error instead of a misleading
                 // "no enclosing loop is labeled" checker error.
+                // BUG-176: see the matching `break` comment above.
                 let name = name.clone();
-                if self.active_labels.iter().any(|l| l == &name)
+                if (self.active_labels.iter().any(|l| l == &name) || is_reserved_positional_loop_target(&name))
                     && self.tokens.get(self.pos + 1)
                         .map(|t| matches!(t.kind, TokenKind::Semicolon))
                         .unwrap_or(false)
@@ -6210,6 +6216,17 @@ fn ident_text(token: Token) -> String {
 /// correctly accepts any letter from those scripts without ALSO
 /// accepting genuinely-lowercase Latin/Cyrillic/etc. letters (which
 /// stay rejected, preserving the convention everywhere it applies).
+/// BUG-176: `break`/`continue inner|outer|middle` are reserved
+/// positional targets (resolved by loop-nesting depth in the
+/// checker's `resolve_positional_loop_target`, not by matching a
+/// declared label name). The parser only needs to know these three
+/// literal words should take the "label" slot instead of falling
+/// through to the value-expression parse, even when no active
+/// DECLARED label has that exact name.
+fn is_reserved_positional_loop_target(name: &str) -> bool {
+    matches!(name, "inner" | "outer" | "middle")
+}
+
 fn is_type_name_start(c: char) -> bool {
     // BUG-174 (2026-08-11): Georgian Mkhedruli is caseless in
     // everyday use, but Unicode still assigns it general category
