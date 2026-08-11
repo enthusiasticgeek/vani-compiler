@@ -5597,3 +5597,26 @@ Repro: `tools/localfuzz/findings/20260811-155155-run-crash-6b9473a3c2/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260811-155155-run-crash-6b9473a3c2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-172419-run-crash-aaead49e89
+
+Repro: `tools/localfuzz/findings/20260811-172419-run-crash-aaead49e89/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-172419-run-crash-aaead49e89/fix_attempt.md`
+
+**Staging Entry**
+
+- **Toolchain**: **Vanic Compiler**
+- **Project Version**: **v1.0.0-dev** (current trunk)
+- **Platform**: **Linux x86_64**
+- **Compiler Flags**: `-g -O2`
+
+- **Command Run**: `./vanic run examples/language/english/echo_p3d_vec_struct.vani`
+- **Mutant/Generated Source**: As provided in the original question.
+
+- **Observed Symptom**: The compiler crashed with an assertion failure in the vector assignment operation. Specifically, the crash occurred during the phase 3d processing of a task involving both `Config` structs and `Vec<i64>` arrays.
+
+- **Backend Affected**: All backends are affected by this issue. The failure is detected and reported at the beginning of the task execution phase.
+
+**STATUS: needs human/frontier root-cause review**
