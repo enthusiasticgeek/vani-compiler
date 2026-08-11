@@ -5504,3 +5504,27 @@ Fix attempt: `tools/localfuzz/findings/20260811-100044-backend-divergence-e13404
 }
 ```
 
+
+---
+
+### Candidate: 20260811-102710-backend-divergence-4203c6f2aa
+
+Repro: `tools/localfuzz/findings/20260811-102710-backend-divergence-4203c6f2aa/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-102710-backend-divergence-4203c6f2aa/fix_attempt.md`
+
+**STAGING ENTRY**
+
+When running the test case `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/echo_with_timeout.vani` with the local staging log, the compiler generated and executed a mutant codebase that diverged between two different compilers: LLVM and C. The observed symptom was a crash in the C backend but ran fine with LLVM, which is unusual given the nature of the bug report.
+
+The specific error message reported by the C backend was:
+```
+Error: segmentation fault (core dumped)
+```
+
+This indicates that there was an attempt to access memory that wasn't allocated or valid. The details of the crash were not provided in the staging log, but it is a common issue with pointer dereferences and invalid memory accesses.
+
+The test case demonstrates the typical pattern of a phase-2 narrow control flow in an `async fn`, with early return on failure, woven through real I/O suspend points. This scenario highlights the robustness of the compiler's ability to manage complex asynchronous code with minimal state splitting overhead, which is particularly important for performance-critical applications.
+
+The backend-divergence finding suggests that there might be a bug in the C backend's handling of asynchronous control flow, specifically in how it manages suspended I/O operations. Given that LLVM runs without issues, this indicates that the problem lies within the C-specific implementation or optimizations of the compiler's runtime.
+
+**STATUS: needs human/frontier root-cause review.
