@@ -5730,3 +5730,12 @@ intent "Math surface — libm-backed scalar functions";
 
 fn main() -> i64 {
   print "sqrt(16):", sqrt(16
+
+---
+
+### Candidate: 20260811-212134-run-crash-8cdaec3f32
+
+Repro: `tools/localfuzz/findings/20260811-212134-run-crash-8cdaec3f32/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-212134-run-crash-8cdaec3f32/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
