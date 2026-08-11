@@ -1220,7 +1220,7 @@ const BENGALI_KEYWORDS: &[&str] = &[
 ];
 
 const TAMIL_KEYWORDS: &[&str] = &[
-    "செயல்பாடு", "சார்பு", "கொள்", "இருக்க",
+    "செயல்பாடு", "சார்பு", "கொள்",
     "கட்டமைப்பு", "எண்ணுப்பெயர்", "மாறா",
     "பொது", "தொகுதி", "பயன்படுத்து", "ஆக",
     "திருப்பு", "என்றால்", "எனில்", "இல்லாவிட்டால்",
@@ -1388,7 +1388,7 @@ const HEBREW_KEYWORDS: &[&str] = &[
     "פונקציה", "הגדרה", "מבנה", "ספירה", "קבוע",
     "ציבורי", "מודול", "השתמש", "בתור",
     "החזר", "אם", "אחרת",
-    "כל_עוד", "עבור", "בתוך", "מ", "עד",
+    "כל_עוד", "לכל", "בתוך", "מ", "עד",
     "עצור", "המשך", "אז",
     "הפניה", "ניתן_לשינוי", "התאמה",
     "אמת", "שקר", "הדפס",
@@ -1407,7 +1407,7 @@ const RUSSIAN_KEYWORDS: &[&str] = &[
     "утвердить", "доказать", "требует",
     "истина", "ложь", "вывести",
     "чистый", "параллельный",
-    "попробовать", "задача",
+    "попробуй", "задача",
     "намерение", "тип", "внешний",
 ];
 
@@ -1435,7 +1435,7 @@ const FRENCH_KEYWORDS: &[&str] = &[
     "asserter", "prouver", "requiert",
     "vrai", "faux", "imprimer",
     "pur", "parallele",
-    "essayer", "tache",
+    "essayer", "travail",
     "intention", "type", "externe",
 ];
 
@@ -1471,7 +1471,7 @@ const ITALIAN_KEYWORDS: &[&str] = &[
     "funzione", "sia", "struttura", "enumerazione", "costante",
     "pubblico", "modulo", "usare", "come",
     "restituire", "se", "altrimenti",
-    "mentre", "per", "in", "da", "fino",
+    "mentre", "per", "in", "da", "finoa",
     "fermare", "continuare", "allora",
     "riferimento", "mutabile", "abbinare",
     "asserire", "provare", "richiede",

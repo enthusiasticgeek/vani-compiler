@@ -99,8 +99,10 @@ count_positive = 2
   ```
 - **`Vec<T>` is heap-allocated and grows**. It's the right
   default for variable-length collections. Construct one with
-  `vec(...)` (varargs literal) or `Vec::new()` (empty). Both
-  emit the same `intent_vec_int64_t` runtime bundle in C.
+  `vec(...)` (varargs literal) or `vec()` (empty -- note this is
+  a genuinely empty Vec; `vec(0)` is a *one-element* Vec `[0]`,
+  not an empty one). Both emit the same `intent_vec_int64_t`
+  runtime bundle in C.
 - **Pass by reference with `ref`**. `xs: ref Vec<i64>` is a
   read-only borrow -- the function reads but doesn't free the
   Vec. If you passed by value, ownership would transfer and
