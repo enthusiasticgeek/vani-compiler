@@ -43449,6 +43449,46 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug177_closure_local_inside_block_expression_compiles_via_tree_c() {
+        // BUG-177 (2026-08-11): found via localfuzz. A closure/fn-
+        // pointer bound to a local INSIDE a block-expression (`let
+        // result = { let f = fn(x: i64) -> i64 { ... }; f(1) };`,
+        // as opposed to an ordinary top-level `let`) falls back to
+        // tree-C (Type::Closure/FnPtr isn't in the SSA-C scalar/
+        // string subset). Tree-C's block-expression `TypedStmt::Let`
+        // handler used plain `"{} v_{}"` prefix-style formatting
+        // (via `c_type_name`), which collapses a function-pointer
+        // type to the generic storage spelling `void*` -- valid for
+        // STORING a function pointer, but not directly CALLABLE in
+        // C, so `v_f(1)` failed to compile ("called object is not a
+        // function or function pointer") even though the checker
+        // accepted the program and the LLVM backend ran it
+        // correctly. The top-level `let` statement handler already
+        // used `format_declarator` (which spells a proper `R
+        // (*name)(T)` declarator) for exactly this reason; the
+        // block-expression handler just hadn't been updated to
+        // match. Fixed by switching it to the same
+        // `format_declarator` call.
+        let source = r#"
+            fn main() -> i64 {
+              let result: i64 = {
+                let f = fn(x: i64) -> i64 { return x + x; };
+                f(1)
+              };
+              return result;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("closure bound inside a block-expression must compile via tree-C");
+        assert!(
+            !c.contains("void* v_f = "),
+            "the local should be declared as a proper function-pointer \
+             declarator, not the generic void* storage spelling:\n{}",
+            c
+        );
+    }
+
+    #[test]
     fn tree_llvm_len_of_field_borrow_and_field_access_uses_field_pointer() {
         // Closure #162: extends #161 to the two field-shape
         // spellings of len that flow through tree-LLVM when a

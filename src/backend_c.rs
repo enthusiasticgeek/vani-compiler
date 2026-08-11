@@ -16666,10 +16666,30 @@ fn emit_expr(expr: &TypedExpr) -> String {
                         // didn't, causing an "undeclared identifier"
                         // mismatch at the C compiler. Found
                         // translating Sanskrit example identifiers.
+                        //
+                        // BUG-177 (2026-08-11): plain `"{} v_{}"`
+                        // prefix-style formatting (via `c_type_name`)
+                        // only works for types whose C spelling is a
+                        // simple prefix. A closure/fn-pointer local
+                        // (`let f = fn(x: i64) -> i64 { ... };` inside
+                        // a block-expression, e.g. `let r = { let f =
+                        // ...; f(1) };`) needs the name EMBEDDED in
+                        // the declarator (`R (*v_f)(T)`), not prefixed
+                        // -- `c_type_name(FnPtr)` collapses to the
+                        // generic storage spelling `void*`, which
+                        // isn't callable in C. The top-level `let`
+                        // statement handler already used
+                        // `format_declarator` for exactly this reason;
+                        // this Block-expr handler just hadn't been
+                        // updated to match. `format_declarator`'s
+                        // fallback arm for plain scalar/aggregate
+                        // types produces the identical "TYPE NAME"
+                        // prefix `c_type_name` did, so this is a
+                        // strict superset fix, not a behavior change
+                        // for the existing working cases.
                         body.push_str(&format!(
-                            "{} v_{} = ({}); ",
-                            c_type_name(ty),
-                            sanitize_ident(name),
+                            "{} = ({}); ",
+                            format_declarator(ty, &local_name(name)),
                             emit_expr(rhs)
                         ));
                     }
