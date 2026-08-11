@@ -5620,3 +5620,48 @@ Fix attempt: `tools/localfuzz/findings/20260811-172419-run-crash-aaead49e89/fix_
 - **Backend Affected**: All backends are affected by this issue. The failure is detected and reported at the beginning of the task execution phase.
 
 **STATUS: needs human/frontier root-cause review**
+
+---
+
+### Candidate: 20260811-173050-backend-divergence-81d310eae4
+
+Repro: `tools/localfuzz/findings/20260811-173050-backend-divergence-81d310eae4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-173050-backend-divergence-81d310eae4/fix_attempt.md`
+
+Staging Entry for vani-compiler localfuzz examples/language/telugu/control_flow.vani
+
+```plaintext
+### Summary ###
+The control_flow.vani file from the vani-compiler project was analyzed, and a divergent behavior was observed with both LLVM and C backends.
+
+### Repro Source (Python) ###
+To reproduce the issue:
+```python
+# Import necessary libraries
+import subprocess
+
+# Command to run with LLVM backend
+llvm_command = ["vanic", "run", "examples/language/telugu/control_flow.vani"]
+
+# Command to run with C backend
+c_command = ["vanic", "run", "examples/language/telugu/control_flow.vani", "--backend=c"]
+
+# Execute commands and capture output
+llvm_output, llvm_error = subprocess.run(llvm_command, check=True, text=True)
+c_output, c_error = subprocess.run(c_command, check=True, text=True)
+
+# Print outputs
+print(f"LLVM Output:\n{llvm_output}")
+print(f"LLVM Error:\n{llvm_error}")
+
+print("\nC Output:\n{c_output}")
+print(f"C Error:\n{c_error}")
+```
+
+### Observed Symptom ###
+When running the `control_flow.vani` file with either the LLVM or C backend, it resulted in a crash due to an index out of bounds error. The specific error message is "index out of bounds".
+
+### Which Backend(s) It Affects ###
+The bug affects both LLVM and C backends.
+
+### Status: Needs Human/frontier Root-Cause Review.
