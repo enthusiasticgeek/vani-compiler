@@ -5748,3 +5748,49 @@ Repro: `tools/localfuzz/findings/20260811-213533-backend-divergence-60b72189a3/r
 Fix attempt: `tools/localfuzz/findings/20260811-213533-backend-divergence-60b72189a3/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-214556-backend-divergence-4e4b4ed872
+
+Repro: `tools/localfuzz/findings/20260811-214556-backend-divergence-4e4b4ed872/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-214556-backend-divergence-4e4b4ed872/fix_attempt.md`
+
+STAGING ENTRY
+
+**Date:** [Insert Date]
+
+**Summary:**
+
+Vani-compiler experienced a backend-divergence when running the provided mutant source with various backends:
+
+1. **LLVM Backend:** The compiler produced an integer overflow error during the subtraction operation, leading to the program crash. This is observed in the `build & run` command for the LLVM backend.
+
+2. **C Backend:** Similarly, the compiler encountered an integer overflow error during the subtraction operation, resulting in a program crash. This is reflected in the `vanic run examples/language/english/tracker.vani --backend=c` command.
+
+3. **Native Binary:** When the native binary was executed without specifying a backend (using `-o /tmp/tracker && /tmp/tracker`), an integer overflow error occurred during the subtraction operation, causing the program crash.
+
+**Repro Source:**
+
+```vani
+// build & run:
+//   vanic run examples/language/english/tracker.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/tracker.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/tracker.vani -o /tmp/tracker && /tmp/tracker   # native binary
+
+intent "A min/max tracker using struct + methods + mut-ref field-assign";
+
+struct Tracker { count: i64, min: i64, max: i64 }
+
+methods on Tracker {
+  fn observe(self: mut ref Tracker, v: i64) -> i64 {
+    self.count = self.count + 1;
+    self.min = if v < self.min { v } else { self.min };
+    self.max = if v > self.max { v } else { self.max };
+    return self.count;
+  }
+
+  fn range(self: ref Tracker) -> i64 { return self.max - self.min; }
+}
+
+fn main() -> i64
