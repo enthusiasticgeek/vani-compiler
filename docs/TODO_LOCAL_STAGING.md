@@ -5850,3 +5850,12 @@ Raw result data:
 ```
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260811-230334-backend-divergence-b851d4006b
+
+Repro: `tools/localfuzz/findings/20260811-230334-backend-divergence-b851d4006b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260811-230334-backend-divergence-b851d4006b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
