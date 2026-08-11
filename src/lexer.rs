@@ -534,6 +534,13 @@ fn bengali_keyword(text: &str) -> Option<TokenKind> {
         "প্রকার" => TokenKind::Type,           // prakar (type — same Sanskrit root)
         "বাহ্যিক" => TokenKind::Extern,        // bahyik (external)
         "অপরিবর্তনীয়" => TokenKind::Invariant,// aparibartaniya (invariant)
+        // === BUG-169 PARITY (2026-08-10): 5 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "সংক্ষেপ" => TokenKind::Reduce,        // shongkkhep (reduction — same Sanskrit root)
+        "সহ" => TokenKind::With,               // shoho (with — same Sanskrit root)
+        "ত্রুটিলেখ" => TokenKind::EPrint,      // trutilekh (error-write; ত্রুটি "error" + লেখ "write")
+        "অসুরক্ষিত" => TokenKind::Unsafe,      // ashurokkhito (unsafe — same Sanskrit root)
+        "ক্ষেত্র" => TokenKind::RegionKw,      // kkhetro (region/area — same Sanskrit root)
         _ => return None,
     };
     Some(kind)
@@ -552,7 +559,11 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         "செயல்பாடு" => TokenKind::Fn,           // seyalpaadu (function)
         "சார்பு" => TokenKind::Fn,                // saarbu (alt function)
         "கொள்" => TokenKind::Let,                  // kol (let/assume)
-        "இருக்க" => TokenKind::Let,               // irukka (let it be)
+        // Native-review fix (2026-08-10): removed "இருக்க"
+        // ("to be", infinitive) from TokenKind::Let -- "கொள்"
+        // above already covers this correctly (same mistake class
+        // as Swedish "vara"/Norwegian "være", both also "(to) be"
+        // wrongly registered for Let and fixed the same way).
         "கட்டமைப்பு" => TokenKind::Struct,        // kattamaippu (structure)
         "எண்ணுப்பெயர்" => TokenKind::Enum,        // ennuppeyar (enum)
         "மாறா" => TokenKind::Const,                // maaraa (unchanging)
@@ -596,6 +607,22 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         "நோக்கம்" => TokenKind::Intent,            // nokkam (intent)
         "வகை" => TokenKind::Type,                  // vagai (type/kind)
         "மாறிலா" => TokenKind::Invariant,          // maarilaa (unchanging — invariant)
+        // === BUG-169 PARITY (2026-08-10): 14 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "தூய" => TokenKind::Pure,                  // thooya (pure)
+        "வெளி" => TokenKind::Extern,               // veli (external/outside)
+        "இணை" => TokenKind::Parallel,              // inai (parallel/pair)
+        "குறை" => TokenKind::Reduce,               // kurai (reduce/decrease)
+        "உடன்" => TokenKind::With,                 // udan (with)
+        "பணி" => TokenKind::Task,                  // pani (task/work)
+        "சேர்" => TokenKind::Join,                 // ser (join/add)
+        "எங்கே" => TokenKind::Where,               // engae (where)
+        "ஆகும்" => TokenKind::Is,                  // aakum (is/becomes)
+        "முறைகள்" => TokenKind::Methods,           // muraigal (methods/ways)
+        "பிழைஎழுது" => TokenKind::EPrint,          // pizhai-ezhuthu (error-write)
+        "முயற்சி" => TokenKind::Try,               // muyarchi (try/attempt)
+        "பாதுகாப்பற்ற" => TokenKind::Unsafe,       // paadhugaapatra (unsafe)
+        "பகுதி" => TokenKind::RegionKw,            // paguthi (region/part)
         _ => return None,
     };
     Some(kind)
@@ -642,6 +669,24 @@ fn telugu_keyword(text: &str) -> Option<TokenKind> {
         "ఉద్దేశం" => TokenKind::Intent,            // uddesam (intent — tatsama)
         "రకం" => TokenKind::Type,                  // rakam (type/kind)
         "మారని" => TokenKind::Invariant,           // maarani (not changing — invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "శుద్ధ" => TokenKind::Pure,                // shuddha (pure — tatsama)
+        "బాహ్య" => TokenKind::Extern,              // baahya (external — tatsama)
+        "సమాంతర" => TokenKind::Parallel,           // samaantara (parallel — tatsama)
+        "సంక్షేప" => TokenKind::Reduce,            // sankshepa (reduction — tatsama)
+        "తో" => TokenKind::With,                   // to (with)
+        "కార్యం" => TokenKind::Task,               // kaaryam (task — tatsama)
+        "సంయోగం" => TokenKind::Join,               // samyogam (union/join — tatsama)
+        "సంకేతం" => TokenKind::Interface,          // sanketam (signal/interface — tatsama)
+        "అమలు" => TokenKind::Implement,            // amalu (implementation)
+        "ఎక్కడ" => TokenKind::Where,               // ekkada (where)
+        "ఉంది" => TokenKind::Is,                   // undi (is/exists)
+        "పద్ధతులు" => TokenKind::Methods,          // paddhathulu (methods)
+        "లోపంరాయి" => TokenKind::EPrint,           // lopam-raayi (error-write)
+        "ప్రయత్నించు" => TokenKind::Try,           // prayatninchu (try/attempt)
+        "అసురక్షిత" => TokenKind::Unsafe,          // asurakshita (unsafe — tatsama)
+        "ప్రాంతం" => TokenKind::RegionKw,          // praantam (region/area)
         _ => return None,
     };
     Some(kind)
@@ -689,6 +734,24 @@ fn gujarati_keyword(text: &str) -> Option<TokenKind> {
         "ઉદ્દેશ" => TokenKind::Intent,             // uddhesh (intent — tatsama)
         "પ્રકાર" => TokenKind::Type,               // prakaar (type — tatsama)
         "અચળ" => TokenKind::Invariant,             // achal (invariant — "unchanging", tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "શુદ્ધ" => TokenKind::Pure,                // shuddh (pure — tatsama)
+        "બાહ્ય" => TokenKind::Extern,              // baahya (external — tatsama)
+        "સમાંતર" => TokenKind::Parallel,           // samaantar (parallel — tatsama)
+        "સંક્ષેપ" => TokenKind::Reduce,            // sankshep (reduction — tatsama)
+        "સાથે" => TokenKind::With,                 // saathe (with)
+        "નિયોગ" => TokenKind::Task,                // niyog (task — tatsama)
+        "સંયોજન" => TokenKind::Join,               // sanyojan (union/join — tatsama)
+        "સંકેત" => TokenKind::Interface,           // sanket (signal/interface — tatsama)
+        "અમલ" => TokenKind::Implement,             // amal (implementation)
+        "જ્યાં" => TokenKind::Where,                // jyaan (where)
+        "છે" => TokenKind::Is,                     // chhe (is)
+        "પદ્ધતિઓ" => TokenKind::Methods,           // paddhatio (methods)
+        "ભૂલલખો" => TokenKind::EPrint,             // bhool-lakho (error-write)
+        "પ્રયાસ" => TokenKind::Try,                // prayaas (try/attempt — tatsama)
+        "અસુરક્ષિત" => TokenKind::Unsafe,          // asurakshit (unsafe — tatsama)
+        "ક્ષેત્ર" => TokenKind::RegionKw,          // kshetra (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -736,6 +799,24 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
         "ਉਦੇਸ਼" => TokenKind::Intent,              // udesh (intent — tatsama)
         "ਕਿਸਮ" => TokenKind::Type,                 // kism (type)
         "ਅਟੱਲ" => TokenKind::Invariant,            // attal (unchanging — invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ਸ਼ੁੱਧ" => TokenKind::Pure,                 // shudh (pure — tatsama)
+        "ਬਾਹਰੀ" => TokenKind::Extern,              // baahri (external)
+        "ਸਮਾਂਤਰ" => TokenKind::Parallel,           // samaantar (parallel — tatsama)
+        "ਸੰਖੇਪ" => TokenKind::Reduce,              // sankhep (reduction — tatsama)
+        "ਨਾਲ" => TokenKind::With,                  // naal (with)
+        "ਨਿਯੋਗ" => TokenKind::Task,                // niyog (task — tatsama)
+        "ਸੰਯੋਜਨ" => TokenKind::Join,               // sanyojan (union/join — tatsama)
+        "ਸੰਕੇਤ" => TokenKind::Interface,           // sanket (signal/interface — tatsama)
+        "ਅਮਲ" => TokenKind::Implement,             // amal (implementation)
+        "ਜਿੱਥੇ" => TokenKind::Where,               // jitthe (where)
+        "ਹੈ" => TokenKind::Is,                     // hai (is)
+        "ਢੰਗ" => TokenKind::Methods,               // dhang (methods/ways)
+        "ਗਲਤੀਲਿਖੋ" => TokenKind::EPrint,           // galti-likho (error-write)
+        "ਕੋਸ਼ਿਸ਼" => TokenKind::Try,               // koshish (try/attempt)
+        "ਅਸੁਰੱਖਿਅਤ" => TokenKind::Unsafe,          // asurakhiat (unsafe — tatsama)
+        "ਖੇਤਰ" => TokenKind::RegionKw,             // khetar (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -785,6 +866,24 @@ fn kannada_keyword(text: &str) -> Option<TokenKind> {
         "ಉದ್ದೇಶ" => TokenKind::Intent,               // uddesha (intent — tatsama)
         "ಪ್ರಕಾರ" => TokenKind::Type,                 // prakaara (type — tatsama)
         "ಅಚಲ" => TokenKind::Invariant,               // achala (unchanging — tatsama invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ಶುದ್ಧ" => TokenKind::Pure,                  // shuddha (pure — tatsama)
+        "ಬಾಹ್ಯ" => TokenKind::Extern,                // baahya (external — tatsama)
+        "ಸಮಾನಾಂತರ" => TokenKind::Parallel,           // samaanaantara (parallel — tatsama)
+        "ಸಂಕ್ಷೇಪ" => TokenKind::Reduce,              // sankshepa (reduction — tatsama)
+        "ಜೊತೆ" => TokenKind::With,                   // jote (with)
+        "ನಿಯೋಗ" => TokenKind::Task,                  // niyoga (task — tatsama)
+        "ಸಂಯೋಜನೆ" => TokenKind::Join,                // samyojane (union/join — tatsama)
+        "ಸಂಕೇತ" => TokenKind::Interface,             // sanketa (signal/interface — tatsama)
+        "ಜಾರಿ" => TokenKind::Implement,              // jaari (in effect/implement)
+        "ಎಲ್ಲಿ" => TokenKind::Where,                 // elli (where)
+        "ಇದೆ" => TokenKind::Is,                      // ide (is/exists)
+        "ವಿಧಾನಗಳು" => TokenKind::Methods,            // vidhaanagalu (methods)
+        "ದೋಷಬರೆ" => TokenKind::EPrint,               // dosha-bare (error-write)
+        "ಪ್ರಯತ್ನ" => TokenKind::Try,                 // prayatna (try/attempt — tatsama)
+        "ಅಸುರಕ್ಷಿತ" => TokenKind::Unsafe,            // asurakshita (unsafe — tatsama)
+        "ಪ್ರದೇಶ" => TokenKind::RegionKw,             // pradesha (region/area)
         _ => return None,
     };
     Some(kind)
@@ -832,6 +931,24 @@ fn malayalam_keyword(text: &str) -> Option<TokenKind> {
         "ഉദ്ദേശ്യം" => TokenKind::Intent,            // uddeshyam (intent — tatsama)
         "തരം" => TokenKind::Type,                    // tharam (type)
         "അചലം" => TokenKind::Invariant,              // achalam (unchanging — tatsama invariant)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ശുദ്ധം" => TokenKind::Pure,                 // shuddham (pure — tatsama)
+        "ബാഹ്യം" => TokenKind::Extern,               // baahyam (external — tatsama)
+        "സമാന്തരം" => TokenKind::Parallel,           // samaantharam (parallel — tatsama)
+        "സംക്ഷേപം" => TokenKind::Reduce,             // samkshepam (reduction — tatsama)
+        "കൂടെ" => TokenKind::With,                   // koode (with)
+        "നിയോഗം" => TokenKind::Task,                 // niyogam (task — tatsama)
+        "സംയോജനം" => TokenKind::Join,                // samyojanam (union/join — tatsama)
+        "സങ്കേതം" => TokenKind::Interface,           // sanketam (signal/interface — tatsama)
+        "നടപ്പിലാക്കുക" => TokenKind::Implement,     // nadappilaakkuka (implement)
+        "എവിടെ" => TokenKind::Where,                 // evide (where)
+        "ആണ്" => TokenKind::Is,                      // aanu (is)
+        "രീതികൾ" => TokenKind::Methods,              // reethikal (methods)
+        "പിശക്എഴുതുക" => TokenKind::EPrint,          // pishaku-ezhuthuka (error-write)
+        "ശ്രമിക്കുക" => TokenKind::Try,              // shramikkuka (try/attempt)
+        "അസുരക്ഷിതം" => TokenKind::Unsafe,           // asurakshitham (unsafe — tatsama)
+        "പ്രദേശം" => TokenKind::RegionKw,            // pradesham (region/area)
         _ => return None,
     };
     Some(kind)
@@ -877,6 +994,24 @@ fn odia_keyword(text: &str) -> Option<TokenKind> {
         "ଉଦ୍ଦେଶ୍ୟ" => TokenKind::Intent,              // uddeshya (intent — tatsama)
         "ପ୍ରକାର" => TokenKind::Type,                  // prakaara (type — tatsama)
         "ଅଚଳ" => TokenKind::Invariant,               // achala (unchanging — invariant, tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ଶୁଦ୍ଧ" => TokenKind::Pure,                   // shuddha (pure — tatsama)
+        "ବାହ୍ୟ" => TokenKind::Extern,                 // baahya (external — tatsama)
+        "ସମାନ୍ତର" => TokenKind::Parallel,             // samaantara (parallel — tatsama)
+        "ସଂକ୍ଷେପ" => TokenKind::Reduce,               // sankshepa (reduction — tatsama)
+        "ସହିତ" => TokenKind::With,                    // sahita (with — tatsama)
+        "ନିଯୋଗ" => TokenKind::Task,                   // niyoga (task — tatsama)
+        "ସଂଯୋଜନ" => TokenKind::Join,                  // sanyojana (union/join — tatsama)
+        "ସଙ୍କେତ" => TokenKind::Interface,             // sanketa (signal/interface — tatsama)
+        "ପ୍ରୟୋଗ" => TokenKind::Implement,             // prayoga (application/implement — tatsama)
+        "କେଉଁଠାରେ" => TokenKind::Where,               // keunthare (where)
+        "ଅଟେ" => TokenKind::Is,                       // ate (is)
+        "ପଦ୍ଧତି" => TokenKind::Methods,               // paddhati (methods — tatsama)
+        "ତ୍ରୁଟିଲେଖ" => TokenKind::EPrint,             // truti-lekha (error-write)
+        "ପ୍ରୟାସ" => TokenKind::Try,                   // prayaasa (try/attempt — tatsama)
+        "ଅସୁରକ୍ଷିତ" => TokenKind::Unsafe,             // asurakshita (unsafe — tatsama)
+        "କ୍ଷେତ୍ର" => TokenKind::RegionKw,             // kshetra (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -924,6 +1059,24 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "අරමුණ" => TokenKind::Intent,                 // aramuna (intent/purpose)
         "වර්ගය" => TokenKind::Type,                   // vargaya (type)
         "නිශ්චල" => TokenKind::Invariant,             // nishchala (motionless/invariant — tatsama)
+        // === BUG-169 PARITY (2026-08-10): 16 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "ශුද්ධ" => TokenKind::Pure,                   // shuddha (pure — tatsama)
+        "බාහිර" => TokenKind::Extern,                 // baahira (external — tatsama)
+        "සමාන්තර" => TokenKind::Parallel,             // samaanthara (parallel — tatsama)
+        "සංක්ෂේප" => TokenKind::Reduce,               // sankshepa (reduction — tatsama)
+        "සමඟ" => TokenKind::With,                     // samaga (with)
+        "නියෝගය" => TokenKind::Task,                  // niyogaya (task — tatsama)
+        "සංයෝජනය" => TokenKind::Join,                 // sanyojanaya (union/join — tatsama)
+        "සංකේතය" => TokenKind::Interface,             // sanketaya (signal/interface — tatsama)
+        "ක්‍රියාත්මක" => TokenKind::Implement,        // kriyaathmaka (implement/put into action)
+        "කොහෙද" => TokenKind::Where,                  // koheda (where)
+        "වේ" => TokenKind::Is,                        // ve (is)
+        "ක්‍රම" => TokenKind::Methods,                // krama (methods/ways — tatsama)
+        "දෝෂයලියන්න" => TokenKind::EPrint,            // doshaya-liyanna (error-write)
+        "උත්සාහ" => TokenKind::Try,                   // uthsaaha (try/effort — tatsama)
+        "අනාරක්ෂිත" => TokenKind::Unsafe,             // anaarakshitha (unsafe — tatsama)
+        "ප්‍රදේශය" => TokenKind::RegionKw,            // pradeshaya (region/area — tatsama)
         _ => return None,
     };
     Some(kind)
@@ -986,6 +1139,23 @@ fn urdu_keyword(text: &str) -> Option<TokenKind> {
         "مقصد" => TokenKind::Intent,           // maqsad (intent)
         "قسم" => TokenKind::Type,              // kism (type)
         "بیرونی" => TokenKind::Extern,         // bairooni (external)
+        // === BUG-169 PARITY (2026-08-10): 15 remaining gaps closed
+        // against the 46-keyword structure-keyword checklist ===
+        "خالص" => TokenKind::Pure,             // khaalis (pure)
+        "متوازی" => TokenKind::Parallel,       // mutawaazi (parallel)
+        "تخفیف" => TokenKind::Reduce,          // takhfeef (reduction)
+        "ساتھ" => TokenKind::With,             // saath (with — Hindustani-shared)
+        "ٹاسک" => TokenKind::Task,             // task (loanword, matches فنکشن/ماڈیول convention)
+        "ملاپ" => TokenKind::Join,             // milaap (union/join — Hindustani-shared)
+        "دوران" => TokenKind::While,           // dauraan (during/while)
+        "جہاں" => TokenKind::Where,            // jahan (where — Hindustani-shared)
+        "ہے" => TokenKind::Is,                 // hai (is — Hindustani-shared)
+        "طریقے" => TokenKind::Methods,         // tareeqe (methods/ways)
+        "غیرمتغیر" => TokenKind::Invariant,    // ghair mutaghayyir (invariant, "non-variable")
+        "غلطیلکھو" => TokenKind::EPrint,       // ghaltilikho (error-write; غلطی "error" + لکھو "write")
+        "کوشش" => TokenKind::Try,              // koshish (try/attempt)
+        "غیرمحفوظ" => TokenKind::Unsafe,       // ghair mahfooz (unsafe, "non-protected")
+        "علاقہ" => TokenKind::RegionKw,        // ilaqa (region/area)
         _ => return None,
     };
     Some(kind)
@@ -1042,6 +1212,24 @@ fn persian_keyword(text: &str) -> Option<TokenKind> {
         "هدف" => TokenKind::Intent,            // hadaf (intent)
         "نوع" => TokenKind::Type,              // nō' (type)
         "خارجی" => TokenKind::Extern,          // khārejī (external)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "خالص" => TokenKind::Pure,             // khāles (pure)
+        "موازی" => TokenKind::Parallel,        // movāzī (parallel)
+        "کاهش" => TokenKind::Reduce,           // kāhesh (reduction)
+        "با" => TokenKind::With,               // bā (with)
+        "وظیفه" => TokenKind::Task,            // vazife (task/duty)
+        "پیوستن" => TokenKind::Join,           // peyvastan (join/connect)
+        "به" => TokenKind::To,                 // be (to)
+        "رابط" => TokenKind::Interface,        // rābet (interface/connector)
+        "اجرا" => TokenKind::Implement,        // ejrā (execution/implement)
+        "کجا" => TokenKind::Where,             // kojā (where)
+        "است" => TokenKind::Is,                // ast (is)
+        "روش" => TokenKind::Methods,           // ravesh (method/way)
+        "تغییرناپذیر" => TokenKind::Invariant, // taghyir-nāpazir (unchangeable)
+        "خطاچاپ" => TokenKind::EPrint,         // khatā-chāp (error-print)
+        "تلاش" => TokenKind::Try,              // talāsh (try/attempt)
+        "ناامن" => TokenKind::Unsafe,          // nā-amn (unsafe)
+        "منطقه" => TokenKind::RegionKw,        // mantaghe (region/area)
         _ => return None,
     };
     Some(kind)
@@ -1064,13 +1252,20 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
         "عمومي" => TokenKind::Pub,             // omumī (public)
         "برخه" => TokenKind::Module,           // barkha (part)
         "وکاروه" => TokenKind::Use,            // wakaraweh (use)
-        "په توګه" => TokenKind::As,            // pe toga (as) — multi-word; not folded yet
+        "لکه" => TokenKind::As,                // lakah (like/as) — BUG-170: replaces
+                                              // dead "په توګه" (contained a space;
+                                              // no Pashto multi-word merge exists,
+                                              // so it could never match — found
+                                              // while auditing keyword parity)
         // Control flow
         "بېرته" => TokenKind::Return,          // berta (back)
         "که" => TokenKind::If,                 // ka (if)
-        "که نه" => TokenKind::Else,            // ka na (else — multi-word)
-        "تر څو" => TokenKind::While,           // tar tso (until)
-        "هر یو" => TokenKind::For,             // har yew (each one — multi-word)
+        "کهنه" => TokenKind::Else,             // kanna (if-not, fused) — BUG-170:
+                                              // replaces dead "که نه" (space)
+        "ترڅو" => TokenKind::While,            // tartso (until, fused) — BUG-170:
+                                              // replaces dead "تر څو" (space)
+        "هریو" => TokenKind::For,              // haryo (each-one, fused) — BUG-170:
+                                              // replaces dead "هر یو" (space)
         "په" => TokenKind::In,                 // pe (in)
         "له" => TokenKind::From,               // le (from)
         "ودروه" => TokenKind::Break,           // wadrawa (stop)
@@ -1078,7 +1273,8 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
         "بیا" => TokenKind::Then,              // bya (then)
         // References / mut
         "وګوره" => TokenKind::Ref,             // waguwra (see)
-        "د بدلون وړ" => TokenKind::Mut,        // dalbedlun war (changeable — multi-word)
+        "بدلېدونکی" => TokenKind::Mut,         // badledunkay (changeable) — BUG-170:
+                                              // replaces dead "د بدلون وړ" (space)
         // Match
         "سمون" => TokenKind::Match,            // samun (alignment)
         // Verification
@@ -1093,6 +1289,25 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
         // SOV-S7 parity
         "موخه" => TokenKind::Intent,           // mokha (purpose)
         "ډول" => TokenKind::Type,              // ḍol (type)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "خالص" => TokenKind::Pure,             // khāles (pure)
+        "بهرنی" => TokenKind::Extern,          // bahrani (external/foreign)
+        "موازي" => TokenKind::Parallel,        // muwāzi (parallel)
+        "کمښت" => TokenKind::Reduce,           // kamekht (reduction/decrease)
+        "سره" => TokenKind::With,              // sara (with)
+        "دنده" => TokenKind::Task,             // dandah (task/duty)
+        "نښلول" => TokenKind::Join,            // nashlawul (to connect/join)
+        "ته" => TokenKind::To,                 // ta (to)
+        "اړیکه" => TokenKind::Interface,       // arraikeh (connection/interface)
+        "پلي" => TokenKind::Implement,         // pali (practical/implement)
+        "چیرته" => TokenKind::Where,           // cherta (where)
+        "دی" => TokenKind::Is,                 // dey (is)
+        "طریقې" => TokenKind::Methods,         // tareeqe (methods)
+        "دايمي" => TokenKind::Invariant,       // dāymi (permanent/invariant)
+        "خطاولیکه" => TokenKind::EPrint,       // khatā-wlika (error-print)
+        "هڅه" => TokenKind::Try,               // hetsa (try/effort)
+        "ناامن" => TokenKind::Unsafe,          // nā-amn (unsafe)
+        "سیمه" => TokenKind::RegionKw,         // seemah (region/area)
         _ => return None,
     };
     Some(kind)
@@ -1139,6 +1354,11 @@ fn khmer_keyword(text: &str) -> Option<TokenKind> {
         "ប្រភេទ" => TokenKind::Type,            // probhett (type)
         "ខាងក្រៅ" => TokenKind::Extern,         // khang krov (outside)
         "មិនប្រែប្រួល" => TokenKind::Invariant, // unchanging
+        // === BUG-170 PARITY (2026-08-10) ===
+        "កាត់បន្ថយ" => TokenKind::Reduce,       // kat bantoy (reduce)
+        "ជាមួយ" => TokenKind::With,             // cheamuoy (with)
+        "អនុវត្ត" => TokenKind::Implement,      // anuwat (implement/execute)
+        "កំហុសបោះពុម្ព" => TokenKind::EPrint,   // kamhaus-bohpum (error-print)
         "រចនាសម្ព័ន្ធ" => TokenKind::Struct,    // structure
         "ការរាប់បញ្ចូល" => TokenKind::Enum,     // counting
         "ថេរ" => TokenKind::Const,              // theer (constant)
@@ -1192,6 +1412,11 @@ fn burmese_keyword(text: &str) -> Option<TokenKind> {
         "အမျိုးအစား" => TokenKind::Type,        // amyo asar
         "အပြင်" => TokenKind::Extern,           // a pyin
         "မပြောင်းလဲ" => TokenKind::Invariant,   // ma pyaung le
+        // === BUG-170 PARITY (2026-08-10) ===
+        "လျှော့ချ" => TokenKind::Reduce,        // shaw hkya (reduce)
+        "နှင့်အတူ" => TokenKind::With,          // hnin' a htu (together with)
+        "အကောင်အထည်ဖော်" => TokenKind::Implement, // a kaung a htant' hpau (implement)
+        "အမှားပုံနှိပ်" => TokenKind::EPrint,   // a hma-poun hnip (error-print)
         "ဖွဲ့စည်းပုံ" => TokenKind::Struct,     // pwe si poun
         "စာရင်း" => TokenKind::Enum,            // sayin
         "ပုံသေ" => TokenKind::Const,            // poun the
@@ -1243,6 +1468,13 @@ fn amharic_keyword(text: &str) -> Option<TokenKind> {
         "አይነት" => TokenKind::Type,              // aynet
         "ውጫዊ" => TokenKind::Extern,             // wchawi (external)
         "የማይለወጥ" => TokenKind::Invariant,       // unchanging
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ቀንስ" => TokenKind::Reduce,             // qenes (reduce/decrease)
+        "ጋር" => TokenKind::With,                // gar (with)
+        "ጀምሮ" => TokenKind::From,               // jemro (starting from)
+        "ድረስ" => TokenKind::To,                 // dress (until/to)
+        "ተግባራዊ" => TokenKind::Implement,       // tegbarawi (practical/implement)
+        "ስህተትህትመት" => TokenKind::EPrint,       // shtet-htmet (error-print)
         "መዋቅር" => TokenKind::Struct,            // mewakr
         "ቆጠራ" => TokenKind::Enum,               // qotera
         "ቋሚ" => TokenKind::Const,               // qwami
@@ -1301,6 +1533,15 @@ fn tibetan_keyword(text: &str) -> Option<TokenKind> {
         "ཚན" => TokenKind::Module,               // tsen (module)
         "བཀོལ" => TokenKind::Use,                // kol (use)
         "དུ" => TokenKind::As,                   // du (as)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ཉུང་དུ" => TokenKind::Reduce,           // nyung-du (reduce/less)
+        "དང" => TokenKind::With,                 // dang (with/and)
+        "སྒྲིག་གཞི" => TokenKind::Struct,        // drig-zhi (structure/system)
+        "འབྲེལ་མཐུད" => TokenKind::Interface,    // drel-thu (connection/interface)
+        "ལག་བསྟར" => TokenKind::Implement,       // lag-tar (implement/carry out)
+        "ཐབས་ལམ" => TokenKind::Methods,          // thab-lam (method/way)
+        "མི་འགྱུར" => TokenKind::Invariant,      // mi-gyur (unchanging)
+        "ནོར་འཁྲུལ་པར" => TokenKind::EPrint,     // nor-trul-par (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1330,6 +1571,35 @@ fn cherokee_keyword(text: &str) -> Option<TokenKind> {
         "ᎠᏙᏢᏍᎩ" => TokenKind::Struct,           // structure
         "ᎬᏙᏗ" => TokenKind::Use,                 // gvdodi (use)
         "ᎤᎲᏍᏛ" => TokenKind::Intent,             // uhvsdv (purpose)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ᎦᏅᎯᏛ" => TokenKind::Pure,               // ganvhidv (nature/pure)
+        "ᏙᏱᏗᏢ" => TokenKind::Extern,             // doyiditlv (outside)
+        "ᎾᏍᎩᏯ" => TokenKind::Parallel,           // nasgiya (alike/parallel)
+        "ᎤᏍᏗᎪᏗ" => TokenKind::Reduce,            // usdigodi (make smaller/reduce)
+        "ᎠᎴ" => TokenKind::With,                 // ale (and/with)
+        "ᏗᎦᎸᏫᏍᏓᏁᏗ" => TokenKind::Task,          // digalvwisdanedi (work/task)
+        "ᏓᏂᎳᏫᏍᎦ" => TokenKind::Join,             // danilawisga (unite/join)
+        "ᏓᏓᎴᏂᏍᎬ" => TokenKind::From,             // dadalenisgv (starting from)
+        "ᎬᏛ" => TokenKind::To,                   // gvdv (to/until)
+        "ᎢᎦᏙᎯ" => TokenKind::Enum,               // igadohi (counting/listing)
+        "ᎠᏍᏓᏩᏛᏍᎩ" => TokenKind::Match,          // asdawadvsgi (matching)
+        "ᎣᏂ" => TokenKind::Then,                 // oni (then/after)
+        "ᎠᏓᏛᏗ" => TokenKind::Interface,          // adadvdi (connector)
+        "ᎬᏔᏂᏙᎲ" => TokenKind::Implement,         // gvtanidohv (using/implementing)
+        "ᎭᏢ" => TokenKind::Where,                // hatlv (where)
+        "ᎨᏒ" => TokenKind::Is,                   // gesv (is/being)
+        "ᎠᏢᏓᏅᎯ" => TokenKind::Const,             // atlvdanvhi (fixed/constant)
+        "ᎢᏳᏓᎴᎩ" => TokenKind::Type,              // iyudalegi (kind/type)
+        "ᏗᏄᎪᏗ" => TokenKind::Methods,            // dinugodi (ways/methods)
+        "ᎠᏎᏗ" => TokenKind::Requires,            // asedi (necessary/required)
+        "ᎤᏙᎯᏳᏫᏍᏗ" => TokenKind::Ensures,        // udohiyuwisdi (confirm/ensure)
+        "ᏂᎦᎳᏛᎾ" => TokenKind::Invariant,         // nigaladvna (unchanging)
+        "ᎤᎴᏗᎠᎴᏂᏍᎬᎢ" => TokenKind::EPrint,       // uledi-alenisgvgi (error-print)
+        "ᎠᏓᎫᏓᏛᏍᎩ" => TokenKind::Try,            // adagudadvsgi (trying/testing)
+        "ᎠᏯᏙᎸ" => TokenKind::Module,             // ayadolv (section/module)
+        "ᏂᎦᏓ" => TokenKind::Pub,                 // nigada (all/public)
+        "ᎠᏂᏍᎦᏂᎩᏛ" => TokenKind::Unsafe,         // anisganigidv (dangerous)
+        "ᎦᏙᎯ" => TokenKind::RegionKw,            // gadohi (land/region)
         _ => return None,
     };
     Some(kind)
@@ -1377,6 +1647,11 @@ fn lao_keyword(text: &str) -> Option<TokenKind> {
         "ປະເພດ" => TokenKind::Type,               // paphet (type)
         "ພາຍນອກ" => TokenKind::Extern,            // phay nok (external)
         "ບໍ່ປ່ຽນ" => TokenKind::Invariant,        // bo pian (invariant)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ຫຼຸດ" => TokenKind::Reduce,               // lut (reduce)
+        "ກັບ" => TokenKind::With,                  // kap (with)
+        "ປະຕິບັດ" => TokenKind::Implement,         // patibat (implement/execute)
+        "ຂໍ້ຜິດພາດພິມ" => TokenKind::EPrint,       // khor-phit-phat-phim (error-print)
         "ໂຄງສ້າງ" => TokenKind::Struct,           // khong sang (structure)
         "ການນັບ" => TokenKind::Enum,              // kan nap (counting)
         "ຄົງທີ່" => TokenKind::Const,             // khong thi (constant)
@@ -1417,6 +1692,31 @@ fn mongolian_keyword(text: &str) -> Option<TokenKind> {
         "ᠬᠡᠯᠪᠡᠷᠢ" => TokenKind::Type,            // kelberi (type / kind)
         "ᠪᠦᠳᠦᠭᠴᠡ" => TokenKind::Struct,          // büdüktse (structure)
         "ᠵᠣᠷᠢᠯᠭ᠎ᠠ" => TokenKind::Intent,         // zorilga (goal / purpose)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ᠭᠠᠳᠠᠨ᠎ᠠ" => TokenKind::Extern,          // gadana (outside/external)
+        "ᠵᠡᠷᠭᠡ" => TokenKind::Parallel,          // zerge (level/parallel)
+        "ᠪᠠᠭᠠᠰᠬᠠ" => TokenKind::Reduce,          // bagasgaa (reduce)
+        "ᠬᠠᠮᠲᠤ" => TokenKind::With,              // hamtu (together/with)
+        "ᠨᠡᠶᠢᠯᠡ" => TokenKind::Join,             // neyile (unite/join)
+        "ᠬᠤᠪᠢᠷᠠᠮᠲᠠᠭᠠᠢ" => TokenKind::Mut,       // huviramtagai (changeable)
+        "ᠳᠣᠲᠣᠷ᠎ᠠ" => TokenKind::In,              // dotora (inside/in)
+        "ᠲᠣᠭᠠᠯᠠᠯ" => TokenKind::Enum,            // tooalal (counting/enum)
+        "ᠲᠣᠬᠢᠷᠠ" => TokenKind::Match,            // tohira (match/fit)
+        "ᠵᠠᠯᠭᠠᠭᠤᠷ" => TokenKind::Interface,      // zalgaguur (connector/interface)
+        "ᠬᠡᠷᠡᠭᠵᠢᠭᠦᠯ" => TokenKind::Implement,    // heregjiguul (implement/realize)
+        "ᠬᠠᠮᠢᠭ᠎ᠠ" => TokenKind::Where,            // hamiga (where)
+        "ᠪᠣᠯᠤᠨ᠎ᠠ" => TokenKind::Is,               // bolona (is/becomes)
+        "ᠲᠣᠭᠲᠠᠮᠠᠯ" => TokenKind::Const,          // togtamal (constant/fixed)
+        "ᠠᠷᠭ᠎ᠠ" => TokenKind::Methods,            // arga (method/way)
+        "ᠱᠠᠭᠠᠷᠳᠠ" => TokenKind::Requires,        // shaardaa (require)
+        "ᠪᠠᠲᠤᠯᠠᠭ᠎ᠠ" => TokenKind::Ensures,       // batalgaa (guarantee/ensure)
+        "ᠲᠣᠭᠲᠠᠪᠤᠷᠢᠲᠠᠢ" => TokenKind::Invariant, // togtaburitai (stable/invariant)
+        "ᠠᠯᠳᠠᠭᠬᠡᠪᠯᠡ" => TokenKind::EPrint,       // aldag-keble (error-print)
+        "ᠣᠷᠣᠯᠳᠤ" => TokenKind::Try,              // oroldu (try/attempt)
+        "ᠨᠢᠭᠡᠴᠡ" => TokenKind::Module,           // nigetse (unit/module)
+        "ᠨᠡᠶᠢᠲᠡ" => TokenKind::Pub,              // neyite (public/general)
+        "ᠠᠶᠤᠯᠲᠠᠢ" => TokenKind::Unsafe,          // ayultai (dangerous)
+        "ᠪᠥᠰᠡ" => TokenKind::RegionKw,           // buse (zone/region)
         _ => return None,
     };
     Some(kind)
@@ -1452,6 +1752,32 @@ fn slovak_keyword(text: &str) -> Option<TokenKind> {
         "pokiaľ" => TokenKind::While,          // as long as
         "kým" => TokenKind::While,             // until (while alt)
         "porovnaj" => TokenKind::Match,        // compare!
+        // === BUG-170 PARITY (2026-08-10) ===
+        "funkcia" => TokenKind::Fn,            // function
+        "zmenši" => TokenKind::Reduce,         // reduce
+        "spolu" => TokenKind::With,            // together/with
+        "spoj" => TokenKind::Join,             // join
+        "nech" => TokenKind::Let,              // let
+        "ak" => TokenKind::If,                 // if
+        "inak" => TokenKind::Else,             // otherwise
+        "pre" => TokenKind::For,               // for
+        "vnútri" => TokenKind::In,             // inside/in (BUG-170 fix: was
+                                              // single-letter "v", collided
+                                              // with common variable names)
+        "pozri" => TokenKind::Ref,             // see
+        "od" => TokenKind::From,               // from
+        "do" => TokenKind::To,                 // to
+        "výpočet" => TokenKind::Enum,          // enum
+        "potom" => TokenKind::Then,            // then
+        "implementuj" => TokenKind::Implement, // implement!
+        "kde" => TokenKind::Where,             // where
+        "je" => TokenKind::Is,                 // is
+        "konštanta" => TokenKind::Const,       // constant
+        "typ" => TokenKind::Type,              // type
+        "metódy" => TokenKind::Methods,        // methods
+        "chybavytlač" => TokenKind::EPrint,    // chyba-vytlač (error-print)
+        "skús" => TokenKind::Try,              // try
+        "modul" => TokenKind::Module,          // module
         _ => return None,
     };
     Some(kind)
@@ -1508,6 +1834,16 @@ fn slovak_ascii_keyword(text: &str) -> Option<TokenKind> {
         "menitelny" => TokenKind::Mut,         // (no ľ, ý)
         "pokial" => TokenKind::While,          // (no ľ)
         "porovnaj" => TokenKind::Match,        // (already ASCII)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "znizit" => TokenKind::Reduce,         // reduce (no diacritic)
+        "spolu" => TokenKind::With,            // together/with (BUG-170 fix:
+                                              // was single-letter "s", collided
+                                              // with common variable names)
+        "vnutri" => TokenKind::In,             // inside/in (no diacritic;
+                                              // BUG-170 fix: was single-letter
+                                              // "v", same collision issue)
+        "implementuj" => TokenKind::Implement, // implement!
+        "chybavytlac" => TokenKind::EPrint,    // chyba-vytlac (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1519,9 +1855,15 @@ fn slovak_ascii_keyword(text: &str) -> Option<TokenKind> {
 fn finnish_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "tehtävä" => TokenKind::Task,          // task
-        "rajapintä" => TokenKind::Interface,   // interface (variant)
-        "vahvistä" => TokenKind::Assert,       // (rare variant)
-        "muuttumatön" => TokenKind::Invariant, // unchanging (variant)
+        // Native-review fix (2026-08-10): removed "rajapintä",
+        // "vahvistä", "muuttumatön" -- these appear to be
+        // artificially-umlauted misspellings of the correctly-
+        // spelled "rajapinta"/"vahvista"/"muuttumaton" (all three
+        // already in finnish_ascii_keyword), violating Finnish
+        // vowel harmony (front ä/ö don't mix with the words' own
+        // back a/o/u vowels; none of the three genuinely take an
+        // umlaut). "tehtävä"/"käytä"/"missä"/"lähtien" below are
+        // all real words that do naturally take ä, kept as-is.
         "käytä" => TokenKind::Use,             // use!
         "missä" => TokenKind::Where,           // where
         "lähtien" => TokenKind::From,          // from
@@ -1579,6 +1921,13 @@ fn finnish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tyyppi" => TokenKind::Type,           // type
         "ulkoinen" => TokenKind::Extern,       // external
         "muuttumaton" => TokenKind::Invariant, // unchanging (no ö)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "vahenna" => TokenKind::Reduce,        // reduce (no a-umlaut)
+        "kanssa" => TokenKind::With,           // with
+        "alkaen" => TokenKind::From,           // from
+        "missa" => TokenKind::Where,           // where (no a-umlaut)
+        "kayta" => TokenKind::Use,             // use (no a-umlaut)
+        "virhetulosta" => TokenKind::EPrint,   // virhe-tulosta (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1659,6 +2008,12 @@ fn catalan_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tipus" => TokenKind::Type,            // type
         "extern" => TokenKind::Extern,         // external (same as English)
         "invariant" => TokenKind::Invariant,   // invariant (same)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "parallel" => TokenKind::Parallel,     // parallel (no accent)
+        "redueix" => TokenKind::Reduce,        // reduce
+        "amb" => TokenKind::With,              // with
+        "es" => TokenKind::Is,                 // is (no accent)
+        "errorimprimeix" => TokenKind::EPrint, // error-imprimeix (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1698,7 +2053,12 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
         "ìṣù" => TokenKind::Module,            // module
         "lò" => TokenKind::Use,                // use
         "bí_ti" => TokenKind::As,              // as
-        "iṣẹ" => TokenKind::Task,              // task
+        // Native-review fix (2026-08-10): was "iṣẹ" (bare, no
+        // tone mark) -- a minimal pair with "iṣẹ́" => Fn above,
+        // differing only by a diacritic that's easy to drop when
+        // typing. Switched to a distinct root to remove the
+        // collision risk (unused in examples/, so zero-risk fix).
+        "ojúṣe" => TokenKind::Task,            // duty / responsibility
         "ọ̀nà" => TokenKind::Struct,           // way / structure
         "ibo" => TokenKind::Where,             // where (ASCII actually)
         "gbangba" => TokenKind::Pub,           // public (ASCII)
@@ -1714,6 +2074,13 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
         "àkọsílẹ̀" => TokenKind::Enum,         // record
         "dáwọ́dúró" => TokenKind::Break,       // stop / break
         "àlàfo" => TokenKind::Const,           // constant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "dínku" => TokenKind::Reduce,          // reduce/decrease
+        "pẹ̀lú" => TokenKind::With,            // with
+        "yàtọ̀" => TokenKind::Else,            // otherwise/different
+        "muṣẹ" => TokenKind::Implement,        // make happen/implement
+        "dájú" => TokenKind::Ensures,          // certain/sure
+        "àṣìṣetẹ̀" => TokenKind::EPrint,       // ashishe-te (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1724,7 +2091,10 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
 /// ɓ/ɗ/ƙ/ƴ.
 fn hausa_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
-        "ɗaya" => TokenKind::Parallel,         // parallel (uses ɗ)
+        // Native-review fix (2026-08-10): removed "ɗaya" ("one",
+        // the numeral) from TokenKind::Parallel -- no clear
+        // connection to "parallel"; "madaidaici" in the ASCII
+        // table already covers Parallel correctly.
         "ƙarya" => TokenKind::False,           // lie (uses ƙ)
         "nau'i" => TokenKind::Type,            // kind (apostrophe)
         // (Most Hausa keywords are pure ASCII; only a few use
@@ -1780,6 +2150,12 @@ fn hausa_ascii_keyword(text: &str) -> Option<TokenKind> {
         "nufin" => TokenKind::Intent,          // purpose
         "waje" => TokenKind::Extern,           // outside
         "a_canzawa" => TokenKind::Invariant,   // not changing
+        // === BUG-170 PARITY (2026-08-10) ===
+        "rage" => TokenKind::Reduce,           // reduce/decrease
+        "tare" => TokenKind::With,             // with/together
+        "hidima" => TokenKind::Task,           // task/service/duty
+        "iri" => TokenKind::Type,              // type/kind
+        "kuskurerubuta" => TokenKind::EPrint,  // kuskure-rubuta (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1789,7 +2165,10 @@ fn hausa_ascii_keyword(text: &str) -> Option<TokenKind> {
 /// resolution. Second Nordic dialect after Swedish; uses å/æ/ø.
 fn norwegian_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
-        "være" => TokenKind::Let,              // "be"
+        // Native-review fix (2026-08-10): removed "være" ("(to)
+        // be", infinitive) from TokenKind::Let -- "la" (the correct
+        // imperative "let", already in norwegian_ascii_keyword and
+        // already ASCII-safe) covers this correctly.
         "påstå" => TokenKind::Assert,          // claim / assert
         "prøv" => TokenKind::Try,              // try!
         "formål" => TokenKind::Intent,         // purpose
@@ -1844,6 +2223,20 @@ fn norwegian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "usikker" => TokenKind::Unsafe,        // unsafe
         "ekstern" => TokenKind::Extern,        // external
         "uforanderlig" => TokenKind::Invariant, // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reduser" => TokenKind::Reduce,        // reduce
+        "med" => TokenKind::With,              // with
+        "for" => TokenKind::For,               // for
+        "inni" => TokenKind::In,               // inside/in (BUG-170 fix: was
+                                              // single-letter "i", collided
+                                              // with the extremely common
+                                              // loop-counter variable name)
+        "se" => TokenKind::Ref,                // see
+        "type" => TokenKind::Type,             // type
+        "hensikt" => TokenKind::Intent,        // purpose/intent
+        "feilskriv" => TokenKind::EPrint,      // feil-skriv (error-print)
+        "prov" => TokenKind::Try,              // try (no diacritic)
+        "omrade" => TokenKind::RegionKw,       // area/region (no diacritic)
         _ => return None,
     };
     Some(kind)
@@ -1920,6 +2313,15 @@ fn danish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "extern" => TokenKind::Extern,         // external
         "uforanderlig" => TokenKind::Invariant, // invariant
         "optaelling" => TokenKind::Enum,       // (no æ)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reducer" => TokenKind::Reduce,        // reduce
+        "med" => TokenKind::With,              // with
+        "for" => TokenKind::For,               // for
+        "indeni" => TokenKind::In,             // inside/in (BUG-170 fix: was
+                                              // single-letter "i", collided
+                                              // with the extremely common
+                                              // loop-counter variable name)
+        "fejludskriv" => TokenKind::EPrint,    // fejl-udskriv (error-print)
         _ => return None,
     };
     Some(kind)
@@ -1976,6 +2378,10 @@ fn armenian_keyword(text: &str) -> Option<TokenKind> {
         "տեսակ" => TokenKind::Type,            // tesak (type / kind)
         "արտաքին" => TokenKind::Extern,        // artak'in (external)
         "անփոփոխ" => TokenKind::Invariant,     // anpopox (unchanging)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "կրճատում" => TokenKind::Reduce,       // kertsatum (reduction)
+        "հետ" => TokenKind::With,              // het (with)
+        "սխալիտպել" => TokenKind::EPrint,      // skhali-tpel (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2032,6 +2438,10 @@ fn georgian_keyword(text: &str) -> Option<TokenKind> {
         "ტიპი" => TokenKind::Type,             // tipi (type)
         "გარე" => TokenKind::Extern,           // gare (outer)
         "უცვლელი" => TokenKind::Invariant,     // utsvleli (unchanging)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "შემცირება" => TokenKind::Reduce,      // shemtsireba (reduction)
+        "თან" => TokenKind::With,              // tan (with)
+        "შეცდომაბეჭდვა" => TokenKind::EPrint,  // shecdoma-bechdva (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2067,6 +2477,28 @@ fn hungarian_keyword(text: &str) -> Option<TokenKind> {
         "felsorolás" => TokenKind::Enum,       // enumeration
         "nyilvános" => TokenKind::Pub,         // public
         "használd" => TokenKind::Use,          // use!
+        // === BUG-170 PARITY (2026-08-10) ===
+        "tiszta" => TokenKind::Pure,           // pure
+        "csökkent" => TokenKind::Reduce,       // reduce
+        "együtt" => TokenKind::With,           // together/with
+        "feladat" => TokenKind::Task,          // task
+        "legyen" => TokenKind::Let,            // let it be
+        "ha" => TokenKind::If,                 // if
+        "folytat" => TokenKind::Continue,      // continue
+        "minden" => TokenKind::For,            // every/for
+        "belül" => TokenKind::In,              // inside/in
+        "kezdve" => TokenKind::From,           // starting from
+        "határig" => TokenKind::To,            // to the limit/until
+        "szerkezet" => TokenKind::Struct,      // structure
+        "illeszkedik" => TokenKind::Match,     // match/fit
+        "akkor" => TokenKind::Then,            // then
+        "megvalósít" => TokenKind::Implement,  // implement
+        "ahol" => TokenKind::Where,            // where
+        "van" => TokenKind::Is,                // is/exists
+        "változatlan" => TokenKind::Invariant, // unchanging
+        "nyomtat" => TokenKind::Print,         // print
+        "hibanyomtat" => TokenKind::EPrint,    // hiba-nyomtat (error-print)
+        "modul" => TokenKind::Module,          // module
         _ => return None,
     };
     Some(kind)
@@ -2095,6 +2527,37 @@ fn hungarian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "fuggveny" => TokenKind::Fn,           // function (no diacritic)
         "valtozo" => TokenKind::Mut,           // mutable (no diacritic)
         "valositsd_meg" => TokenKind::Implement, // implement
+        // === BUG-170 PARITY (2026-08-10) ===
+        "kulso" => TokenKind::Extern,          // external (no diacritic)
+        "parhuzamos" => TokenKind::Parallel,   // parallel (no diacritic)
+        "csokkent" => TokenKind::Reduce,       // reduce (no diacritic)
+        "egyutt" => TokenKind::With,           // together/with (no diacritic)
+        "egyesit" => TokenKind::Join,          // join (no diacritic)
+        "visszater" => TokenKind::Return,      // return (no diacritic)
+        "kulonben" => TokenKind::Else,         // otherwise (no diacritic)
+        "amig" => TokenKind::While,            // while (no diacritic)
+        "torj" => TokenKind::Break,            // break! (no diacritic)
+        "belul" => TokenKind::In,              // inside/in (no diacritic)
+        "nezd" => TokenKind::Ref,              // look! (no diacritic)
+        "kezdve" => TokenKind::From,           // starting from
+        "hatarig" => TokenKind::To,            // to the limit/until
+        "felsorolas" => TokenKind::Enum,       // enumeration (no diacritic)
+        "felulet" => TokenKind::Interface,     // interface (no diacritic)
+        "allando" => TokenKind::Const,         // constant (no diacritic)
+        "tipus" => TokenKind::Type,            // type (no diacritic)
+        "metodusok" => TokenKind::Methods,     // methods (no diacritic)
+        "cel" => TokenKind::Intent,            // goal (no diacritic)
+        "hasznald" => TokenKind::Use,          // use!
+        "igenyel" => TokenKind::Requires,      // requires
+        "garantal" => TokenKind::Ensures,      // guarantees (no diacritic)
+        "valtozatlan" => TokenKind::Invariant, // unchanging (no diacritic)
+        "allitsd" => TokenKind::Assert,        // assert! (no diacritic)
+        "bizonyitsd" => TokenKind::Prove,      // prove! (no diacritic)
+        "hibanyomtass" => TokenKind::EPrint,   // hiba-nyomtass (error-print)
+        "probald" => TokenKind::Try,           // try! (no diacritic)
+        "nyilvanos" => TokenKind::Pub,         // public (no diacritic)
+        "veszelyes" => TokenKind::Unsafe,      // dangerous (no diacritic)
+        "tartomany" => TokenKind::RegionKw,    // region (no diacritic)
         _ => return None,
     };
     Some(kind)
@@ -2126,6 +2589,33 @@ fn czech_keyword(text: &str) -> Option<TokenKind> {
         "použij" => TokenKind::Use,            // use!
         "proměnný" => TokenKind::Mut,          // variable / mutable
         "odpovídej" => TokenKind::Match,       // correspond! / match
+        // === BUG-170 PARITY (2026-08-10) ===
+        "funkce" => TokenKind::Fn,             // function
+        "zmenši" => TokenKind::Reduce,         // reduce
+        "spolu" => TokenKind::With,            // together/with
+        "spoj" => TokenKind::Join,             // join
+        "pokud" => TokenKind::If,              // if
+        "jinak" => TokenKind::Else,            // otherwise
+        "dokud" => TokenKind::While,           // while
+        "pro" => TokenKind::For,               // for
+        "uvnitř" => TokenKind::In,             // inside/in (BUG-170 fix: was
+                                              // single-letter "v", collided
+                                              // with common variable names)
+        "viz" => TokenKind::Ref,               // see
+        "od" => TokenKind::From,               // from
+        "do" => TokenKind::To,                 // to
+        "struktura" => TokenKind::Struct,      // structure
+        "pak" => TokenKind::Then,              // then
+        "implementuj" => TokenKind::Implement, // implement!
+        "kde" => TokenKind::Where,             // where
+        "je" => TokenKind::Is,                 // is
+        "konstanta" => TokenKind::Const,       // constant
+        "typ" => TokenKind::Type,              // type
+        "metody" => TokenKind::Methods,        // methods
+        "chybavypiš" => TokenKind::EPrint,     // chyba-vypiš (error-print)
+        "zkus" => TokenKind::Try,              // try
+        "modul" => TokenKind::Module,          // module
+        "oblast" => TokenKind::RegionKw,       // area/region
         _ => return None,
     };
     Some(kind)
@@ -2182,6 +2672,11 @@ fn czech_ascii_keyword(text: &str) -> Option<TokenKind> {
         "pouzij" => TokenKind::Use,            // (no diacritic)
         "promenny" => TokenKind::Mut,          // (no diacritic)
         "odpovidej" => TokenKind::Match,       // (no diacritic)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "zmensi" => TokenKind::Reduce,         // reduce (no diacritic)
+        "spolu" => TokenKind::With,            // together/with
+        "uvnitr" => TokenKind::In,             // inside/in (no diacritic)
+        "chybatiskni" => TokenKind::EPrint,    // chyba-tiskni (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2210,6 +2705,37 @@ fn swedish_keyword(text: &str) -> Option<TokenKind> {
         "oföränderlig" => TokenKind::Invariant, // unchanging
         "uppräkning" => TokenKind::Enum,       // enumeration
         "använd" => TokenKind::Use,            // use!
+        // === BUG-170 PARITY (2026-08-10) ===
+        "funktion" => TokenKind::Fn,           // function
+        "ren" => TokenKind::Pure,              // pure
+        "extern" => TokenKind::Extern,         // external
+        "parallell" => TokenKind::Parallel,    // parallel
+        "reducera" => TokenKind::Reduce,       // reduce
+        "med" => TokenKind::With,              // with
+        "uppgift" => TokenKind::Task,          // task
+        "om" => TokenKind::If,                 // if
+        "annars" => TokenKind::Else,           // otherwise
+        "medan" => TokenKind::While,           // while
+        "bryt" => TokenKind::Break,            // break
+        "inuti" => TokenKind::In,              // inside/in (BUG-170 fix: was
+                                              // single-letter "i", collided
+                                              // with the extremely common
+                                              // loop-counter variable name)
+        "se" => TokenKind::Ref,                // see
+        "till" => TokenKind::To,               // to
+        "struktur" => TokenKind::Struct,       // structure
+        "matcha" => TokenKind::Match,          // match
+        "implementera" => TokenKind::Implement, // implement
+        "konstant" => TokenKind::Const,        // constant
+        "typ" => TokenKind::Type,              // type
+        "metoder" => TokenKind::Methods,       // methods
+        "syfte" => TokenKind::Intent,          // purpose
+        "bevisa" => TokenKind::Prove,          // prove
+        "skriv" => TokenKind::Print,           // write/print
+        "felskriv" => TokenKind::EPrint,       // fel-skriv (error-print)
+        "modul" => TokenKind::Module,          // module
+        "offentlig" => TokenKind::Pub,         // public
+        "område" => TokenKind::RegionKw,       // area/region
         _ => return None,
     };
     Some(kind)
@@ -2219,7 +2745,10 @@ fn swedish_keyword(text: &str) -> Option<TokenKind> {
 fn swedish_ascii_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "funktion" => TokenKind::Fn,           // function
-        "vara" => TokenKind::Let,              // be
+        // Native-review fix (2026-08-10): removed "vara" ("(to) be",
+        // infinitive) from TokenKind::Let -- "lat" (below, the
+        // no-diacritic form of the correct "låt") already covers
+        // this correctly.
         "struktur" => TokenKind::Struct,       // structure
         "konstant" => TokenKind::Const,        // constant
         "offentlig" => TokenKind::Pub,         // public
@@ -2260,6 +2789,18 @@ fn swedish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "anvand" => TokenKind::Use,            // (no ä)
         "for" => TokenKind::For,               // (no ö — could conflict; pragma-gated safe)
         "fran" => TokenKind::From,             // (no å)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reducera" => TokenKind::Reduce,       // reduce
+        "med" => TokenKind::With,              // with
+        "inuti" => TokenKind::In,              // inside/in (no diacritic;
+                                              // BUG-170 fix: was single-letter
+                                              // "i", same collision issue)
+        "granssnitt" => TokenKind::Interface,  // interface (no diacritic)
+        "garanterar" => TokenKind::Ensures,    // guarantees/ensures
+        "oforanderlig" => TokenKind::Invariant, // invariant (no diacritic)
+        "bekrafta" => TokenKind::Assert,       // confirm/assert (no diacritic)
+        "felskriv" => TokenKind::EPrint,       // fel-skriv (error-print)
+        "omrade" => TokenKind::RegionKw,       // area/region (no diacritic)
         _ => return None,
     };
     Some(kind)
@@ -2312,6 +2853,14 @@ fn filipino_ascii_keyword(text: &str) -> Option<TokenKind> {
         "layunin" => TokenKind::Intent,        // purpose
         "uri" => TokenKind::Type,              // type / kind
         "panlabas" => TokenKind::Extern,       // outside
+        // === BUG-170 PARITY (2026-08-10) ===
+        "bawasan" => TokenKind::Reduce,        // reduce/decrease
+        "kasama" => TokenKind::With,           // with/along with
+        "para" => TokenKind::For,              // for
+        "saka" => TokenKind::Then,             // and then
+        "ugnayan" => TokenKind::Interface,     // interface/connection
+        "walangpalit" => TokenKind::Invariant, // walang-palit (unchanging)
+        "pagkakamaliisulat" => TokenKind::EPrint, // pagkakamali-isulat (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2369,6 +2918,12 @@ fn vietnamese_keyword(text: &str) -> Option<TokenKind> {
         "đặt" => TokenKind::Let,              // (set / let)
         "sai" => TokenKind::False,            // (false / wrong)
         "bên_ngoài" => TokenKind::Extern,     // (external)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "giảm" => TokenKind::Reduce,          // (reduce)
+        "với" => TokenKind::With,             // (with)
+        "trong" => TokenKind::In,             // (in)
+        "in" => TokenKind::Print,             // (print)
+        "lỗi_in" => TokenKind::EPrint,        // (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2439,6 +2994,12 @@ fn romanian_keyword(text: &str) -> Option<TokenKind> {
         "fie" => TokenKind::Let,              // (let it be) — ASCII
         "pur" => TokenKind::Pure,             // (pure) — ASCII
         "paralel" => TokenKind::Parallel,     // (parallel) — ASCII
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reduce" => TokenKind::Reduce,        // (reduce)
+        "cu" => TokenKind::With,              // (with)
+        "în" => TokenKind::In,                // (in)
+        "din" => TokenKind::From,             // (from)
+        "eroaretipărește" => TokenKind::EPrint, // (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2497,6 +3058,13 @@ fn romanian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "fie" => TokenKind::Let,
         "pur" => TokenKind::Pure,
         "paralel" => TokenKind::Parallel,
+        // === BUG-170 PARITY (2026-08-10) ===
+        "extern" => TokenKind::Extern,
+        "reduce" => TokenKind::Reduce,
+        "cu" => TokenKind::With,
+        "in" => TokenKind::In,                // (no diacritic alt of "in")
+        "din" => TokenKind::From,
+        "eroaretipareste" => TokenKind::EPrint, // eroare-tipareste (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2553,6 +3121,10 @@ fn dutch_ascii_keyword(text: &str) -> Option<TokenKind> {
         "type" => TokenKind::Type,            // type (loanword)
         "extern" => TokenKind::Extern,        // external (same as English alias)
         "invariant" => TokenKind::Invariant,  // invariant (same)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "verminder" => TokenKind::Reduce,     // reduce
+        "met" => TokenKind::With,             // with
+        "foutdruk" => TokenKind::EPrint,      // fout-druk (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2610,6 +3182,10 @@ fn thai_keyword(text: &str) -> Option<TokenKind> {
         "ชนิด" => TokenKind::Type,           // chanit (kind / type)
         "ภายนอก" => TokenKind::Extern,       // phainok (external)
         "ไม่เปลี่ยน" => TokenKind::Invariant, // mai plian (invariant)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ลด" => TokenKind::Reduce,           // lot (reduce/decrease)
+        "กับ" => TokenKind::With,            // kap (with)
+        "ข้อผิดพลาดพิมพ์" => TokenKind::EPrint, // kho-phit-phlat-phim (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2704,6 +3280,14 @@ fn polish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "typ" => TokenKind::Type,             // type
         "zewnetrzny" => TokenKind::Extern,    // external (no diacritic alt)
         "niezmienny" => TokenKind::Invariant, // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "zmniejsz" => TokenKind::Reduce,      // reduce/decrease
+        "razem" => TokenKind::With,           // together/with (BUG-170 fix:
+                                              // was single-letter "z", collided
+                                              // with common variable names)
+        "do" => TokenKind::To,                // to/until
+        "obszar" => TokenKind::RegionKw,      // area/region
+        "bladdrukuj" => TokenKind::EPrint,    // blad-drukuj (error-print, no diacritic)
         _ => return None,
     };
     Some(kind)
@@ -2740,6 +3324,30 @@ fn turkish_keyword(text: &str) -> Option<TokenKind> {
         "yapı" => TokenKind::Struct,          // yapi (structure)
         "sıralama" => TokenKind::Enum,        // siralama (enumeration)
         "modül" => TokenKind::Module,         // modul (module)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "saf" => TokenKind::Pure,             // pure
+        "paralel" => TokenKind::Parallel,     // parallel
+        "azalt" => TokenKind::Reduce,         // reduce
+        "ile" => TokenKind::With,             // with
+        "olsun" => TokenKind::Let,            // let it be
+        "yoksa" => TokenKind::Else,           // else
+        "iken" => TokenKind::While,           // while
+        "devam" => TokenKind::Continue,       // continue
+        "den" => TokenKind::From,             // from
+        "kadar" => TokenKind::To,             // until/to
+        "sonra" => TokenKind::Then,           // then
+        "uygula" => TokenKind::Implement,     // implement
+        "nerede" => TokenKind::Where,         // where
+        "olur" => TokenKind::Is,              // is/becomes
+        "sabit" => TokenKind::Const,          // constant
+        "tip" => TokenKind::Type,             // type
+        "metotlar" => TokenKind::Methods,     // methods
+        "kullan" => TokenKind::Use,           // use
+        "gerek" => TokenKind::Requires,       // requires
+        "garanti" => TokenKind::Ensures,      // guarantee
+        "hatayazdır" => TokenKind::EPrint,    // hata-yazdır (error-print)
+        "dene" => TokenKind::Try,             // try
+        "genel" => TokenKind::Pub,            // general/public
         _ => return None,
     };
     Some(kind)
@@ -2804,6 +3412,15 @@ fn turkish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tip" => TokenKind::Type,             // type
         "dis" => TokenKind::Extern,           // external (no diacritic)
         "degismez" => TokenKind::Invariant,   // invariant (no diacritic)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "azalt" => TokenKind::Reduce,         // reduce
+        "ile" => TokenKind::With,             // with
+        "birlestir" => TokenKind::Join,       // join/unite (no diacritic)
+        "eger" => TokenKind::If,              // if (no diacritic)
+        "icinde" => TokenKind::In,            // inside/in (no diacritic)
+        "bak" => TokenKind::Ref,              // look/see
+        "sonra" => TokenKind::Then,           // then/after
+        "hatayazdir" => TokenKind::EPrint,    // hata-yazdir (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2876,6 +3493,10 @@ fn malay_ascii_keyword(text: &str) -> Option<TokenKind> {
         "jenis" => TokenKind::Type,           // type / kind
         "luaran" => TokenKind::Extern,        // external (Malay)
         "tetap" => TokenKind::Invariant,      // fixed
+        // === BUG-170 PARITY (2026-08-10) ===
+        "kurangkan" => TokenKind::Reduce,     // reduce
+        "dengan" => TokenKind::With,          // with
+        "ralatcetak" => TokenKind::EPrint,    // ralat-cetak (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2948,6 +3569,10 @@ fn swahili_ascii_keyword(text: &str) -> Option<TokenKind> {
         "aina" => TokenKind::Type,            // type / kind
         "nje" => TokenKind::Extern,           // outside / external
         "isiyobadilika" => TokenKind::Invariant, // unchanging
+        // === BUG-170 PARITY (2026-08-10) ===
+        "punguza" => TokenKind::Reduce,       // reduce
+        "na" => TokenKind::With,              // with/and
+        "kosachapisha" => TokenKind::EPrint,  // kosa-chapisha (error-print)
         _ => return None,
     };
     Some(kind)
@@ -2980,7 +3605,11 @@ fn italian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "mentre" => TokenKind::While,         // while
         "per" => TokenKind::For,              // for / "for each"
         "da" => TokenKind::From,              // from
-        "fino" => TokenKind::To,              // until / to
+        "finoa" => TokenKind::To,             // fino-a (until-to, fused) --
+                                              // native-review fix: bare "fino"
+                                              // is grammatically incomplete for
+                                              // this meaning, Italian needs
+                                              // "fino a" ("conta fino a 10")
         "rompere" => TokenKind::Break,        // break
         "interrompere" => TokenKind::Break,   // interrupt (alt)
         "continuare" => TokenKind::Continue,  // continue
@@ -3024,6 +3653,15 @@ fn italian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tipo" => TokenKind::Type,            // type
         "esterno" => TokenKind::Extern,       // external
         "invariante" => TokenKind::Invariant, // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "ridurre" => TokenKind::Reduce,       // reduce
+        "con" => TokenKind::With,             // with
+        "in" => TokenKind::In,                // in
+        "risulta" => TokenKind::Is,           // results in/is (BUG-170 fix:
+                                              // was single-letter "e", collided
+                                              // with common variable names and
+                                              // literally means "and")
+        "errorestampare" => TokenKind::EPrint, // errore-stampare (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3098,6 +3736,10 @@ fn arabic_keyword(text: &str) -> Option<TokenKind> {
         "نوع" => TokenKind::Type,             // naw' (type / kind)
         "خارجي" => TokenKind::Extern,         // khārijī (external)
         "مستقر" => TokenKind::Invariant,      // mustaqarr (stable / invariant — avoids collision with Urdu/Persian ثابت=Const)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "تقليل" => TokenKind::Reduce,         // taqlīl (reduction)
+        "مع" => TokenKind::With,              // ma'a (with)
+        "خطأاطبع" => TokenKind::EPrint,       // khata-itba (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3171,6 +3813,10 @@ fn greek_keyword(text: &str) -> Option<TokenKind> {
         "τύπος" => TokenKind::Type,           // týpos (type)
         "εξωτερικό" => TokenKind::Extern,     // exoterikó (external)
         "αμετάβλητο" => TokenKind::Invariant, // ametávlito (invariant)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "μείωση" => TokenKind::Reduce,        // meíosi (reduction)
+        "με" => TokenKind::With,              // me (with)
+        "σφάλμαεκτύπωση" => TokenKind::EPrint, // sfálma-ektýposi (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3201,7 +3847,15 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "אם" => TokenKind::If,                // im (if)
         "אחרת" => TokenKind::Else,            // aheret (else / otherwise)
         "כאשר" => TokenKind::While,           // kasher (while / when)
-        "עבור" => TokenKind::For,             // avur (for / "on behalf of")
+        "לכל" => TokenKind::For,              // le-kol (for each) -- native-
+                                              // review fix: was "עבור"
+                                              // ("for"/"on behalf of",
+                                              // benefactive), which doesn't
+                                              // read as introducing loop
+                                              // iteration; "לכל" mirrors the
+                                              // same successful pattern
+                                              // already used by the closely
+                                              // related Arabic table ("لكل")
         "בתוך" => TokenKind::In,              // betoch (inside)
         "מתוך" => TokenKind::From,            // mitokh (from)
         "עד" => TokenKind::To,                // ad (until)
@@ -3247,6 +3901,10 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "טיפוס" => TokenKind::Type,           // tipus (type — alt loanword)
         "חיצוני" => TokenKind::Extern,        // khitsoni (external)
         "בלתי_משתנה" => TokenKind::Invariant, // bilti_mishtaneh (unchanging)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "הפחתה" => TokenKind::Reduce,         // hafchata (reduction)
+        "עם" => TokenKind::With,              // im (with)
+        "שגיאההדפס" => TokenKind::EPrint,     // shegiah-hadpes (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3331,6 +3989,10 @@ fn indonesian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "jenis" => TokenKind::Type,           // kind (alt)
         "eksternal" => TokenKind::Extern,     // external
         "invarian" => TokenKind::Invariant,   // invariant (loanword)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "kurangi" => TokenKind::Reduce,       // reduce
+        "dengan" => TokenKind::With,          // with
+        "kesalahancetak" => TokenKind::EPrint, // kesalahan-cetak (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3445,6 +4107,10 @@ fn portuguese_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tipo" => TokenKind::Type,            // type
         "externo" => TokenKind::Extern,       // external
         "invariante" => TokenKind::Invariant, // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reduzir" => TokenKind::Reduce,       // reduce
+        "com" => TokenKind::With,             // with
+        "erroimprimir" => TokenKind::EPrint,  // erro-imprimir (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3522,6 +4188,10 @@ fn spanish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "tipo" => TokenKind::Type,            // type
         "externo" => TokenKind::Extern,       // external
         "invariante" => TokenKind::Invariant, // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reducir" => TokenKind::Reduce,       // reduce
+        "con" => TokenKind::With,             // with
+        "errorimprimir" => TokenKind::EPrint, // error-imprimir (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3547,7 +4217,11 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "retourne" => TokenKind::Return,      // return! (imperative)
         "si" => TokenKind::If,                // if
         "sinon" => TokenKind::Else,           // else
-        "tandis" => TokenKind::While,         // while
+        "tantque" => TokenKind::While,        // tant-que (as-long-as, fused) --
+                                              // native-review fix: bare "tandis"
+                                              // is grammatically incomplete in
+                                              // French, it only means "while" as
+                                              // part of "tandis que"
         "pour" => TokenKind::For,             // for
         "dans" => TokenKind::In,              // in
         "depuis" => TokenKind::From,          // from
@@ -3569,6 +4243,20 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "vrai" => TokenKind::True,            // true
         "faux" => TokenKind::False,           // false
         "imprimer" => TokenKind::Print,       // print
+        "imprime" => TokenKind::Print,        // print! (imperative) -- native-
+                                              // review fix: was in the NATIVE
+                                              // table as accented "imprimé" (a
+                                              // past participle, "printed" --
+                                              // grammatically odd as a command),
+                                              // but the correct imperative form
+                                              // "imprime" has no accent, so it
+                                              // belongs here in the ASCII table
+                                              // instead (the native table is
+                                              // only reachable for non-ASCII
+                                              // text -- a pure-ASCII spelling
+                                              // placed there is unreachable dead
+                                              // code, the same bug class BUG-170
+                                              // found in Pashto)
         "afficher" => TokenKind::Print,       // display (alt)
         // === PURITY / PARALLEL ===
         "pur" => TokenKind::Pure,             // pure
@@ -3583,7 +4271,13 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "est" => TokenKind::Is,               // is
         // === CONCURRENCY ===
         "essayer" => TokenKind::Try,          // try
-        "tache" => TokenKind::Task,           // task (no accent alt)
+        "travail" => TokenKind::Task,         // work/task -- native-review fix:
+                                              // "tache" (no accent) is a REAL,
+                                              // different French word meaning
+                                              // "stain"; only "tâche" (with the
+                                              // circumflex) means "task", so the
+                                              // accent-free spelling silently
+                                              // meant something else entirely
         "joindre" => TokenKind::Join,         // join
         // === EMBEDDED ===
         "dangereux" => TokenKind::Unsafe,     // dangerous
@@ -3593,6 +4287,13 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "type" => TokenKind::Type,            // type
         "externe" => TokenKind::Extern,       // external
         "invariant" => TokenKind::Invariant,  // invariant
+        // === BUG-170 PARITY (2026-08-10) ===
+        "parallele" => TokenKind::Parallel,   // parallel (no accent)
+        "reduire" => TokenKind::Reduce,       // reduce (no accent)
+        "avec" => TokenKind::With,            // with
+        "enumeration" => TokenKind::Enum,     // enumeration (no accent)
+        "region" => TokenKind::RegionKw,      // region (no accent)
+        "erreurimprimer" => TokenKind::EPrint, // erreur-imprimer (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3661,6 +4362,13 @@ fn german_ascii_keyword(text: &str) -> Option<TokenKind> {
         "typ" => TokenKind::Type,             // type
         "extern" => TokenKind::Extern,        // external (same as English alias!)
         "unveraenderlich" => TokenKind::Invariant, // invariant (no umlaut alt)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "reduzieren" => TokenKind::Reduce,    // reduce
+        "mit" => TokenKind::With,             // with
+        "aufzaehlung" => TokenKind::Enum,     // enumeration (no umlaut)
+        "oeffentlich" => TokenKind::Pub,      // public (no umlaut)
+        "bereich" => TokenKind::RegionKw,     // region/area
+        "fehlerdrucken" => TokenKind::EPrint, // fehler-drucken (error-print)
         _ => return None,
     };
     Some(kind)
@@ -3692,10 +4400,15 @@ fn spanish_keyword(text: &str) -> Option<TokenKind> {
         "métodos" => TokenKind::Methods,      // methods
         "región" => TokenKind::RegionKw,      // region
         // === BOUNDS ===
-        // `dónde` (interrogative "where?") is distinct from `donde`
-        // (relative "where"); both have a use, but only the accented
-        // form is non-ASCII so safe to register without pragma gate.
-        "dónde" => TokenKind::Where,          // where (interrogative)
+        // Native-review fix (2026-08-10): this table used to register
+        // `dónde` (interrogative "where?", as in "¿Dónde estás?") for
+        // TokenKind::Where. vāṇी's `where` is a non-interrogative
+        // clause/statement usage, so the grammatically correct
+        // register is the RELATIVE `donde` (no accent, "el lugar
+        // donde vivo" = "the place where I live") -- which
+        // `spanish_ascii_keyword` already registers correctly.
+        // Removed the mismatched interrogative entry rather than
+        // keep a wrong-register non-ASCII duplicate.
         _ => return None,
     };
     Some(kind)
@@ -3709,6 +4422,16 @@ fn spanish_keyword(text: &str) -> Option<TokenKind> {
 /// etc.) don't accidentally collide with user identifiers in
 /// non-pragma files. Pragma threading queued for v2 to unlock
 /// the full German keyword set.
+///
+/// Native-review pass (2026-08-10): removed 3 semantically wrong
+/// entries found while auditing this table -- "auflösen" (means
+/// "to dissolve/resolve", not "break") -> `TokenKind::Break`,
+/// "ausführen"/"ausführe" (means "to execute", not "to print") ->
+/// `TokenKind::Print`, "möglichkeit" (means "possibility", not
+/// "intent") -> `TokenKind::Intent`. All three concepts are already
+/// correctly covered by `german_ascii_keyword` ("brechen", "drucken"/
+/// "schreiben", "absicht" respectively), so no replacement was
+/// needed here.
 fn german_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
@@ -3719,7 +4442,6 @@ fn german_keyword(text: &str) -> Option<TokenKind> {
         "während" => TokenKind::While,         // while (has ä)
         "für" => TokenKind::For,               // for (has ü)
         "zurück" => TokenKind::Return,         // return / back (has ü)
-        "auflösen" => TokenKind::Break,        // resolve / break (has ö)
         // === REFS / MUT ===
         "veränderlich" => TokenKind::Mut,      // changeable / mutable (has ä)
         "veränderbar" => TokenKind::Mut,       // alt mutable form (has ä)
@@ -3729,13 +4451,9 @@ fn german_keyword(text: &str) -> Option<TokenKind> {
         "überprüfe" => TokenKind::Assert,      // verify! imperative (has ü)
         "prüfen" => TokenKind::Assert,         // check (has ü)
         "prüfe" => TokenKind::Assert,          // check! imperative (has ü)
-        // === PRINT ===
-        "ausführen" => TokenKind::Print,       // execute (has ü)
-        "ausführe" => TokenKind::Print,        // execute! imperative (has ü)
         // === CONCURRENCY ===
         "ausführbar" => TokenKind::Task,       // executable / task (has ü)
         // === SOV-S7 PARITY ===
-        "möglichkeit" => TokenKind::Intent,    // possibility / intent (has ö)
         "äußere" => TokenKind::Extern,         // external (has ä + ß)
         "äußerer" => TokenKind::Extern,        // external (declined form, has ä + ß)
         _ => return None,
@@ -3815,6 +4533,10 @@ fn korean_keyword(text: &str) -> Option<TokenKind> {
         "타입" => TokenKind::Type,           // taip (type — loanword)
         "외부" => TokenKind::Extern,         // oebu (external)
         "불변" => TokenKind::Invariant,      // bulbyeon (invariant)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "축소" => TokenKind::Reduce,         // chukso (reduction)
+        "함께" => TokenKind::With,           // hamkke (together/with)
+        "오류출력" => TokenKind::EPrint,     // oryu-chullyeok (error-output)
         _ => return None,
     };
     Some(kind)
@@ -3892,6 +4614,11 @@ fn japanese_keyword(text: &str) -> Option<TokenKind> {
         "型" => TokenKind::Type,             // kata (type)
         "外部" => TokenKind::Extern,         // gaibu (external)
         "不変" => TokenKind::Invariant,      // fuhen (invariant)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "削減" => TokenKind::Reduce,         // sakugen (reduction)
+        "と" => TokenKind::With,             // to (with)
+        "中" => TokenKind::In,               // naka (inside/in)
+        "エラー表示" => TokenKind::EPrint,   // eraa-hyouji (error-display)
         _ => return None,
     };
     Some(kind)
@@ -3914,7 +4641,10 @@ fn mandarin_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
         "函数" => TokenKind::Fn,             // hánshù (function)
-        "函数主要" => TokenKind::Fn,         // alt with main; kept for completeness
+        // Native-review fix (2026-08-10): removed "函数主要"
+        // ("function main", a compound meaning specifically the
+        // *entry-point* function) -- not a valid general synonym
+        // for the `fn` keyword, which declares ANY function.
         "让" => TokenKind::Let,              // ràng (let / make)
         "结构" => TokenKind::Struct,         // jiégòu (structure)
         "结构体" => TokenKind::Struct,       // jiégòutǐ (struct body)
@@ -3980,6 +4710,12 @@ fn mandarin_keyword(text: &str) -> Option<TokenKind> {
         "意图" => TokenKind::Intent,         // yìtú (intention)
         "类型" => TokenKind::Type,           // lèixíng (type)
         "外部" => TokenKind::Extern,         // wàibù (external)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "减少" => TokenKind::Reduce,         // jiǎnshǎo (reduce/decrease)
+        "与" => TokenKind::With,             // yǔ (with/and)
+        "在" => TokenKind::In,               // zài (at/in)
+        "是" => TokenKind::Is,               // shì (is)
+        "错误打印" => TokenKind::EPrint,     // cuòwù-dǎyìn (error-print)
         _ => return None,
     };
     Some(kind)
@@ -4007,7 +4743,6 @@ fn french_keyword(text: &str) -> Option<TokenKind> {
         // === PRINT ===
         "écrire" => TokenKind::Print,        // to write
         "écris" => TokenKind::Print,         // write! (imperative)
-        "imprimé" => TokenKind::Print,       // printed (past participle alt)
         // === BOUNDS ===
         "où" => TokenKind::Where,            // where (très naturel)
         // === CONCURRENCY ===
@@ -4029,11 +4764,18 @@ fn french_keyword(text: &str) -> Option<TokenKind> {
 /// first statement parser applies directly — no SOV plumbing.
 /// Uses Arabic 0-9 numerals (Cyrillic numeric letter notation is
 /// archaic, not used in modern Russian).
+///
+/// Native-review pass (2026-08-10): removed "дело" ("matter/
+/// affair/business", not "work/function") from `TokenKind::Fn` --
+/// "функция" alone already covers it correctly. Also fixed
+/// "попытка" (a noun, "an attempt") -> `TokenKind::Try` to
+/// "попробуй" (the imperative "try!"), matching the imperative
+/// mood already used by this table's other command-like entries
+/// ("смотри", "верни").
 fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         // === DECLARATIONS ===
         "функция" => TokenKind::Fn,           // funktsiya (function — loanword)
-        "дело" => TokenKind::Fn,              // delo (work — alt)
         "пусть" => TokenKind::Let,            // pust' (let — natural Russian)
         "структура" => TokenKind::Struct,     // struktura (structure)
         "перечисление" => TokenKind::Enum,    // perechislenie (enumeration)
@@ -4085,7 +4827,7 @@ fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
         "где" => TokenKind::Where,            // gde (where)
         "есть" => TokenKind::Is,              // yest' (is — Russian copula)
         // === CONCURRENCY ===
-        "попытка" => TokenKind::Try,          // popytka (attempt/try)
+        "попробуй" => TokenKind::Try,         // poprobuy (try! — imperative)
         "задача" => TokenKind::Task,          // zadacha (task)
         "соединить" => TokenKind::Join,       // soyedinit' (join/unite)
         // === EMBEDDED ===
@@ -4097,6 +4839,10 @@ fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
         "тип" => TokenKind::Type,             // tip (type)
         "внешний" => TokenKind::Extern,       // vneshniy (external)
         "инвариант" => TokenKind::Invariant,  // invariant (loanword)
+        // === BUG-170 PARITY (2026-08-10) ===
+        "сократить" => TokenKind::Reduce,     // sokratit' (reduce/shorten)
+        "совместно" => TokenKind::With,       // sovmestno (jointly/with)
+        "ошибкапечатать" => TokenKind::EPrint, // oshibka-pechatat' (error-print)
         _ => return None,
     };
     Some(kind)

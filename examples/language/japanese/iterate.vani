@@ -7,7 +7,7 @@
 目的 "Japanese Vec iteration smoke-test";
 
 関数 main() -> i64 {
-  代入 配列: Vec<i64> = vec(0);
+  代入 配列: Vec<i64> = vec();
   配列 = push(配列, 10);
   配列 = push(配列, 20);
   配列 = push(配列, 30);

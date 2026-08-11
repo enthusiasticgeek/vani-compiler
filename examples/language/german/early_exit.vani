@@ -6,7 +6,10 @@
 
 intent "break and continue in loops";
 
-// `auflösen` = break; English `continue` (no German equiv in v1)
+// This file uses English `break`/`continue` (no German alias for
+// either in v1 -- an earlier "auflösen" = break claim here was
+// wrong: auflösen actually means "to dissolve/resolve", not
+// "break", and was never a registered keyword for this file to use)
 
 fn count_odd(limit: i64) -> i64 {
   let count: i64 = 0;
@@ -21,6 +24,6 @@ fn count_odd(limit: i64) -> i64 {
 
 fn main() -> i64 {
   überprüfe count_odd(4) == 2;
-  ausführe count_odd(4);
+  drucken count_odd(4);
   zurück 0;
 }

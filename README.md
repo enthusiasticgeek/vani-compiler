@@ -117,14 +117,14 @@ unavoidable stays in English:
 The Sanskrit version prints `३` — the same value `3`, rendered in
 Devanagari numerals to match the source script. The entry point can be
 spelled `मुख्य` (mukhya), `प्रमुख` (pramukh), `प्रधान` (pradhan), or
-`main` — the parser canonicalizes any of the four. `Vec<T>` can be
-written `सूची<T>` too (kept as `Vec<i64>` above for readability — both
-compile identically). What's left in English is structurally
-unavoidable in the current v1 surface: builtin function *names*
-(`vec`, `sort`, `vec_kth_smallest`) aren't translated (only language
-*keywords* and *type* names are), and `_return` — the identifier an
-`ensures` clause uses to refer to a function's own return value — has
-no dialect alias yet.
+`main` — the parser canonicalizes any of the four. `सूची<T>` above is
+the Devanagari alias for `Vec<T>` — both spellings compile identically,
+so a fully-Devanagari file need not carry a bare Latin `Vec`. What's
+left in English is structurally unavoidable in the current v1 surface:
+builtin function *names* (`vec`, `sort`, `vec_kth_smallest`) aren't
+translated (only language *keywords* and *type* names are), and
+`_return` — the identifier an `ensures` clause uses to refer to a
+function's own return value — has no dialect alias yet.
 
 ---
 

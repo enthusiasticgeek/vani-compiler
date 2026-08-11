@@ -83,7 +83,12 @@ Side-by-side, mapping by row:
 
 Identifier names (`add`, `x`, `y`, `sum`, `main`) and the
 `i64` type stay ASCII -- Devanagari identifiers are supported
-but they're a stylistic choice, not a requirement.
+but they're a stylistic choice, not a requirement. The one
+exception is the entry point itself: `मुख्य`, `प्रमुख`, and
+`प्रधान` are all canonicalized to the same entry point as plain
+`main`, regardless of the file's dialect -- so a fully-Devanagari
+file can spell it `मुख्य()` instead of `main()` if you'd rather
+not have one lone Latin word in an otherwise-Devanagari program.
 
 ## Why it works that way
 
@@ -96,11 +101,11 @@ but they're a stylistic choice, not a requirement.
 - **The `// श्री।` header** is decorative -- a conventional
   Sanskrit *auspicious-beginning* mark. The compiler ignores it.
   It's a recognizable cue that the file uses the dialect surface.
-- **`परति` / `यदि` / `यावत्`** (and their Hindi/Marathi
-  cousins) take care of `for` / `if` / `while`. The complete
-  alias table for all 46 structure keywords is in the
-  [README](https://github.com/enthusiasticgeek/vani-compiler/blob/main/README.md)
-  under "Language targeting & queued work".
+- **`प्रति` / `यदि` / `यावत्`** (and their Hindi/Marathi
+  cousins) take care of `for` / `if` / `while`. The keyword alias
+  tables (Sanskrit / Hindi / Marathi, by category) are in the
+  [Language Manual](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/language_manual.md#multilingual-keywords)'s
+  "Multilingual keywords" section.
 - **SOV (verb-at-end) shapes** like `x लिख;` (= `print x;`) are
   available for `print`, `return`, `assert`, `prove`, `let`,
   `if`, and `while`. They're documented in

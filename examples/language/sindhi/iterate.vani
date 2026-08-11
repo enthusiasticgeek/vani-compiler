@@ -1,7 +1,7 @@
 // vani-lang: sindhi
 مقصد "Sindhi iterate smoke-test";
 فنکشن main() -> i64 {
-  مانیں فهرست: Vec<i64> = vec(0);
+  مانیں فهرست: Vec<i64> = vec();
   فهرست = push(فهرست, 10);
   فهرست = push(فهرست, 20);
   فهرست = push(فهرست, 30);

@@ -11972,3 +11972,205 @@ files: `cargo test --release` (2880 lib tests + 12 other suites, 0
 failed), `vanic check examples` (940 ok, unchanged from the BUG-167
 post-fix baseline), `tools/leak_sweep.py` (935 compiled+run clean,
 4 flagged -- matches `tools/leak_sweep_baseline.json` exactly).
+
+## BUG-169 (2026-08-10) -- India-languages structure-keyword parity audit (round 2, 10 dialects), plus a SOV-vs-SVO grammar check, FIXED
+
+Follow-up to BUG-166's Sanskrit/Hindi/Marathi keyword-parity audit,
+per explicit request to extend the same audit to "all remaining India
+languages" (the other 15 rows of `docs/languages.md`'s Tier I table),
+plus a check of each language's natural word order (SOV vs SVO) against
+what the parser actually supports.
+
+**Keyword parity.** A mechanical audit (same method as BUG-166: cross-
+reference every dialect's keyword table against the 46 `is_structure_
+keyword_kind` TokenKinds) found the 10 Tier I dialects with their own
+dedicated keyword table in `src/lexer.rs` -- Bengali, Tamil, Telugu,
+Gujarati, Punjabi (Gurmukhi), Kannada, Malayalam, Odia, Sinhala, Urdu --
+were each missing between 5 and 16 of the 46 required keywords:
+
+| Dialect | Missing before fix | Count |
+|---|---|---|
+| Bengali | Reduce, With, EPrint, Unsafe, RegionKw | 5 |
+| Urdu | Pure, Parallel, Reduce, With, Task, Join, While, Where, Is, Methods, Invariant, EPrint, Try, Unsafe, RegionKw | 15 |
+| Tamil | Pure, Extern, Parallel, Reduce, With, Task, Join, Where, Is, Methods, EPrint, Try, Unsafe, RegionKw | 14 |
+| Telugu, Gujarati, Punjabi, Kannada, Malayalam, Odia, Sinhala | Pure, Extern, Parallel, Reduce, With, Task, Join, Interface, Implement, Where, Is, Methods, EPrint, Try, Unsafe, RegionKw | 16 each |
+
+All silent gaps (an unmapped spelling in a dialect's file just never
+lexes as that keyword), not compile errors -- the same failure shape
+as BUG-166's eprint gap, just at 10x the scale. Fixed by adding one
+spelling per missing keyword to each of the 10 dialect functions,
+following each dialect's already-established register (tatsama
+Sanskrit-root loanwords for the Indo-Aryan dialects that already lean
+tatsama -- Bengali/Gujarati/Punjabi/Odia/Telugu/Kannada/Malayalam/
+Sinhala; native/Hindustani vocabulary for Tamil (Dravidian, explicitly
+non-tatsama per its own doc comment) and Urdu (Perso-Arabic/Persian-
+Arabic register, not Sanskrit). `eprint` in particular follows the
+same "error-word + write-verb, no space" compound pattern BUG-166
+established (e.g. Bengali ত্রুটিলেখ = ত্রুটি "error" + লেখ "write").
+Each addition was checked against its dialect's existing table for
+collisions before landing (e.g. Bengali's "যোগ" already meant `join`,
+so a "সরল" wasn't picked for a smoke-test function name that happened
+to collide -- caught by `vanic check`, not a lexer bug).
+
+Verified: `cargo build --release` (0 duplicate-pattern / unreachable-
+match warnings introduced), then a real `vanic check` + `vanic run`
+(both backends) smoke test per dialect exercising at least the new
+`Pure`/`EPrint` keywords plus one existing one, confirming correct
+native-numeral output on every one of the 10.
+
+**Union-inheritance dialects.** Nepali, Maithili, and Konkani-
+Devanagari have no dedicated table -- `spelling_supports_dialect`
+already routes them through the union of Sanskrit/Hindi/Marathi (now
+complete since BUG-166), and Sindhi + Punjabi-Shahmukhi have no
+dedicated table either -- the lexer's keyword-lookup chain calls
+`urdu_keyword` unconditionally for the whole Perso-Arabic script
+(confirmed by reading the `.or_else(...)` dispatch chain directly, not
+assumed). Verified all 5 empirically with real `vanic check`/`run`
+smoke tests using newly-added Urdu/Sanskrit keywords under each of
+their own pragmas -- all passed with zero additional code changes.
+(One test-authoring mistake surfaced and was corrected along the way:
+Punjabi-Shahmukhi's pragma string is `punjabi-shahmukhi` (hyphenated),
+not `punjabi_shahmukhi` -- an underscore version silently falls
+through to the `Ascii` numeral default and no dialect at all, which
+looked like a bug in a first pass but was the smoke test's own typo.)
+
+**SOV vs. SVO.** Every Indian-subcontinent language is SOV
+(verb-final) in natural word order -- a well-established Sprachbund
+feature spanning Indo-Aryan and Dravidian alike, no exceptions.
+Reading `src/parser.rs`'s SOV detectors (`looks_like_sov_verb_at_end`,
+`looks_like_sov_for`, `looks_like_sov_block_verb`) found they key
+purely off `TokenKind` (`Return`/`Print`/`EPrint`/`Assert`/`Prove`/
+`Let` for verb-at-end; `Ident` immediately followed by `For` for
+range-for) -- NOT the declared dialect, despite being named/commented
+"Devanagari SOV" throughout (`merge_multi_word_devanagari_aliases`,
+closures #265/#266, etc.). This means SOV grammar was already
+dialect-agnostic and just never documented or tested as such. Verified
+empirically (not just by code reading) with real SOV-syntax programs
+against Bengali (Brahmi/Indo-Aryan), Tamil (Dravidian), and Urdu
+(Perso-Arabic, RTL) -- all three compiled and ran correctly on both
+backends, including Urdu's `IDENT ہر ... سے ... تک { }` range-for SOV
+shape computing the correct sum. No parser changes were needed; this
+was a documentation/testing gap, not a code gap. The one genuinely
+Devanagari-only piece is multi-word alias MERGING (e.g. Hindi's
+two-token "के लिए" for `for`) -- a different feature (multi-token
+keyword spelling) from SOV grammar, which doesn't need it since every
+dialect already has a single-token spelling for each SOV-eligible
+keyword.
+
+Regression tests: `bug169_india_dialects_structure_keyword_parity` in
+`src/lib.rs` -- reads `src/lexer.rs`'s own source via `include_str!`
+and mechanically extracts each of the 10 dialect functions' `"spelling"
+=> TokenKind::Kind` arms at test-run time (no hand-transcription of
+~500 non-Latin spellings, which is exactly the transcription-error
+risk BUG-166's own postmortem flagged at 10x the scale here -- so this
+test can never drift from the real implementation). `bug169_union_
+inheritance_dialects_compile` -- real `compile()` calls proving the
+5 union-inheritance dialects pick up the fix transitively.
+
+Full-corpus re-verification: `cargo test --release` (2882 lib tests +
+12 other suites, 0 failed), `vanic check examples` (940 ok, unchanged),
+`tools/leak_sweep.py` (935 compiled+run clean, 4 flagged -- matches
+baseline exactly).
+
+Next free bug number is **BUG-170**.
+
+## BUG-170 (2026-08-10) -- "global languages" keyword-parity round (49 of 60 dialect functions), Pashto dead multi-word entries, SOV-vs-SVO check, FIXED
+
+Third round of the keyword-parity audit, per explicit request to
+follow the India round (BUG-169) with a separate pass over the
+remaining Tier II (global) dialects in `docs/languages.md`.
+
+**Scope**: every keyword-table function in `src/lexer.rs` outside the
+10 India-dialect ones BUG-169 already covered -- 60 functions total
+across ~43 distinct dialects (several Latin-script dialects have both
+a native accented table and a fallback ASCII table; a handful of
+dialects are ASCII-only).
+
+**Keyword parity**: a mechanical audit (same method as BUG-166/169)
+found 49 of the 60 functions missing between 3 and 44 of the 46
+required structure keywords. `Reduce`/`With`/`EPrint` was the
+near-universal minimal gap (~35 functions affected by just those
+three); the worst cases (`hausa_keyword`, `norwegian_keyword`,
+`finnish_keyword`, `spanish_keyword`, `french_keyword`, `german_
+keyword`, `portuguese_keyword`, `catalan_keyword`, `polish_keyword`,
+`danish_keyword`, `vietnamese_ascii_keyword` -- 33-44 missing each)
+turned out to be a red herring on first read: `Lexer::lex_ident`'s
+dispatch tries every dialect's NATIVE (accented) table first, then
+falls through to a second match keyed on the file's declared pragma
+that calls that SAME dialect's `_ascii_keyword` table -- so a pragma-
+declared file's real keyword set is the union of both tables, and
+several of those "33-44 missing" native tables were only ever meant
+to hold the entries that actually need a diacritic, with the bulk of
+real coverage already living in the (separately near-complete) ASCII
+sibling. Recomputing gaps as a union across all 17 split-table
+dialects showed every one of them was ALREADY functionally complete
+once its ASCII table was fixed -- no native-table work needed beyond
+that. Added 1-24 new spellings per remaining incomplete function,
+following each dialect's own established vocabulary register
+(reusing the same word across a dialect's native+ASCII table pair
+where the word is already diacritic-free, since `_ascii_keyword` and
+its native sibling are two independent Rust match blocks and
+identical literal strings across them are harmless).
+
+**Regression caught mid-round (real bug in my own additions, not
+pre-existing)**: several of the new spellings were single ASCII
+characters (`i` for `In` in Danish/Norwegian/Swedish's ASCII and
+native tables, `v` for `In` in Slovak/Czech, `s` for `With` in
+Slovak, `z` for `With` in Polish, `e` for `Is` in Italian) --
+`vanic check examples` dropped from 940 to 922 immediately after,
+because `i` collides with the near-universal loop-counter variable
+name convention (`examples/language/{danish,norwegian,swedish}/*.vani`
+all declare a local named `i`) and `v`/`s`/`z`/`e` collide the same
+way in the Slovak/Czech/Polish/Italian examples. All 10 replaced with
+longer, unambiguous words (e.g. Danish `i` -> `indeni` "inside",
+Slovak `s` -> `spolu` "together", Italian `e` -> `risulta` "results
+in"); `vanic check examples` returned to exactly 940/940 (same file
+set, diffed against the pre-BUG-170 baseline, not just the same
+count) afterward. Documented here as a caution for any future large-
+scale keyword-coinage pass: single-character ASCII spellings are a
+much higher collision risk with real user code than they first
+appear, even for languages where the *word itself* really is one
+letter (Slovak "s"/"v", Danish/Norwegian/Swedish "i" as poetic-license
+shortenings) -- prefer the fuller form.
+
+**Pashto dead multi-word entries (separate, unrelated bug, found
+opportunistically)**: `pashto_keyword` had 5 entries whose string
+literal contained a space (`"په توګه"` => `As`, `"که نه"` => `Else`,
+`"تر څو"` => `While`, `"هر یو"` => `For`, `"د بدلون وړ"` => `Mut`).
+These could never match -- the lexer's tokenizer splits on
+whitespace, and Pashto has no multi-word merge pass analogous to
+Devanagari's `merge_multi_word_devanagari_aliases`. Confirmed dead
+via a minimal repro (`5 په توګه i64` failed with "expected ';'" right
+after `5`) before fixing. A repo-wide scan confirmed this pattern is
+unique to Pashto -- no other dialect table has a space-containing key.
+Fixed by fusing each into a single token (`لکه`, `کهنه`, `ترڅو`,
+`هریو`, `بدلېدونکی` respectively); re-verified all 4 testable ones
+(`Mut` untested end-to-end, only via the mechanical parity check)
+parse and run correctly.
+
+**SOV vs. SVO**: `docs/languages.md`'s own Word-order column already
+flags which Tier II dialects are verb-final (Turkish, Hungarian,
+Korean, Japanese, Burmese, Amharic, Tibetan, Cherokee, Mongolian,
+Armenian, Georgian, Persian, Pashto, plus German/Dutch's V2-in-
+subordinate-clauses SOV). As with the Tier I finding, the parser's
+SOV verb-at-end grammar turned out to already be dialect-agnostic
+(TokenKind-keyed, not dialect-name-gated) -- verified directly with
+real compile-and-run programs against Japanese, Korean, and Turkish
+(three different script families), including the `IDENT for ... { }`
+range-for SOV shape. No parser changes needed.
+
+Regression tests (`src/lib.rs`): `bug170_global_dialects_structure_
+keyword_parity` mechanically re-derives per-dialect coverage from
+`src/lexer.rs`'s own source via `include_str!`, correctly modeling
+the native+ascii union for the 17 split-table dialects (no hand-
+transcription of ~2000 spellings across 60 functions).
+`bug170_pashto_dead_multiword_entries_now_reachable` compiles a real
+Pashto program exercising 3 of the 5 previously-dead entries.
+
+Full-corpus re-verification: `cargo test --release` (2884 lib tests +
+12 other suites, 0 failed), `vanic check examples` (940 ok, exact same
+file set as the pre-BUG-170 baseline, not just the same count),
+`tools/leak_sweep.py` (935 compiled+run clean, 4 flagged -- matches
+baseline exactly).
+
+Next free bug number is **BUG-171**.

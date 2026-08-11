@@ -529,21 +529,33 @@ typedef.
 bundle around the per-Iface element type at lowering time); the
 collision only happened on tree-C. The fix is C-only.
 
-### L9 — LLVM backend: identifiers with non-ASCII chars ✅ SHIPPED 2026-06-08
+### L9 — LLVM backend: identifiers with non-ASCII chars ✅ SHIPPED 2026-06-08 (gaps found + fixed 2026-08-10, BUG-168)
 
 LLVM IR's bare-identifier grammar restricts characters to
-printable ASCII. Devanagari/Bengali/Tamil/etc. function /
-struct / local names mangle to `_uHHHH` (uppercase hex per
-codepoint) on emission via `llvm_mangle_ident` (see
-[src/backend_llvm.rs:239](../src/backend_llvm.rs)).
+printable ASCII, and C's identifier grammar is similarly
+ASCII-only. Devanagari/Bengali/Tamil/etc. function / struct /
+local names mangle to a hex-encoded form on emission: LLVM via
+`llvm_mangle_ident` (see
+[src/backend_llvm.rs:239](../src/backend_llvm.rs)), C via the
+analogous `sanitize_ident` in `src/backend_c.rs`. Both encode
+each non-ASCII character's codepoint as `_<hex>_` (an injective
+mapping — collision-resistant even when the compiler can't just
+drop straight to raw UTF-8 bytes, which C's identifier grammar
+also forbids).
 
-**Status**: Fully shipped. Verified 2026-06-08 against
-[examples/language/sanskrit/pure_devanagari.vani](../examples/language/sanskrit/pure_devanagari.vani)
-(function name `द्विपदगुणक`, locals `वामभाग`/`दक्षिणभाग`/`मूल्य`,
-type name `पूर्णांक`) plus Marathi/Bengali examples — every
-backend path that emits an LLVM identifier routes through
-`llvm_mangle_ident`. No user-visible change; C backend uses
-UTF-8 directly.
+**Status**: Shipped 2026-06-08, but incompletely -- re-verified
+2026-08-10 while translating Sanskrit/Hindi/Marathi example
+identifiers and found **BUG-168**: 1 LLVM call site (a
+match-arm-binding value-copy path) and 7 C call sites (match-arm
+bindings, `let`/reassign desugar inside blocks, mixed-payload
+enum union member names, shallow-free cleanup, and a closure
+env-capture uid) spliced the raw source identifier directly into
+the emitted symbol instead of routing through the sanitizer,
+producing invalid LLVM IR / C on a Devanagari-named local
+crossing a `?`-operator desugar. All 8 sites fixed; the earlier
+"C backend uses UTF-8 directly" framing above was never accurate
+-- `sanitize_ident` has existed and hex-encoded non-ASCII since
+BUG-105/106 (2026-08-04), it just wasn't called at every site.
 
 ---
 
@@ -731,7 +743,7 @@ point without making search worse.
 **Workaround**: native-speaker linguists adding to the prefix
 table in
 [`src/diagnostic.rs:localize_message`](../src/diagnostic.rs).
-Tracked in [`docs/grammar_review_queue.md`](grammar_review_queue.md).
+Tracked in [`docs/archive/grammar_review_queue.md`](archive/grammar_review_queue.md).
 
 ---
 
@@ -885,47 +897,6 @@ The only I/O primitive was `print` / `write` to stdout.*
 | Flat file I/O (`open`, `read`, `write`, `close`) | ❌ no language surface |
 | Device I/O (RS232 / RS485 / UART / `ioctl`) | ❌ no language surface |
 | `flush` / `setbuf` / unbuffered stdout | ❌ no language surface |
-
-| Feature | v1 status |
-|---|---|
-| `print` / `write` → stdout | ✅ Ships (always newline-terminated) |
-| `eprint` / stderr output | ❌ No language surface |
-| stdin / `read_line` | ❌ No language surface |
-| Flat file I/O (`open`, `read`, `write`, `close`) | ❌ No language surface |
-| Device I/O (RS232 / RS485 / UART / `ioctl`) | ❌ No language surface |
-| `flush` / `setbuf` / unbuffered stdout | ❌ No language surface |
-
-**Why**: stdout-only `print` covers the primary use case (programs that
-compute and report). Full file I/O requires affine `FileHandle` types,
-a `Result<T, E>` error surface, and per-platform device abstractions —
-a dedicated Arc.
-
-**Workaround — FFI**: declare `extern "C"` bindings to libc or POSIX
-and use `--link-with` for any C shim layer.
-
-```vani
-// ── flat file (libc) ─────────────────────────────────────────────
-extern "C" fn fopen(path: Str, mode: Str) -> i64;   // FILE* as i64
-extern "C" fn fclose(fp: i64) -> i32;
-extern "C" fn fputs_file(s: Str, fp: i64) -> i32;   // C: fputs
-extern "C" fn fgets(buf: Str, n: i32, fp: i64) -> i64;
-extern "C" fn fflush(fp: i64) -> i32;
-
-fn write_log(path: Str, msg: Str) -> i64 {
-  let fp: i64 = fopen(path, "a");
-  if fp == 0 { return 0 - 1; }
-  let _ = fputs_file(msg, fp);
-  let _ = fflush(fp);
-  let _ = fclose(fp);
-  return 0;
-}
-
-// ── stdin ─────────────────────────────────────────────────────────
-extern "C" fn getchar() -> i32;   // read one byte from stdin
-
-// ── stderr ────────────────────────────────────────────────────────
-extern "C" fn fputs_stderr(s: Str) -> i32;   // thin C wrapper: fputs(s, stderr)
-```
 
 For **device I/O** (Linux serial ports / UART), the `struct termios`
 ABI is aggregate-by-value, which v1 rejects at the FFI boundary.

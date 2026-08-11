@@ -7,7 +7,7 @@
 目的 "Mandarin Vec iteration smoke-test";
 
 函数 main() -> i64 {
-  让 数组: Vec<i64> = vec(0);
+  让 数组: Vec<i64> = vec();
   数组 = push(数组, 10);
   数组 = push(数组, 20);
   数组 = push(数组, 30);

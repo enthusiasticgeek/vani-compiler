@@ -36,7 +36,7 @@ fn main() -> i64 {
   überprüfe is_some(a) == 1;
   überprüfe is_some(b) == 0;
 
-  ausführe "Some(42) unwrapped =", x;
-  ausführe "None with default 100 =", y;
+  drucken "Some(42) unwrapped =", x;
+  drucken "None with default 100 =", y;
   zurück 0;
 }

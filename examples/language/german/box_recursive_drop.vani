@@ -13,15 +13,15 @@ struct Bag {
 fn main() -> i64 {
   let v: Vec<i64> = vec(10, 20, 30);
   let b: Box<Vec<i64>> = box(v);
-  ausführe "constructed Box<Vec<i64>>";
+  drucken "constructed Box<Vec<i64>>";
 
   let v2: Vec<i64> = vec(7, 8, 9);
   let bag: Bag = Bag { contents: box(v2) };
-  ausführe "constructed Bag";
+  drucken "constructed Bag";
 
   let s: OwnedStr = "hi" + "!";
   let bs: Box<OwnedStr> = box(s);
-  ausführe "constructed Box<OwnedStr>";
+  drucken "constructed Box<OwnedStr>";
 
   zurück 0;
 }

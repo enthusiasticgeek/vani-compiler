@@ -103,7 +103,7 @@ fn process_packet(buf: ref [u8; 256]) -> i64 { ... }
 
 This says: "compile-time check that this function does not
 trigger any heap allocation." Any code path that would call
-`malloc` (directly or via `Vec::new()`, `OwnedStr`, `Box::new`,
+`malloc` (directly or via `vec(...)`, `OwnedStr`, `box(...)`,
 etc.) is rejected at compile time.
 
 The compiler verifies the entire transitive call graph.

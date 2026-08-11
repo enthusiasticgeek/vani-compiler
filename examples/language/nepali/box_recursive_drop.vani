@@ -11,12 +11,12 @@
 }
 
 कार्य main() -> i64 {
-  माना v: Vec<i64> = vec(0);
+  माना v: Vec<i64> = vec();
   v = push(v, 10);
   v = push(v, 20);
   v = push(v, 30);
   माना b: Box<Vec<i64>> = box(v);
-  माना v2: Vec<i64> = vec(0);
+  माना v2: Vec<i64> = vec();
   v2 = push(v2, 7);
   माना थैला: Bag = Bag { contents: box(v2) };
   लिखो "Nepali box recursive drop OK";

@@ -9,7 +9,7 @@
   بازگشت -1;
 }
 تابع main() -> i64 {
-  فرض v: Vec<i64> = vec(0);
+  فرض v: Vec<i64> = vec();
   v = push(v, 3);
   v = push(v, 0);
   v = push(v, 7);

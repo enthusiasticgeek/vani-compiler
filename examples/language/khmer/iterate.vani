@@ -7,7 +7,7 @@
 គោលបំណង "Khmer Vec iteration smoke-test";
 
 មុខងារ main() -> i64 {
-  អោយ បញ្ជី: Vec<i64> = vec(0);
+  អោយ បញ្ជី: Vec<i64> = vec();
   បញ្ជី = push(បញ្ជី, 10);
   បញ្ជី = push(បញ្ជី, 20);
   បញ្ជី = push(បញ្ជី, 30);

@@ -27,7 +27,7 @@ fn main() -> i64 {
   let b: Opt = doubled_q(Opt.None);
   überprüfe unwrap_or(b, 99) == 99;
 
-  ausführe "Some(5)? doubled =", unwrap_or(a, 0);
-  ausführe "None? defaulted to", unwrap_or(b, 99);
+  drucken "Some(5)? doubled =", unwrap_or(a, 0);
+  drucken "None? defaulted to", unwrap_or(b, 99);
   zurück 0;
 }

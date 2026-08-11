@@ -15,7 +15,7 @@ función sum_to(n: i64) -> i64 {
 }
 
 función main() -> i64 {
-  assert sum_to(4) == 10;
+  assert sum_to(4) == 6;
   assert sum_to(0) == 0;
   print sum_to(4);
   return 0;

@@ -9,7 +9,7 @@
 ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian Box drop smoke-test";
 
 ᠴᠠᠭ main() -> i64 {
-  ᠶᠠᠪᠤᠭᠤᠯ arr: Vec<i64> = vec(0);
+  ᠶᠠᠪᠤᠭᠤᠯ arr: Vec<i64> = vec();
   arr = push(arr, 10);
   arr = push(arr, 20);
   arr = push(arr, 30);
