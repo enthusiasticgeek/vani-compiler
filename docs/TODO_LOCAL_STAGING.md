@@ -6365,3 +6365,43 @@ Repro: `tools/localfuzz/findings/20260812-194925-backend-divergence-f854ac392d/r
 Fix attempt: `tools/localfuzz/findings/20260812-194925-backend-divergence-f854ac392d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-204136-backend-divergence-d7da016e7e
+
+Repro: `tools/localfuzz/findings/20260812-204136-backend-divergence-d7da016e7e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-204136-backend-divergence-d7da016e7e/fix_attempt.md`
+
+**STAGING ENTRY: Backend Divergence**
+
+### Test Case Description
+
+The provided test case is a Marathi keyword example using the `vani-lang` compiler. It includes a recursive function `फलन क्रमगुणित` that performs factorial calculations and an assertion statement involving recursion.
+
+### Repro Source Code
+
+```vani
+// श्री।.
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/marathi/keywords.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/marathi/keywords.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/marathi/keywords.vani -o /tmp/marathi_keywords && /tmp/marathi_keywords   # native binary
+
+// मराठी (marāṭhī) — Marathi-keyword example.
+// `कार्य` / `फलन` = fn, `मान` = let, `परत` = return,
+// `जर` / `नाहीतर` = if / else, `खात्री` = assert (certainty).
+
+फलन क्रमगुणित(क: i64) -> i64 {
+  जर क <= 1 {
+    परत -9223372036854775808;
+  } नाहीतar {
+    परत क * क्रमगुणित(क - 1);
+  }
+}
+
+फलन मुख्य() -> i64 {
+  मान क: i64 = क्रमगुणित(5);
+  मान ख: i64 = क्रम
