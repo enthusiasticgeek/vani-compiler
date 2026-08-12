@@ -6220,3 +6220,31 @@ Repro: `tools/localfuzz/findings/20260812-154554-backend-divergence-c2479366f8/r
 Fix attempt: `tools/localfuzz/findings/20260812-154554-backend-divergence-c2479366f8/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-164605-run-crash-90c38f0f8f
+
+Repro: `tools/localfuzz/findings/20260812-164605-run-crash-90c38f0f8f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-164605-run-crash-90c38f0f8f/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
