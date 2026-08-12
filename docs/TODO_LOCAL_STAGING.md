@@ -6200,3 +6200,14 @@ fn main() -> i64 {
     n = n + -9223372036854775808;
   }
   assert n == 5
+
+---
+
+### Candidate: 20260812-153250-backend-divergence-51ca335b1d
+
+Repro: `tools/localfuzz/findings/20260812-153250-backend-divergence-51ca335b1d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-153250-backend-divergence-51ca335b1d/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+This bug report describes a backend-divergence issue in the vani-compiler when compiling the provided VANI code with both LLVM and C backends, resulting in an index out of bounds error during the while loop execution. The mutant/generated source demonstrates a control flow structure that causes this divergence by mutating a vector (`Vec<i64>`) within a while loop, which should iterate up to its length but fails due to an incorrect array access. This issue affects both LLVM and C backends.
