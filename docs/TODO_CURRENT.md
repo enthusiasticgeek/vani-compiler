@@ -12474,3 +12474,69 @@ other suites, 0 failed), `vanic check` across all 1040 example files
 clean (matches baseline).
 
 Next free bug number is **BUG-181**.
+
+## Update 2026-08-12: BUG-181 CLOSED (found by localfuzz) -- unconditional OOB memory-safety hole
+
+Found by localfuzz (mutated `examples/language/english/anon_fn.vani`,
+changing a loop increment `j = j + 1;` to `j = j + -1;`). The C
+backend segfaulted outright (SIGSEGV, exit 139 -- not the usual
+SIGABRT/134 trap pattern); the LLVM backend printed correct output
+then hit a genuine "index out of bounds: -1, len 6" trap. The
+divergent exit code (139 vs the expected 134) was the tell that this
+wasn't the already-accepted abort-vs-exit(3) pattern -- this was an
+actual, uncaught out-of-bounds memory access.
+
+Root cause: sibling of BUG-127, but in the Index/bounds-elision arm
+of `try_elide_bounds_in_typed_expr` (`src/checker.rs`) rather than
+the Binary (arithmetic-overflow) arm BUG-127 fixed. That fix's own
+comment claimed Index elision was safe inside a loop ("a `for`
+loop's own induction-variable facts are freshly and soundly
+re-derived every iteration by construction, unlike the possibly-
+stale facts used here") -- true for `for`, but the `inside_loop`
+flag the Index arm receives doesn't distinguish a `for` loop's
+compiler-synthesized induction variable from an arbitrary
+`while`-loop variable the user mutates by hand. For the latter, the
+exact same stale-fact problem applies: `smt_facts` deliberately
+survives a same-scope reassignment inside a loop body (for a
+separate loop-invariant-preservation check), so a fact like `j == 0`
+(true only on the first iteration) got used to "prove" both
+`j < len(dsc)` and `j >= 0` were ALWAYS true, silently dropping the
+runtime bounds check for the entire loop -- not just eliding a
+narrow, provably-safe case. `--smt-debug` confirmed the exact stale
+fact: `(assert (= v_j (_ bv0 64)))` unconditionally fixed inside the
+query for an expression that runs on every iteration.
+
+This is more severe than BUG-127 in kind, not just degree: BUG-127's
+elided overflow guard turned an intended-finite loop into an
+infinite one (a hang, still memory-safe). This elided bounds check
+produced an **unconditional, always-reachable out-of-bounds memory
+access with no runtime guard at all** -- confirmed to segfault on
+the C backend (raw negative-index pointer arithmetic, no trap
+mechanism engaged) and to silently read arbitrary out-of-bounds heap
+memory FOREVER on the LLVM backend (no crash, no trap, just garbage
+values printed in an unbounded loop) on a minimized repro. Directly
+contradicts the compiler's own stated design contract ("hosted
+programs are safe by construction -- no segfault surface, no UAF, no
+buffer overrun").
+
+Fixed by giving the Index arm the identical `if inside_loop { return;
+}` guard the Binary arm already had, and correcting that arm's now-
+inaccurate comment about Index elision being safe. Accepted trade-off:
+a `for` loop's own otherwise-safe indexing (e.g. `for i from 0 to
+len(xs) { xs[i] }`) now also keeps its runtime bounds check --
+a performance regression, not a correctness one; a future loop-
+invariant-aware elision pass could recover it soundly. Updated
+`smt_elides_vec_bounds_in_for_loop_body` (renamed
+`smt_no_longer_elides_vec_bounds_in_for_loop_body`) to assert the
+corrected expectation.
+
+Added `bug181_loop_carried_bounds_check_is_not_elided` in
+`src/lib.rs`. Verification: `cargo test --release` (2897 lib tests +
+12 other suites, 0 failed), `vanic check` across all 1040 example
+files (17 failures, exact same file set, zero diff),
+`tools/leak_sweep.py` clean (matches baseline exactly -- this sweep
+actually RUNS every example under ASan/LSan/UBSan, so it also serves
+as an output-behavior-equivalence check across the whole corpus for
+this fix).
+
+Next free bug number is **BUG-182**.

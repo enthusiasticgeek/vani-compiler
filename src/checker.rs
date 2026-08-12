@@ -39587,6 +39587,35 @@ fn try_elide_bounds_in_typed_expr(
             if !*checked {
                 return;
             }
+            // BUG-181 (2026-08-12): the comment on the Binary arm below
+            // claims Index elision is safe inside a loop because "a
+            // `for` loop's own induction-variable facts are freshly
+            // and soundly re-derived every iteration by construction."
+            // That's true for `for`, but `inside_loop` doesn't
+            // distinguish a `for` loop's synthesized induction
+            // variable from an arbitrary `while`-loop variable the
+            // user mutates by hand -- and for the latter, `smt_facts`
+            // has exactly the same staleness problem BUG-127 already
+            // fixed for arithmetic-overflow elision: a fact like
+            // `j == 0` from before the loop (or from an earlier
+            // iteration) only describes the FIRST time control
+            // reaches this point, not every iteration. Concretely:
+            // `while j < 6 { xs[j]; j = j + -1; }` "proved" `j >= 0`
+            // and `j < 6` using the stale `j == 0` fact, elided the
+            // runtime bounds check, and the second iteration (j == -1)
+            // read out of bounds -- an unconditional, always-reachable
+            // OOB read/write with no runtime guard at all, confirmed
+            // to segfault on the C backend and silently read
+            // arbitrary heap memory forever on the LLVM backend.
+            // Skip elision entirely inside any loop, matching the
+            // Binary arm's existing guard; a `for` loop's provably-
+            // in-range indexing (e.g. `for i from 0 to n { xs[i] }`)
+            // keeps its runtime check too now -- a performance
+            // regression, not a correctness one, and one a future
+            // loop-invariant-aware elision pass can recover.
+            if inside_loop {
+                return;
+            }
             // Build the goal: `(index as u64) < len(array) && index >= 0`.
             // We require both parts to discharge. For unsigned indices,
             // `>= 0` is trivially true via type.
@@ -39680,11 +39709,22 @@ fn try_elide_bounds_in_typed_expr(
             // elided the runtime guard, then actually overflowed on
             // the second iteration (i64::MIN + i64::MIN wraps to 0)
             // -- silent wraparound that turned an intended 5-iteration
-            // loop into an infinite one instead of trapping. Bounds
-            // (Index) elision above is unaffected: a `for` loop's own
+            // loop into an infinite one instead of trapping.
+            //
+            // BUG-181 (2026-08-12): this comment used to claim Bounds
+            // (Index) elision above was unaffected by the same
+            // staleness problem, reasoning that "a `for` loop's own
             // induction-variable facts are freshly and soundly
-            // re-derived every iteration by construction, unlike the
-            // possibly-stale facts used here.
+            // re-derived every iteration by construction." That's
+            // true for `for`, but the Index arm's `inside_loop` flag
+            // doesn't distinguish a `for` loop's synthesized
+            // induction variable from an arbitrary `while`-loop
+            // variable the user mutates by hand -- for the latter,
+            // the exact same stale-fact bug applies and was confirmed
+            // to elide a bounds check that should have fired,
+            // producing an unconditional out-of-bounds read. The
+            // Index arm now has its own `if inside_loop { return; }`
+            // guard, identical to this one.
             if inside_loop {
                 return;
             }
