@@ -1534,3 +1534,76 @@ script, which is the JIT path's whole reason to exist) to fix a rare
 pathological-loop case that `vanic build`/`--backend=c` already handle
 correctly. Left as a documented, understood limitation rather than
 changed unilaterally.
+
+### L28 -- `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit
+
+Found via `tools/localfuzz` (2026-08-12): a fuzzer-mutated program
+computed an `f32` value far outside `i64`'s representable range, then
+cast it with `as i64`. Both backends "succeed" (no panic, no
+diagnostic on either side) but disagree on the process exit code --
+confirmed with a minimal 4-line repro, independent of the SIMD context
+the original finding used:
+
+```vani
+fn main() -> i64 {
+  let s: f32 = 3.0 + 9223372036854775807;
+  return s as i64;
+}
+```
+
+```
+$ vanic run f.vani               # exits 0
+$ vanic run f.vani --backend=c   # exits 255
+```
+
+**Root cause**: `s` (an `f32`) ends up holding a value around 2^63 --
+`3.0 + 9223372036854775807` (`i64::MAX`) gets promoted through
+`double` (which can represent that magnitude, if not exactly) and then
+narrowed to `f32` for the `let s: f32 = ...` assignment. `s as i64`
+then converts a float that's at or beyond `i64::MAX + 1` back to
+`int64_t` -- the C standard states this is **undefined behavior** when
+the value doesn't fit the target integer type, and the C backend emits
+a bare `(int64_t)(...)` cast with no range check, so the compiled
+program inherits that UB directly: on this machine, GCC's
+`cvttss2si` produces `INT64_MIN` as the "integer indefinite" result,
+which further truncates through `main`'s `int64_t -> int` return-value
+narrowing to produce exit code 255. LLVM's `fptosi` instruction is
+*also* documented as producing a poison value for an out-of-range
+input -- not the same guaranteed behavior as C, just a different
+flavor of undefined, which is exactly why the two backends disagree
+rather than agreeing on some other wrong-but-consistent answer.
+
+**Impact**: correctness, in the narrow sense that a float-to-int `as`
+cast is unchecked in both backends -- this cuts against the language's
+own stated design contract ("hosted programs are safe by construction
+-- no segfault surface"; see the `unsafe(reason = "...")` gating
+diagnostic's wording, which makes exactly this promise for the rest of
+the language). Integer arithmetic overflow, division/shift, and
+bounds accesses are all checked and produce a well-defined panic in
+v1; float-to-int narrowing casts are the one numeric-conversion
+category that currently isn't. Practically rare -- it requires a
+float value that's already outside the target integer range, not
+just precision loss from an in-range float -- but "rare" isn't "safe,"
+and the divergent exit code means a program relying on this exit code
+(e.g. shell scripting around `vanic run` vs `vanic build`) gets a
+different answer depending purely on which backend ran it.
+
+**Workaround**: none needed for well-behaved programs -- keep
+float-to-int casts within the target type's representable range (the
+same discipline `as i32`/`as i8` truncating casts already require of
+callers). If a value's range genuinely can't be bounded statically,
+clamp it explicitly before casting (e.g. `f64_clamp(x, i64::MIN as
+f64, i64::MAX as f64) as i64`) rather than relying on the cast itself
+to do anything sensible.
+
+**Fix**: not applied. The right fix is almost certainly a checked
+`as` cast for float-to-int narrowing -- either a compile-time-proven
+range fact (SMT, matching how the existing overflow/bounds checks
+work) or a runtime range check with a defined panic message on both
+backends, plus a decision on whether v1 should instead adopt
+Rust-style *saturating* float-to-int casts (defined, non-panicking,
+clamps to the target type's min/max) -- a real semantics decision, not
+a one-line patch, and one that needs to land identically on both
+backends to actually close this gap rather than just relocate it.
+Left as a documented, understood limitation rather than changed
+unilaterally.

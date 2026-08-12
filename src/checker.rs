@@ -6706,8 +6706,8 @@ fn hoist_impls_into_functions(
                     continue;
                 }
             };
-            // Validate signature: parameter count + return type.
-            // Blanket-expanded impls (type_params was non-empty before
+            // Validate signature: parameter count + per-param types + return
+            // type. Blanket-expanded impls (type_params was non-empty before
             // expansion) use concrete param types that differ from the
             // interface's generic-instantiated param types â€” skip the
             // per-param type check; only count and return type matter.
@@ -6723,6 +6723,46 @@ fn hoist_impls_into_functions(
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(iface_method.params.len(), method.params.len())));
                 continue;
+            }
+            // Non-`self` parameter types must match the interface exactly
+            // (skip `self` -- its concrete type necessarily differs per
+            // impl, that's the whole point of implementing for different
+            // types). Before this check existed, an impl could silently
+            // redeclare a parameter's type (e.g. the interface says `f64`,
+            // the impl says `i64`) and the checker accepted it -- the two
+            // backends then disagreed on the calling convention for a
+            // `dyn Iface` vtable call (float vs. integer register/ABI
+            // slot), producing backend-dependent garbage at runtime
+            // instead of a compile error. Found by localfuzz mutating
+            // examples/language/english/design_patterns/behavioral/
+            // observer.vani's interface param type.
+            if !is_blanket {
+                let mut param_type_mismatch = false;
+                for (impl_p, iface_p) in method.params.iter().zip(iface_method.params.iter()) {
+                    if impl_p.name == "self" || iface_p.name == "self" {
+                        continue;
+                    }
+                    // The interface may spell a parameter as `Self` (a
+                    // placeholder every impl substitutes with its own
+                    // concrete type) -- substitute before comparing, same
+                    // helper used for default-method injection.
+                    let iface_p_ty = substitute_self_type(&iface_p.ty, &imp.for_type);
+                    if impl_p.ty != iface_p_ty {
+                        diagnostics.push(Diagnostic::new(
+                            impl_p.span,
+                            format!(
+                                "impl method '{}::{}' declares parameter '{}' as {} \
+                                 but interface '{}' declares it as {}",
+                                type_name, method.name, impl_p.name, impl_p.ty,
+                                imp.interface_name, iface_p_ty
+                            ),
+                        ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&format!("{}", iface_p_ty), &format!("{}", impl_p.ty))));
+                        param_type_mismatch = true;
+                    }
+                }
+                if param_type_mismatch {
+                    continue;
+                }
             }
             // For concrete (non-blanket) impls, verify return type matches.
             // Blanket impls may legitimately substitute T in the return type,

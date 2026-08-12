@@ -13068,4 +13068,85 @@ directly since this is a pure checker-level panic, not a
 backend/runtime issue). Verification: `cargo test --release --lib`
 (2910 tests, 0 failed).
 
-Next free bug number is **BUG-187**.
+## BUG-187: `implement` blocks were never checked against their `interface`'s declared parameter TYPES (FIXED 2026-08-12)
+
+Found by `tools/localfuzz` triaging the 2026-08-12 22:42Z batch (6
+findings, 4 signatures -- see `vani-compiler-localfuzz`'s
+`docs/TODO_LOCAL_STAGING.md` for the full per-finding triage; 2/6 were
+the same fuzzer-deleted-loop-increment pattern already seen before
+[not a compiler bug], 2/6 were the already-accepted abort()-vs-exit(3)
+trap-mechanism divergence). The remaining 2 were both real:
+
+**This bug** -- the fuzzer mutated
+`examples/language/english/design_patterns/behavioral/observer.vani`'s
+`interface Observer { fn update(self: StdoutObserver, value: f64) ->
+i64; }` declaration from `i64` to `f64`, while its three `implement`
+blocks (for `StdoutObserver`/`FileObserver`/`AlertObserver`) all kept
+`value: i64` unchanged. `vanic check` accepted this outright -- no
+diagnostic at all. Running it produced silently wrong output that
+differed BETWEEN backends: calling through the resulting `Vec<dyn
+Observer>` via `for o in ref observers { o.update(value); }`, the C
+backend happened to print the correct value for all three observers,
+but LLVM printed the correct value only for the first (`StdoutObserver`)
+and garbage (an uninitialized-looking large integer) for the other
+two:
+
+```
+C:    [file: app.log ] value = 50           (correct)
+LLVM: [file: app.log ] value = 140412147951040   (garbage)
+```
+
+**Root cause**: `checker.rs`'s `implement`-vs-`interface` conformance
+check validated parameter COUNT (`method.params.len() !=
+iface_method.params.len()`) and return type, but never validated each
+parameter's actual TYPE -- confirmed by a pre-existing comment on that
+exact code path that already described the intended behavior
+("Blanket-expanded impls... skip the per-param type check; only count
+and return type matter" -- correctly implying non-blanket impls
+SHOULD have their param types checked) without the check itself ever
+having been written. With no compile-time signature validation, an
+impl could freely disagree with its interface's declared parameter
+type; the checker accepted it, and the two backends' `dyn Iface`
+vtable-call codegen then disagreed on the calling-convention slot
+(float vs. integer register) for the mismatched parameter -- exactly
+the kind of unsound-program-produces-backend-dependent-garbage bug
+class this session's compiler-bug-hunting keeps surfacing.
+
+**Fixed** by adding a per-parameter type-equality check for non-blanket
+impls, in `checker.rs` right after the existing count check: `self` is
+skipped (its concrete type legitimately varies per impl -- that's the
+entire point of `implement X for T`), and the interface's declared
+type is passed through the existing `substitute_self_type` helper
+(already used for default-method injection) before comparing, so an
+interface using `Self` as a placeholder for a NON-`self` parameter
+(the common `Eq`-style `fn eq(self: ref Self, other: ref Self) ->
+bool;` shape) still compiles correctly -- confirmed this exact shape
+via a dedicated companion regression test, since the first version of
+the fix broke `HashMap<StructKey, V>`'s `Eq`/`Hash` interface pattern
+(caught immediately by the existing `hashmap_struct_key_hash_eq_self_
+by_ref_lib` / `..._by_value_lib` tests before this ever reached main).
+
+Regression tests: `bug187_implement_block_param_type_mismatch_with_
+interface_is_rejected` (the fix) and `bug187_self_placeholder_param_
+still_matches_across_different_impls` (the companion `Self`-in-
+non-self-position case) in `src/lib.rs`.
+
+Verification: `cargo test --release --lib` (2912 tests, 0 failed),
+`cargo test --release --test run_end_to_end` (245 passed, 8
+pre-existing ignored, 0 failed), `vanic check` across all 1042 example
+files (18 non-ok, confirmed EXACT same file set as the established
+baseline -- 17 intentional `xfail_`/`mix_` edge-case files plus 2
+environment-gated `unsafe`/embedded-target files, zero new failures
+from this fix), the original mutated `observer.vani` repro now
+correctly rejected with a clear diagnostic, and the real (unmutated)
+`observer.vani` shipped in the repo re-confirmed still compiling
+clean.
+
+The other real finding from this batch (an unrelated float-to-int
+cast UB divergence, `c.rc=255` vs `llvm.rc=0`) is NOT a checker
+soundness gap the same way -- documented as `docs/v1_limitations.md`'s
+new **L28** instead of fixed, since the real fix (checked or
+saturating float-to-int casts) is a semantics decision affecting both
+backends, not a one-line patch.
+
+Next free bug number is **BUG-188**.
