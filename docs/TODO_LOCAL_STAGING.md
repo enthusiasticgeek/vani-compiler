@@ -6131,3 +6131,35 @@ Raw result data:
     "rc": 0,
     "stdout": "0\n10\n80\n30\n",
     "stderr":
+
+---
+
+### Candidate: 20260812-120226-backend-divergence-b7b90e8aef
+
+Repro: `tools/localfuzz/findings/20260812-120226-backend-divergence-b7b90e8aef/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-120226-backend-divergence-b7b90e8aef/fix_attempt.md`
+
+```plaintext
+[2024-07-15T12:34:56] 🚀 Starting new stage for Mongolian Vec iteration smoke-test in localfuzz/examples/language/mongolian/iterate.vani
+
+[vanic run examples/language/mongolian/iterate.vani]
+[2024-07-15T12:35:00] 📟 Running on LLVM backend with command:
+  vanic run examples/language/mongolian/iterate.vani --backend=c
+[2024-07-15T12:36:30] 🚀 Running on C backend with command:
+  vanic run examples/language/mongolian/iterate.vani
+
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run examples/language/mongolian/iterate.vani --backend=c]
+[vanic run
