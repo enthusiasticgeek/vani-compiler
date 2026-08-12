@@ -5894,3 +5894,12 @@ Repro: `tools/localfuzz/findings/20260812-000055-backend-divergence-50fe3d1582/r
 Fix attempt: `tools/localfuzz/findings/20260812-000055-backend-divergence-50fe3d1582/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-000337-backend-divergence-30fb8d129d
+
+Repro: `tools/localfuzz/findings/20260812-000337-backend-divergence-30fb8d129d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-000337-backend-divergence-30fb8d129d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
