@@ -66,15 +66,21 @@ fn print_board(board: ref Vec<i64>) -> i64 {
   return 0;
 }
 
-// Returns 0 (no winner yet), 1 (X has three in a row), or 2 (O does).
-// `lines` is the flat list of the 8 winning triples (3 rows, 3
-// columns, 2 diagonals), 3 board indices each.
-fn winner_of(board: ref Vec<i64>) -> i64 {
-  let lines: Vec<i64> = vec(
+// The flat list of the 8 winning triples (3 rows, 3 columns, 2
+// diagonals), 3 board indices each -- shared by winner_of (checks
+// all three cells equal) and find_winning_move (checks two equal
+// plus one empty, for the computer opponent below).
+fn win_lines() -> Vec<i64> {
+  return vec(
     0, 1, 2,  3, 4, 5,  6, 7, 8,
     0, 3, 6,  1, 4, 7,  2, 5, 8,
     0, 4, 8,  2, 4, 6
   );
+}
+
+// Returns 0 (no winner yet), 1 (X has three in a row), or 2 (O does).
+fn winner_of(board: ref Vec<i64>) -> i64 {
+  let lines: Vec<i64> = win_lines();
   let li: u64 = 0;
   while li < 8 as u64 {
     let base: u64 = li * 3 as u64;
@@ -91,6 +97,89 @@ fn winner_of(board: ref Vec<i64>) -> i64 {
     li = li + 1 as u64;
   }
   return 0;
+}
+
+// Returns a board index that would complete three-in-a-row for
+// `player` if placed right now, or -1 if no such move exists. Used
+// by the computer opponent both to take its own winning move and,
+// with the arguments swapped, to block the human's.
+fn find_winning_move(board: ref Vec<i64>, player: i64) -> i64 {
+  let lines: Vec<i64> = win_lines();
+  let li: u64 = 0;
+  while li < 8 as u64 {
+    let base: u64 = li * 3 as u64;
+    let ia: u64 = lines[base] as u64;
+    let ib: u64 = lines[base + 1 as u64] as u64;
+    let ic: u64 = lines[base + 2 as u64] as u64;
+    let a: i64 = board[ia];
+    let b: i64 = board[ib];
+    let c: i64 = board[ic];
+    if a == player {
+      if b == player {
+        if c == 0 {
+          return ic as i64;
+        }
+      }
+    }
+    if a == player {
+      if c == player {
+        if b == 0 {
+          return ib as i64;
+        }
+      }
+    }
+    if b == player {
+      if c == player {
+        if a == 0 {
+          return ia as i64;
+        }
+      }
+    }
+    li = li + 1 as u64;
+  }
+  return 0 - 1;
+}
+
+// A simple, non-learning heuristic: win if possible, else block the
+// human's winning move, else take the center, else a corner, else
+// any remaining edge. Not unbeatable-perfect minimax -- deliberately
+// simple enough to read in one sitting -- but it never misses an
+// immediate win or an immediate block, so it's a genuine opponent,
+// not a random-mover.
+fn ai_move(board: ref Vec<i64>, ai_player: i64, human_player: i64) -> i64 {
+  let win_idx: i64 = find_winning_move(board, ai_player);
+  if win_idx >= 0 {
+    return win_idx;
+  }
+  let block_idx: i64 = find_winning_move(board, human_player);
+  if block_idx >= 0 {
+    return block_idx;
+  }
+  if board[4 as u64] == 0 {
+    return 4;
+  }
+  if board[0 as u64] == 0 {
+    return 0;
+  }
+  if board[2 as u64] == 0 {
+    return 2;
+  }
+  if board[6 as u64] == 0 {
+    return 6;
+  }
+  if board[8 as u64] == 0 {
+    return 8;
+  }
+  if board[1 as u64] == 0 {
+    return 1;
+  }
+  if board[3 as u64] == 0 {
+    return 3;
+  }
+  if board[5 as u64] == 0 {
+    return 5;
+  }
+  return 7;
 }
 
 // Prompts the current player until they either type a valid, empty
@@ -147,18 +236,46 @@ ensures _return == 0 - 1 || (_return >= 0 && _return <= 8);
 }
 
 fn main() -> i64 {
+  print "vani tic-tac-toe -- two players, one terminal";
+  print "";
+  print "Play against another human, or the computer?";
+  print "Type 'c' for computer, anything else for two humans ('quit' or blank to exit):";
+  flush_stdout();
+  let mode_input: OwnedStr = stdin_read_line();
+  let mode_trimmed: OwnedStr = str_trim(mode_input);
+  if mode_trimmed == "" {
+    print "Goodbye!";
+    return 0;
+  }
+  if mode_trimmed == "quit" {
+    print "Goodbye!";
+    return 0;
+  }
+  let mode_lower: OwnedStr = str_to_lower(mode_trimmed);
+  let vs_computer: bool = str_starts_with(mode_lower, "c");
+
   let board: Vec<i64> = vec_fill(9, 0);
   let player: i64 = 1;
   let winner: i64 = 0;
   let moves_made: i64 = 0;
 
-  print "vani tic-tac-toe -- two players, one terminal";
   print "";
 
   while true {
     print_board(ref board);
     print "";
-    let idx: i64 = read_move(ref board, player);
+    let idx: i64 = 0 - 1;
+    if vs_computer {
+      if player == 2 {
+        idx = ai_move(ref board, 2, 1);
+        let ai_msg: OwnedStr = "Computer plays " + player_label(2) + " at " + i64_to_str(idx + 1) + ".";
+        print ai_msg;
+      } else {
+        idx = read_move(ref board, player);
+      }
+    } else {
+      idx = read_move(ref board, player);
+    }
     if idx < 0 {
       print "Goodbye!";
       return 0;
