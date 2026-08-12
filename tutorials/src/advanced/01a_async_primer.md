@@ -264,6 +264,6 @@ loop, with full state-machine examples.
 
 ---
 
-**Previous**: [Sec.16 -- Packages with Kosh ->](../intermediate/16_packages.md)
+**Previous**: [Sec.17 -- Capstone: a terminal tic-tac-toe game ->](../intermediate/17_tic_tac_toe_capstone.md)
 **Next**: [Sec.1 -- Async / await and the Task transform ->](01_async.md)
 
