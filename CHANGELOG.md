@@ -1,5 +1,71 @@
 # Changelog
 
+## [v0.9.3] — 2026-08-12
+
+Patch release. No new language features, no breaking changes — consolidates
+6 bug fixes (BUG-179 through BUG-184) since v0.9.2, most of them in the
+SMT-based bounds/overflow-elision pass shared by all four backends, plus a
+tutorial-coverage pass and a QEMU cross-compile testing tool. See
+`RELEASE_NOTES/v0.9.3.md` for the full writeup; full per-bug detail lives in
+`docs/TODO_CURRENT.md`.
+
+### Fixed (SMT bounds-elision soundness — BUG-181, 182, 183)
+
+- **BUG-181** (memory-safety): a stale fact from before a `while` loop let
+  the bounds-check elision pass "prove" a loop-mutated index always
+  in-bounds using only its first-iteration value — an unconditional,
+  always-reachable out-of-bounds memory access (SIGSEGV on the C backend,
+  silent unbounded out-of-bounds heap reads on LLVM), not a narrower edge
+  case. Fixed by disabling that elision for any index lexically inside a
+  loop body — a deliberate, permanent soundness-over-performance trade-off
+  (see `docs/v1_limitations.md`'s new **L26**).
+- **BUG-182**: the same stale-fact shape at a loop's *exit*, not its
+  interior — restoring the pre-loop fact snapshot wholesale (including
+  facts about any variable the loop body reassigned) combined with the
+  loop's own fresh post-loop facts into an internally contradictory fact
+  set, from which the solver could "prove" anything, including a wildly
+  out-of-range constant index being in-bounds.
+- **BUG-183**: the identical stale-fact shape recurred at four more merge
+  points besides loop exits — `if`/`else`, `if let`, `while let` (which had
+  no fact-restore mechanism at all), and the `select`-statement loop
+  desugar — plus a second, independent leak source at two of those sites:
+  `env`'s own constant-tracking bypassing the fact list entirely.
+
+### Fixed (other)
+
+- **BUG-179**: a minimal `bptr_new` + `bptr_len` program with no `bptr_get`
+  call anywhere crashed both backends outright — the `Option<i64>`
+  enum type they both unconditionally referenced was never registered
+  unless `bptr_get` was actually called somewhere in the program.
+- **BUG-180**: an explicit generic type annotation (`Option<i64>`,
+  `Result<T,E>`, or any user generic) on a `let` inside an
+  `unsafe(...) { }` block or a `task { }` spawn block failed to resolve
+  at all, regardless of what the annotation actually named.
+- **BUG-184**: `--big-o`'s complexity-classification pass listed 3
+  wrong/nonexistent builtin names (a `btreemap_contains_key` typo, plus
+  two builtins — `btreeset_get`, `bst_search` — that don't exist),
+  silently misclassifying real `BTreeMap`/`Bst` lookups as O(1) instead
+  of O(log n). Advisory-annotation-only; never affected compiled code.
+
+### Added
+
+- **`tools/install-cross-qemu.sh`**: local QEMU + cross-toolchain install
+  script for AArch64/RISC-V64 testing on this machine's Debian/Ubuntu-family
+  setup, with a `--check`-only verify mode.
+- **Tutorial coverage**: filled documentation gaps for ~150 previously-
+  undocumented builtins, a RISC-V/RVV specifics section in the SIMD
+  tutorial, and `clone`/`clone_at` docs.
+
+### Internal
+
+- `scripts/release.py` now refuses to tag a release while
+  `RELEASE_NOTES/`/`CHANGELOG.md` still hold unfilled scaffold
+  placeholders (the gap that let v0.9.2 ship with `TODO` stubs
+  untouched) — see this file's own `## [v0.9.2]` entry, backfilled
+  retroactively as part of the same fix.
+
+---
+
 ## [v0.9.2] — 2026-08-11
 
 Patch release. No new language features beyond positional `break`/`continue`
