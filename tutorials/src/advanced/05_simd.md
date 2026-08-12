@@ -495,6 +495,67 @@ vanic build saxpy.vani --target=aarch64-unknown-linux-gnu --sve2
 Both flags are ignored on non-AArch64 targets (the compiler emits
 a clear error). `--sve2` wins if both are given.
 
+## RISC-V / RVV specifics
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Two things make RVV a different situation from AArch64/NEON above,
+worth being upfront about before the instruction table:
+
+- **No dedicated opt-in flag.** `--sve`/`--sve2` exist because SVE
+  is a genuinely different codegen mode LLVM has to be told to
+  target. RVV has no `vanic`-level equivalent -- cross-compiling to
+  `riscv64gc-unknown-linux-gnu` alone does not turn on vector
+  codegen. The only lever is `--cpu=<name>`, forwarded verbatim as
+  `-mcpu=<name>` to `llc`; RVV-capable values like `sifive-x280`
+  come from LLVM's own RISC-V CPU table, not from anything
+  `vanic` validates or special-cases.
+- **Never run on real RVV silicon.** Everything below is QEMU-only.
+  `docs/TODO_CURRENT.md`'s `RVV-bench` item (a benchmark run against
+  a SiFive X280 / Milk-V Pioneer / StarFive VisionFive 2) is still
+  open, blocked on hardware access. Treat the instruction mapping
+  as "what LLVM's RISC-V backend is documented to emit," not
+  "confirmed correct on a physical board" -- the same asterisk the
+  vec256/vec512 platform-mapping tables above already carry for
+  their RVV rows.
+
+```bash
+# Cross-compile + run under QEMU with RVV enabled. Both sides must
+# separately agree to use the V extension:
+#   --cpu=sifive-x280   tells LLVM to EMIT RVV instructions
+#   -cpu rv64,v=true     tells QEMU to EXECUTE them
+# Omitting either side causes an illegal-instruction fault at runtime,
+# not a silent fallback to scalar code.
+QEMU_RISCV64="qemu-riscv64-static -cpu rv64,v=true,vlen=256" \
+  vanic run saxpy.vani --target=riscv64-unknown-linux-gnu --cpu=sifive-x280
+```
+
+`vlen=256` is the emulated physical vector register width in bits
+(128/256/512/...) -- match it to whichever platform-mapping row
+above you're trying to exercise. Full QEMU setup (install commands,
+CI wiring, what QEMU can and can't validate) is already covered in
+[Advanced 4b -- Cross-compilation](04b_cross_compile_primer.md#enabling-simd-extensions-in-qemu)
+and [`docs/qemu_testing.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/qemu_testing.md)
+-- this section is scoped to the RVV instruction mapping itself, not
+the QEMU mechanics.
+
+| `vec128<T>` builtin | Expected RVV instruction (i32 example, LMUL=1) |
+|---------|----------------------------------|
+| `simd_splat` | `vmv.v.x v0, a0` |
+| `simd_add` | `vadd.vv v0, v1, v2` |
+| `simd_mul` | `vmul.vv v0, v1, v2` |
+| `simd_reduce_add` | `vmv.s.x v3, zero` then `vredsum.vs v3, v1, v3` |
+| `simd_load` | `vle32.v v0, (a0)` |
+| `simd_store` | `vse32.v v0, (a0)` |
+
+Unlike NEON's fixed 128-bit registers, RVV registers are
+width-agnostic -- the same instructions run whether `vlen` is 128
+or 512, with the hardware (or QEMU) filling in the element count.
+This is exactly why `vec256<T>`/`vec512<T>` map to a *single*
+vector-register group on wide-enough RVV cores (see the platform
+mapping tables above): there's no NEON-style "two 128-bit passes"
+overhead to widen into, only a wider single instruction.
+
 ---
 
 ## FFI shim escape hatch
