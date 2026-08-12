@@ -7,8 +7,8 @@
 > Reading order: [Advanced 4a -- Embedded primer](04a_embedded_primer.md)
 > -> here -> [Advanced 4 -- Embedded](04_embedded.md).
 
-This chapter has **no compiler code**. Pure concepts, then the
-full attribute / flag reference.
+This chapter leads with concepts, then a full attribute/flag
+reference with real code.
 
 ---
 

@@ -6,8 +6,10 @@
 > [06a pointers/refs](06a_pointers_refs_primer.md) ->
 > [06b heap/stack](06b_heap_vs_stack_primer.md) -> here.
 
-This chapter has **no compiler code**. Pure intuition. The
-formal version is [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md).
+This chapter is mostly intuition, with a few small snippets
+illustrating move semantics (one uses `Vec<i64>` a chapter early --
+see the note before it). The formal version is
+[Intermediate 3 -- Affine ownership](../intermediate/03_affine.md).
 
 ## Recap: where we are
 
@@ -160,6 +162,13 @@ non-Copy value.
 ## When it shows up in practice
 
 The most common shape is **function arguments**:
+
+> **New syntax ahead**: `Vec<i64>` is a growable list of `i64`
+> values -- `vec(1, 2, 3)` builds one, `xs[0]` reads its first
+> element. Its own full chapter is next
+> ([Beginner 7](07_vec_arrays.md)); it's used here only because
+> move-vs-borrow needs a real heap-owning type to demonstrate, and
+> `Vec` is the most common one.
 
 ```vani
 fn consume(xs: Vec<i64>) -> i64 {

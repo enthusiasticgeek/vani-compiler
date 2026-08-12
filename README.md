@@ -251,6 +251,7 @@ The standard library ships affine-first containers across four complexity tiers.
 | [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) | 84 lessons: Beginner (25) → Intermediate (37) → Advanced (22) |
 | [Language Manual](docs/language_manual.md) | Types, ownership, control flow, SIMD, FFI, tooling |
 | [Language Coverage](docs/languages.md) | All 62 human-language dialects + verification status |
+| [Tools](tools/README.md) | `vani_translate.py` (translate `.vani` source between all 63 dialects), leak sweep, cross-QEMU setup, LLM context bundle |
 | [Design Philosophy](docs/philosophy.md) | Why the design is the way it is; comparisons with Rust/C++ |
 | [Safety Standards](tutorials/src/advanced/12_safety_standards.md) | ASIL-D, DO-178C, IEC 61508, MISRA C 2012 compliance |
 | [Benchmarks](benchmarks/README.md) | 12 benchmarks vs C / C++ / Rust — catalogue, methodology, open gaps |

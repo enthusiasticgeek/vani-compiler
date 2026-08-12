@@ -6,8 +6,8 @@
 > Reading order: [02a parallelism primer](02a_parallelism_primer.md)
 > -> here -> [Advanced 3 concurrency](03_concurrency.md).
 
-This chapter has **no compiler code**. Pure intuition, then the
-one-page API.
+This chapter leads with intuition, then a one-page API with real
+code.
 
 ## The problem: phase-by-phase parallel work
 

@@ -7,7 +7,8 @@
 > -> here -> [Intermediate 4 generics+interfaces](04_generics_iface.md)
 > for the formal syntax.
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real generic-function code
+once the analogy lands.
 
 ## The problem: code that's the same except for the type
 

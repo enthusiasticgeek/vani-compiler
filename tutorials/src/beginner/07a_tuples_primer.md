@@ -6,7 +6,10 @@
 > at use sites. Reading order: this is short + foundational;
 > read it any time after [Beginner 7 Vec + arrays](07_vec_arrays.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter leads with intuition, not syntax drills — but a few
+short `struct`/`Box` code snippets show up below as comparison
+points against tuples (both get a one-line "here's what this means"
+note the first time they appear; full chapters come later).
 
 ## The combo-meal tray
 
@@ -51,6 +54,12 @@ fn divmod(a: i64, b: i64) -> ???
 Three ways to handle the "two return values":
 
 ### Option 1: a struct
+
+> **New syntax ahead**: `struct Name { field: Type, ... }` declares a
+> named bundle of fields — below, `DivMod` bundles a `q` and an `r`
+> field under one type name. `struct` gets its own full chapter later
+> ([Intermediate 1](../intermediate/01_struct_methods.md)); it shows
+> up here only as the thing a tuple is being compared against.
 
 ```vani
 struct DivMod { q: i64, r: i64 }
@@ -285,6 +294,13 @@ destructuring patterns are one level deep only); staged
 destructuring is the only way to unpack a nested tuple.
 
 ### Tuple containing a `Box`
+
+> **New syntax ahead**: `Box<T>` is a single heap-allocated `T` —
+> `box(value)` moves `value` onto the heap and hands back an 8-byte
+> pointer to it. Its own chapter is later
+> ([Intermediate 3a](../intermediate/03a_box_raii_primer.md)); here
+> it's just an example of a non-trivial (bigger-than-a-few-bytes)
+> tuple slot.
 
 ```vani
 struct BigData { ... }   // imagine this is 4 KB

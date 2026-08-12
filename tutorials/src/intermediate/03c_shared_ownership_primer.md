@@ -7,7 +7,8 @@
 > + [Intermediate 3a Box+RAII](03a_box_raii_primer.md) +
 > [Intermediate 3b affine deeper](03b_affine_deeper_primer.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real code for each of the
+five idiomatic alternatives.
 
 ## The family car, one title
 

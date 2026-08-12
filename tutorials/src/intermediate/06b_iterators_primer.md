@@ -7,7 +7,8 @@
 > [06a closures primer](06a_closures_primer.md) -> here ->
 > [Intermediate 6 closures + iterator combinators](06_closures.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real iterator-combinator
+code once the analogy lands.
 
 ## The kitchen tap
 

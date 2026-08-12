@@ -12872,3 +12872,84 @@ backfill left no other release accidentally still stale), a freshly-
 scaffolded throwaway version (`0.0.1-test`, cleaned up after) correctly
 reporting both markers, and a full `--dry-run --no-push --patch` run
 completing cleanly end-to-end with the renumbered step output.
+
+## Tooling: `tools/vani_translate.py` was silently broken for a real chunk of its claimed language coverage (2026-08-12)
+
+Found while answering a direct question about whether the tool still
+worked. A quick functional test (translate each dialect's own real
+example file to English, try to compile the result) found 15 of 62
+dialects produced output that didn't compile -- the tool was just
+leaving specific keywords untranslated, silently. Root-caused to the
+exact same shape as BUG-173 (`src/lsp.rs`'s completion lists drifting
+from `src/lexer.rs`): `ALIASES`, a ~1200-line hand-maintained Python
+dict, had never been mechanically kept in sync with `lexer.rs`'s real
+keyword tables. Six of the compiler's 63 dialects (Nepali, Maithili,
+Konkani, Assamese, Sindhi, Punjabi-Shahmukhi -- all pragma-only
+aliases of an existing shared table) were also missing from the
+tool's `--to` list entirely.
+
+Deeper root cause once the first fix pass landed: even a *correct*
+`ALIASES` entry wasn't enough. `build_reverse_lookup()` (the function
+every "recognize this word as a keyword" call site uses) was seeded
+**only** from `ALIASES`'s single curated "canonical" spelling per
+(TokenKind, language) -- but `lexer.rs` often accepts several valid
+synonyms for the same TokenKind (e.g. Danish's ASCII `formaal`
+alongside native `formål`; English's own `give`/`give_back` alongside
+`return`). A real file using any synonym OTHER than the one `ALIASES`
+happened to pick silently passed through untranslated. Separately,
+`_translate_keywords` only ever *rewrote* an existing `// vani-lang:`
+pragma line -- it never *added* one, so translating FROM a pragma-less
+source (the common case for English, which needs none) into any
+pragma-gated ASCII-only target dialect produced output with no pragma
+at all, unconditionally failing to compile regardless of whether the
+keywords themselves translated correctly.
+
+Fixed by treating `lexer.rs` as the actual source of truth, the same
+way BUG-173 did for `lsp.rs`:
+
+- New `tools/regen_vani_translate_keywords.py`: extracts every
+  `"word" => TokenKind::Xxx` pair from every dialect's `lexer.rs`
+  keyword function(s) (plus the inline English-alias match block in
+  `lex_ident`, and `multi_word_devanagari_keyword`'s legitimate
+  space-containing phrases -- excluding those from the "wrong word"
+  classification took a second pass after they first looked like 3
+  false-positive typos). Validates every existing `ALIASES` cell,
+  fixes the ones that don't match a real `lexer.rs` word (42 cells:
+  a mix of genuine typos, e.g. Turkish `tür` for Type when the real
+  word is `tip`, and TokenKind/language collisions, e.g. Urdu's
+  `Task` entry `کام` actually meaning `Fn`), backfills the 523 cells
+  that were simply absent from some TokenKind's dict entirely (a
+  different gap Pass 1 alone couldn't catch -- discovered via Pashto,
+  which was completely missing `Intent`/`Assert`/`Prove` despite
+  `lexer.rs` having real words for all three), adds the 6 missing
+  languages as straight copies of their parent's already-valid word,
+  and generates a new `ALL_SYNONYMS: Dict[str, List[str]]` -- the
+  union of every valid synonym for a TokenKind across every language
+  including English's own aliases -- that `build_reverse_lookup()`
+  now seeds from FIRST, closing the "only recognizes one canonical
+  spelling" gap. `_translate_keywords` also now inserts a pragma line
+  when none existed, for any non-English target.
+- `verify_roundtrip`'s own blind spot (confirmed directly: it reported
+  "round-trip ok" for a deliberately-broken Swahili case where a
+  keyword silently round-tripped to itself unchanged) is now closed
+  too -- when a `vanic` binary can be found, `--verify` additionally
+  compiles BOTH translation hops via `vanic check`, not just the
+  first one (a corrupted OUTPUT-side spelling for the return leg can
+  still produce a matching token sequence while not compiling, so
+  checking only the forward hop would have missed exactly this case
+  -- confirmed by re-running the same deliberate-break test against
+  the single-hop version first).
+- New `tools/test_vani_translate.py`: permanent regression suite
+  (table-staleness check + all 62 non-English dialects translated
+  both directions with a real `vanic check` compile, + `--verify` for
+  all 62), wired into `.github/workflows/ci.yml` as a new job.
+
+Two cells remain genuinely unfixable without inventing a translation:
+Cherokee and Mongolian have no native `as`-cast keyword in `lexer.rs`
+at all (confirmed absent from both dialect functions); left as a
+documented, honest English-fallback gap rather than guessing a word.
+
+Verification: `python3 tools/test_vani_translate.py` passes clean (0
+`regen --check` problems across 48 TokenKinds x 62 languages, 62/62
+dialects compile in both directions, 62/62 `--verify` round-trips
+pass including the new dual-hop compile check).

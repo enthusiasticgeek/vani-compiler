@@ -5,7 +5,8 @@
 > order: [Beginner 6a/6b/6c primers](../beginner/06a_pointers_refs_primer.md)
 > -> [Intermediate 3 affine ownership](03_affine.md) -> here.
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real `Box<T>` code once the
+analogy lands.
 
 ## The storage-unit key
 

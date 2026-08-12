@@ -9,7 +9,8 @@
 > met payloaded enums yet; then this; then
 > [Intermediate 10 Result + try](10_result_try.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real code illustrating each
+pattern.
 
 ## The relay race
 

@@ -2,7 +2,9 @@
 
 Out-of-tree utilities that do not ship with the compiler binary.
 
-- [`vani_translate.py`](#vani_translatepy) — keyword translation between 57 languages with optional LLM translation of comments, strings, and identifiers
+- [`vani_translate.py`](#vani_translatepy) — keyword translation between 63 languages with optional LLM translation of comments, strings, and identifiers
+- [`regen_vani_translate_keywords.py`](#regen_vani_translate_keywordspy) — regenerates `vani_translate.py`'s keyword tables from `src/lexer.rs`; run this after any lexer.rs keyword edit
+- [`test_vani_translate.py`](#test_vani_translatepy) — regression suite for `vani_translate.py`, run in CI
 - [`leak_sweep.py`](#leak_sweeppy) — ASan + LeakSanitizer + UBSan sweep over the example corpus, run in CI
 - [`install-cross-qemu.sh`](#install-cross-qemush) — set up AArch64 / RISC-V 64 QEMU user-mode emulation + cross-compilers for local `--target=` testing
 - [`llm_context/`](llm_context/README.md) — prompt-engineering bundle and MCP server for AI agents (Phase ML-2)
@@ -13,6 +15,16 @@ Out-of-tree utilities that do not ship with the compiler binary.
 
 **Current version**: B.1 v3  
 **Status**: Production-ready keyword translation; LLM path requires an API key or local Ollama instance
+
+Keyword data (`ALIASES`, `ALL_SYNONYMS`) is generated from `src/lexer.rs` by
+[`regen_vani_translate_keywords.py`](#regen_vani_translate_keywordspy) — don't
+hand-edit those tables directly, the same way `tools/regen_lsp_keywords.py`
+keeps `src/lsp.rs`'s completion lists in sync with `lexer.rs`. (2026-08-12:
+the tables had drifted badly enough from `lexer.rs` that translating several
+real dialects produced output that didn't compile — 6 dialects were also
+missing from `--to` entirely. Both fixed the same day;
+[`test_vani_translate.py`](#test_vani_translatepy) is the permanent
+regression guard, wired into CI.)
 
 A source-level translator for `.vani` files. It substitutes keywords, rewrites SOV word-order where needed, and optionally delegates natural-language content (comments, strings, identifiers) to an LLM.
 
@@ -43,16 +55,17 @@ python3 tools/vani_translate.py --list-keywords
 
 ### Supported languages
 
-57 languages across 12 script families.
+63 languages across 12 script families — the full set the compiler itself
+accepts via `// vani-lang:` pragmas.
 
 | Family | Languages |
 |--------|-----------|
-| Indo-Aryan (Devanagari) | English\*, Sanskrit, Hindi, Marathi |
-| Indo-Aryan (other scripts) | Bengali, Odia, Gujarati, Punjabi, Sinhala |
+| Indo-Aryan (Devanagari) | English\*, Sanskrit, Hindi, Marathi, Nepali, Maithili, Konkani |
+| Indo-Aryan (other scripts) | Bengali, Assamese, Odia, Gujarati, Punjabi, Sinhala |
 | Dravidian | Tamil, Telugu, Kannada, Malayalam |
 | East Asian | Mandarin, Japanese, Korean |
 | Southeast Asian | Thai, Vietnamese, Khmer, Burmese, Lao, Malay, Indonesian, Filipino |
-| Middle Eastern / RTL | Arabic, Hebrew, Persian, Urdu, Pashto |
+| Middle Eastern / RTL | Arabic, Hebrew, Persian, Urdu, Sindhi, Punjabi-Shahmukhi (`--to punjabi_shahmukhi`), Pashto |
 | Cyrillic | Russian |
 | European (non-Latin) | Greek |
 | European (Latin) | Spanish, French, German, Portuguese, Italian, Dutch, Polish, Turkish, Swedish, Norwegian, Danish, Hungarian, Czech, Slovak, Finnish, Romanian, Catalan |
@@ -61,6 +74,14 @@ python3 tools/vani_translate.py --list-keywords
 | Other | Tibetan, Cherokee, Mongolian |
 
 \* English is the canonical baseline; all other languages map to and from it.
+
+Nepali, Maithili, Konkani, Assamese, Sindhi, and Punjabi-Shahmukhi are
+pragma-only dialects that reuse an existing shared keyword table (same as
+the compiler itself treats them — see `docs/language_manual.md`'s
+Multilingual keywords section) rather than having their own translated
+vocabulary; translating *into* one of them produces the same keyword
+spellings as its parent (Hindi, Bengali, and Urdu respectively), just under
+that dialect's own pragma tag.
 
 Language names are used as-is on the CLI (`--to hindi`, `--to japanese`, etc.) and in the source pragma (`// vani-lang: hindi`).
 
@@ -270,11 +291,62 @@ ok, message = verify_roundtrip(source, target_lang="hindi", src_lang="english")
 
 The translator is a pure-Python single-file tool (`tools/vani_translate.py`). It operates in three passes:
 
-1. **Keyword substitution** — a character-level scan replaces every keyword token using a reverse-lookup table built from `ALIASES`. Multi-word fusions are handled by a one-token look-ahead.
+1. **Keyword substitution** — a character-level scan replaces every keyword token using a reverse-lookup table seeded from `ALL_SYNONYMS` (every spelling `lexer.rs` actually accepts for a given TokenKind, across every dialect) and `ALIASES` (the single canonical spelling used for output). Multi-word fusions are handled by a one-token look-ahead.
 2. **SOV rewriting** — for SOV target languages, verb-final statement lines are detected and reordered (SVO → SOV on output; SOV → SVO on input).
 3. **LLM pass** (optional) — `//` comment text, quoted string content, and optionally identifiers are extracted and sent to the chosen LLM backend. On failure the original text is kept unchanged.
 
 `_is_word_char()` recognises characters from all 27 supported Unicode script ranges so that non-ASCII keyword tokens are correctly delimited without a full Unicode segmenter.
+
+---
+
+## `regen_vani_translate_keywords.py`
+
+**Status**: Maintenance tool — run after any keyword-table edit in `src/lexer.rs`
+
+Regenerates `vani_translate.py`'s `ALIASES` and `ALL_SYNONYMS` tables directly
+from `src/lexer.rs`'s real keyword-matching functions, instead of leaving
+them hand-maintained (the shape of bug that caused BUG-173 in `src/lsp.rs`
+and the 2026-08-12 `vani_translate.py` staleness this script exists to
+prevent recurring).
+
+```bash
+# Report drift without writing (used by CI + test_vani_translate.py)
+python3 tools/regen_vani_translate_keywords.py --check
+
+# Fix ALIASES cells that no longer match lexer.rs, add any language
+# missing from ALIASES entirely, and regenerate ALL_SYNONYMS
+python3 tools/regen_vani_translate_keywords.py
+```
+
+It validates every `ALIASES[TokenKind][language]` cell against the real
+`lexer.rs` function(s) that language's keywords come from (`LANG_TABLES`),
+backfills any cell that's simply missing (a language never got added for
+some TokenKind), and adds the 6 dialects that reuse an existing shared
+table wholesale (`ALIAS_OF`) if they're absent. It does **not** invent a
+translation for a TokenKind `lexer.rs` genuinely has no word for in some
+language — those stay as documented gaps (2 known cases: Cherokee and
+Mongolian have no native `as`-cast keyword yet).
+
+---
+
+## `test_vani_translate.py`
+
+**Status**: Regression suite — run in CI
+
+Guards against `vani_translate.py` regressing the way it did on
+2026-08-12. Needs a built `vanic` binary to run its compile-check steps
+(`cargo build --release --bin vanic` first); falls back to just the
+table-staleness check otherwise.
+
+```bash
+python3 tools/test_vani_translate.py
+```
+
+Checks: `regen_vani_translate_keywords.py --check` passes; every dialect's
+own real example file translates to English and compiles; English's
+`basics.vani` translates into every dialect and compiles; `--verify`'s
+round-trip (including its dual-hop `vanic check` compile-check) passes for
+every dialect.
 
 ---
 

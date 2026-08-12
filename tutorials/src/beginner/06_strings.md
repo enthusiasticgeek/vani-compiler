@@ -225,6 +225,15 @@ yourself; either form works identically.
 
 ### Storing an `OwnedStr` into a struct's `Str` field is rejected
 
+> **New syntax ahead**: this section uses `struct` — a named bundle
+> of fields, like `Holder { s: Str, n: i64 }` below, which groups an
+> `s` and an `n` value together under one type name so you can pass
+> both around as a single unit (`h.s` reads the `s` field, `h.n` the
+> `n` field). `struct` gets its own full chapter later
+> ([Intermediate 1](../intermediate/01_struct_methods.md)); this is
+> just enough to follow the example below, which is really about
+> `OwnedStr`'s lifetime, not about `struct` itself.
+
 The `let`-narrowing case above is safe because the compiler-managed
 temp's scope is tied directly to the `let` itself. That safety
 doesn't carry over to a struct field — a struct can easily outlive
@@ -651,6 +660,16 @@ fn main() -> i64 {
 | `is_ascii_digit(byte)` / `is_ascii_alpha(byte)` / `is_ascii_alphanumeric(byte)` / `is_ascii_whitespace(byte)` | `i64 -> bool` | classify ONE byte code, not a `Str` |
 
 ### Characters, stripping, and `parse_bool`
+
+> **New syntax ahead**: `str_chars` below returns a `Vec<i64>` — a
+> growable list type with its own full chapter later
+> ([Beginner 7](07_vec_arrays.md)). All you need here: `Vec<i64>` is
+> a numbered sequence of `i64` values, `ch[0]` reads the first one,
+> and `len(ref ch)` counts how many there are. The `match` at the
+> bottom is previewed the same way — full treatment in
+> [Beginner 8](08_match.md) and its
+> [Option primer](08b_errors_primer.md); here it just picks `v` out
+> of `Option.Some(v)`, or falls back to `false` for `Option.None`.
 
 ```vani
 intent "chars, strip, parse_bool";

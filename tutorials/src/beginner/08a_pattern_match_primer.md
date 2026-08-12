@@ -7,7 +7,10 @@
 > payloads. Read it before
 > [Beginner 8 -- Pattern match on integers + booleans](08_match.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter leads with intuition, not syntax drills — but real
+`match` code shows up throughout to ground the analogy, including a
+brief look at `enum` declarations (full chapter later — see the
+callout further down before you get there).
 
 ## The post-office sorting clerk
 
@@ -163,6 +166,16 @@ A loose `if`/`else` chain might handle 4 cases and forget the
 5th -- a runtime "fell through everything" silently-wrong-
 behavior. With `match`, the compiler **checks that every
 possible value is covered**.
+
+> **New syntax ahead**: `enum Name { VariantA, VariantB, ... }`
+> declares a type that's exactly ONE of a fixed set of named
+> variants — `Color` below is `Red` OR `Green` OR `Blue`, never more
+> than one at a time. That's also what `Result<i64, ParseError>`
+> from Pattern 1 above already was — `Ok(...)` or `Err(...)`, never
+> both — just built into the language instead of hand-declared. The
+> "why this shape, why call it a sum" explanation is a few
+> paragraphs down; `enum` itself gets a full chapter later
+> ([Intermediate 2](../intermediate/02_enums_payloads.md)).
 
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 

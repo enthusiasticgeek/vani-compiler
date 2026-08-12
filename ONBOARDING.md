@@ -27,8 +27,9 @@ cc --version
 The compiler **runs** without the LLVM tools — `vanic check` only
 needs Rust and z3. `vanic run --backend=llvm` needs `lli`; `vanic
 build` needs `llc` + `cc` (+ optional `opt`). The C backend (`run
---backend=c`) needs `cc`. (`intentc` is kept as a legacy alias
-for one release cycle; prefer `vanic`.)
+--backend=c`) needs `cc`. (`intentc` is kept as a legacy alias —
+originally planned as a one-release-cycle bridge, still shipped
+15+ releases later as of v0.9.3; prefer `vanic`.)
 
 `VANIC_NO_VERIFY=1` (or the legacy `INTENTC_NO_VERIFY=1`) skips
 SMT entirely for fast iteration on non-proof code changes. Don't

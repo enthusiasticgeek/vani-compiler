@@ -3,12 +3,13 @@
 > **Learning goal**: build a mental model of "the compiler can
 > mathematically prove things about your code." This is vāṇी's
 > most distinctive feature -- and the one most foreign to
-> readers coming from any mainstream language. Reading order:
-> this is foundational; read it before
-> [Beginner 9 SMT intro](../beginner/09_smt_intro.md) for first
-> contracts, then [Intermediate 12 SMT deep-dive](12_smt_deepdive.md).
+> readers coming from any mainstream language. If you followed the
+> book in order you already saw first contracts in
+> [Beginner 9](../beginner/09_smt_intro.md); this chapter re-grounds
+> the intuition before [Intermediate 12 SMT deep-dive](12_smt_deepdive.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real `requires`/`ensures`
+code once the analogy lands.
 
 ## The building inspector and the blueprint
 

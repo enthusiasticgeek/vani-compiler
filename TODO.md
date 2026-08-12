@@ -5,37 +5,34 @@
 > The canonical current work queue (actionable, checkbox-ordered) is in
 > **[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md)**.
 
-## Current status (as of 2026-07-28)
+## Current status (as of 2026-08-12)
 
-- **Version**: `0.9.4-dev` (tagged v0.1.0 through v0.9.4-dev; see RELEASING.md for full history).
-- **Tests**: 2600 lib tests passing, **0 failing** — first fully clean
-  `cargo test --lib` run in a while; the 3 Win64 FFI-ABI failures that
-  had been showing up (and being written off as "pre-existing,
-  unrelated") were finally diagnosed and fixed as BUG-26, see below.
-- **Dialects**: 62 across 26 scripts.
-- **Blocked**: macOS hardware, grammar consultant, AArch64/RISC-V benchmark hardware, proper IOCP, crates.io API token.
-- **No known bugs remain open.** BUG-5 through BUG-26 are all fixed —
-  see [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for full writeups.
-  Highlights from the 2026-07-27/28 sessions: BUG-13 through BUG-23
-  covered a range of codegen-correctness fixes (RwLock/Mutex payload
-  types, slice-match pattern guards, a C-backend Vec-bounds hint
-  false-firing on a fresh-in-loop-body Vec); BUG-21 Path B shipped a
-  genuine new language feature (`Task<R>` — `task <fn>(args…)` /
-  `join <name>` spawn a real OS thread and carry a typed return value
-  back across it, not just the old payload-free block form); auditing
-  that feature's own code for the same bug class found and fixed
-  BUG-24 (a real heap buffer overflow in the LLVM backend's task-spawn
-  context sizing) and BUG-25 (unsound struct-size accounting in the
-  `#[bounded_stack]` safety-critical stack-overflow verifier); BUG-26
-  diagnosed and fixed the 3 long-standing "pre-existing" test failures
-  instead of continuing to write them off.
-- **2026-07-25/26 session**: BUG-6 through BUG-12 found and fixed (real
-  dangling-reference / codegen-correctness bugs, not just missing
-  features). Ref-capturing closures went from "scoped only" to fully
-  implemented: v-fix, v1 (real `Closure` values), v2 (non-escape
-  enforcement), and v3 (`vani-optimize` v0.1.5 gained `Closure`-accepting
-  variants) all shipped — see
-  [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md).
+- **Version**: `0.9.4-dev` on `main`; latest tagged release is `v0.9.3`
+  (2026-08-12). See [RELEASING.md](RELEASING.md) for the full version
+  history and [CHANGELOG.md](CHANGELOG.md) for release-by-release detail.
+- **Tests**: 2906 lib tests passing, **0 failing**, plus 12 other test
+  suites (integration tests, cross-target QEMU runs, the ASan/LSan/UBSan
+  example-corpus sweep, the `vani_translate.py` regression suite) all
+  green in CI.
+- **Dialects**: 62 across 26 scripts (63 including English) — see
+  [docs/languages.md](docs/languages.md) for per-dialect verification
+  status.
+- **Blocked**: macOS hardware, grammar consultant, AArch64/RISC-V
+  benchmark hardware, proper IOCP, crates.io API token — unchanged since
+  the last update (see "Blocked items" below).
+- **No known bugs remain open.** BUG-1 through BUG-184 are all fixed —
+  see [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the full,
+  chronological per-bug writeup (this file used to inline a running
+  highlights summary here; that became unmaintainable well before
+  BUG-184, so this section now just points at the real log instead of
+  drifting further out of sync with it). Recent milestones: three
+  patch releases since this section was last updated (v0.9.1, v0.9.2,
+  v0.9.3), a 3-bug soundness series in the SMT bounds-elision pass
+  shared by every backend (BUG-181/182/183 — a stale-fact class of bug
+  that let the compiler prove a provably-unsafe array index "safe"),
+  and `tools/vani_translate.py` (translate `.vani` source between all
+  63 dialects) going from silently broken for ~24% of its claimed
+  language coverage to fully regression-tested in CI.
 
 ## Open items (summary)
 

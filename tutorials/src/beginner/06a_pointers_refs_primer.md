@@ -237,6 +237,13 @@ pointer.
 
 <img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
+> **New syntax ahead**: `struct Point { x: i64, y: i64 }` declares a
+> named bundle of two fields, `x` and `y`, under the type name
+> `Point` — `p.x` reads the `x` field. `struct` gets its own full
+> chapter later ([Intermediate 1](../intermediate/01_struct_methods.md));
+> it's used here only because "a reference to some real data" needs
+> *some* data, and a two-field point is the smallest realistic shape.
+
 ```vani
 struct Point { x: i64, y: i64 }
 

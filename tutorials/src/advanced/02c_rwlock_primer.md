@@ -7,8 +7,8 @@
 > the full primitive survey) or independently after the
 > [02a parallelism primer](02a_parallelism_primer.md).
 
-This chapter has **no compiler code**. Intuition first, then the
-one-page API.
+This chapter leads with intuition, then a one-page API with real
+code.
 
 ## The whiteboard problem
 

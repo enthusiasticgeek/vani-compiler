@@ -7,8 +7,8 @@
 > [Intermediate 4 generics and interfaces](04_generics_iface.md)
 > (the code surface).
 
-This chapter has **no compiler code**. Intuition first, then the
-one-page API.
+This chapter leads with intuition, then a one-page API reference
+with real code.
 
 ## The government form with pre-filled boxes
 

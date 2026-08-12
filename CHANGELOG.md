@@ -409,39 +409,56 @@ control flow, not real compiler defects). Highlights:
 
 ---
 
-## [v0.5.3] — YYYY-MM-DD
+## [v0.5.3] — 2026-07-17
+
+Feature + performance release. See `RELEASE_NOTES/v0.5.3.md` for the full writeup.
 
 ### Added
 
-- TODO
+- **Generic trait bounds inline syntax** (G1) — `fn f<T: Iface>(x: T)` as sugar for `where T is Iface`.
+- **`clone_at` on `Vec<(i64, OwnedStr)>`** (G2) — Tuple + `OwnedStr` element support.
+- **`Atomic<T>` extended to `f64`** (G3).
+
+### Performance
+
+- pdqsort replacing Lomuto introsort; ascending/reverse-sorted pattern-detection passes; AVX-512 bitmask scan for the sort partition step; persistent pthread pool for `parallel for`; `getelementptr inbounds` on every Vec/Array GEP.
 
 ### Fixed
 
-- TODO
+- LSP test helper's `Uri` construction (fluent-uri API compatibility).
 
 ---
 
-## [v0.5.2] — YYYY-MM-DD
+## [v0.5.2] — 2026-07-17
 
-### Added
-
-- TODO
+Security patch release.
 
 ### Fixed
 
-- TODO
+- Bumped `lsp-types` 0.94 → 0.97 to drop a transitive `idna < 1.0` dependency (Dependabot-flagged GHSA advisory).
 
 ---
 
-## [v0.5.1] — YYYY-MM-DD
+## [v0.5.1] — 2026-07-17
+
+Feature release, closing out the L-series and XL-series work queued after v0.5.0. See `RELEASE_NOTES/v0.5.1.md` for the full writeup.
 
 ### Added
 
-- TODO
+- **Closure capture of affine (non-Copy) bindings** (L5).
+- **`select { await poll then binding { body } }` syntax** (L3).
+- **Runtime integer overflow guards for `Add`/`Sub`/`Mul`** (L4), with SMT elision.
+- **Slice/vec destructure patterns in `match`** (L1).
+- **`#[repr(C)]` / `#[repr(packed)]` struct layout attributes** (L2).
+- **`Vec<bool>` packed bit-array representation** (XL1).
+- **`vanic test` built-in test runner** (XL2).
+- **`for await x in expr` stream syntax** (XL3).
+- **Multi-pass monomorphizer** (XL4) — fixes nested generic function chains a single pass couldn't fully resolve.
 
 ### Fixed
 
-- TODO
+- A curly-quote encoding bug in `parser.rs`, found while building the `vanic test` runner.
+- CI: a shadowing XL2 test arm that had silently broken the `test` subcommand's own test coverage.
 
 ---
 

@@ -10,6 +10,42 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-08-12 (BUG-81 through BUG-184; v0.9.1, v0.9.2, v0.9.3 releases)
+
+**State**: ten days, ~104 bugs (BUG-81 through BUG-184), and three patch
+releases (`v0.9.1` 2026-08-07, `v0.9.2` 2026-08-11, `v0.9.3` 2026-08-12)
+since the last handoff entry below. This entry summarizes the major
+threads at session-cluster granularity rather than bug-by-bug — every
+individual fix has its own full writeup in
+[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) (search the `BUG-NNN`
+number), and each release's `CHANGELOG.md`/`RELEASE_NOTES/vX.Y.Z.md`
+entry groups its own range by theme. Compiler version `0.9.4-dev`
+(`Cargo.toml`); last tagged release `v0.9.3`.
+
+### Shipped across this window (2026-08-03 → 2026-08-12)
+
+| Item | What shipped |
+|------|-------------|
+| Feature-combination gaps sweep (BUG-81–104) | 49-row sweep across 11 categories (SIMD × containers/generics, generics × concurrency handles, SMT contracts × generics/enums, async × everything, `dyn` × generics, `try`/`?` × containers, thin-coverage collections, FFI × generics, 3-way affine × generics × containers, pattern-match depth, boundary confirmations). ~15 bugs, nearly all the same root shape: a monomorphization/codegen "find every use of X" walker covering only some of the AST's shapes. |
+| Localfuzz-found + bug-pattern-audit rounds (BUG-105–178) | Multiple audit rounds (round 2 through round 11) plus ongoing `tools/localfuzz` triage. Highlights: BUG-110 (both SSA backends silently emitted fully unchecked arithmetic — the single most impactful fix of this window), BUG-116 (SSA path never lowered `requires` at all), a systematic ASan/LeakSanitizer sweep (BUG-153/154 onward) that found a real leak/UAF class recurring at 5 independent call sites (closures, struct-field assignment, bare call args, `hashmap_*`, `Trie` ops) — CI gained a permanent ASan/LSan/UBSan corpus-sweep job as a result. BUG-166/167 found and fixed a real SMT-soundness bug (the identifier sanitizer aliased distinct non-ASCII variable names into one SMT symbol). BUG-169–172 were large localization sweeps: structure-keyword parity across all 60+ dialect functions, then a native-speaker linguistic review across ~40 dialects that also found a widespread `vec(0)`-is-not-empty bug in 46 example files. BUG-176 shipped a real language feature (positional `break inner`/`outer`/`middle`). |
+| **v0.9.1** (2026-08-07) | Consolidated ~70 bug fixes (BUG-68–140) across 5 sweeps into one patch release — the version had been sitting at `0.9.1-dev` unreleased while that work accumulated. |
+| **v0.9.2** (2026-08-11) | ~38 more bug fixes (BUG-141–178) + positional break/continue. Shipped with the release-notes/changelog scaffolding still unfilled (`TODO` placeholders) — caught and fixed retroactively on 2026-08-12, see below. |
+| SMT bounds-elision soundness series (BUG-181/182/183) | Found via localfuzz, same root theme across 3 separate bugs: `checker.rs`'s `smt_facts` (a running "facts assumed true here" list) going stale across a loop or branch boundary and letting the bounds-check elision pass "prove" an out-of-range index in-bounds. BUG-181 was the worst in kind — an unconditional, always-reachable out-of-bounds memory access (SIGSEGV on the C backend). Fixed by disabling that specific elision inside loop bodies (a permanent, documented trade-off — `docs/v1_limitations.md` L26) and by dropping stale facts at 5 more merge points (`if`/`else`, `if let`, `while let`, `select`) BUG-183's targeted follow-up audit found. |
+| **v0.9.3** (2026-08-12) | BUG-179–184 (the SMT series above, two tutorial-writing-time gaps, and a `--big-o` classification bug found while adding its own regression coverage). `scripts/release.py` gained a hard guard (`check_notes_not_stale`) refusing to tag a release while `RELEASE_NOTES`/`CHANGELOG.md` still hold unfilled scaffold placeholders — the exact gap that let v0.9.2 ship stale. |
+| Tutorial sequential-readability audit | Verified the tutorials' "no CS background needed" claim by reading every chapter in the book's own `SUMMARY.md` order, tracking whether any concept is used before it's taught. Found and fixed real forward-references (struct/enum/interface/Vec used ahead of their own chapters) in 7 files, plus a separately-discovered, repo-wide false "this chapter has no compiler code" claim in 25 more primer chapters. |
+| `docs/language_manual.md` accuracy audit | Found real drift against actual compiler behavior: 6 wrong/nonexistent builtin names in the Collections table (`vec_push`/`vec_len` don't exist), a Concurrency example using an invalid type + syntax, a Mutex example using pointer-deref syntax that doesn't exist in vāṇी, and an SMT example with 3 compile errors. Every corrected sample re-verified against the real compiler. |
+| `tools/vani_translate.py` fully fixed | Found broken for ~24% of its claimed dialect coverage (untranslated keywords silently producing non-compiling output) plus 6 dialects missing from `--to` entirely — same "hand-copied table drifted from `lexer.rs`" shape as BUG-173's `src/lsp.rs` staleness. New `tools/regen_vani_translate_keywords.py` (fixed 42 wrong + 523 entirely-missing table cells + added the 6 missing dialects) and `tools/test_vani_translate.py` (permanent regression suite, now a CI job) close it for good. |
+| Retroactive doc/release fixes (2026-08-12) | v0.9.2's `CHANGELOG.md`/`RELEASE_NOTES/v0.9.2.md` entries backfilled with real content (were shipped with `TODO` placeholders); the already-published GitHub release page for v0.9.2 also needed a separate `gh release edit` since it doesn't auto-sync with repo file changes. This `STATUS.md` entry, `TODO.md`'s "Current status" section, and `RELEASING.md`'s version-history gap (stopped at `v0.5.0`) were all found stale by the same pass and are being brought current alongside it. |
+
+### Key numbers (2026-08-12)
+- **Compiler version**: `0.9.4-dev` (last tagged release: `v0.9.3`, 2026-08-12)
+- **Bugs fixed this window**: ~104 (BUG-81 through BUG-184)
+- **Releases cut this window**: 3 (`v0.9.1`, `v0.9.2`, `v0.9.3`)
+- **`cargo test`**: 2906 lib tests + 12 other suites, 0 failures (includes 2 new CI jobs added this window: the ASan/LSan/UBSan corpus sweep and the `vani_translate.py` regression suite)
+- **`vanic check` example corpus**: 1022/1040 ok (18 non-ok: 17 known pre-existing xfail/embedded-gated files + 1 deliberately-malformed lex fixture)
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-08-02 (testing-matrix sweep: 13 bugs found+fixed, BUG-68–BUG-80)
 
 **State**: completed a full, systematic sweep of `docs/TESTING_MATRIX_TODO.md`'s
