@@ -3,9 +3,7 @@
 The tutorials site is an mdBook. Each lesson is a single
 Markdown file under `tutorials/src/`. To contribute:
 
-1. **Pick a lesson** from [SUMMARY.md](SUMMARY.md). Stub
-   lessons (everything except *Beginner 1 â€" Hello, World*) are
-   open for writing.
+1. **Pick a lesson** from [SUMMARY.md](SUMMARY.md).
 2. **Use the template** from
    [`beginner/01_hello_world.md`](beginner/01_hello_world.md):
    - Learning goal (one sentence)
@@ -73,5 +71,8 @@ mdbook serve --open
 mdbook clean
 ```
 
-GitHub Pages deployment is queued as **TUT-5** â€" see
-[TODO.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md).
+GitHub Pages deployment is live — every push to `main` that touches
+`tutorials/` triggers
+[`.github/workflows/deploy-tutorials.yml`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/.github/workflows/deploy-tutorials.yml),
+which builds and publishes to
+[enthusiasticgeek.github.io/vani-compiler](https://enthusiasticgeek.github.io/vani-compiler/).

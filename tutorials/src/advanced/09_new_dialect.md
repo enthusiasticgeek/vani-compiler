@@ -18,11 +18,16 @@ There are two distinct levels of work:
 
 | Level | What it unlocks | Effort |
 |-------|----------------|--------|
-| **Translator only** | `vani_translate.py` can output the language; you can read source in that language if you already have it | Edit `ALIASES` in `tools/vani_translate.py` — no Rust changes |
+| **Translator only** | `vani_translate.py` can output the language; you can read source in that language if you already have it | Add an entry to `LANG_TABLES` in `tools/regen_vani_translate_keywords.py` and re-run it — no Rust changes |
 | **Compiler-level** | `vanic` can parse, type-check, and compile `.vani` files *written* in that language | Lexer + backend + diagnostic changes in Rust |
 
-The translator already covers 57 languages (see [Section 8](08_translator.md)).
-For compiler-level support, continue with the rest of this chapter.
+The translator already covers all 63 languages the compiler itself
+supports (see [Section 8](08_translator.md)) — there's no
+translator-only superset anymore, so this row only applies if you're
+extending the translator's keyword coverage for a language it's
+missing a specific word for, not adding a wholly new one. For
+compiler-level support (a genuinely new language), continue with the
+rest of this chapter.
 
 ## Quick decision tree
 

@@ -9,8 +9,10 @@ SOLID is a set of five principles for writing maintainable software.
 They were articulated for object-oriented languages but none of them
 actually require inheritance -- they describe properties of modules,
 interfaces, and functions that hold in any typed language. vāṇी maps
-them cleanly, and in one case (LSP) can enforce them with the SMT
-verifier.
+them cleanly, and in one case (the Liskov Substitution Principle,
+abbreviated LSP -- see "L" below; not to be confused with the
+[Language Server Protocol](../installation.md#editor-integration-lsp))
+can enforce them with the SMT verifier.
 
 ---
 

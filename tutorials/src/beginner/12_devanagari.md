@@ -16,13 +16,14 @@ keyword `फलन` maps to `fn` in the same way `funcion` maps to
 switches. The program still runs identically; only the words
 you type change.
 
-The compiler natively supports Sanskrit, Hindi, Marathi, and several
-other script families. The translator tool (`tools/vani_translate.py`)
-extends this to **57 languages** — from Russian and Arabic to Japanese
-and Swahili — so you can convert existing files into any of those
-languages even if the compiler does not yet parse them natively.
-This lesson shows you what the Devanagari surface looks like in
-practice.
+The compiler natively supports **63 languages** in total — Sanskrit,
+Hindi, and Marathi among them, alongside everything from Russian and
+Arabic to Japanese and Swahili (see
+[Language Coverage](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/languages.md)
+for the full list). The translator tool (`tools/vani_translate.py`)
+covers that same set, so you can convert an existing `.vani` file
+between any two of them without hand-editing keywords. This lesson
+shows you what the Devanagari surface looks like in practice.
 
 ## The program
 
@@ -110,7 +111,7 @@ not have one lone Latin word in an otherwise-Devanagari program.
   available for `print`, `return`, `assert`, `prove`, `let`,
   `if`, and `while`. They're documented in
   Advanced Sec.7 -- *Devanagari purity arc*.
-- **The translator works both ways and across 57 languages**.
+- **The translator works both ways and across all 63 languages**.
   Convert any `.vani` file between human languages without
   rewriting by hand:
   ```bash
@@ -118,7 +119,7 @@ not have one lone Latin word in an otherwise-Devanagari program.
   python3 tools/vani_translate.py --to sanskrit \
       ~/lesson1.vani -o ~/lesson1_sa.vani --add-sri-header
 
-  # Sanskrit → Japanese (or any other of the 57 supported languages)
+  # Sanskrit → Japanese (or any other of the 63 supported languages)
   python3 tools/vani_translate.py --to japanese \
       ~/lesson1_sa.vani -o ~/lesson1_ja.vani
 

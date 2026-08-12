@@ -20,7 +20,7 @@ tools and shows the write-verify-iterate loop end to end.
 Two scripts under [`tools/llm_context/`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/llm_context/):
 
 - **`bundle.py`** (Phase ML-1, 2026-06-07) -- a static Markdown
-  context bundle, ~31K tokens full, ~21K with `--no-examples`
+  context bundle, ~33K tokens full, ~22K with `--no-examples`
   (confirmed by testing; the corpus has grown a lot since an
   earlier ~13K/~7K estimate). Paste it into any LLM as a system
   prompt and the model can generate working vāṇी without any
@@ -55,8 +55,8 @@ python3 tools/llm_context/bundle.py > /tmp/vani_ctx.md
 # an earlier version of this page said ~13K/~7K/~4K; the corpus
 # has grown a lot since -- re-derive with `wc -c` / 4 if these
 # drift again):
-python3 tools/llm_context/bundle.py                            # ~126K bytes, ~31K tokens (full)
-python3 tools/llm_context/bundle.py --no-examples               # ~83K bytes, ~21K tokens
+python3 tools/llm_context/bundle.py                            # ~134K bytes, ~33K tokens (full)
+python3 tools/llm_context/bundle.py --no-examples               # ~89K bytes, ~22K tokens
 python3 tools/llm_context/bundle.py --no-examples --no-limits  # ~19K bytes, ~5K tokens
 
 # Single section only:
@@ -72,7 +72,7 @@ python3 tools/llm_context/bundle.py --section patterns   # GoF catalog only
 | 2 | Keyword alias table (English <-> Sanskrit <-> Hindi <-> Marathi) | `tools/vani_translate.py::ALIASES` |
 | 3 | SOV verb-at-end statement shape table | README + bundle |
 | 4 | 22 GoF design patterns, one-line intent each | `examples/.../design_patterns/` |
-| 5 | English example corpus signatures (`intent` + `fn`) | 165 example files (confirmed by testing; an earlier version of this page said 155) |
+| 5 | English example corpus signatures (`intent` + `fn`) | 194 example files (confirmed by testing; earlier versions of this page said 155, then 165 -- the corpus keeps growing, re-derive with `find examples/language/english -name '*.vani' \| wc -l` if this drifts again) |
 | 6 | Dialect-aware error prefixes | `src/diagnostic.rs::localize_message` |
 | 7 | v1 limitations catalog (verbatim) | `docs/v1_limitations.md` |
 
@@ -240,12 +240,12 @@ JSON shape -- point `command` at `python3` and `args[0]` at
 | `vani://aliases` | TokenKind <-> dialect spelling table |
 | `vani://sov` | SOV verb-at-end shape table |
 | `vani://patterns` | 22-pattern GoF catalog |
-| `vani://examples` | Signatures of all 165 English examples |
+| `vani://examples` | Signatures of all 194 English examples |
 | `vani://errors` | Dialect-aware error prefix table |
 | `vani://limits` | v1 limitations catalog |
 | `vani://full-bundle` | All of the above concatenated |
 
-Instead of pasting all ~31K tokens upfront, the agent pulls
+Instead of pasting all ~33K tokens upfront, the agent pulls
 `vani://aliases` when (and only when) writing a Devanagari
 file. Big savings on long-running agent sessions.
 
@@ -267,7 +267,7 @@ search":
 
 1. Agent fetches `vani://aliases` + `vani://examples` (~12K
    tokens combined, confirmed by testing -- still well under the
-   ~31K full bundle since it skips §6's error-prefix table and
+   ~33K full bundle since it skips §6's error-prefix table and
    §7's limitations catalog).
 2. Agent drafts a `SortedVec<i64>` wrapper with `push`,
    `find`, and `requires` / `ensures` clauses.

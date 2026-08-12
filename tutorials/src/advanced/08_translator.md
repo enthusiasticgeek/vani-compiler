@@ -1,7 +1,7 @@
 ﻿# Advanced 8 -- The cross-language translator
 
 > **Learning goal**: understand how `vani_translate.py` works, use it to
-> move a program between two of its 57 supported languages, add an LLM
+> move a program between two of its 63 supported languages, add an LLM
 > backend for natural-language content, and extend the keyword table with
 > a new entry.
 
@@ -30,17 +30,20 @@ comments `/* */` — is forwarded unchanged.
 
 ## Supported languages
 
-57 languages across 12 script families. Use the exact lowercase name on
-the CLI and in `// vani-lang:` pragmas.
+63 languages across 12 script families -- the full set the compiler
+itself accepts via `// vani-lang:` pragmas. Use the exact lowercase
+name on the CLI and in pragmas.
 
 ```
 english     sanskrit    hindi       marathi
-bengali     odia        gujarati    punjabi     sinhala
+nepali      maithili    konkani
+bengali     assamese    odia        gujarati    punjabi     sinhala
 tamil       telugu      kannada     malayalam
 mandarin    japanese    korean
 thai        vietnamese  khmer       burmese     lao
 malay       indonesian  filipino
-arabic      hebrew      persian     urdu        pashto
+arabic      hebrew      persian     urdu        sindhi
+punjabi_shahmukhi       pashto
 russian
 greek
 spanish     french      german      portuguese  italian
@@ -52,15 +55,28 @@ swahili     yoruba      hausa       amharic
 tibetan     cherokee    mongolian
 ```
 
+Six of these (`nepali`, `maithili`, `konkani`, `assamese`, `sindhi`,
+`punjabi_shahmukhi`) are pragma-only dialects that reuse an existing
+shared keyword table -- same as the compiler itself treats them (see
+`docs/languages.md`). Translating *into* one of them produces the same
+keyword spellings as its parent (Hindi, Bengali, and Urdu
+respectively), just under that dialect's own pragma tag.
+`punjabi_shahmukhi` is the one exception to "CLI name == pragma tag":
+the compiler's pragma parser expects the hyphenated
+`// vani-lang: punjabi-shahmukhi`, which the translator writes
+automatically -- you still pass `--to punjabi_shahmukhi` (underscore)
+on the command line.
+
 ---
 
 ## Pass 1: keyword translation
 
 Every keyword is substituted using a bidirectional lookup table
-(`ALIASES` in `vani_translate.py`). The `--from` flag is optional —
-the translator auto-detects every known keyword regardless of source
-language. Translation between any two of the 57 languages works directly,
-not only through English.
+(`ALIASES` for output spellings, `ALL_SYNONYMS` for input recognition
+-- see "Adding a keyword" below for why there are two). The `--from`
+flag is optional — the translator auto-detects every known keyword
+regardless of source language. Translation between any two of the 63
+languages works directly, not only through English.
 
 ```bash
 # English → Japanese
@@ -107,22 +123,26 @@ After `--to arabic` from the Russian file:
 python3 tools/vani_translate.py --list-keywords
 ```
 
-Confirmed by testing: the table only has columns for English, Sanskrit,
-Hindi, Marathi, and Mandarin -- `list_keywords()` in
-`tools/vani_translate.py` hardcodes those five and was never updated
-when the roster grew to 57 languages, so it does NOT show all 57 (an
-earlier version of this page claimed it did). A missing entry in one
-of those five columns prints as a bare `--`, not `(missing)`. To check
-coverage for any of the other 52 languages, read the `ALIASES` dict in
-`tools/vani_translate.py` directly, or translate a file that exercises
-the keyword you care about and inspect the output by eye.
+The table only has columns for English, Sanskrit, Hindi, Marathi, and
+Mandarin -- `list_keywords()` in `tools/vani_translate.py` hardcodes
+those five as a representative sample; it does NOT show all 63 (a full
+63-column table would be unreadable as a terminal/markdown table). A
+missing entry in one of those five columns prints as a bare `--`, not
+`(missing)`. To check coverage for any of the other 58 languages, read
+the `ALIASES` dict in `tools/vani_translate.py` directly, run
+`python3 tools/regen_vani_translate_keywords.py --check` (reports every
+cell that's wrong OR entirely missing, validated directly against
+`src/lexer.rs` -- see "Adding a keyword" below), or translate a file
+that exercises the keyword you care about and inspect the output by
+eye.
 
 ---
 
 ## Pass 2: SOV word-order rewriting
 
-Twenty languages in the translator use Subject-Object-Verb word order.
-Verb-final statement shapes are rewritten automatically — no flag needed.
+Twenty-six languages in the translator use Subject-Object-Verb word
+order. Verb-final statement shapes are rewritten automatically — no
+flag needed.
 
 **Verb-final statements**:
 
@@ -143,19 +163,19 @@ English                              Hindi
 for idx from 0 to n {          →    idx के लिए 0 से n तक {
 ```
 
-(Loop variable spelled `idx`, not `i` -- confirmed by testing, `i`
-specifically collides with Swedish's spelling of the `In` keyword in
-the translator's global cross-language lookup table, silently
-mangling the identifier into `में` instead of leaving it alone. See
-"Known limitations" below.)
+(Loop variable spelled `idx`, not a short common-word-shaped name --
+some short identifiers coincidentally collide with another language's
+keyword spelling in the translator's global cross-language lookup
+table and get silently mangled. See "Known limitations" below.)
 
 Both directions work. Translating a Hindi-keyword file back to English
 restores `return` / `print` at the start of the line and the `for … from … to`
 shape.
 
-SOV languages in the translator: Sanskrit, Hindi, Marathi, Bengali, Odia,
-Gujarati, Punjabi, Sinhala, Tamil, Telugu, Kannada, Malayalam, Japanese,
-Korean, Urdu, Persian, Pashto, Turkish, Mongolian, Tibetan.
+SOV languages in the translator: Sanskrit, Hindi, Marathi, Nepali,
+Maithili, Konkani, Bengali, Assamese, Odia, Gujarati, Punjabi, Sinhala,
+Tamil, Telugu, Kannada, Malayalam, Japanese, Korean, Urdu, Sindhi,
+Punjabi-Shahmukhi, Persian, Pashto, Turkish, Mongolian, Tibetan.
 
 ---
 
@@ -279,46 +299,57 @@ catch coverage gaps.
 
 ```bash
 python3 tools/vani_translate.py basics.vani --to japanese --verify
-# → round-trip ok: english -> japanese -> english (14 keyword tokens preserved)
+# → round-trip ok: english -> japanese -> english (21 keyword tokens
+#   preserved, both hops compile clean)
 # (exact count drifts as example files are edited -- verified against
-# examples/language/english/basics.vani as of 2026-08-01; what matters
+# examples/language/english/basics.vani as of 2026-08-12; what matters
 # is the "round-trip ok" message, not the specific number)
 ```
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 The round-trip guarantee covers keywords only. Comments, strings, and
-identifiers are not compared.
+identifiers are not compared. When a `vanic` binary can be found (on
+`PATH`, or this repo's own `target/release`/`target/debug`), `--verify`
+*additionally* compiles both translation hops with `vanic check` and
+folds that into the pass/fail verdict — a real syntax problem in
+either hop fails verification even if the keyword-token sequence
+happens to still match. (Token-sequence equality alone has a real
+blind spot: an untranslated keyword that silently passes through
+round-trips to itself unchanged, which used to make a genuinely broken
+translation report "ok" — confirmed and fixed 2026-08-12.)
 
 ---
 
 ## Adding a keyword to the alias table
 
-Suppose you want to add a language alias for `pure` that the
-translator currently falls back to English for. (Korean already has
-one as of this writing -- `"korean": "순수"` -- confirmed by checking
-`ALIASES["Pure"]` directly; use `--list-keywords` for the five
-languages it covers, or grep `ALIASES` in `tools/vani_translate.py`
-for any other language, to find a genuinely-missing pair before
-following along.) Open `tools/vani_translate.py`, find the `Pure`
-entry, and add the missing language's key -- the shape is the same
-regardless of which one you're adding, so the Korean line below still
-illustrates it correctly even though it's no longer the gap itself:
+**Don't hand-edit `ALIASES`.** That used to be the documented workflow
+here, and it's exactly how the table drifted badly enough (2026-08-12)
+that translating several real dialects silently produced output that
+didn't compile -- the same "hand-copied table quietly rots relative to
+`src/lexer.rs`" shape as an earlier bug in the LSP's completion lists.
+`src/lexer.rs` is the actual source of truth for every keyword spelling
+the compiler accepts; `tools/vani_translate.py`'s tables are generated
+from it by `tools/regen_vani_translate_keywords.py`.
 
-```python
-"Pure": {
-    "english": "pure",
-    "sanskrit": "शुद्ध",  "hindi": "शुद्ध",   "marathi": "शुद्ध",
-    "mandarin": "纯",      "japanese": "純粋",   "korean": "순수",    # ← added
-    "russian":  "чистый",
-    ...
-},
+If the language you want already has the word in `lexer.rs` (just
+missing from `ALIASES`), fixing it is one command:
+
+```bash
+python3 tools/regen_vani_translate_keywords.py --check   # see what's stale/missing
+python3 tools/regen_vani_translate_keywords.py           # fix it
 ```
+
+If `lexer.rs` genuinely has no word for that TokenKind in that
+language's dialect function yet, add it there first (find the right
+`fn xxx_keyword(text: &str) -> Option<TokenKind>` function for the
+language -- see [Section 9](09_new_dialect.md) for how the dialect
+functions are organized), rebuild `vanic`, and re-run the regen script
+above; it will pick up the new entry automatically.
 
 Verify with the round-trip:
 
 ```bash
-# Write a file that uses pure
 cat > /tmp/test_pure.vani << 'EOF'
 // vani-lang: english
 pure fn square(n: i64) -> i64 { return n * n; }
@@ -329,50 +360,48 @@ python3 tools/vani_translate.py /tmp/test_pure.vani --to korean --verify
 # → round-trip ok: english -> korean -> english (N keyword tokens preserved)
 ```
 
-That's it. The reverse-lookup table is rebuilt from `ALIASES` at startup,
-so no other change is needed.
+Or, better, run the whole regression suite (`tools/test_vani_translate.py`
+-- the same one CI runs) before and after your change; it exercises
+every dialect in both directions plus `--verify`, not just the one you
+touched.
 
 ---
 
 ## Adding a new language to the translator
 
-Adding a language to the **translator only** (not to the compiler's lexer)
-is a three-step change to `tools/vani_translate.py`:
+Every dialect `src/lexer.rs` accepts should also work in the
+translator -- as of this writing all 63 do (verified by
+`tools/test_vani_translate.py`, wired into CI). If you're adding a
+language the **compiler** doesn't support yet, do that first (see
+[Section 9 →](09_new_dialect.md)) -- once `vanic` itself can parse the
+new dialect, wiring it into the translator is a small addition to
+`tools/regen_vani_translate_keywords.py`, not `vani_translate.py`
+directly:
 
-1. **Add entries** to every relevant row of `ALIASES`. At minimum cover
-   the ~30 most-common token kinds (`Fn`, `Let`, `Return`, `If`, `Else`,
-   `While`, `For`, `Break`, `Continue`, `Assert`, `Prove`, `True`,
-   `False`, `Print`, `Match`, `Struct`, `Enum`, `Const`, `Pub`, `Module`,
-   `Use`, `Interface`, `Implement`, `Try`, `Task`, `Join`, `Unsafe`,
-   `RegionKw`, `Intent`, `Type`). Leave uncommon ones out — the
-   translator falls back to English for any missing entry.
+1. **Add an entry to `LANG_TABLES`**: the new language's key, the
+   `lexer.rs` function(s) supplying its keyword table (in preference
+   order -- native-script form before its ASCII-only pragma-gated
+   counterpart, if it has both), and the exact `// vani-lang: <tag>`
+   pragma string the compiler's pragma parser expects (almost always
+   identical to the language key -- see `punjabi_shahmukhi`'s entry
+   for the one exception, a hyphen-vs-underscore mismatch handled by
+   `_PRAGMA_TAG_OVERRIDES`).
+2. If the new dialect is a pragma-only alias of an existing shared
+   table (like Nepali/Maithili/Konkani reusing the Devanagari table,
+   or Assamese reusing Bengali's), also add it to `ALIAS_OF` so its
+   column gets filled in as a straight copy of the parent's
+   already-curated words.
+3. Run `python3 tools/regen_vani_translate_keywords.py` -- it adds the
+   language to `SUPPORTED_LANGS`, `ALIASES`, and `ALL_SYNONYMS`
+   automatically. Add the new language to `SOV_LANGS` by hand if it
+   uses Subject-Object-Verb word order (the regen script doesn't infer
+   grammar).
+4. The Unicode character range for a genuinely new script also needs a
+   line in `_is_word_char()` if `lexer.rs`'s own dialect functions
+   introduced one `vani_translate.py` doesn't already recognize.
 
-2. **Add the language name** to `SUPPORTED_LANGS`.
-
-3. **Add to `SOV_LANGS`** if the language uses Subject-Object-Verb word
-   order (the translator will then automatically rewrite verb-final
-   statement shapes).
-
-```python
-# Step 2
-SUPPORTED_LANGS = (
-    ...,
-    "assamese",    # ← new
-)
-
-# Step 3 (Assamese is SOV)
-SOV_LANGS = frozenset({
-    ...,
-    "assamese",
-})
-```
-
-The Unicode character range for the new script also needs a line in
-`_is_word_char()` if it is not already covered (Assamese reuses the
-Bengali block U+0980–U+09FF, which is already there).
-
-To add a language to the **compiler itself** (so it can parse and compile
-`.vani` files in that language), see [Section 9 →](09_new_dialect.md).
+Run `python3 tools/test_vani_translate.py` afterward to confirm the new
+language round-trips and compiles both directions.
 
 ---
 
@@ -410,7 +439,7 @@ print(msg)
 | Multi-line string literals are not translated | Keep strings on one line |
 | Nested for-range SOV patterns: only the outermost loop is rewritten | — |
 | Ollama quality varies by model size | Use a 7B+ model; set `--llm-timeout 120` |
-| **User identifiers that happen to match another supported language's keyword spelling get silently mangled** — confirmed by testing: `i` (loop variable) collides with Swedish's spelling of `In` and becomes `में` under any target language, even though the file is English/Hindi and never mentions Swedish. Pass 1's keyword matching is deliberately global across all 57 languages (that's what makes `--from` auto-detection work at all -- see "Pass 1" above), so it can't tell a real keyword from a coincidentally-identical identifier. | Avoid single/short identifiers as loop variables (`idx`/`index` instead of `i`); `--verify` only checks the keyword token sequence, so it will NOT catch a mangled identifier -- inspect translated output by eye when it uses short names |
+| **User identifiers that happen to match another supported language's keyword spelling get silently mangled** — confirmed by testing (2026-08-12): a parameter named `com` collides with Portuguese's spelling of `With` and becomes `सह` under any target language, even though the file is English/Hindi and never mentions Portuguese. Pass 1's keyword matching is deliberately global across all 63 languages (that's what makes `--from` auto-detection work at all -- see "Pass 1" above), and now also matches every synonym in `ALL_SYNONYMS`, not just each language's one canonical spelling -- broader recognition on purpose (it's what fixed the "some real dialect spelling silently passes through untranslated" bug this table used to describe a symptom of), but it widens this specific collision surface too. | Avoid short, common-word-shaped identifiers (`com`, `de`, `is`, `to`, `as`, ...); `--verify` only checks the keyword token sequence, so it will NOT catch a mangled identifier -- inspect translated output by eye when it uses short names |
 
 ---
 
@@ -421,12 +450,12 @@ print(msg)
    and run `--verify` on both. Inspect the output in a Unicode-capable
    editor.
 
-2. Add one keyword entry to a language that is missing it (`--list-
-   keywords` only covers English/Sanskrit/Hindi/Marathi/Mandarin,
-   printing a bare `--` for a gap in one of those five -- for any of
-   the other 52 languages, grep `ALIASES` in `tools/vani_translate.py`
-   directly to find a `TokenKind` whose dict is missing that
-   language's key). Run the round-trip test.
+2. Pick a `TokenKind` and a language, and use
+   `tools/regen_vani_translate_keywords.py --check` to see whether its
+   `ALIASES` cell is stale or missing. If none are (the table should
+   be clean as of this writing), pick a keyword `lexer.rs` doesn't yet
+   have a word for in some dialect, add one there, and run the regen
+   script to pick it up. Run the round-trip test either way.
 
 3. *(Advanced)* Run the translator with `--llm anthropic --translate-identifiers`
    on a file that has descriptive function names. Review whether the

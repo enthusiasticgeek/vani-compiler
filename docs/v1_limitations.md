@@ -1479,3 +1479,58 @@ preservation) rather than reusing possibly-stale `smt_facts` -- could
 recover this class of elision without reintroducing BUG-181's hole.
 Filed as part of the round-12 audit focus; see
 `docs/BUG_PATTERN_AUDIT_TODO_12.md`.
+
+### L27 -- `vanic run`'s LLVM JIT path skips the `opt` optimizer, unlike `vanic build`/`--backend=c`
+
+Found via `tools/localfuzz` (2026-08-12): a loop counter fuzzer-mutated
+to start at `i64::MIN` (needing ~9.2 quintillion increments to reach
+the loop's real exit condition) completed **instantly** under `vanic
+build` (AOT) and `vanic run --backend=c`, but hung indefinitely under
+plain `vanic run` (the default LLVM JIT path) -- confirmed directly,
+not just observed:
+
+```
+$ timeout 5 vanic run f.vani --backend=c   # exits 0 instantly
+$ timeout 5 vanic build f.vani -o f && ./f  # exits 0 instantly
+$ timeout 5 vanic run f.vani                # times out (exit 124)
+```
+
+**Root cause**: `vanic build`'s LLVM pipeline runs `opt -O3` on the
+generated `.ll` before handing it to `llc` (see `src/main.rs`'s AOT
+path, and the C backend gets the equivalent via `cc -O2`/`-O3`).
+`opt -O3` includes scalar-evolution / induction-variable analysis that
+can collapse a simple counting loop like `while (n < LIMIT) { ...
+n = n + 1; }` into a near-constant-time computation when the loop body
+has no other observable side effect until it exits -- which is exactly
+this shape. `vanic run`'s JIT path, by contrast, writes the raw,
+**unoptimized** `.ll` straight to `lli` with no `opt` pass at all. For
+almost all real programs this difference is invisible (`lli`'s own
+MCJIT still runs at native speed per instruction); it only becomes
+visible for a loop shape whose *iteration count* an optimizer can
+collapse away entirely -- there, the JIT genuinely executes every one
+of billions/quintillions of iterations one at a time, with no
+shortcut, and can appear to hang forever on a program that finishes
+instantly any other way.
+
+**Impact**: performance only, not correctness -- given enough time,
+`vanic run`'s JIT would produce the same answer. In practice this
+means a loop with an accidentally-enormous range (a real off-by-one
+bug in user code, not just a fuzzer artifact) can look like a hang
+under plain `vanic run` while the exact same program runs instantly
+under `--backend=c` or `vanic build`, which is a confusing signal when
+debugging -- "which backend I used" shouldn't determine whether a
+program appears to hang.
+
+**Workaround**: use `vanic build` (or `vanic run --backend=c`) instead
+of the default JIT path when debugging a loop that seems to hang, or
+if you suspect an accidentally-huge range. `VANIC_NO_VERIFY=1` does
+not help here (this isn't an SMT-verification cost).
+
+**Fix**: not applied. Adding an `opt -O3` pass to the JIT path is a
+real design trade-off, not a clear-cut bug fix -- it would add a
+non-trivial startup-latency cost to *every* `vanic run` invocation
+(including the common case of quickly re-running a small test/example
+script, which is the JIT path's whole reason to exist) to fix a rare
+pathological-loop case that `vanic build`/`--backend=c` already handle
+correctly. Left as a documented, understood limitation rather than
+changed unilaterally.
