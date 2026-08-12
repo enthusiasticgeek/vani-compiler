@@ -21,13 +21,35 @@ intent "Terminal tic-tac-toe -- two human players share one terminal, taking tur
 //    7 | 8 | 9
 //
 // Board state is a flat Vec<i64> of length 9: 0 = empty, 1 = X, 2 = O.
+//
+// Color is ANSI escape codes (`\x1b[...m`), built via the `\x` hex
+// escape in string literals. `const` initializers in v1 must be a
+// bare literal (`42`, `true`, ...) -- no string literals, function
+// calls, or concatenation -- so the named colors below are tiny
+// wrapper functions instead of constants: still one named place to
+// change a color, just spelled as `fn` instead of `const`. Each
+// color is reset immediately after so it doesn't bleed into the
+// board's `|`/`-` separators. Empty cells stay uncolored (they're
+// just a position number, not a player's mark).
+
+fn ansi_red() -> Str { return "\x1b[31m"; }
+fn ansi_blue() -> Str { return "\x1b[34m"; }
+fn ansi_yellow() -> Str { return "\x1b[33m"; }
+fn ansi_reset() -> Str { return "\x1b[0m"; }
+
+fn player_label(player: i64) -> OwnedStr {
+  if player == 1 {
+    return ansi_red() + "X" + ansi_reset();
+  }
+  return ansi_blue() + "O" + ansi_reset();
+}
 
 fn symbol_for(v: i64, pos: i64) -> OwnedStr {
   if v == 1 {
-    return "X" + "";
+    return player_label(1);
   }
   if v == 2 {
-    return "O" + "";
+    return player_label(2);
   }
   return i64_to_str(pos);
 }
@@ -91,11 +113,8 @@ requires len(board) == 9 as u64;
 ensures _return == 0 - 1 || (_return >= 0 && _return <= 8);
 {
   while true {
-    if player == 1 {
-      print "Player X, enter a position (1-9), or 'quit' to exit:";
-    } else {
-      print "Player O, enter a position (1-9), or 'quit' to exit:";
-    }
+    let prompt: OwnedStr = "Player " + player_label(player) + ", enter a position (1-9), or 'quit' to exit:";
+    print prompt;
     flush_stdout();
     let input: OwnedStr = stdin_read_line();
     let trimmed: OwnedStr = str_trim(input);
@@ -151,17 +170,15 @@ fn main() -> i64 {
     if winner != 0 {
       print "";
       print_board(ref board);
-      if winner == 1 {
-        print "X wins!";
-      } else {
-        print "O wins!";
-      }
+      let win_msg: OwnedStr = player_label(winner) + " wins!";
+      print win_msg;
       break;
     }
     if moves_made >= 9 {
       print "";
       print_board(ref board);
-      print "It's a draw.";
+      let draw_msg: OwnedStr = ansi_yellow() + "It's a draw." + ansi_reset();
+      print draw_msg;
       break;
     }
 
