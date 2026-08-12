@@ -15633,6 +15633,173 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn big_o_btreemap_contains_key_is_logarithmic() {
+        // Regression (2026-08-12): `is_logn_builtin` listed
+        // "btreemap_contains" -- the real builtin is
+        // "btreemap_contains_key" (see `btreemap_basics_typecheck_and_
+        // compile` above for the actual call signature). The typo meant
+        // a fn whose only superlinear-ish operation is
+        // `btreemap_contains_key` silently fell through to the
+        // "unknown builtin -> O(1)" default instead of being classified
+        // Logarithmic. Fixed by correcting the string.
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn just_lookup(key: i64) -> bool {
+              let m: BTreeMap<i64, i64> = btreemap_new();
+              return btreemap_contains_key(ref m, key);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "just_lookup").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Logarithmic);
+    }
+
+    #[test]
+    fn big_o_bst_contains_is_logarithmic() {
+        // Sanity check alongside the btreemap_contains_key regression
+        // above: `is_logn_builtin` also listed a phantom "bst_search"
+        // (no such builtin exists -- the real lookup op is
+        // "bst_contains", already listed separately) and a phantom
+        // "btreeset_get" (BTreeSet has no `get`, only `contains`).
+        // Removed both dead entries; this test pins that the real
+        // "bst_contains" builtin was never affected by that cleanup.
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn just_bst_lookup(key: i64) -> bool {
+              let t: Bst<i64> = bst_new();
+              return bst_contains(ref t, key);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "just_bst_lookup").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Logarithmic);
+    }
+
+    #[test]
+    fn big_o_linear_builtin_at_top_level_is_linear() {
+        // `is_linear_builtin`'s table (find/contains/reverse/dedup/
+        // vec_map/etc.) was only ever exercised indirectly through
+        // loop-nesting tests; nothing pinned the depth==0 case where
+        // the fn's own asymptotic cost (not a loop) comes purely from
+        // calling one of these once, standalone.
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn has_it(xs: Vec<i64>, needle: i64) -> bool {
+              return contains(ref xs, needle);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "has_it").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Linear);
+    }
+
+    #[test]
+    fn big_o_linear_builtin_inside_loop_bumps_to_polynomial() {
+        // Companion to the top-level case above: `merge_with_expr_
+        // and_callees` deliberately treats a linear builtin called
+        // INSIDE a loop as adding a level of nesting (comment: "bumps
+        // Linear-loop to Polynomial(k+1)") rather than just Linear --
+        // an O(n) loop containing an O(n) `reverse` call each iteration
+        // is O(n²), not O(n).
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn reverse_each(xs: Vec<i64>, n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                let ys: Vec<i64> = vec(1, 2, 3);
+                let _ = reverse(mut ref ys);
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "reverse_each").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Polynomial(2));
+    }
+
+    #[test]
+    fn big_o_parallel_for_bumps_depth_like_regular_for() {
+        // `TypedStmt::For`'s `parallel: bool` field is ignored by the
+        // big_o match arm (`TypedStmt::For { start, end, body, .. }`)
+        // -- confirms `parallel for` over an unbounded (non-constant)
+        // end value still counts as a nesting-depth bump exactly like
+        // a sequential `for`, rather than silently falling through the
+        // `_ => {}` catch-all and reporting O(1).
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn sum_parallel(xs: Vec<i64>, n: i64) -> i64 {
+              let total: i64 = 0;
+              parallel for i from 0 to n
+              reduce total with +;
+              {
+                total = total + xs[i as u64];
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "sum_parallel").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Linear);
+    }
+
+    #[test]
+    fn big_o_polynomial_callee_propagates_through_loop() {
+        // Cross-fn propagation was only pinned for Linear and
+        // Logarithmic/NLogN callees (see the tests above). This pins
+        // `propagate_callee_into_summary`'s `BigO::Polynomial(k)` arm:
+        // a helper that's independently O(n²) (nested loops), called
+        // inside the caller's own single loop, must combine to
+        // O(n³) (depth 1 + k 2 = 3), not stay at O(n²).
+        use crate::big_o::{annotate_program, BigO, BigOMode};
+        let source = r#"
+            fn quadratic_helper(n: i64) -> i64 {
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < n {
+                let j: i64 = 0;
+                while j < n {
+                  total = total + 1;
+                  j = j + 1;
+                }
+                i = i + 1;
+              }
+              return total;
+            }
+            fn caller(n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                let _ = quadratic_helper(n);
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let annotations = annotate_program(&checked.ir, BigOMode::Force);
+        let caller = annotations.iter()
+            .find(|(n, _)| n == "caller")
+            .expect("caller in annotations");
+        assert_eq!(
+            caller.1,
+            BigO::Polynomial(3),
+            "O(n²) callee inside an O(n) loop must combine to O(n³), got: {}",
+            caller.1,
+        );
+    }
+
+    #[test]
     fn elaboration_renders_after_move_after_use_diagnostic() {
         // User-direction item (2026-06-08): the move-after-use
         // diagnostic carries a 3-step elaboration explaining

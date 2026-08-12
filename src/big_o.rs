@@ -472,19 +472,27 @@ fn is_superlinear_builtin_sort(name: &str) -> bool {
 }
 
 fn is_logn_builtin(name: &str) -> bool {
+    // Regression (2026-08-12, found while writing big_o test coverage):
+    // three of these names never matched any real builtin call --
+    // `btreemap_contains_key` is the actual builtin (this list had
+    // `btreemap_contains`, missing the `_key` suffix), and
+    // `btreeset_get`/`bst_search` don't exist at all (BTreeSet has no
+    // `get`; BST's lookup builtin is `bst_contains`, already listed
+    // separately). All three were silent no-ops: a fn that called only
+    // `btreemap_contains_key` (or, hypothetically, the never-existing
+    // other two) fell through to the "unknown builtin -> O(1)" default
+    // instead of being classified `Logarithmic`.
     matches!(
         name,
         "binary_search"
             | "btreemap_get"
             | "btreemap_insert"
             | "btreemap_remove"
-            | "btreemap_contains"
-            | "btreeset_get"
+            | "btreemap_contains_key"
             | "btreeset_insert"
             | "btreeset_remove"
             | "btreeset_contains"
             | "bst_insert"
-            | "bst_search"
             | "bst_contains"
     )
 }
