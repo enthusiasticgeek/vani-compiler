@@ -8,6 +8,19 @@ interacting with loops), both affecting both SSA-C and SSA-LLVM (and
 their tree-backend siblings) identically since the bug lives in the
 shared checker.rs pass both backends consume.
 
+**Status update 2026-08-12, same day**: item 1 below ("there may be
+more in match-arm merging") paid off immediately — the targeted audit
+found and fixed **BUG-183**, the identical stale-fact shape at the
+`if`/`else` merge, the `if let` merge, the `select`-statement
+loop-desugar exit, and (a worse variant — no restore at all) `while
+let`. It also surfaced a SECOND, independent leak source at two of
+those four sites: `env`'s own `VarInfo.constant` bookkeeping, read
+directly by `current_smt_facts` on every query, bypassing the
+`smt_facts` Vec entirely — fixing the Vec alone was not sufficient at
+the `if let` site until `clear_constants_for` was added there too.
+Full writeup: `docs/TODO_CURRENT.md`'s BUG-183 entry. Items 2–4 below
+are still open for a follow-up round.
+
 ## The pattern, in one sentence
 
 `checker.rs`'s SMT-based elision passes (overflow-guard elision AND

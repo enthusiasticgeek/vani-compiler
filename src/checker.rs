@@ -14099,6 +14099,12 @@ fn check_one_stmt(
             }
             env.pop_scope();
             let else_env = std::mem::replace(env, pre_env.clone());
+            // BUG-183 (2026-08-12): compute which bindings either branch
+            // mutated BEFORE restoring smt_facts, so the restore below can
+            // drop any now-stale fact about them. Reused further down for
+            // `clear_constants_for` too (same set, same reasoning).
+            let mut branch_muts = collect_branch_mutations(then_body);
+            walk_branch_mutations(else_body, &mut branch_muts);
             // After the if-else, facts revert to pre. One exception: if
             // exactly one branch terminates (return/break/continue), then
             // execution past the merge must have taken the *other* branch,
@@ -14106,6 +14112,22 @@ fn check_one_stmt(
             // a common verifier gap: `if x < 0 { return ...; }` should
             // imply `x >= 0` on every statement that follows.
             *smt_facts = pre_facts;
+            // BUG-183: `pre_facts` is a snapshot from BEFORE either branch
+            // ran, so it still contains facts about any variable either
+            // branch reassigned (e.g. `i == 0` from a `let i: i64 = 0;`
+            // above this `if`, when both branches do `i = <something else>;`).
+            // Restoring it wholesale reintroduces a now-FALSE fact into the
+            // post-merge context -- confirmed via `--smt-debug` to let the
+            // bounds-elision pass "prove" a definitely-out-of-bounds index
+            // in-bounds using the stale `i == 0` fact, an unconditional OOB
+            // read with no runtime guard (same shape/severity as BUG-181/
+            // BUG-182, but at an if/else merge instead of a loop exit).
+            // Drop every such fact before re-adding the branch-condition
+            // fact below (which is about `cond`, not a mutated binding, so
+            // it stays valid regardless).
+            for name in &branch_muts {
+                drop_facts_mentioning(smt_facts, name);
+            }
             match (then_terminated, else_terminated) {
                 (true, false) => smt_facts.push(negate(cond)),
                 (false, true) => smt_facts.push(cond.clone()),
@@ -14288,9 +14310,8 @@ fn check_one_stmt(
             // binding's storage). Bindings provably untouched by
             // both branches keep their constant â€” refines #4 from
             // STATUS.md (was: blanket clear of every binding's
-            // constant after if/else).
-            let mut branch_muts = collect_branch_mutations(then_body);
-            walk_branch_mutations(else_body, &mut branch_muts);
+            // constant after if/else). `branch_muts` was already computed
+            // above (BUG-183 fix) for the analogous smt_facts cleanup.
             clear_constants_for(&mut merged, &branch_muts);
             *env = merged;
 
@@ -16627,6 +16648,30 @@ fn check_one_stmt(
             env.pop_scope();
             *env = pre_env;
             *smt_facts = pre_facts;
+            // BUG-183 (2026-08-12): this desugars to a real `while true {
+            // ... }` loop (see `loops.push` above), so same-scope
+            // reassignments inside an arm body are deliberately NOT
+            // fact-dropped while checking runs (gated off by `loops.
+            // is_empty()`, same as any other loop body -- needed for
+            // loop-invariant-preservation checking). That means `pre_facts`
+            // can be stale for any variable an arm body reassigns, exactly
+            // like the `Stmt::While`/`Stmt::For` loop-exit case BUG-182
+            // fixed and the `Stmt::If`/`if let` merge case fixed alongside
+            // this comment -- drop every such fact here too, unioned across
+            // every arm (any arm could have run).
+            let mut body_muts: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for arm in arms {
+                walk_branch_mutations(&arm.body, &mut body_muts);
+            }
+            for name in &body_muts {
+                drop_facts_mentioning(smt_facts, name);
+            }
+            // `*env = pre_env;` above reset `env.constant` too -- see the
+            // `check_iflet_stmt` follow-up comment for why this half of the
+            // fix is just as load-bearing as the `smt_facts` drop above
+            // (`current_smt_facts` re-synthesizes facts straight from
+            // `env`, bypassing the `smt_facts` Vec entirely).
+            clear_constants_for(env, &body_muts);
 
             let true_expr = TypedExpr {
                 kind: TypedExprKind::Bool(true),
@@ -16856,6 +16901,19 @@ fn check_iflet_stmt(
     env.pop_scope();
     let else_env = std::mem::replace(env, pre_env.clone());
     *smt_facts = pre_facts;
+    // BUG-183 (2026-08-12): same stale-fact shape as the `Stmt::If` merge
+    // fix -- `pre_facts` predates both branches, so it still holds facts
+    // about any variable either arm reassigned (e.g. `i == 0` from before
+    // this `if let`, when both arms do `i = <something else>;`). Confirmed
+    // via a minimal `if let Opt.Some(n) = a { i = 5; } else { i = 6; }`
+    // repro to unconditionally elide a genuinely out-of-bounds `xs[i]`
+    // bounds check on the tree-C backend. Drop every fact mentioning a
+    // branch-mutated binding right after the restore.
+    let mut branch_muts = collect_branch_mutations(then_body);
+    walk_branch_mutations(else_body, &mut branch_muts);
+    for name in &branch_muts {
+        drop_facts_mentioning(smt_facts, name);
+    }
     let pre_non_copy: Vec<(String, VarInfo)> = pre_env
         .all_bindings()
         .filter(|(_, info)| !info.ty.is_copy())
@@ -16887,6 +16945,19 @@ fn check_iflet_stmt(
             (None, None) => {}
         }
     }
+    // BUG-183 follow-up (2026-08-12): dropping the `smt_facts`-list facts
+    // above wasn't sufficient on its own -- `env` was reset to `pre_env`
+    // (via the two `std::mem::replace(env, pre_env.clone())` calls above)
+    // and never had `clear_constants_for` applied for branch-mutated
+    // bindings, unlike `Stmt::If`'s merge. `current_smt_facts` (the actual
+    // function every elision query calls) re-synthesizes a fresh
+    // `name == constant` fact straight from `env`'s `VarInfo.constant`
+    // field on every query, independent of the `smt_facts` Vec's own
+    // history -- so a stale `env` constant alone was enough to keep
+    // reintroducing the exact same unsound `i == 0` fact even after the
+    // `smt_facts` list itself was cleaned. Confirmed by testing: this line
+    // was the missing piece that actually closed the `if let` repro.
+    clear_constants_for(env, &branch_muts);
     body.push(TypedStmt::If { cond: cond_expr, then_body: then_stmts, else_body: else_stmts });
     if !scrut_checked.ty().is_copy() {
         if let Some(info_mut) = env.lookup_mut(&tmp_name) {
@@ -17065,11 +17136,32 @@ fn check_whilelet_stmt(
             ref_aliases: Vec::new(),
         });
     }
+    // BUG-183 (2026-08-12): unlike `Stmt::While`/`Stmt::For`, this function
+    // never snapshotted/restored `smt_facts` around the loop body at all --
+    // whatever was true before the loop just sat there unchanged, and
+    // same-scope reassignments inside `while_body` don't drop it either
+    // (the drop is gated off while `loops` is non-empty, same as every
+    // other loop body, for loop-invariant-preservation purposes). Confirmed
+    // via a minimal repro (`cur` starts as `Opt.None` so the loop body
+    // never runs at all) that a pre-loop fact like `i == 0` survives
+    // completely untouched past a `while let` that reassigns `i` inside
+    // its body, unconditionally eliding a bounds check that should very
+    // much still be there. Snapshot before the loop, restore after, drop
+    // facts mentioning anything the body mutates -- same shape as the
+    // `Stmt::While`/`Stmt::For`/`Stmt::ForIter` fix. Note `_invariants` is
+    // separately unused/unimplemented for `while let` (a pre-existing,
+    // unrelated feature gap), so there's no invariant fact to re-add here.
+    let pre_facts = smt_facts.clone();
     loops.push(LoopFrame { pre_env: env.clone(), body_scope_depth: env.scopes.len(), value_temp: None, label: emit_label.clone() });
     check_stmt_list(while_body, env, signatures, function, loops, smt_facts, &mut inner_body, diagnostics);
     emit_current_scope_drops(env, &mut inner_body, diagnostics);
     loops.pop();
     env.pop_scope();
+    let body_muts = collect_branch_mutations(while_body);
+    *smt_facts = pre_facts;
+    for name in &body_muts {
+        drop_facts_mentioning(smt_facts, name);
+    }
     body.push(TypedStmt::While {
         label: emit_label,
         cond: TypedExpr { kind: TypedExprKind::Bool(true), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(true)), span, binding_decl_span: None },

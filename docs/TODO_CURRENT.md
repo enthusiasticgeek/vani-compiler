@@ -12689,3 +12689,97 @@ elsewhere in the same two files (both already link to sibling
 
 Proceeding to BUG_PATTERN_AUDIT_TODO_12.md's round-12 targeted
 smt_facts audit next.
+
+## BUG-183 (2026-08-12) -- CLOSED: stale smt_facts/env-constants leak past if/else, if-let, while-let, and select merges
+
+Found within minutes of starting the round-12 targeted audit
+`BUG_PATTERN_AUDIT_TODO_12.md` itself asked for -- the first item on
+its list ("every `*smt_facts = pre_facts` site... there may be more
+in match-arm merging") turned out to be exactly right. Grepped all 9
+`*smt_facts = pre_facts[.clone()]` sites in `checker.rs`; besides the
+4 loop-exit sites BUG-182 already fixed and the `Stmt::If` merge
+(which turned out to ALSO be broken, see below), found the same
+shape at `check_iflet_stmt`'s merge and the `select` statement's
+loop-desugar exit, plus a totally-missing restore at
+`check_whilelet_stmt` (which never snapshotted `smt_facts` around
+the loop body at all).
+
+**Root cause, part 1 (the `smt_facts` Vec itself)**: identical shape
+to BUG-182, just not at a loop boundary. `Stmt::If`'s merge restores
+`*smt_facts = pre_facts;` (a snapshot from before EITHER branch ran)
+and only adds back a fact about the branch condition -- never drops
+facts about variables either branch reassigned. Confirmed via a
+minimal repro (`if flag == 0 { i = 5; } else { i = 6; }` after
+`let i: i64 = 0;`, followed by `print xs[i];`) that the pre-if
+`i == 0` fact survives the merge completely untouched, unconditionally
+eliding a bounds check on an index that's actually 5 or 6 against a
+3-element Vec -- confirmed via `--smt-debug`
+(`(assert (= v_i (_ bv0 64)))` unconditionally present) and via the
+emitted C (`v_0.data[v_8]` with zero bounds guard, both C backends).
+Same repro shape reproduced for `check_iflet_stmt` (an `if let`
+merge) and, by direct code-shape argument (an arm body can mutate
+any outer variable, same as any loop body, and the same-scope
+reassignment fact-drop is gated off while `loops` is non-empty), for
+the `select` statement's loop-desugar exit. Fixed all three by
+computing `branch_muts`/`body_muts` (via the pre-existing
+`collect_branch_mutations`/`walk_branch_mutations` helpers) and
+calling `drop_facts_mentioning` for each, right after the restore
+and before any fresh facts get added back -- same pattern as
+BUG-182's fix.
+
+`check_whilelet_stmt` had a different, more severe version of the
+same root problem: it never snapshotted/restored `smt_facts` around
+the loop body **at all**, so whatever was true before the loop
+carried forward completely unchanged (same-scope reassignment inside
+its body doesn't drop the stale fact either, gated off the same way
+as any other loop for invariant-preservation reasons -- and `while
+let` doesn't even support the `invariant` clause that could have
+supplied a corrective post-loop fact; `_invariants` is accepted
+syntactically but silently unused, a separate pre-existing gap noted
+but out of scope here). Confirmed with a repro where the loop body
+never runs even once (`cur` starts as `Opt.None`) yet a pre-loop
+`i == 0` fact still unconditionally elided the post-loop bounds
+check. Fixed by adding the missing `pre_facts` snapshot/restore plus
+the same `drop_facts_mentioning` step `Stmt::While` already has.
+
+**Root cause, part 2 (the SEPARATE `env`-constant path)**: fixing
+part 1 alone was NOT sufficient for `check_iflet_stmt` or the
+`select` site -- the `if let` repro still elided the check after the
+`smt_facts`-Vec fix. Traced to `current_smt_facts` (the function
+every bounds/overflow-elision query actually calls), which
+re-synthesizes a fresh `name == constant` fact straight from `env`'s
+`VarInfo.constant` field on EVERY query, entirely independent of the
+`smt_facts` Vec's own history. `Stmt::If`'s merge already called
+`clear_constants_for(&mut merged, &branch_muts)` for exactly this
+reason (pre-existing, unrelated to this bug -- added earlier to fix
+a *different*, non-security constant-folding correctness issue), so
+its `env` side was already sound; `check_iflet_stmt` and the
+`select` desugar never had an equivalent call. Added
+`clear_constants_for(env, &branch_muts)` /
+`clear_constants_for(env, &body_muts)` to both, reusing the same
+mutation set already computed for the `smt_facts` fix.
+`check_whilelet_stmt` needed no equivalent addition: unlike the
+other three, it never resets `env` back to a pre-loop snapshot at
+all, so the ordinary `Stmt::Assign` handler's unconditional
+`info.constant = None` (unlike the `smt_facts` drop, this one is
+NOT gated by `loops.is_empty()` -- see `src/checker.rs`'s
+`Stmt::Assign` arm) already keeps `env` sound on its own.
+
+Added four regression tests in `src/lib.rs`:
+`bug183_if_else_merge_does_not_leak_stale_pre_branch_fact`,
+`bug183_if_let_merge_does_not_leak_stale_pre_branch_fact`,
+`bug183_while_let_does_not_leak_stale_pre_loop_fact` (three new
+`#[test]` fns), plus the `select`-desugar fix is covered by code-
+shape argument and the existing async/select test suite (a targeted
+`select`-statement repro needs real async I/O plumbing to construct
+JIT/AOT-runnable end to end; not attempted this round -- flagged in
+case a future localfuzz finding surfaces it directly instead).
+Verification: `cargo test --release` (2900 lib tests + 12 other
+suites, 0 failed), `vanic check examples` (1022/1040 ok -- 18 non-ok,
+same as baseline: the 17 known pre-existing xfail/embedded-gated
+files plus the one deliberately-malformed `xfail_block_comment_
+unterminated.vani` lex fixture, zero new failures, exact same file
+set), `tools/leak_sweep.py` clean (18 skipped / 4 flagged, matches
+baseline exactly).
+
+Next free bug number is **BUG-184**.

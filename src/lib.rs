@@ -1830,6 +1830,127 @@ mod tests {
     }
 
     #[test]
+    fn bug183_if_else_merge_does_not_leak_stale_pre_branch_fact() {
+        // BUG-183 (2026-08-12): found during the round-12 audit that
+        // BUG-182's own filing (docs/BUG_PATTERN_AUDIT_TODO_12.md)
+        // suggested -- the same `*smt_facts = pre_facts` staleness
+        // shape, but at an `if`/`else` merge instead of a loop exit.
+        // `pre_facts` is a snapshot from BEFORE either branch ran, so
+        // it still holds `i == 0` (from the `let i: i64 = 0;` above)
+        // even when BOTH branches reassign `i` to something else --
+        // restoring it wholesale after the merge reintroduces a now-
+        // FALSE fact into the post-merge context. Confirmed via
+        // --smt-debug: `(assert (= v_i (_ bv0 64)))` unconditionally
+        // fed into the `xs[i]` bounds query after the if/else, even
+        // though `i` is provably 5 or 6 there, never 0. Fixed by
+        // dropping every fact mentioning a branch-mutated binding
+        // (the same `branch_muts` set already computed for
+        // `clear_constants_for`) right after the post-merge restore.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let i: i64 = 0;
+              let flag: i64 = (len(xs) as i64) - 3;
+              if flag == 0 {
+                i = 5;
+              } else {
+                i = 6;
+              }
+              print xs[i];
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("if/else should compile to LLVM");
+        assert!(
+            llvm.contains("index out of bounds"),
+            "BUG-183 regression: the post-if/else bounds check was elided \
+             again via a stale pre-branch fact (tree-LLVM), got: {llvm}"
+        );
+        let c = compile_to_c(source).expect("if/else should compile to C");
+        assert!(
+            c.contains("index out of bounds"),
+            "BUG-183 regression: the post-if/else bounds check was elided \
+             again via a stale pre-branch fact (tree-C), got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug183_if_let_merge_does_not_leak_stale_pre_branch_fact() {
+        // BUG-183 sibling: `check_iflet_stmt` had the exact same
+        // `*smt_facts = pre_facts` restore, missing the same drop.
+        let source = r#"
+            enum Opt {
+              None,
+              Some(i64),
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let i: i64 = 0;
+              let a: Opt = Opt.Some(42);
+              if let Opt.Some(n) = a {
+                i = 5;
+              } else {
+                i = 6;
+              }
+              print xs[i];
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("if-let should compile to LLVM");
+        assert!(
+            llvm.contains("index out of bounds"),
+            "BUG-183 regression: the post-if-let bounds check was elided \
+             again via a stale pre-branch fact (tree-LLVM), got: {llvm}"
+        );
+        let c = compile_to_c(source).expect("if-let should compile to C");
+        assert!(
+            c.contains("index out of bounds"),
+            "BUG-183 regression: the post-if-let bounds check was elided \
+             again via a stale pre-branch fact (tree-C), got: {c}"
+        );
+    }
+
+    #[test]
+    fn bug183_while_let_does_not_leak_stale_pre_loop_fact() {
+        // BUG-183 sibling, worse in kind: `check_whilelet_stmt` never
+        // snapshotted/restored `smt_facts` around the loop body AT
+        // ALL, so a pre-loop fact just sat there unconditionally true
+        // forever, regardless of what the loop body does -- confirmed
+        // with `cur` starting as `Opt.None` (loop body never runs even
+        // once) and the body reassigning `i`, showing the bounds check
+        // was elided purely from the ORIGINAL pre-loop `i == 0` fact
+        // with no restore/drop machinery involved at all.
+        let source = r#"
+            enum Opt {
+              None,
+              Some(i64),
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let i: i64 = 0;
+              let cur: Opt = Opt.None;
+              while let Opt.Some(v) = cur {
+                i = 100;
+              }
+              print xs[i];
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("while-let should compile to LLVM");
+        assert!(
+            llvm.contains("index out of bounds"),
+            "BUG-183 regression: the post-while-let bounds check was elided \
+             again via a stale pre-loop fact (tree-LLVM), got: {llvm}"
+        );
+        let c = compile_to_c(source).expect("while-let should compile to C");
+        assert!(
+            c.contains("index out of bounds"),
+            "BUG-183 regression: the post-while-let bounds check was elided \
+             again via a stale pre-loop fact (tree-C), got: {c}"
+        );
+    }
+
+    #[test]
     fn bug129_tree_c_requires_guard_uses_exit3_not_raw_assert() {
         // BUG-129: tree-C's `requires`-clause runtime guard still
         // used the raw libc `assert()` macro (SIGABRT on failure)
