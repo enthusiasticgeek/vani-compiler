@@ -14621,3 +14621,98 @@ fn bug185_print_bool_then_vec_fill_does_not_corrupt_llvm_phi_predecessors() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// Regression coverage for examples/language/english/tic_tac_toe_timed.vani
+// (the task/join/Atomic<T> timed tic-tac-toe demo). Covers the fast
+// paths only -- a real 15-second-timeout wait belongs in manual
+// verification (already done extensively while building this file),
+// not in every CI run.
+#[test]
+fn tic_tac_toe_timed_example_plays_a_full_game_correctly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/tic_tac_toe_timed.vani",
+        manifest_dir
+    );
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut cmd = Command::new(binary);
+        cmd.args(&backend_args);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn().unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        {
+            use std::io::Write;
+            // X wins on the top row: 1, 4, 2, 5, 3.
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(b"1\n4\n2\n5\n3\n")
+                .expect("write stdin");
+        }
+        let output = child.wait_with_output().expect("wait for intentc");
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("wins!"),
+            "expected a win banner for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+// EOF on stdin (no input at all) must exit immediately via the
+// blank/quit path, not hang waiting out the 15-second per-move
+// timeout -- this is exactly the scenario tools/leak_sweep.py hits
+// when it globs and runs every example with a closed stdin.
+#[test]
+fn tic_tac_toe_timed_example_exits_immediately_on_closed_stdin() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/tic_tac_toe_timed.vani",
+        manifest_dir
+    );
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut cmd = Command::new(binary);
+        cmd.args(&backend_args);
+        cmd.stdin(std::process::Stdio::null());
+        let start = std::time::Instant::now();
+        let output = cmd
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        let elapsed = start.elapsed();
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            elapsed.as_secs() < 10,
+            "expected an immediate exit on closed stdin for {:?}, took {:?} (the 15s per-move timeout must not be the thing that ends this)",
+            backend_args,
+            elapsed
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Goodbye!"),
+            "expected the quit path for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
