@@ -6211,3 +6211,12 @@ Fix attempt: `tools/localfuzz/findings/20260812-153250-backend-divergence-51ca33
 Status: needs human/frontier root-cause review.
 
 This bug report describes a backend-divergence issue in the vani-compiler when compiling the provided VANI code with both LLVM and C backends, resulting in an index out of bounds error during the while loop execution. The mutant/generated source demonstrates a control flow structure that causes this divergence by mutating a vector (`Vec<i64>`) within a while loop, which should iterate up to its length but fails due to an incorrect array access. This issue affects both LLVM and C backends.
+
+---
+
+### Candidate: 20260812-154554-backend-divergence-c2479366f8
+
+Repro: `tools/localfuzz/findings/20260812-154554-backend-divergence-c2479366f8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-154554-backend-divergence-c2479366f8/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
