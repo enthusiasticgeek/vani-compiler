@@ -6405,3 +6405,14 @@ The provided test case is a Marathi keyword example using the `vani-lang` compil
 फलन मुख्य() -> i64 {
   मान क: i64 = क्रमगुणित(5);
   मान ख: i64 = क्रम
+
+---
+
+### Candidate: 20260812-210832-backend-divergence-2f122f2480
+
+Repro: `tools/localfuzz/findings/20260812-210832-backend-divergence-2f122f2480/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-210832-backend-divergence-2f122f2480/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler project's local staging log shows a backend-divergence issue with the mutant generated from `/home/virgo/source/vani-compiler-localfuzz/examples/language/arabic/iterate.vani`. When running the program on either LLVM or C backends, it crashes due to an integer overflow in the `int64_t add` operation. The observed symptom is a crash, and the exact repro source is the provided mutant. This issue affects both backend configurations (`llvm` and `c`).
