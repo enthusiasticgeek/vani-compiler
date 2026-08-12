@@ -12974,3 +12974,98 @@ every `vanic run` invocation, not a clear-cut bug fix, and wasn't
 changed unilaterally. Full per-finding triage:
 `vani-compiler-localfuzz`'s `docs/TODO_LOCAL_STAGING.md`, "Triage
 closeout: 2026-08-12 17:32Z batch".
+
+## BUG-185: `print <bool>;` followed by `vec_fill` (or any later phi-consuming construct) corrupted LLVM codegen (FIXED 2026-08-12)
+
+Found while adding an AI opponent to
+`examples/language/english/tic_tac_toe.vani`: a mode-selection prompt
+did `let vs_computer: bool = ...; print vs_computer;` followed later
+by `vec_fill(9, 0)` for the board, and `vanic run` failed outright --
+`lli` rejected the emitted module with "PHI node entries do not match
+predecessors!". Not a silent-wrong-answer bug: every affected program
+failed to run at all on the default (LLVM) backend.
+
+Bisected down to a 4-line minimal repro with no string builtins
+involved at all:
+
+```vani
+fn main() -> i64 {
+  print true;
+  let board: Vec<i64> = vec_fill(9, 0);
+  print board[0 as u64];
+  return 0;
+}
+```
+
+Root cause: `backend_llvm.rs`'s `emit_print_expr_no_newline`, the
+`Type::Bool` arm, branches to two blocks (print "true" / print
+"false"), merges them back into a `p_done<N>` block -- but never
+updated `ctx.current_block` to point at that merge block afterward.
+Any later codegen in the same function that reads `ctx.current_block`
+to compute a phi node's incoming-block list (`vec_fill`'s fill loop
+is one; this is a general `FnCtx` bookkeeping bug, not specific to
+`vec_fill` -- an `if`/`while` after a bool print would hit the same
+gap) captured the stale pre-branch block instead of the real
+fell-through-via-`p_done` predecessor. Independently confirmed the
+bug generalizes beyond `vec_fill` (if-expression merge, while loop --
+both correct after the fix, both would have been wrong before it,
+not separately tested pre-fix since the vec_fill repro was already
+conclusive).
+
+Fixed by adding the missing `ctx.current_block = m_lbl;` right after
+emitting the merge block's label, matching the pattern used at every
+other branch-merge site in this file (`ctx.current_block = done_lbl;`
+etc.). The SSA-LLVM backend (`ssa_backend_llvm.rs`) doesn't have this
+bug -- checked directly, its bool-print codegen has no matching
+`p_done`-style branch/merge shape to begin with.
+
+Regression test: `bug185_print_bool_then_vec_fill_does_not_corrupt_llvm_phi_predecessors`
+in `tests/run_end_to_end.rs`, runs the minimal repro through both
+backends via a real `vanic run` (not just a `compile_to_llvm`
+substring check -- this class of bug only surfaces once `lli` itself
+parses and verifies the emitted module). Verification: `cargo test
+--release --lib` (2909 tests, 0 failed), `cargo test --release --test
+run_end_to_end` (243 passed, 8 pre-existing ignored, 0 failed).
+
+## BUG-186: `task`/`join` inside any loop body crashed the checker outright (FIXED 2026-08-12)
+
+Found immediately after BUG-185, while building a timed tic-tac-toe
+variant (a `task` races reading stdin against a countdown, spawned
+fresh each turn inside the game's `while true` loop). The very first
+version that spawned a task inside a loop body -- no
+`requires`/`ensures`/`invariant` clause anywhere in sight -- crashed
+`vanic check` outright:
+
+```
+thread 'main' panicked at src/checker.rs:37069:13:
+internal error: entered unreachable code: task/join cannot appear in a proof position (requires/ensures/invariant)
+```
+
+Root cause: `substitute_expr`'s `TaskSpawnCall`/`TaskJoinExpr` arm was
+`unreachable!()`, on the assumption that task/join could never reach
+a substitution context. False -- `walk_for_reassigns` (the
+bounds-elision pass's per-loop-iteration reassignment tracker, used
+to symbolically model "what does variable X equal after one
+iteration" for the compiler's OWN internal loop-invariant reasoning,
+not anything the user writes) calls `substitute_expr` on the RHS of
+*every* `let`/assign statement in a loop body unconditionally --
+including `let t: Task<i64> = task worker(...);` and `let r: i64 =
+join t;`. This runs on every loop regardless of whether it has an
+explicit `invariant` clause, so any loop containing task/join at all
+crashed the compiler, 100% reproducible, not a corner case.
+
+Fixed by having that arm return the expression unchanged instead of
+panicking: task/join results aren't something the SMT layer can
+reason about symbolically anyway (real threads, real side effects),
+so any later fact that ends up depending on one just goes unprovable
+(a normal `Unknown`/`SkippedUnsupported` outcome with a runtime-check
+fallback, the same as any other unprovable shape) -- not a crash.
+
+Regression test: `bug186_task_spawn_or_join_inside_a_loop_body_does_not_panic_the_checker`
+in `src/lib.rs`, using the exact minimal repro (a 3-iteration loop
+spawning+joining a task per iteration, checked via `compile()`
+directly since this is a pure checker-level panic, not a
+backend/runtime issue). Verification: `cargo test --release --lib`
+(2910 tests, 0 failed).
+
+Next free bug number is **BUG-187**.
