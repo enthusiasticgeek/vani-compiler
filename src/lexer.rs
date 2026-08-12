@@ -3736,6 +3736,7 @@ fn arabic_keyword(text: &str) -> Option<TokenKind> {
         "نوع" => TokenKind::Type,             // naw' (type / kind)
         "خارجي" => TokenKind::Extern,         // khārijī (external)
         "مستقر" => TokenKind::Invariant,      // mustaqarr (stable / invariant — avoids collision with Urdu/Persian ثابت=Const)
+        "بصفة" => TokenKind::As,              // bisifat (as / in the capacity of) — BUG-182 follow-up: arabic_keyword had no `as` cast keyword at all
         // === BUG-170 PARITY (2026-08-10) ===
         "تقليل" => TokenKind::Reduce,         // taqlīl (reduction)
         "مع" => TokenKind::With,              // ma'a (with)
@@ -3901,6 +3902,7 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "טיפוס" => TokenKind::Type,           // tipus (type — alt loanword)
         "חיצוני" => TokenKind::Extern,        // khitsoni (external)
         "בלתי_משתנה" => TokenKind::Invariant, // bilti_mishtaneh (unchanging)
+        "בתור" => TokenKind::As,              // betor (as / in the role of) — BUG-182 follow-up: hebrew_keyword had no `as` cast keyword at all
         // === BUG-170 PARITY (2026-08-10) ===
         "הפחתה" => TokenKind::Reduce,         // hafchata (reduction)
         "עם" => TokenKind::With,              // im (with)

@@ -1775,6 +1775,61 @@ mod tests {
     }
 
     #[test]
+    fn bug182_stale_pre_loop_fact_does_not_leak_past_loop_exit() {
+        // BUG-182 (2026-08-12): found alongside BUG-181 (same
+        // localfuzz batch, sibling backend-divergence cluster).
+        // Unlike BUG-181 (unsound elision INSIDE a loop body), this
+        // is a bounds check AFTER a loop has already exited, on a
+        // Vec the loop grew via `push`. checker.rs's post-loop fact
+        // restore did `*smt_facts = pre_facts;` (a snapshot from
+        // BEFORE the loop ran, still containing e.g. `len(xs) == 1`
+        // from `let xs: Vec<i64> = vec(0);`) and then ADDED the
+        // loop's own sound post-loop facts (its declared invariant
+        // `len(xs) == (i as u64)` combined with the loop-exit fact
+        // `i >= 5`) on top -- producing an internally CONTRADICTORY
+        // fact set (`len(xs)` asserted to be both `1` and `>= 5`
+        // simultaneously), from which the SMT solver can "prove"
+        // anything, including that a wildly out-of-range constant
+        // index is in bounds. Confirmed via --smt-debug: the stale
+        // `(assert (= v_xs_len (_ bv1 64)))` sat alongside the
+        // fresh, correct post-loop facts. Fixed by dropping every
+        // fact mentioning a loop-body-mutated variable (the
+        // `body_muts` set, already computed for constant-clearing)
+        // before re-adding the loop's own post-loop facts -- applied
+        // to the `while`, `for`, `for-iter`, and while-as-let-init
+        // loop forms, all of which shared the identical
+        // `*smt_facts = pre_facts` pattern.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(0);
+              let i: i64 = 1;
+              while i < 5
+              invariant len(xs) == (i as u64);
+              {
+                xs = push(xs, i * 10);
+                i = i + 1;
+              }
+              assert i == 5;
+              assert len(xs) == 5;
+              print xs[0 - 1];
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("loop should compile to LLVM");
+        assert!(
+            llvm.contains("index out of bounds"),
+            "BUG-182 regression: the post-loop bounds check was elided \
+             again via a stale pre-loop fact (tree-LLVM), got: {llvm}"
+        );
+        let c = compile_to_c(source).expect("loop should compile to C");
+        assert!(
+            c.contains("index out of bounds"),
+            "BUG-182 regression: the post-loop bounds check was elided \
+             again via a stale pre-loop fact (tree-C), got: {c}"
+        );
+    }
+
+    #[test]
     fn bug129_tree_c_requires_guard_uses_exit3_not_raw_assert() {
         // BUG-129: tree-C's `requires`-clause runtime guard still
         // used the raw libc `assert()` macro (SIGABRT on failure)
