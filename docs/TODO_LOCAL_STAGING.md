@@ -6163,3 +6163,40 @@ Fix attempt: `tools/localfuzz/findings/20260812-120226-backend-divergence-b7b90e
 [vanic run examples/language/mongolian/iterate.vani --backend=c]
 [vanic run examples/language/mongolian/iterate.vani --backend=c]
 [vanic run
+
+---
+
+### Candidate: 20260812-143145-backend-divergence-99a23910aa
+
+Repro: `tools/localfuzz/findings/20260812-143145-backend-divergence-99a23910aa/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-143145-backend-divergence-99a23910aa/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+The vani-compiler project's local staging log shows a candidate bug report for a crash related to the loop-carried overflow elision pass in the compiler's over-commit branch. The base corpus file is `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/loop_carried_overflow_not_elided.vani`, and the mutant/generated source is as follows:
+
+```vani
+// BUG-127 (2026-08-07): the checker's overflow-elision pass
+// deliberately keeps SMT facts about a reassigned variable alive
+// across a loop body (see checker.rs's two `if loops.is_empty() {
+// drop_facts_mentioning(...) }` call sites) so a separate
+// loop-invariant-preservation check can still see entry facts. But
+// that made a fact like `n == 0` (true only on the FIRST time
+// control reaches this statement) look like it still held on LATER
+// iterations too -- there's no general loop-invariant inference to
+// confirm it. The elision pass "proved" `n + i64::MIN` never
+// overflows using that stale fact (0 + i64::MIN doesn't overflow),
+// elided the runtime guard, and the LLVM backend then silently
+// wrapped on the SECOND iteration (i64::MIN + i64::MIN wraps to 0)
+// -- an intended 5-iteration loop became a genuine infinite loop
+// instead of trapping.
+
+fn main() -> i64 {
+  let n: i64 = 0 + 0;
+  while n < 100 {
+    if n == 5 {
+      break;
+    }
+    n = n + -9223372036854775808;
+  }
+  assert n == 5
