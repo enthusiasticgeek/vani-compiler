@@ -6416,3 +6416,73 @@ Fix attempt: `tools/localfuzz/findings/20260812-210832-backend-divergence-2f122f
 STATUS: needs human/frontier root-cause review.
 
 The vani-compiler project's local staging log shows a backend-divergence issue with the mutant generated from `/home/virgo/source/vani-compiler-localfuzz/examples/language/arabic/iterate.vani`. When running the program on either LLVM or C backends, it crashes due to an integer overflow in the `int64_t add` operation. The observed symptom is a crash, and the exact repro source is the provided mutant. This issue affects both backend configurations (`llvm` and `c`).
+
+---
+
+## Triage closeout: 2026-08-12 22:42Z batch (6 findings, 4 signatures) -- 1 REAL BUG FIXED, 1 NEW LIMITATION DOCUMENTED
+
+Findings: `20260812-184118-run-crash-ac65175aa2`,
+`20260812-190129-run-crash-0b551088db`,
+`20260812-204136-backend-divergence-d7da016e7e`,
+`20260812-210832-backend-divergence-2f122f2480`,
+`20260812-192155-backend-divergence-7dc0c9257a`,
+`20260812-194925-backend-divergence-f854ac392d`.
+
+- **2x run-crash, both backends timed out** (`ac65175aa2` base
+  `arabic/early_exit.vani`, `0b551088db` base `persian/iterate.vani`):
+  both are fuzzer-deleted loop increments (`ع = ع + 1;` / `i = i + 1;`
+  removed from the while-loop body, confirmed by diffing against the
+  live, unmutated example file in each case) -- a genuinely infinite
+  loop in the mutated SOURCE, correctly hanging identically on both
+  backends. Not a compiler bug.
+- **2x backend-divergence (rc=134 C / rc=3 LLVM, identical stderr
+  "integer overflow in int64_t mul")** (`d7da016e7e`, `2f122f2480`):
+  the established, repeatedly-confirmed abort()-vs-exit(3) trap-
+  mechanism divergence, same class as BUG-113/115/117/120/135/177.
+  Accepted design, not a bug.
+- **1x backend-divergence, BOTH exit 0 but stdout differs**
+  (`7dc0c9257a`, base `design_patterns/behavioral/observer.vani`):
+  **REAL BUG, FIXED as BUG-187** (main repo commit `7ba35f99`). The
+  fuzzer mutated the `Observer` interface's declared parameter type
+  from `i64` to `f64` while all three `implement` blocks kept `i64`.
+  `vanic check` accepted the mismatch with zero diagnostic. Dispatch
+  through `Vec<dyn Observer>` then diverged: C happened to print
+  correct values for all three observers, LLVM printed correct output
+  only for the first and large-garbage-integer values for the other
+  two -- the two backends' vtable call codegen disagreed on the
+  calling-convention slot (float vs. integer register) for the
+  mismatched parameter. Root cause: `checker.rs`'s `implement`-vs-
+  `interface` conformance check validated parameter COUNT and return
+  type but never individual parameter TYPES (a pre-existing comment on
+  that exact code path already implied the check should exist for
+  non-blanket impls; it just was never written). Fixed by adding the
+  missing per-parameter type check, substituting the interface's own
+  `Self` placeholder via the existing `substitute_self_type` helper so
+  `Eq`-style `fn eq(self: ref Self, other: ref Self)` interfaces still
+  compile (this exact case broke on the first fix attempt, caught by
+  the existing `HashMap<StructKey,V>` Eq/Hash tests before reaching
+  main). See main repo's `docs/TODO_CURRENT.md` BUG-187 entry for the
+  full writeup; two new regression tests in `src/lib.rs`.
+- **1x backend-divergence, rc=255 C / rc=0 LLVM, no stderr on either
+  side** (`f854ac392d`, base `edge_cases/mix_simd_struct_field.vani`):
+  **REAL finding, DOCUMENTED not fixed, as `docs/v1_limitations.md`
+  L28**. An `f32` value ends up outside `i64`'s representable range,
+  then gets cast with `as i64` -- genuine C-standard undefined
+  behavior (float-to-int narrowing cast when the value doesn't fit),
+  which the C backend emits with no range check at all. LLVM's
+  `fptosi` is *also* documented as producing a poison value for an
+  out-of-range input, just a different flavor of undefined, which is
+  why the two backends disagree rather than agreeing on some other
+  wrong-but-consistent answer. Confirmed with a 4-line minimal repro,
+  independent of the SIMD context the original finding used. Not fixed
+  here because the real fix (checked or Rust-style saturating float-
+  to-int casts) is a semantics decision that needs to land identically
+  on both backends, not a one-line patch -- left as a documented,
+  understood gap against the language's stated "safe by construction"
+  design goal, matching the L26/L27 precedent for not changing
+  established behavior unilaterally mid-triage.
+
+Harness refreshed to main HEAD `7ba35f99` (via `refresh.sh`) before
+closing this batch, so the BUG-187 fix is already live in the
+fuzzed binary going forward -- no risk of re-discovering the same
+finding.
