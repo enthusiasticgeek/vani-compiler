@@ -117,3 +117,26 @@ jobs:
 
       - name: Run leak sweep against the checked-in baseline
         run: python3 tools/leak_sweep.py
+
+  # ── vani_translate.py regression suite ───────────────────────────────────
+  #
+  # Added 2026-08-12 after confirming this tool's hand-maintained ALIASES
+  # table had drifted from src/lexer.rs (the same shape as BUG-173's
+  # src/lsp.rs staleness) badly enough that translating several real
+  # dialects produced output that didn't compile. Guards against it
+  # recurring -- see tools/test_vani_translate.py's own docstring for the
+  # full check list.
+  translate-tool-check:
+    name: vani_translate.py regression suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build vanic (release)
+        run: cargo build --release --bin vanic
+
+      - name: Run translate-tool regression suite
+        run: python3 tools/test_vani_translate.py

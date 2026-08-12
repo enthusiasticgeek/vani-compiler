@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """
-vani_translate — translate a .vani source file's keywords between
-                English, Sanskrit, Hindi, and Marathi.
+vani_translate — translate a .vani source file's keywords between any
+                of the 63 dialects the compiler itself supports (see
+                SUPPORTED_LANGS below for the full list -- English plus
+                62 others spanning Indo-Aryan, Dravidian, CJK, Southeast
+                Asian, Middle Eastern/RTL, Cyrillic, European, Caucasian,
+                and African language families).
 
 B.1 v3 — adds SOV <-> SVO word-order reordering for verb-final
 statements and Hindi for-range loops; adds optional LLM-based
 translation of comments, string literals, and identifiers.
+
+Keyword data (ALIASES, ALL_SYNONYMS) is generated from src/lexer.rs by
+tools/regen_vani_translate_keywords.py -- run that after any lexer.rs
+keyword-table edit instead of hand-editing this file's tables directly,
+the same way tools/regen_lsp_keywords.py keeps src/lsp.rs in sync (see
+that script's own docstring for why: a hand-maintained duplicate table
+drifts from the real one silently otherwise).
 
 Usage:
     # Translate to Sanskrit (auto-detects source from pragma):
@@ -93,6 +104,12 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ལས་ཀ",
         "cherokee": "ᏗᎦᏬᏂᎯᏍᏗ",   "mongolian": "ᠴᠠᠭ",
         "malay": "fungsi",          "indonesian": "fungsi",   "filipino": "gawain",
+        "nepali": "फलन",
+        "maithili": "फलन",
+        "konkani": "फलन",
+        "assamese": "ফাংশন",
+        "sindhi": "فنکشن",
+        "punjabi_shahmukhi": "فنکشن",
     },
     "Let": {
         "english": "let",
@@ -121,6 +138,13 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ཡོད་པར་ཤོག",
         "cherokee": "ᎠᏁᎳ",
         "malay": "biarkan",          "indonesian": "biarkan",  "filipino": "hayaan",
+        "nepali": "माना",
+        "maithili": "माना",
+        "konkani": "माना",
+        "assamese": "মান",
+        "sindhi": "مانیں",
+        "punjabi_shahmukhi": "مانیں",
+        "mongolian": "ᠶᠠᠪᠤᠭᠤᠯ",
     },
     "Struct": {
         "english": "struct",
@@ -148,6 +172,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "መዋቅር",
         "cherokee": "ᎠᏙᏢᏍᎩ",
         "malay": "struktur",         "indonesian": "struktur", "filipino": "istraktura",
+        "nepali": "संरचना",
+        "maithili": "संरचना",
+        "konkani": "संरचना",
+        "assamese": "গঠন",
+        "sindhi": "ساخت",
+        "punjabi_shahmukhi": "ساخت",
+        "yoruba": "ọ̀nà",
+        "tibetan": "སྒྲིག་གཞི",
+        "mongolian": "ᠪᠦᠳᠦᠭᠴᠡ",
     },
     "Enum": {
         "english": "enum",
@@ -175,6 +208,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ቆጠራ",
         "tibetan": "རྩིས",
         "malay": "penghitungan",     "indonesian": "enumerasi","filipino": "pagbilang",
+        "nepali": "गणन",
+        "maithili": "गणन",
+        "konkani": "गणन",
+        "assamese": "গণনা",
+        "sindhi": "شمار",
+        "punjabi_shahmukhi": "شمار",
+        "yoruba": "àkọsílẹ̀",
+        "cherokee": "ᎢᎦᏙᎯ",
+        "mongolian": "ᠲᠣᠭᠠᠯᠠᠯ",
     },
     "Const": {
         "english": "const",
@@ -202,6 +244,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ቋሚ",
         "tibetan": "རྟག",
         "malay": "pemalar",          "indonesian": "tetap",    "filipino": "pirme",
+        "nepali": "स्थिर",
+        "maithili": "स्थिर",
+        "konkani": "स्थिर",
+        "assamese": "স্থির",
+        "sindhi": "ثابت",
+        "punjabi_shahmukhi": "ثابت",
+        "yoruba": "àlàfo",
+        "cherokee": "ᎠᏢᏓᏅᎯ",
+        "mongolian": "ᠲᠣᠭᠲᠠᠮᠠᠯ",
     },
     "Type": {
         "english": "type",
@@ -220,15 +271,24 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "τύπος",
         "spanish": "tipo",           "french": "type",          "german": "typ",
         "portuguese": "tipo",        "italian": "tipo",         "dutch": "type",
-        "polish": "typ",             "turkish": "tür",          "swedish": "typ",
+        "polish": "typ",             "turkish": "tip",          "swedish": "typ",
         "norwegian": "type",         "danish": "type",          "hungarian": "típus",
         "czech": "typ",              "slovak": "typ",           "finnish": "tyyppi",
         "romanian": "tip",           "catalan": "tipus",
         "armenian": "տեսակ",         "georgian": "ტიპი",
-        "swahili": "aina",           "hausa": "irin",
+        "swahili": "aina",           "hausa": "nau'i",
         "amharic": "አይነት",
         "tibetan": "རིགས",
         "malay": "jenis",            "indonesian": "tipe",     "filipino": "uri",
+        "nepali": "प्रकार",
+        "maithili": "प्रकार",
+        "konkani": "प्रकार",
+        "assamese": "প্রকার",
+        "sindhi": "قسم",
+        "punjabi_shahmukhi": "قسم",
+        "yoruba": "irú",
+        "cherokee": "ᎢᏳᏓᎴᎩ",
+        "mongolian": "ᠬᠡᠯᠪᠡᠷᠢ",
     },
     "Extern": {
         "english": "extern",
@@ -250,6 +310,29 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ውጫዊ",
         "tibetan": "ཕྱི",
         "malay": "luaran",           "indonesian": "eksternal",
+        "nepali": "बाह्य",
+        "maithili": "बाह्य",
+        "konkani": "बाह्य",
+        "assamese": "বাহ্যিক",
+        "sindhi": "بیرونی",
+        "punjabi_shahmukhi": "بیرونی",
+        "tamil": "வெளி",
+        "telugu": "బాహ్య",
+        "gujarati": "બાહ્ય",
+        "punjabi": "ਬਾਹਰੀ",
+        "kannada": "ಬಾಹ್ಯ",
+        "malayalam": "ബാഹ്യം",
+        "sinhala": "බාහිර",
+        "pashto": "بهرنی",
+        "swahili": "nje",
+        "filipino": "panlabas",
+        "yoruba": "ìta",
+        "hausa": "waje",
+        "khmer": "ខាងក្រៅ",
+        "burmese": "အပြင်",
+        "cherokee": "ᏙᏱᏗᏢ",
+        "lao": "ພາຍນອກ",
+        "mongolian": "ᠭᠠᠳᠠᠨ᠎ᠠ",
     },
     "Intent": {
         "english": "intent",
@@ -273,11 +356,19 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "czech": "záměr",            "slovak": "účel",          "finnish": "tarkoitus",
         "romanian": "scop",          "catalan": "proposit",
         "armenian": "նպատակ",        "georgian": "მიზანი",
-        "swahili": "kusudi",         "yoruba": "ìpinnu",        "hausa": "nufin",
+        "swahili": "lengo",         "yoruba": "ìpinnu",        "hausa": "nufin",
         "amharic": "ዓላማ",
         "tibetan": "དམིགས་ཡུལ",
         "mongolian": "ᠵᠣᠷᠢᠯᠭ᠎ᠠ",
-        "malay": "niat",             "indonesian": "tujuan",    "filipino": "layunin",
+        "malay": "tujuan",             "indonesian": "tujuan",    "filipino": "layunin",
+        "nepali": "उद्देश्य",
+        "maithili": "उद्देश्य",
+        "konkani": "उद्देश्य",
+        "assamese": "উদ্দেশ্য",
+        "sindhi": "مقصد",
+        "punjabi_shahmukhi": "مقصد",
+        "pashto": "موخه",
+        "cherokee": "ᎤᎲᏍᏛ",
     },
     "Invariant": {
         "english": "invariant",
@@ -300,7 +391,26 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "romanian": "invariant",     "catalan": "invariant",
         "armenian": "անփոփոխ",       "georgian": "უცვლელი",
         "amharic": "የማይለወጥ",
-        "malay": "invarian",         "indonesian": "invarian",
+        "malay": "tetap",         "indonesian": "invarian",
+        "nepali": "अपरिवर्तनीय",
+        "maithili": "अपरिवर्तनीय",
+        "konkani": "अपरिवर्तनीय",
+        "assamese": "অপরিবর্তনীয়",
+        "urdu": "غیرمتغیر",
+        "persian": "تغییرناپذیر",
+        "pashto": "دايمي",
+        "swahili": "isiyobadilika",
+        "filipino": "walangpalit",
+        "yoruba": "àìyípadà",
+        "hausa": "a_canzawa",
+        "khmer": "មិនប្រែប្រួល",
+        "burmese": "မပြောင်းလဲ",
+        "tibetan": "མི་འགྱུར",
+        "cherokee": "ᏂᎦᎳᏛᎾ",
+        "lao": "ບໍ່ປ່ຽນ",
+        "mongolian": "ᠲᠣᠭᠲᠠᠪᠤᠷᠢᠲᠠᠢ",
+        "sindhi": "غیرمتغیر",
+        "punjabi_shahmukhi": "غیرمتغیر",
     },
 
     # ── Visibility / modules / imports ───────────────────────────────────────
@@ -330,6 +440,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ሕዝባዊ",
         "tibetan": "སྤྱི",
         "malay": "awam",             "indonesian": "publik",    "filipino": "pampubliko",
+        "nepali": "सार्वजनिक",
+        "maithili": "सार्वजनिक",
+        "konkani": "सार्वजनिक",
+        "assamese": "সর্বজনীন",
+        "sindhi": "عوامی",
+        "punjabi_shahmukhi": "عوامی",
+        "yoruba": "gbangba",
+        "cherokee": "ᏂᎦᏓ",
+        "mongolian": "ᠨᠡᠶᠢᠲᠡ",
     },
     "Module": {
         "english": "module",
@@ -357,6 +476,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ሞዱል",
         "tibetan": "ཚན",
         "malay": "modul",            "indonesian": "modul",     "filipino": "modyul",
+        "nepali": "मॉड्यूल",
+        "maithili": "मॉड्यूल",
+        "konkani": "मॉड्यूल",
+        "assamese": "খণ্ড",
+        "sindhi": "ماڈیول",
+        "punjabi_shahmukhi": "ماڈیول",
+        "yoruba": "ìṣù",
+        "cherokee": "ᎠᏯᏙᎸ",
+        "mongolian": "ᠨᠢᠭᠡᠴᠡ",
     },
     "Use": {
         "english": "use",
@@ -385,6 +513,13 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "བཀོལ",
         "cherokee": "ᎬᏙᏗ",          "mongolian": "ᠬᠡᠷᠡᠭᠯᠡ",
         "malay": "guna",             "indonesian": "pakai",     "filipino": "gamitin",
+        "nepali": "उपयोग",
+        "maithili": "उपयोग",
+        "konkani": "उपयोग",
+        "assamese": "ব্যবহার",
+        "sindhi": "استعمال",
+        "punjabi_shahmukhi": "استعمال",
+        "yoruba": "lò",
     },
     "As": {
         "english": "as",
@@ -397,7 +532,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "mandarin": "作为",           "japanese": "として",       "korean": "로서",
         "thai": "เป็น",              "vietnamese": "như",       "khmer": "ជា",
         "burmese": "အဖြစ်",          "lao": "ເປັນ",
-        "arabic": "بوصفه",           "persian": "بعنوان",
+        "arabic": "بصفة",           "persian": "بعنوان",
         "urdu": "بطور",
         "russian": "как",
         "greek": "ως",
@@ -411,6 +546,16 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "swahili": "kama",           "hausa": "kamar",
         "tibetan": "དུ",
         "malay": "sebagai",          "indonesian": "sebagai",   "filipino": "bilang",
+        "nepali": "यथा",
+        "maithili": "यथा",
+        "konkani": "यथा",
+        "assamese": "হিসাবে",
+        "sindhi": "بطور",
+        "punjabi_shahmukhi": "بطور",
+        "pashto": "لکه",
+        "hebrew": "בתור",
+        "yoruba": "bí_ti",
+        "amharic": "እንደ",
     },
 
     # ── Control flow ─────────────────────────────────────────────────────────
@@ -441,6 +586,13 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ལོག",
         "cherokee": "ᏗᎬᏎᏗ",         "mongolian": "ᠪᠤᠴᠠ",
         "malay": "kembali",          "indonesian": "kembali",   "filipino": "ibalik",
+        "nepali": "लौटाओ",
+        "maithili": "लौटाओ",
+        "konkani": "लौटाओ",
+        "assamese": "ফেরত",
+        "sindhi": "واپس",
+        "punjabi_shahmukhi": "واپس",
+        "yoruba": "padà",
     },
     "If": {
         "english": "if",
@@ -469,6 +621,12 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "གལ་ཏེ",
         "cherokee": "ᎢᏳᏃ",          "mongolian": "ᠬᠡᠷᠪᠡ",
         "malay": "jika",             "indonesian": "jika",      "filipino": "kung",
+        "nepali": "अगर",
+        "maithili": "अगर",
+        "konkani": "अगर",
+        "assamese": "যদি",
+        "sindhi": "اگر",
+        "punjabi_shahmukhi": "اگر",
     },
     "Else": {
         "english": "else",
@@ -497,6 +655,14 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "གཞན",
         "cherokee": "ᎪᎯ",           "mongolian": "ᠡᠰᠡᠪᠡᠯ",
         "malay": "selainnya",        "indonesian": "selainnya", "filipino": "kundi",
+        "nepali": "वरना",
+        "maithili": "वरना",
+        "konkani": "वरना",
+        "assamese": "নাহলে",
+        "sindhi": "ورنہ",
+        "punjabi_shahmukhi": "ورنہ",
+        "pashto": "کهنه",
+        "yoruba": "yàtọ̀",
     },
     "While": {
         "english": "while",
@@ -512,7 +678,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "arabic": "بينما",           "hebrew": "כאשר",           "persian": "تا",
         "russian": "пока",
         "greek": "όσο",
-        "spanish": "mientras",       "french": "tandis",        "german": "während",
+        "spanish": "mientras",       "french": "tantque",        "german": "während",
         "portuguese": "enquanto",    "italian": "mentre",       "dutch": "zolang",
         "polish": "dopóki",          "turkish": "iken",         "swedish": "medan",
         "norwegian": "mens",         "danish": "mens",          "hungarian": "amíg",
@@ -524,6 +690,16 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "བར",
         "mongolian": "ᠶᠠᠭ᠎ᠠ",
         "malay": "selama",           "indonesian": "selama",    "filipino": "habang",
+        "nepali": "जबतक",
+        "maithili": "जबतक",
+        "konkani": "जबतक",
+        "assamese": "যতক্ষণ",
+        "urdu": "دوران",
+        "pashto": "ترڅو",
+        "yoruba": "nígbà",
+        "cherokee": "ᏰᎵᏊ",
+        "sindhi": "دوران",
+        "punjabi_shahmukhi": "دوران",
     },
     "For": {
         "english": "for",
@@ -536,8 +712,8 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "mandarin": "对于",           "japanese": "対象",         "korean": "각각",
         "thai": "สำหรับ",            "vietnamese": "với_mỗi",  "khmer": "សម្រាប់",
         "burmese": "အတွက်",          "lao": "ສຳລັບ",
-        "arabic": "لكل",             "hebrew": "עבור",           "persian": "هر",
-        "urdu": "ہر",                "pashto": "هر",
+        "arabic": "لكل",             "hebrew": "לכל",           "persian": "هر",
+        "urdu": "ہر",                "pashto": "هریو",
         "russian": "для",
         "greek": "για",
         "spanish": "para",           "french": "pour",          "german": "für",
@@ -552,6 +728,12 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ལ",
         "cherokee": "ᏌᏊ",           "mongolian": "ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ",
         "malay": "untuk",            "indonesian": "untuk",     "filipino": "para",
+        "nepali": "के लिए",
+        "maithili": "के लिए",
+        "konkani": "के लिए",
+        "assamese": "প্রতি",
+        "sindhi": "ہر",
+        "punjabi_shahmukhi": "ہر",
     },
     "In": {
         "english": "in",
@@ -561,7 +743,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "malayalam": "ഇൽ",
         "gujarati": "માં",           "punjabi": "ਵਿੱਚ",
         "sinhala": "තුළ",
-        "mandarin": "in",            "japanese": "に",           "korean": "안에",
+        "mandarin": "在",            "japanese": "中",           "korean": "안에",
         "thai": "ใน",                "khmer": "ក្នុង",
         "burmese": "ထဲမှာ",          "lao": "ໃນ",
         "arabic": "في",              "hebrew": "בתוך",           "persian": "در",
@@ -570,7 +752,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "σε",
         "spanish": "en",             "french": "dans",          "german": "in",
         "portuguese": "em",          "dutch": "in",
-        "polish": "w",               "turkish": "içinde",       "swedish": "i",
+        "polish": "w",               "turkish": "içinde",       "swedish": "inuti",
         "finnish": "sisalla",
         "armenian": "մեջ",           "georgian": "ში",
         "swahili": "ndani",          "hausa": "cikin",
@@ -578,6 +760,24 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ནང",
         "cherokee": "ᎭᏫᎾ",
         "malay": "dalam",            "indonesian": "dalam",     "filipino": "sa",
+        "nepali": "में",
+        "maithili": "में",
+        "konkani": "में",
+        "assamese": "মধ্যে",
+        "sindhi": "میں",
+        "punjabi_shahmukhi": "میں",
+        "pashto": "په",
+        "italian": "in",
+        "vietnamese": "trong",
+        "romanian": "în",
+        "hungarian": "belül",
+        "czech": "uvnitř",
+        "slovak": "vnútri",
+        "norwegian": "inni",
+        "danish": "indeni",
+        "catalan": "en",
+        "yoruba": "nínú",
+        "mongolian": "ᠳᠣᠲᠣᠷ᠎ᠠ",
     },
     "From": {
         "english": "from",
@@ -598,13 +798,23 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "polish": "od",              "turkish": "den",          "swedish": "från",
         "norwegian": "fra",          "danish": "fra",
         "czech": "od",               "slovak": "od",            "finnish": "lähtien",
-        "romanian": "de_la",         "catalan": "des",
+        "romanian": "din",         "catalan": "des",
         "armenian": "ից",            "georgian": "დან",
         "swahili": "kutoka",         "yoruba": "láti",          "hausa": "daga",
-        "amharic": "ከ",
+        "amharic": "ጀምሮ",
         "tibetan": "ནས",
         "mongolian": "ᠠᠴᠠ",
         "malay": "dari",             "indonesian": "dari",      "filipino": "mula",
+        "nepali": "से",
+        "maithili": "से",
+        "konkani": "से",
+        "assamese": "থেকে",
+        "urdu": "سے",
+        "pashto": "له",
+        "hungarian": "kezdve",
+        "cherokee": "ᏓᏓᎴᏂᏍᎬ",
+        "sindhi": "سے",
+        "punjabi_shahmukhi": "سے",
     },
     "To": {
         "english": "to",
@@ -617,22 +827,31 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "mandarin": "到",            "japanese": "まで",          "korean": "까지",
         "thai": "ถึง",               "vietnamese": "đến",       "khmer": "ដល់",
         "burmese": "သို့",           "lao": "ເຖິງ",
-        "arabic": "إلى",             "hebrew": "עד",             "persian": "تا",
+        "arabic": "إلى",             "hebrew": "עד",             "persian": "به",
         "urdu": "تک",
         "russian": "до",
         "greek": "μέχρι",
         "spanish": "hasta",          "french": "vers",          "german": "bis",
-        "portuguese": "ate",         "italian": "fino",         "dutch": "tot",
+        "portuguese": "ate",         "italian": "finoa",         "dutch": "tot",
         "polish": "do",              "turkish": "kadar",        "swedish": "till",
         "norwegian": "til",          "danish": "til",
         "czech": "do",               "slovak": "do",            "finnish": "asti",
         "romanian": "până",          "catalan": "fins",
         "armenian": "մինչև",         "georgian": "მდე",
         "swahili": "hadi",           "yoruba": "dé",            "hausa": "zuwa",
-        "amharic": "ወደ",
+        "amharic": "ድረስ",
         "tibetan": "བར་དུ",
         "mongolian": "ᠬᠦᠷᠲᠡᠯᠡ",
         "malay": "hingga",           "indonesian": "sampai",    "filipino": "hanggang",
+        "nepali": "तक",
+        "maithili": "तक",
+        "konkani": "तक",
+        "assamese": "পর্যন্ত",
+        "sindhi": "تک",
+        "punjabi_shahmukhi": "تک",
+        "pashto": "ته",
+        "hungarian": "határig",
+        "cherokee": "ᎬᏛ",
     },
     "Break": {
         "english": "break",
@@ -661,6 +880,14 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "འགོག",
         "cherokee": "ᎤᎵᏍᎩᏗ",      "mongolian": "ᠵᠣᠭᠰᠣ",
         "malay": "berhenti",         "indonesian": "berhenti",  "filipino": "tumigil",
+        "nepali": "रुको",
+        "maithili": "रुको",
+        "konkani": "रुको",
+        "assamese": "বিরাম",
+        "sindhi": "بند",
+        "punjabi_shahmukhi": "بند",
+        "pashto": "ودروه",
+        "yoruba": "dáwọ́dúró",
     },
     "Continue": {
         "english": "continue",
@@ -689,6 +916,14 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "མུ་མཐུད",
         "cherokee": "ᏗᎧᎵᏍᏗ",      "mongolian": "ᠦᠷᠭᠦᠯᠵᠢᠯᠡ",
         "malay": "teruskan",         "indonesian": "lanjutkan", "filipino": "magpatuloy",
+        "nepali": "आगे",
+        "maithili": "आगे",
+        "konkani": "आगे",
+        "assamese": "এগিয়ে",
+        "sindhi": "جاری",
+        "punjabi_shahmukhi": "جاری",
+        "pashto": "دوام",
+        "yoruba": "tẹ̀síwájú",
     },
     "Then": {
         "english": "then",
@@ -707,7 +942,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "τότε",
         "spanish": "entonces",       "french": "alors",         "german": "dann",
         "portuguese": "entao",       "italian": "allora",       "dutch": "dan",
-        "polish": "wtedy",           "turkish": "o_zaman",      "swedish": "så",
+        "polish": "wtedy",           "turkish": "sonra",      "swedish": "så",
         "norwegian": "da",           "danish": "så",            "hungarian": "akkor",
         "czech": "pak",              "slovak": "potom",         "finnish": "sitten",
         "romanian": "atunci",        "catalan": "aleshores",
@@ -716,7 +951,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ከዚያ",
         "tibetan": "དེ་ནས",
         "mongolian": "ᠳᠠᠷᠠᠭ᠎ᠠ",
-        "malay": "maka",             "indonesian": "maka",      "filipino": "kung_gayon",
+        "malay": "maka",             "indonesian": "maka",      "filipino": "saka",
+        "nepali": "तो",
+        "maithili": "तो",
+        "konkani": "तो",
+        "assamese": "তবে",
+        "sindhi": "تب",
+        "punjabi_shahmukhi": "تب",
+        "pashto": "بیا",
+        "cherokee": "ᎣᏂ",
     },
 
     # ── References ───────────────────────────────────────────────────────────
@@ -745,6 +988,17 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ལྟ",
         "cherokee": "ᎯᎪᎲᎢ",         "mongolian": "ᠦᠵᠡ",
         "malay": "lihat",            "indonesian": "lihat",
+        "nepali": "देखो",
+        "maithili": "देखो",
+        "konkani": "देखो",
+        "assamese": "দেখ",
+        "urdu": "دیکھیں",
+        "pashto": "وګوره",
+        "filipino": "tingnan",
+        "yoruba": "wò",
+        "amharic": "ይመልከት",
+        "sindhi": "دیکھیں",
+        "punjabi_shahmukhi": "دیکھیں",
     },
     "Mut": {
         "english": "mut",
@@ -770,6 +1024,21 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "swahili": "badilika",       "hausa": "canzawa",
         "cherokee": "ᏚᎵᎮᎵᎬᎢ",
         "malay": "berubah",          "indonesian": "dapatberubah",
+        "nepali": "परिवर्तनीय",
+        "maithili": "परिवर्तनीय",
+        "konkani": "परिवर्तनीय",
+        "assamese": "পরিবর্তনীয়",
+        "sindhi": "بدلنا",
+        "punjabi_shahmukhi": "بدلنا",
+        "pashto": "بدلېدونکی",
+        "filipino": "nababago",
+        "yoruba": "àyípadà",
+        "khmer": "អាចផ្លាស់ប្តូរ",
+        "burmese": "ပြောင်းလဲနိုင်",
+        "amharic": "ሊቀየር",
+        "tibetan": "འགྱུར",
+        "lao": "ປ່ຽນແປງໄດ້",
+        "mongolian": "ᠬᠤᠪᠢᠷᠠᠮᠲᠠᠭᠠᠢ",
     },
 
     # ── Matching ─────────────────────────────────────────────────────────────
@@ -797,6 +1066,19 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "swahili": "linganisha",     "hausa": "dace",
         "tibetan": "མཐུན",
         "malay": "padan",            "indonesian": "cocokkan",
+        "nepali": "मिलान",
+        "maithili": "मिलान",
+        "konkani": "मिलान",
+        "assamese": "মেলে",
+        "urdu": "ملان",
+        "pashto": "سمون",
+        "filipino": "tugmain",
+        "yoruba": "bámu",
+        "amharic": "ተዛመደ",
+        "cherokee": "ᎠᏍᏓᏩᏛᏍᎩ",
+        "mongolian": "ᠲᠣᠬᠢᠷᠠ",
+        "sindhi": "ملان",
+        "punjabi_shahmukhi": "ملان",
     },
 
     # ── Verification ─────────────────────────────────────────────────────────
@@ -826,6 +1108,15 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "ངེས",
         "mongolian": "ᠪᠠᠲᠤᠯ",
         "malay": "pastikan",         "indonesian": "pastikan",  "filipino": "patunayan",
+        "nepali": "सुनिश्चित",
+        "maithili": "सुनिश्चित",
+        "konkani": "सुनिश्चित",
+        "assamese": "নিশ্চিত",
+        "urdu": "یقینی",
+        "pashto": "تایید",
+        "cherokee": "ᎯᏍᏗᏎᏍᏗ",
+        "sindhi": "یقینی",
+        "punjabi_shahmukhi": "یقینی",
     },
     "Prove": {
         "english": "prove",
@@ -848,11 +1139,21 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "czech": "dokaž",            "slovak": "dokáž",         "finnish": "todista",
         "romanian": "dovedește",     "catalan": "demostra",
         "armenian": "ապացուցել",     "georgian": "დაამტკიცე",
-        "swahili": "thibitisha_ki",  "hausa": "nuna",
+        "swahili": "thibitisha_kuwa",  "hausa": "nuna",
         "amharic": "አስረዳ",
         "tibetan": "བསྒྲུབས",
         "mongolian": "ᠨᠣᠲᠠᠯᠠ",
         "malay": "buktikan",         "indonesian": "buktikan",  "filipino": "ipakita",
+        "nepali": "सिद्ध करो",
+        "maithili": "सिद्ध करो",
+        "konkani": "सिद्ध करो",
+        "assamese": "প্রমাণ",
+        "urdu": "ثبوت",
+        "pashto": "ثبوت",
+        "yoruba": "fihàn",
+        "cherokee": "ᎠᎩᏠᏯᏍᏗ",
+        "sindhi": "ثبوت",
+        "punjabi_shahmukhi": "ثبوت",
     },
     "Requires": {
         "english": "requires",
@@ -870,7 +1171,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "απαιτεί",
         "spanish": "requiere",       "french": "exige",         "german": "benoetigt",
         "portuguese": "requer",      "italian": "richiede",     "dutch": "vereist",
-        "polish": "wymaga",          "turkish": "gerektirir",   "swedish": "kräver",
+        "polish": "wymaga",          "turkish": "gerek",   "swedish": "kräver",
         "norwegian": "krever",       "danish": "kræver",        "hungarian": "igényel",
         "czech": "vyžaduje",         "slovak": "vyžaduje",      "finnish": "vaatii",
         "romanian": "necesită",      "catalan": "requereix",
@@ -879,6 +1180,17 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ይፈልጋል",
         "tibetan": "དགོས",
         "malay": "memerlukan",       "indonesian": "perlu",     "filipino": "kailangan",
+        "nepali": "चाहिए",
+        "maithili": "चाहिए",
+        "konkani": "चाहिए",
+        "assamese": "প্রয়োজনীয়",
+        "urdu": "درکار",
+        "pashto": "اړتیا",
+        "yoruba": "nílò",
+        "cherokee": "ᎠᏎᏗ",
+        "mongolian": "ᠱᠠᠭᠠᠷᠳᠠ",
+        "sindhi": "درکار",
+        "punjabi_shahmukhi": "درکار",
     },
     "Ensures": {
         "english": "ensures",
@@ -896,7 +1208,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "εγγυάται",
         "spanish": "garantiza",      "french": "garantit",      "german": "garantiert",
         "portuguese": "garante",     "italian": "garantisce",   "dutch": "verzekert",
-        "polish": "gwarantuje",      "turkish": "sağlar",       "swedish": "säkerställer",
+        "polish": "gwarantuje",      "turkish": "garanti",       "swedish": "säkerställer",
         "norwegian": "garanterer",   "danish": "garanterer",    "hungarian": "garantál",
         "czech": "zajišťuje",        "slovak": "zaručuje",      "finnish": "takaa",
         "romanian": "garantează",    "catalan": "garanteix",
@@ -905,6 +1217,17 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "amharic": "ያረጋግጣል",
         "tibetan": "ཁག",
         "malay": "menjamin",         "indonesian": "jamin",     "filipino": "tiyakin",
+        "nepali": "निश्चित",
+        "maithili": "निश्चित",
+        "konkani": "निश्चित",
+        "assamese": "সুনিশ্চিত",
+        "urdu": "ضمانت",
+        "pashto": "ډاډ",
+        "yoruba": "dájú",
+        "cherokee": "ᎤᏙᎯᏳᏫᏍᏗ",
+        "mongolian": "ᠪᠠᠲᠤᠯᠠᠭ᠎ᠠ",
+        "sindhi": "ضمانت",
+        "punjabi_shahmukhi": "ضمانت",
     },
 
     # ── Bool / print ─────────────────────────────────────────────────────────
@@ -935,6 +1258,12 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "བདེན",
         "cherokee": "ᎤᏙᎯᏳ",         "mongolian": "ᠦᠨᠡᠨ",
         "malay": "benar",            "indonesian": "benar",     "filipino": "totoo",
+        "nepali": "सत्य",
+        "maithili": "सत्य",
+        "konkani": "सत्य",
+        "assamese": "সত্য",
+        "sindhi": "سچ",
+        "punjabi_shahmukhi": "سچ",
     },
     "False": {
         "english": "false",
@@ -963,6 +1292,12 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "རྫུན",
         "cherokee": "ᎤᏝ",           "mongolian": "ᠬᠤᠳᠠᠯ",
         "malay": "palsu",            "indonesian": "salah",     "filipino": "mali",
+        "nepali": "असत्य",
+        "maithili": "असत्य",
+        "konkani": "असत्य",
+        "assamese": "অসত্য",
+        "sindhi": "جھوٹ",
+        "punjabi_shahmukhi": "جھوٹ",
     },
     "Print": {
         "english": "print",
@@ -991,6 +1326,13 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "པར",
         "mongolian": "ᠬᠡᠪᠯᠡ",
         "malay": "cetak",            "indonesian": "cetak",     "filipino": "isulat",
+        "nepali": "लिखो",
+        "maithili": "लिखो",
+        "konkani": "लिखो",
+        "assamese": "লেখ",
+        "sindhi": "لکھو",
+        "punjabi_shahmukhi": "لکھو",
+        "cherokee": "ᎠᎴᏂᏍᎬᎢ",
     },
 
     # ── Purity / parallelism ─────────────────────────────────────────────────
@@ -1013,6 +1355,32 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "tibetan": "གཙང",
         "mongolian": "ᠴᠡᠪᠡᠷ",
         "malay": "tulen",            "indonesian": "murni",     "filipino": "dalisay",
+        "nepali": "शुद्ध",
+        "maithili": "शुद्ध",
+        "konkani": "शुद्ध",
+        "bengali": "শুদ্ধ",
+        "tamil": "தூய",
+        "telugu": "శుద్ధ",
+        "gujarati": "શુદ્ધ",
+        "punjabi": "ਸ਼ੁੱਧ",
+        "kannada": "ಶುದ್ಧ",
+        "malayalam": "ശുദ്ധം",
+        "odia": "ଶୁଦ୍ଧ",
+        "sinhala": "ශුද්ධ",
+        "urdu": "خالص",
+        "persian": "خالص",
+        "pashto": "خالص",
+        "armenian": "մաքուր",
+        "georgian": "სუფთა",
+        "yoruba": "mímọ́",
+        "hausa": "tsabta",
+        "khmer": "បរិសុទ្ធ",
+        "burmese": "သန့်ရှင်း",
+        "cherokee": "ᎦᏅᎯᏛ",
+        "lao": "ບໍລິສຸດ",
+        "assamese": "শুদ্ধ",
+        "sindhi": "خالص",
+        "punjabi_shahmukhi": "خالص",
     },
     "Parallel": {
         "english": "parallel",
@@ -1027,20 +1395,164 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "polish": "równoległy",      "turkish": "paralel",      "swedish": "parallell",
         "norwegian": "parallell",    "danish": "parallel",      "hungarian": "párhuzamos",
         "czech": "paralelní",        "slovak": "paralelný",     "finnish": "rinnakkainen",
-        "romanian": "paralel",       "catalan": "paral_lel",
+        "romanian": "paralel",       "catalan": "parallel",
         "swahili": "sambamba",
         "amharic": "ትይዩ",
         "malay": "selari",           "indonesian": "paralel",   "filipino": "magkatulad",
+        "nepali": "समानांतर",
+        "maithili": "समानांतर",
+        "konkani": "समानांतर",
+        "bengali": "সমান্তরাল",
+        "tamil": "இணை",
+        "telugu": "సమాంతర",
+        "gujarati": "સમાંતર",
+        "punjabi": "ਸਮਾਂਤਰ",
+        "kannada": "ಸಮಾನಾಂತರ",
+        "malayalam": "സമാന്തരം",
+        "odia": "ସମାନ୍ତର",
+        "sinhala": "සමාන්තර",
+        "urdu": "متوازی",
+        "persian": "موازی",
+        "pashto": "موازي",
+        "armenian": "զուգահեռ",
+        "georgian": "პარალელური",
+        "yoruba": "akáṣe",
+        "hausa": "madaidaici",
+        "khmer": "ស្របគ្នា",
+        "burmese": "ပြိုင်တူ",
+        "tibetan": "མཉམ",
+        "cherokee": "ᎾᏍᎩᏯ",
+        "lao": "ຂະໜານ",
+        "mongolian": "ᠵᠡᠷᠭᠡ",
+        "assamese": "সমান্তরাল",
+        "sindhi": "متوازی",
+        "punjabi_shahmukhi": "متوازی",
     },
     "Reduce": {
         "english": "reduce",
         "sanskrit": "संक्षेप",       "hindi": "संक्षेप",          "marathi": "संक्षेप",
-        "mandarin": "reduce",
+        "mandarin": "减少",
+        "nepali": "संक्षेप",
+        "maithili": "संक्षेप",
+        "konkani": "संक्षेप",
+        "bengali": "সংক্ষেপ",
+        "tamil": "குறை",
+        "telugu": "సంక్షేప",
+        "gujarati": "સંક્ષેપ",
+        "punjabi": "ਸੰਖੇਪ",
+        "kannada": "ಸಂಕ್ಷೇಪ",
+        "malayalam": "സംക്ഷേപം",
+        "odia": "ସଂକ୍ଷେପ",
+        "sinhala": "සංක්ෂේප",
+        "urdu": "تخفیف",
+        "persian": "کاهش",
+        "pashto": "کمښت",
+        "russian": "сократить",
+        "spanish": "reducir",
+        "french": "reduire",
+        "japanese": "削減",
+        "korean": "축소",
+        "german": "reduzieren",
+        "portuguese": "reduzir",
+        "indonesian": "kurangi",
+        "greek": "μείωση",
+        "hebrew": "הפחתה",
+        "italian": "ridurre",
+        "arabic": "تقليل",
+        "polish": "zmniejsz",
+        "turkish": "azalt",
+        "malay": "kurangkan",
+        "swahili": "punguza",
+        "vietnamese": "giảm",
+        "romanian": "reduce",
+        "dutch": "verminder",
+        "thai": "ลด",
+        "hungarian": "csökkent",
+        "czech": "zmenši",
+        "slovak": "zmenši",
+        "finnish": "vahenna",
+        "swedish": "reducera",
+        "filipino": "bawasan",
+        "norwegian": "reduser",
+        "danish": "reducer",
+        "armenian": "կրճատում",
+        "georgian": "შემცირება",
+        "catalan": "redueix",
+        "yoruba": "dínku",
+        "hausa": "rage",
+        "khmer": "កាត់បន្ថយ",
+        "burmese": "လျှော့ချ",
+        "amharic": "ቀንስ",
+        "tibetan": "ཉུང་དུ",
+        "cherokee": "ᎤᏍᏗᎪᏗ",
+        "lao": "ຫຼຸດ",
+        "mongolian": "ᠪᠠᠭᠠᠰᠬᠠ",
+        "assamese": "সংক্ষেপ",
+        "sindhi": "تخفیف",
+        "punjabi_shahmukhi": "تخفیف",
     },
     "With": {
         "english": "with",
         "sanskrit": "सह",            "hindi": "सह",              "marathi": "सह",
-        "mandarin": "with",
+        "mandarin": "与",
+        "nepali": "सह",
+        "maithili": "सह",
+        "konkani": "सह",
+        "bengali": "সহ",
+        "tamil": "உடன்",
+        "telugu": "తో",
+        "gujarati": "સાથે",
+        "punjabi": "ਨਾਲ",
+        "kannada": "ಜೊತೆ",
+        "malayalam": "കൂടെ",
+        "odia": "ସହିତ",
+        "sinhala": "සමඟ",
+        "urdu": "ساتھ",
+        "persian": "با",
+        "pashto": "سره",
+        "russian": "совместно",
+        "spanish": "con",
+        "french": "avec",
+        "japanese": "と",
+        "korean": "함께",
+        "german": "mit",
+        "portuguese": "com",
+        "indonesian": "dengan",
+        "greek": "με",
+        "hebrew": "עם",
+        "italian": "con",
+        "arabic": "مع",
+        "polish": "razem",
+        "turkish": "ile",
+        "malay": "dengan",
+        "swahili": "na",
+        "vietnamese": "với",
+        "romanian": "cu",
+        "dutch": "met",
+        "thai": "กับ",
+        "hungarian": "együtt",
+        "czech": "spolu",
+        "slovak": "spolu",
+        "finnish": "kanssa",
+        "swedish": "med",
+        "filipino": "kasama",
+        "norwegian": "med",
+        "danish": "med",
+        "armenian": "հետ",
+        "georgian": "თან",
+        "catalan": "amb",
+        "yoruba": "pẹ̀lú",
+        "hausa": "tare",
+        "khmer": "ជាមួយ",
+        "burmese": "နှင့်အတူ",
+        "amharic": "ጋር",
+        "tibetan": "དང",
+        "cherokee": "ᎠᎴ",
+        "lao": "ກັບ",
+        "mongolian": "ᠬᠠᠮᠲᠤ",
+        "assamese": "সহ",
+        "sindhi": "ساتھ",
+        "punjabi_shahmukhi": "ساتھ",
     },
 
     # ── Interfaces / methods ─────────────────────────────────────────────────
@@ -1061,7 +1573,32 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "romanian": "interfață",     "catalan": "interface",
         "armenian": "միջերես",       "georgian": "ინტერფეისი",
         "swahili": "kiolesura",      "amharic": "በይነገጽ",
-        "malay": "antara_muka",      "indonesian": "antarmuka",
+        "malay": "antaramuka",      "indonesian": "antarmuka",
+        "nepali": "संकेत",
+        "maithili": "संकेत",
+        "konkani": "संकेत",
+        "sindhi": "رابطہ",
+        "punjabi_shahmukhi": "رابطہ",
+        "bengali": "সংকেত",
+        "tamil": "இடைமுகம்",
+        "telugu": "సంకేతం",
+        "gujarati": "સંકેત",
+        "punjabi": "ਸੰਕੇਤ",
+        "kannada": "ಸಂಕೇತ",
+        "malayalam": "സങ്കേതം",
+        "odia": "ସଙ୍କେତ",
+        "sinhala": "සංකේතය",
+        "pashto": "اړیکه",
+        "filipino": "ugnayan",
+        "yoruba": "ifaramọ",
+        "hausa": "hannu",
+        "khmer": "ចំណុចប្រទាក់",
+        "burmese": "မျက်နှာပြင်",
+        "tibetan": "འབྲེལ་མཐུད",
+        "cherokee": "ᎠᏓᏛᏗ",
+        "lao": "ສ່ວນຕິດຕໍ່",
+        "mongolian": "ᠵᠠᠯᠭᠠᠭᠤᠷ",
+        "assamese": "সংকেত",
     },
     "Implement": {
         "english": "implement",
@@ -1078,8 +1615,35 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "czech": "implementuj",      "slovak": "implementuj",   "finnish": "toteuta",
         "romanian": "implementează", "catalan": "implementa",
         "armenian": "իրականացնել",   "georgian": "განხორციელება",
-        "amharic": "ተግብር",
+        "amharic": "ተግባራዊ",
         "malay": "laksanakan",       "indonesian": "terapkan",  "filipino": "ipatupad",
+        "nepali": "कार्यान्वित",
+        "maithili": "कार्यान्वित",
+        "konkani": "कार्यान्वित",
+        "bengali": "কার্যান্বিত",
+        "tamil": "செயல்படுத்து",
+        "telugu": "అమలు",
+        "gujarati": "અમલ",
+        "punjabi": "ਅਮਲ",
+        "kannada": "ಜಾರಿ",
+        "malayalam": "നടപ്പിലാക്കുക",
+        "odia": "ପ୍ରୟୋଗ",
+        "sinhala": "ක්‍රියාත්මක",
+        "urdu": "نافذ",
+        "persian": "اجرا",
+        "pashto": "پلي",
+        "swahili": "tekeleza",
+        "yoruba": "muṣẹ",
+        "hausa": "aiwatar",
+        "khmer": "អនុវត្ត",
+        "burmese": "အကောင်အထည်ဖော်",
+        "tibetan": "ལག་བསྟར",
+        "cherokee": "ᎬᏔᏂᏙᎲ",
+        "lao": "ປະຕິບັດ",
+        "mongolian": "ᠬᠡᠷᠡᠭᠵᠢᠭᠦᠯ",
+        "assamese": "কার্যান্বিত",
+        "sindhi": "نافذ",
+        "punjabi_shahmukhi": "نافذ",
     },
     "Methods": {
         "english": "methods",
@@ -1091,13 +1655,40 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "μέθοδοι",
         "spanish": "metodos",        "french": "méthodes",      "german": "methoden",
         "portuguese": "metodos",     "italian": "metodi",       "dutch": "methoden",
-        "polish": "metody",          "turkish": "metodlar",     "swedish": "metoder",
+        "polish": "metody",          "turkish": "metotlar",     "swedish": "metoder",
         "norwegian": "metoder",      "danish": "metoder",       "hungarian": "metódusok",
         "czech": "metody",           "slovak": "metody",        "finnish": "menetelmat",
         "romanian": "metode",        "catalan": "metodes",
         "armenian": "մեթոդներ",      "georgian": "მეთოდები",
         "amharic": "ዘዴዎች",
         "malay": "kaedah",           "indonesian": "metode",    "filipino": "pamamaraan",
+        "nepali": "विधि",
+        "maithili": "विधि",
+        "konkani": "विधि",
+        "bengali": "বিধি",
+        "tamil": "முறைகள்",
+        "telugu": "పద్ధతులు",
+        "gujarati": "પદ્ધતિઓ",
+        "punjabi": "ਢੰਗ",
+        "kannada": "ವಿಧಾನಗಳು",
+        "malayalam": "രീതികൾ",
+        "odia": "ପଦ୍ଧତି",
+        "sinhala": "ක්‍රම",
+        "urdu": "طریقے",
+        "persian": "روش",
+        "pashto": "طریقې",
+        "swahili": "njia",
+        "yoruba": "ipa",
+        "hausa": "hanyoyi",
+        "khmer": "វិធីសាស្ត្រ",
+        "burmese": "နည်းလမ်း",
+        "tibetan": "ཐབས་ལམ",
+        "cherokee": "ᏗᏄᎪᏗ",
+        "lao": "ວິທີການ",
+        "mongolian": "ᠠᠷᠭ᠎ᠠ",
+        "assamese": "বিধি",
+        "sindhi": "طریقے",
+        "punjabi_shahmukhi": "طریقے",
     },
 
     # ── Bounds ───────────────────────────────────────────────────────────────
@@ -1118,19 +1709,44 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "armenian": "որտեղ",         "georgian": "სად",
         "swahili": "wapi",           "hausa": "ina",
         "amharic": "የት",
-        "malay": "di_mana",          "indonesian": "dimana",    "filipino": "saan",
+        "malay": "tempat",          "indonesian": "dimana",    "filipino": "saan",
+        "nepali": "जहाँ",
+        "maithili": "जहाँ",
+        "konkani": "जहाँ",
+        "bengali": "যেখানে",
+        "tamil": "எங்கே",
+        "telugu": "ఎక్కడ",
+        "gujarati": "જ્યાં",
+        "punjabi": "ਜਿੱਥੇ",
+        "kannada": "ಎಲ್ಲಿ",
+        "malayalam": "എവിടെ",
+        "odia": "କେଉଁଠାରେ",
+        "sinhala": "කොහෙද",
+        "urdu": "جہاں",
+        "persian": "کجا",
+        "pashto": "چیرته",
+        "yoruba": "ibo",
+        "khmer": "ណា",
+        "burmese": "ဘယ်မှာ",
+        "tibetan": "གང",
+        "cherokee": "ᎭᏢ",
+        "lao": "ບ່ອນທີ່",
+        "mongolian": "ᠬᠠᠮᠢᠭ᠎ᠠ",
+        "assamese": "যেখানে",
+        "sindhi": "جہاں",
+        "punjabi_shahmukhi": "جہاں",
     },
     "Is": {
         "english": "is",
         "sanskrit": "अस्ति",          "hindi": "है",              "marathi": "आहे",
-        "mandarin": "is",             "japanese": "は",            "korean": "이다",
+        "mandarin": "是",             "japanese": "は",            "korean": "이다",
         "thai": "คือ",               "vietnamese": "là",
         "arabic": "هو",              "hebrew": "הוא",
         "russian": "есть",
         "greek": "είναι",
         "spanish": "es",             "french": "est",           "german": "ist",
-        "portuguese": "eh",          "italian": "è",            "dutch": "is",
-        "polish": "jest",            "turkish": "dır",          "swedish": "är",
+        "portuguese": "eh",          "italian": "risulta",            "dutch": "is",
+        "polish": "jest",            "turkish": "olur",          "swedish": "är",
         "norwegian": "er",           "danish": "er",            "hungarian": "van",
         "czech": "je",               "slovak": "je",            "finnish": "on",
         "romanian": "este",          "catalan": "es",
@@ -1138,6 +1754,32 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "hausa": "ne",
         "amharic": "ነው",
         "malay": "adalah",           "indonesian": "adalah",    "filipino": "ay",
+        "nepali": "है",
+        "maithili": "है",
+        "konkani": "है",
+        "bengali": "হয়",
+        "tamil": "ஆகும்",
+        "telugu": "ఉంది",
+        "gujarati": "છે",
+        "punjabi": "ਹੈ",
+        "kannada": "ಇದೆ",
+        "malayalam": "ആണ്",
+        "odia": "ଅଟେ",
+        "sinhala": "වේ",
+        "urdu": "ہے",
+        "persian": "است",
+        "pashto": "دی",
+        "swahili": "ni",
+        "yoruba": "ni",
+        "khmer": "គឺ",
+        "burmese": "ဖြစ်သည်",
+        "tibetan": "ཡིན",
+        "cherokee": "ᎨᏒ",
+        "lao": "ແມ່ນ",
+        "mongolian": "ᠪᠣᠯᠤᠨ᠎ᠠ",
+        "assamese": "হয়",
+        "sindhi": "ہے",
+        "punjabi_shahmukhi": "ہے",
     },
 
     # ── Concurrency ──────────────────────────────────────────────────────────
@@ -1147,7 +1789,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "mandarin": "尝试",            "japanese": "試行",          "korean": "시도",
         "thai": "ลอง",               "vietnamese": "thử",
         "arabic": "حاول",            "hebrew": "נסה",
-        "russian": "попытка",
+        "russian": "попробуй",
         "greek": "δοκιμή",
         "spanish": "intentar",       "french": "essayer",       "german": "versuchen",
         "portuguese": "tentar",      "italian": "tentare",      "dutch": "probeer",
@@ -1159,6 +1801,31 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "swahili": "jaribu",         "hausa": "gwadawa",
         "amharic": "ሞክር",
         "malay": "cuba",             "indonesian": "coba",      "filipino": "subukan",
+        "nepali": "प्रयास",
+        "maithili": "प्रयास",
+        "konkani": "प्रयास",
+        "bengali": "চেষ্টা",
+        "tamil": "முயற்சி",
+        "telugu": "ప్రయత్నించు",
+        "gujarati": "પ્રયાસ",
+        "punjabi": "ਕੋਸ਼ਿਸ਼",
+        "kannada": "ಪ್ರಯತ್ನ",
+        "malayalam": "ശ്രമിക്കുക",
+        "odia": "ପ୍ରୟାସ",
+        "sinhala": "උත්සාහ",
+        "urdu": "کوشش",
+        "persian": "تلاش",
+        "pashto": "هڅه",
+        "yoruba": "gbiyanju",
+        "khmer": "ព្យាយាម",
+        "burmese": "ကြိုးစား",
+        "tibetan": "འབད",
+        "cherokee": "ᎠᏓᎫᏓᏛᏍᎩ",
+        "lao": "ລອງ",
+        "mongolian": "ᠣᠷᠣᠯᠳᠤ",
+        "assamese": "চেষ্টা",
+        "sindhi": "کوشش",
+        "punjabi_shahmukhi": "کوشش",
     },
     "Task": {
         "english": "task",
@@ -1167,7 +1834,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "mandarin": "任务",            "japanese": "タスク",        "korean": "작업",
         "thai": "งาน",               "vietnamese": "công_việc",
         "arabic": "مهمة",            "hebrew": "משימה",           "persian": "وظیفه",
-        "urdu": "کام",
+        "urdu": "ٹاسک",
         "russian": "задача",
         "greek": "εργασία",
         "spanish": "tarea",          "french": "tâche",         "german": "aufgabe",
@@ -1177,10 +1844,31 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "czech": "úloha",            "slovak": "úloha",         "finnish": "tehtava",
         "romanian": "sarcină",       "catalan": "tasca",
         "armenian": "խնդիր",         "georgian": "დავალება",
-        "swahili": "kazi_ndogo",     "hausa": "aiki_kadan",
+        "swahili": "jukumu",     "hausa": "hidima",
         "amharic": "ስራ",
         "mongolian": "ᠡᠭᠦᠷᠭᠡ",
         "malay": "tugasan",          "indonesian": "tugas",     "filipino": "tungkulin",
+        "nepali": "नियोग",
+        "maithili": "नियोग",
+        "konkani": "नियोग",
+        "assamese": "নিয়োগ",
+        "sindhi": "ٹاسک",
+        "punjabi_shahmukhi": "ٹاسک",
+        "tamil": "பணி",
+        "telugu": "కార్యం",
+        "gujarati": "નિયોગ",
+        "punjabi": "ਨਿਯੋਗ",
+        "kannada": "ನಿಯೋಗ",
+        "malayalam": "നിയോഗം",
+        "odia": "ନିଯୋଗ",
+        "sinhala": "නියෝගය",
+        "pashto": "دنده",
+        "yoruba": "ojúṣe",
+        "khmer": "ភារកិច្ច",
+        "burmese": "တာဝန်",
+        "tibetan": "ལས",
+        "cherokee": "ᏗᎦᎸᏫᏍᏓᏁᏗ",
+        "lao": "ວຽກງານ",
     },
     "Join": {
         "english": "join",
@@ -1200,7 +1888,31 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "swahili": "unganisha",      "hausa": "hadawa",
         "amharic": "ቀላቀል",
         "tibetan": "མཐུན་སྦྱོར",
-        "malay": "bergabung",        "indonesian": "gabungkan", "filipino": "pagsama",
+        "malay": "gabung",        "indonesian": "gabungkan", "filipino": "pagsama",
+        "nepali": "संयोजन",
+        "maithili": "संयोजन",
+        "konkani": "संयोजन",
+        "bengali": "যোগ",
+        "tamil": "சேர்",
+        "telugu": "సంయోగం",
+        "gujarati": "સંયોજન",
+        "punjabi": "ਸੰਯੋਜਨ",
+        "kannada": "ಸಂಯೋಜನೆ",
+        "malayalam": "സംയോജനം",
+        "odia": "ସଂଯୋଜନ",
+        "sinhala": "සංයෝජනය",
+        "urdu": "ملاپ",
+        "persian": "پیوستن",
+        "pashto": "نښلول",
+        "yoruba": "darapọ",
+        "khmer": "ភ្ជាប់",
+        "burmese": "ပူးပေါင်း",
+        "cherokee": "ᏓᏂᎳᏫᏍᎦ",
+        "lao": "ເຊື່ອມ",
+        "mongolian": "ᠨᠡᠶᠢᠯᠡ",
+        "assamese": "যোগ",
+        "sindhi": "ملاپ",
+        "punjabi_shahmukhi": "ملاپ",
     },
 
     # ── Embedded ─────────────────────────────────────────────────────────────
@@ -1221,7 +1933,34 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "armenian": "անապահով",      "georgian": "სახიფათო",
         "amharic": "አደገኛ",
         "tibetan": "ཉེན་ཁ",
-        "malay": "tidak_selamat",    "indonesian": "bahaya",
+        "malay": "tidakselamat",    "indonesian": "bahaya",
+        "nepali": "असुरक्षित",
+        "maithili": "असुरक्षित",
+        "konkani": "असुरक्षित",
+        "bengali": "অসুরক্ষিত",
+        "tamil": "பாதுகாப்பற்ற",
+        "telugu": "అసురక్షిత",
+        "gujarati": "અસુરક્ષિત",
+        "punjabi": "ਅਸੁਰੱਖਿਅਤ",
+        "kannada": "ಅಸುರಕ್ಷಿತ",
+        "malayalam": "അസുരക്ഷിതം",
+        "odia": "ଅସୁରକ୍ଷିତ",
+        "sinhala": "අනාරක්ෂිත",
+        "urdu": "غیرمحفوظ",
+        "persian": "ناامن",
+        "pashto": "ناامن",
+        "swahili": "hatari",
+        "filipino": "mapanganib",
+        "yoruba": "àìláàbò",
+        "hausa": "kasada",
+        "khmer": "មិនមានសុវត្ថិភាព",
+        "burmese": "ဘေးကင်းမှု",
+        "cherokee": "ᎠᏂᏍᎦᏂᎩᏛ",
+        "lao": "ບໍ່ປອດໄພ",
+        "mongolian": "ᠠᠶᠤᠯᠲᠠᠢ",
+        "assamese": "অসুরক্ষিত",
+        "sindhi": "غیرمحفوظ",
+        "punjabi_shahmukhi": "غیرمحفوظ",
     },
     "RegionKw": {
         "english": "region",
@@ -1233,14 +1972,40 @@ ALIASES: Dict[str, Dict[str, str]] = {
         "greek": "περιοχή",
         "spanish": "region",         "french": "région",        "german": "bereich",
         "portuguese": "regiao",      "italian": "regione",      "dutch": "gebied",
-        "polish": "obszar",          "turkish": "bölge",        "swedish": "region",
-        "norwegian": "område",       "danish": "område",        "hungarian": "tartomány",
+        "polish": "obszar",          "turkish": "bölge",        "swedish": "område",
+        "norwegian": "omrade",       "danish": "område",        "hungarian": "tartomány",
         "czech": "oblast",           "slovak": "oblasť",        "finnish": "alue",
         "romanian": "regiune",       "catalan": "regio",
         "armenian": "տարածք",        "georgian": "რეგიონი",
         "amharic": "ክልል",
         "tibetan": "ཁུལ",
         "malay": "kawasan",          "indonesian": "wilayah",   "filipino": "rehiyon",
+        "nepali": "क्षेत्र",
+        "maithili": "क्षेत्र",
+        "konkani": "क्षेत्र",
+        "bengali": "ক্ষেত্র",
+        "tamil": "பகுதி",
+        "telugu": "ప్రాంతం",
+        "gujarati": "ક્ષેત્ર",
+        "punjabi": "ਖੇਤਰ",
+        "kannada": "ಪ್ರದೇಶ",
+        "malayalam": "പ്രദേശം",
+        "odia": "କ୍ଷେତ୍ର",
+        "sinhala": "ප්‍රදේශය",
+        "urdu": "علاقہ",
+        "persian": "منطقه",
+        "pashto": "سیمه",
+        "swahili": "eneo",
+        "yoruba": "agbègbè",
+        "hausa": "yanki",
+        "khmer": "តំបន់",
+        "burmese": "ဒေသ",
+        "cherokee": "ᎦᏙᎯ",
+        "lao": "ພູມພາກ",
+        "mongolian": "ᠪᠥᠰᠡ",
+        "assamese": "ক্ষেত্র",
+        "sindhi": "علاقہ",
+        "punjabi_shahmukhi": "علاقہ",
     },
 }
 
@@ -1248,6 +2013,11 @@ SUPPORTED_LANGS = (
     "english", "sanskrit", "hindi", "marathi", "mandarin",
     # South Asian
     "bengali", "odia", "gujarati", "punjabi", "sinhala",
+    # Phase 2 dialects (2026-08-12): pragma-only aliases of an existing
+    # shared keyword table -- see tools/regen_vani_translate_keywords.py's
+    # LANG_TABLES/ALIAS_OF for exactly which table each reuses.
+    "nepali", "maithili", "konkani", "assamese", "sindhi",
+    "punjabi_shahmukhi",
     # Dravidian
     "tamil", "telugu", "kannada", "malayalam",
     # East Asian
@@ -1278,13 +2048,31 @@ _IA_DEVANAGARI = frozenset(("sanskrit", "hindi", "marathi", "nepali", "maithili"
 
 # Languages with SOV (Subject-Object-Verb) word order for certain constructs.
 SOV_LANGS = frozenset({
-    "sanskrit", "hindi", "marathi",
-    "bengali", "odia", "gujarati", "punjabi", "sinhala",
+    "sanskrit", "hindi", "marathi", "nepali", "maithili", "konkani",
+    "bengali", "odia", "gujarati", "punjabi", "sinhala", "assamese",
     "tamil", "telugu", "kannada", "malayalam",
     "japanese", "korean",
-    "urdu", "persian", "pashto",
+    "urdu", "persian", "pashto", "sindhi", "punjabi_shahmukhi",
     "turkish", "mongolian", "tibetan",
 })
+
+# lexer.rs's `// vani-lang:` pragma parser expects specific tag spellings
+# (src/lexer.rs's DialectLang pragma match, ~line 5860) that don't always
+# match this tool's internal SUPPORTED_LANGS key -- currently just
+# punjabi_shahmukhi (underscore, matching examples/language/punjabi_shahmukhi/
+# and every other plain-lowercase-word key here) vs lexer.rs's
+# "punjabi-shahmukhi" (hyphen, the only spelling its pragma match accepts
+# besides "shahmukhi" / "pnb"). Used when WRITING a pragma; reading is
+# handled by checking both spellings in detect_pragma_lang.
+_PRAGMA_TAG_OVERRIDES: Dict[str, str] = {
+    "punjabi_shahmukhi": "punjabi-shahmukhi",
+}
+
+
+def pragma_tag(lang: str) -> str:
+    """The exact `// vani-lang: <tag>` string lexer.rs's pragma parser
+    expects for `lang`. Almost always `lang` itself."""
+    return _PRAGMA_TAG_OVERRIDES.get(lang, lang)
 
 # Multi-word forms that the lexer fuses post-tokenization.
 MULTI_WORD_ALIASES: Dict[Tuple[str, ...], str] = {
@@ -1294,6 +2082,494 @@ MULTI_WORD_ALIASES: Dict[Tuple[str, ...], str] = {
     ("सिद्ध", "करा"):     "Prove",
     ("समान्तर", "प्रति"): "Parallel",
 }
+
+# BEGIN ALL_SYNONYMS (auto-generated by tools/regen_vani_translate_keywords.py)
+ALL_SYNONYMS: Dict[str, List[str]] = {
+    "Arrow": ['yields'],
+    "As": [
+        'as', 'यथा', 'হিসাবে', 'ஆக', 'గా', 'તરીકે', 'ਵਜੋਂ', 'ಆಗಿ', 'ആയി', 'ଭାବେ', 'ලෙස',
+        'بطور', 'بعنوان', 'لکه', 'как', 'como', 'comme', 'として', '作为', '로서', 'als', 'sebagai',
+        'ως', 'בתור', 'come', 'بصفة', 'jako', 'olarak', 'kama', 'như', 'ca', 'เป็น', 'mint',
+        'ako', 'kuten', 'som', 'bilang', 'որպես', 'როგორც', 'com', 'bí_ti', 'kamar', 'ជា',
+        'အဖြစ်', 'እንደ', 'དུ', 'ເປັນ',
+    ],
+    "Assert": [
+        'assert', 'खात्री', 'सुनिश्चित', 'सिद्धम्', 'নিশ্চিত', 'உறுதி', 'నిర్ధారించు',
+        'નિશ્ચિત', 'ਨਿਸ਼ਚਿਤ', 'ಖಚಿತಪಡಿಸಿ', 'ഉറപ്പിക്കുക', 'ନିଶ୍ଚିତ', 'තහවුරු', 'یقینی', 'ادعا',
+        'تایید', 'утверждать', 'afirmar', 'vérifier', 'vérifie', 'affirmer', '確認', '断言', '확인',
+        'überprüfen', 'überprüfe', 'prüfen', 'prüfe', 'behaupten', 'pastikan', 'επιβεβαίωση',
+        'ודא', 'affermare', 'تأكد', 'potwierdź', 'potwierdz', 'doğrula', 'dogrula',
+        'thibitisha', 'khẳng_định', 'afirmă', 'afirma', 'bevestig', 'ยืนยัน', 'állítsd',
+        'allitsd', 'tvrď', 'tvrd', 'potvrď', 'potvrd', 'vahvista', 'påstå', 'bekrafta',
+        'patunayan', 'bekreft', 'bekraeft', 'paastaa', 'հաստատել', 'დაამოწმე', 'jẹ́risí',
+        'tabbatar', 'បញ្ជាក់', 'သေချာ', 'አረጋግጥ', 'ངེས', 'ᎯᏍᏗᏎᏍᏗ', 'ຢືນຢັນ', 'ᠪᠠᠲᠤᠯ',
+    ],
+    "Bool": ['bool', 'तर्क', 'बूल'],
+    "Break": [
+        'break', 'विराम', 'रुको', 'थांब', 'বিরাম', 'நிறுத்து', 'ఆపు', 'વિરામ', 'ਵਿਰਾਮ',
+        'ನಿಲ್ಲಿ', 'നിർത്തുക', 'ବନ୍ଦ', 'නවත්වන්න', 'بند', 'بشکن', 'ودروه', 'прервать', 'romper',
+        'interrompre', '中断', '중단', 'brechen', 'parar', 'interromper', 'berhenti', 'διακοπή',
+        'שבור', 'הפסק', 'rompere', 'interrompere', 'كسر', 'przerwij', 'kır', 'kir', 'vunja',
+        'ngắt', 'rupe', 'stop', 'หยุด', 'törj', 'torj', 'přeruš', 'prerus', 'preruš', 'perus',
+        'katkaise', 'bryt', 'tumigil', 'bryd', 'ընդհատել', 'შეჩერება', 'trenca', 'dáwọ́dúró',
+        'dakatar', 'បំបាក់', 'ရပ်', 'ስብር', 'འགོག', 'ᎤᎵᏍᎩᏗ', 'ຢຸດ', 'ᠵᠣᠭᠰᠣ',
+    ],
+    "Const": [
+        'const', 'स्थिर', 'नियत', 'স্থির', 'மாறா', 'స్థిరం', 'સ્થિર', 'ਸਥਿਰ', 'ಸ್ಥಿರ',
+        'സ്ഥിരം', 'ସ୍ଥିର', 'ස්ථිර', 'ثابت', 'постоянная', 'constante', '定数', '常量', '상수',
+        'konstante', 'tetap', 'σταθερά', 'קבוע', 'costante', 'قيمة_ثابتة', 'stała', 'stala',
+        'sabit', 'pemalar', 'thabiti', 'hằng', 'constantă', 'constanta', 'คงที่', 'állandó',
+        'allando', 'konstanta', 'konštanta', 'vakio', 'konstant', 'pirme', 'հաստատուն',
+        'მუდმივი', 'constant', 'àlàfo', 'tabbas', 'ថេរ', 'ပုံသေ', 'ቋሚ', 'རྟག', 'ᎠᏢᏓᏅᎯ',
+        'ຄົງທີ່', 'ᠲᠣᠭᠲᠠᠮᠠᠯ',
+    ],
+    "Continue": [
+        'continue', 'अग्रे', 'पुढे', 'आगे', 'এগিয়ে', 'தொடர்', 'కొనసాగించు', 'ચાલુ', 'ਜਾਰੀ',
+        'ಮುಂದುವರಿಸಿ', 'തുടരുക', 'ଜାରି', 'ඉදිරියට', 'جاری', 'ادامه', 'دوام', 'продолжить',
+        'continuar', 'continuer', '続行', '继续', '계속', 'weiter', 'lanjutkan', 'συνέχεια', 'המשך',
+        'continuare', 'استمر', 'kontynuuj', 'devam', 'teruskan', 'endelea', 'tiếp_tục',
+        'continuă', 'continua', 'verder', 'ดำเนินต่อ', 'folytat', 'folytasd', 'pokračuj',
+        'pokracuj', 'jatka', 'fortsätt', 'fortsatt', 'magpatuloy', 'fortsett', 'fortsæt',
+        'fortsaet', 'շարունակել', 'გაგრძელება', 'tẹ̀síwájú', 'ci_gaba', 'បន្ត', 'ဆက်လုပ်',
+        'ቀጥል', 'མུ་མཐུད', 'ᏗᎧᎵᏍᏗ', 'ສືບຕໍ່', 'ᠦᠷᠭᠦᠯᠵᠢᠯᠡ',
+    ],
+    "EPrint": [
+        'eprint', 'त्रुटिलिख', 'त्रुटिलिखो', 'दोषलिहा', 'ত্রুটিলেখ', 'பிழைஎழுது', 'లోపంరాయి',
+        'ભૂલલખો', 'ਗਲਤੀਲਿਖੋ', 'ದೋಷಬರೆ', 'പിശക്എഴുതുക', 'ତ୍ରୁଟିଲେଖ', 'දෝෂයලියන්න', 'غلطیلکھو',
+        'خطاچاپ', 'خطاولیکه', 'ошибкапечатать', 'errorimprimir', 'erreurimprimer', 'エラー表示',
+        '错误打印', '오류출력', 'fehlerdrucken', 'erroimprimir', 'kesalahancetak', 'σφάλμαεκτύπωση',
+        'שגיאההדפס', 'errorestampare', 'خطأاطبع', 'bladdrukuj', 'hatayazdır', 'hatayazdir',
+        'ralatcetak', 'kosachapisha', 'lỗi_in', 'eroaretipărește', 'eroaretipareste',
+        'foutdruk', 'ข้อผิดพลาดพิมพ์', 'hibanyomtat', 'hibanyomtass', 'chybavypiš',
+        'chybatiskni', 'chybavytlač', 'chybavytlac', 'virhetulosta', 'felskriv',
+        'pagkakamaliisulat', 'feilskriv', 'fejludskriv', 'սխալիտպել', 'შეცდომაბეჭდვა',
+        'errorimprimeix', 'àṣìṣetẹ̀', 'kuskurerubuta', 'កំហុសបោះពុម្ព', 'အမှားပုံနှိပ်',
+        'ስህተትህትመት', 'ནོར་འཁྲུལ་པར', 'ᎤᎴᏗᎠᎴᏂᏍᎬᎢ', 'ຂໍ້ຜິດພາດພິມ', 'ᠠᠯᠳᠠᠭᠬᠡᠪᠯᠡ',
+    ],
+    "Else": [
+        'else', 'अन्यथा', 'वरना', 'नाहीतर', 'नहीं तो', 'নাহলে', 'অন্যথা', 'இல்லாவிட்டால்',
+        'లేకపోతే', 'નહીંતર', 'ਵਰਨਾ', 'ಇಲ್ಲದಿದ್ದರೆ', 'അല്ലെങ്കിൽ', 'ଅନ୍ୟଥା', 'නැතිනම්', 'ورنہ',
+        'وگرنه', 'کهنه', 'иначе', 'sino', 'sinon', 'そうでなければ', '否则', '아니면', 'sonst', 'senão',
+        'senao', 'selainnya', 'lainnya', 'αλλιώς', 'אחרת', 'altrimenti', 'وإلا', 'inaczej',
+        'yoksa', 'vinginevyo', 'ngược_lại', 'altfel', 'anders', 'ไม่เช่นนั้น', 'különben',
+        'kulonben', 'jinak', 'inak', 'muuten', 'annars', 'kundi', 'ellers', 'այլապես', 'სხვა',
+        'altrament', 'yàtọ̀', 'ko_kuwa', 'ផ្សេង', 'မဟုတ်ပါက', 'ካልሆነ', 'གཞན', 'ᎪᎯ',
+        'ບໍ່ດັ່ງນັ້ນ', 'ᠡᠰᠡᠪᠡᠯ',
+    ],
+    "Ensures": [
+        'ensures', 'निश्चित', 'सुनिश्चयित', 'সুনিশ্চিত', 'உறுதிப்படுத்து', 'నిశ్చయం', 'ખાતરી',
+        'ਯਕੀਨੀ', 'ಖಚಿತ', 'ഉറപ്പ്', 'ସୁନିଶ୍ଚିତ', 'සහතික', 'ضمانت', 'تضمین', 'ډاډ',
+        'гарантирует', 'garantiza', 'garantit', '保証', '保证', '보장', 'garantiert', 'garante',
+        'jamin', 'εγγυάται', 'מבטיח', 'garantisce', 'يضمن', 'gwarantuje', 'garanti',
+        'menjamin', 'hakikisha', 'đảm_bảo', 'garantează', 'garanteaza', 'verzekert',
+        'รับประกัน', 'garantál', 'garantal', 'zajišťuje', 'zajistuje', 'zaručuje', 'zarucuje',
+        'takaa', 'säkerställer', 'garanterar', 'tiyakin', 'garanterer', 'երաշխավորում',
+        'უზრუნველყოფს', 'garanteix', 'dájú', 'tabbace', 'ធានា', 'ဆောင်ရွက်', 'ያረጋግጣል', 'ཁག',
+        'ᎤᏙᎯᏳᏫᏍᏗ', 'ຮັບປະກັນ', 'ᠪᠠᠲᠤᠯᠠᠭ\u180eᠠ',
+    ],
+    "Enum": [
+        'enum', 'विकल्प', 'गणन', 'গণনা', 'எண்ணுப்பெயர்', 'గణన', 'ગણના', 'ਗਣਨਾ', 'ಎಣಿಕೆ',
+        'എണ്ണൽ', 'ଗଣନା', 'ගණනය', 'شمار', 'شمارش', 'شمېرل', 'перечисление', 'enumeración',
+        'enumeracion', 'énumération', 'enumeration', '列挙', '枚举', '열거', 'aufzählung',
+        'aufzaehlung', 'enumeração', 'enumeracao', 'enumerasi', 'απαρίθμηση', 'ספירה',
+        'enumerazione', 'تعداد', 'wyliczenie', 'sıralama', 'siralama', 'penghitungan',
+        'orodha', 'liệt_kê', 'enumerare', 'opsomming', 'การแจงนับ', 'felsorolás', 'felsorolas',
+        'výčet', 'vycet', 'výpočet', 'vypocet', 'luettelointi', 'uppräkning', 'uppraekning',
+        'pagbilang', 'oppregning', 'optælling', 'optaelling', 'թվարկում', 'ჩამოთვლა',
+        'enumeració', 'enumeracio', 'àkọsílẹ̀', 'lissafi', 'ការរាប់បញ្ចូល', 'စာရင်း', 'ቆጠራ',
+        'རྩིས', 'ᎢᎦᏙᎯ', 'ການນັບ', 'ᠲᠣᠭᠠᠯᠠᠯ',
+    ],
+    "Extern": [
+        'extern', 'बाह्य', 'বাহ্যিক', 'வெளி', 'బాహ్య', 'બાહ્ય', 'ਬਾਹਰੀ', 'ಬಾಹ್ಯ', 'ബാഹ്യം',
+        'ବାହ୍ୟ', 'බාහිර', 'بیرونی', 'خارجی', 'بهرنی', 'внешний', 'externo', 'étranger',
+        'externe', '外部', '외부', 'äußere', 'äußerer', 'eksternal', 'εξωτερικό', 'חיצוני',
+        'esterno', 'خارجي', 'zewnętrzny', 'zewnetrzny', 'dış', 'dis', 'luaran', 'nje',
+        'bên_ngoài', 'ภายนอก', 'külső', 'kulso', 'vnější', 'vnejsi', 'vonkajší', 'vonkajsi',
+        'ulkoinen', 'panlabas', 'ekstern', 'արտաքին', 'გარე', 'ìta', 'waje', 'ខាងក្រៅ',
+        'အပြင်', 'ውጫዊ', 'ཕྱི', 'ᏙᏱᏗᏢ', 'ພາຍນອກ', 'ᠭᠠᠳᠠᠨ\u180eᠠ',
+    ],
+    "F32": ['f32', 'दशांश३२'],
+    "F64": ['f64', 'दशांश', 'दशांश६४'],
+    "False": [
+        'false', 'असत्य', 'अशुद्ध', 'झूठ', 'गलत', 'खोटे', 'चूक', 'অসত্য', 'মিথ্যা', 'ভুল',
+        'பொய்', 'అబద్ధం', 'ખોટું', 'ਝੂਠ', 'ಸುಳ್ಳು', 'ತಪ್ಪು', 'അസത്യം', 'തെറ്റ്', 'ମିଥ୍ୟା',
+        'අසත්\u200dය', 'වැරදි', 'جھوٹ', 'نادرست', 'ناسم', 'ложь', 'неверно', 'falso', 'faux',
+        '偽', '假', '거짓', 'falsch', 'salah', 'ψευδές', 'שקר', 'خطأ', 'fałsz', 'falsz', 'yanlış',
+        'yanlis', 'palsu', 'uongo', 'sai', 'fals', 'onwaar', 'เท็จ', 'hamis', 'nepravda',
+        'epatosi', 'falskt', 'mali', 'usant', 'falsk', 'կեղծ', 'მცდარი', 'irọ́', 'ƙarya',
+        'មិនពិត', 'မှား', 'ሐሰት', 'རྫུན', 'ᎤᏝ', 'ບໍ່ຈິງ', 'ᠬᠤᠳᠠᠯ',
+    ],
+    "Fn": [
+        'fn', 'फलन', 'कार्य', 'ফাংশন', 'কাজ', 'செயல்பாடு', 'சார்பு', 'ఫంక్షన్', 'పని', 'કાર્ય',
+        'ફંકશન', 'ਕਾਰਜ', 'ਫੰਕਸ਼ਨ', 'ಕಾರ್ಯ', 'ಫಂಕ್ಷನ್', 'കാര്യം', 'ഫംഗ്ഷൻ', 'କାର୍ଯ୍ୟ',
+        'ଫଙ୍କସନ୍', 'කාර්යය', 'ශ්\u200dරිතය', 'فنکشن', 'کام', 'تابع', 'فانکشن', 'کار',
+        'функция', 'función', 'funcion', 'fonction', '関数', '函数', '함수', 'funktion', 'função',
+        'funcao', 'fungsi', 'συνάρτηση', 'פונקציה', 'פעולה', 'funzione', 'دالة', 'funkcja',
+        'işlev', 'fonksiyon', 'kazi', 'hàm', 'funcție', 'functie', 'ฟังก์ชัน', 'függvény',
+        'fuggveny', 'funkce', 'funkcia', 'funktio', 'gawain', 'funksjon', 'ֆունկցիա',
+        'ფუნქცია', 'funció', 'funcio', 'iṣẹ́', 'aiki', 'មុខងារ', 'လုပ်ဆောင်ချက်', 'ተግባር',
+        'ལས་ཀ', 'ᏗᎦᏬᏂᎯᏍᏗ', 'ໜ້າທີ່', 'ᠴᠠᠭ',
+    ],
+    "For": [
+        'for', 'प्रति', 'साठी', 'के लिए', 'প্রতি', 'ஒவ்வொரு', 'ప్రతి', 'પ્રતિ', 'ਹਰ', 'ಪ್ರತಿ',
+        'ഓരോ', 'ପ୍ରତି', 'සෑම', 'ہر', 'هر', 'هریو', 'для', 'para', 'pour', '対象', '对于', '각각',
+        'für', 'jede', 'untuk', 'για', 'לכל', 'per', 'لكل', 'dla', 'için', 'icin', 'kwa',
+        'với_mỗi', 'pentru', 'voor', 'สำหรับ', 'minden', 'pro', 'pre', 'jokaiselle', 'för',
+        'ամեն', 'თითოეული', 'fún', 'ga', 'សម្រាប់', 'အတွက်', 'ለ', 'ལ', 'ᏌᏊ', 'ສຳລັບ',
+        'ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ',
+    ],
+    "Forall": ['forall'],
+    "From": [
+        'from', 'से', 'থেকে', 'இருந்து', 'నుండి', 'થી', 'ਤੋਂ', 'ಇಂದ', 'നിന്ന്', 'ରୁ', 'සිට',
+        'سے', 'از', 'له', 'от', 'desde', 'depuis', 'から', '从', '에서', 'von', 'dari', 'από',
+        'מתוך', 'da', 'من', 'od', 'den', 'kutoka', 'từ', 'din', 'van', 'จาก', 'kezdve',
+        'lähtien', 'alkaen', 'från', 'fran', 'mula', 'fra', 'ից', 'დან', 'des', 'láti', 'daga',
+        'ពី', 'မှ', 'ጀምሮ', 'ནས', 'ᏓᏓᎴᏂᏍᎬ', 'ຈາກ', 'ᠠᠴᠠ',
+    ],
+    "I16": ['i16', 'पूर्णांक१६'],
+    "I32": ['i32', 'पूर्णांक३२'],
+    "I64": ['i64', 'पूर्णांक', 'पूर्णांक६४'],
+    "I8": ['i8', 'पूर्णांक८'],
+    "If": [
+        'if', 'यदि', 'अगर', 'जर', 'যদি', 'என்றால்', 'எனில்', 'అయితే', 'જો', 'ਜੇ', 'ಆದರೆ',
+        'എങ്കിൽ', 'ଯଦି', 'නම්', 'اگر', 'که', 'если', 'si', 'もし', '如果', '만약', '만일', 'wenn',
+        'se', 'jika', 'αν', 'אם', 'إذا', 'jeśli', 'jesli', 'eğer', 'eger', 'kama_ni', 'ikiwa',
+        'nếu', 'dacă', 'daca', 'indien', 'ถ้า', 'ha', 'pokud', 'jestli', 'ak', 'kedy', 'jos',
+        'om', 'kung', 'hvis', 'եթե', 'თუ', 'bí', 'idan', 'បើ', 'ဆိုလျှင်', 'ከ', 'གལ་ཏེ', 'ᎢᏳᏃ',
+        'ຖ້າ', 'ᠬᠡᠷᠪᠡ',
+    ],
+    "Implement": [
+        'impl', 'कार्यान्वित', 'কার্যান্বিত', 'செயல்படுத்து', 'అమలు', 'અમલ', 'ਅਮਲ', 'ಜಾರಿ',
+        'നടപ്പിലാക്കുക', 'ପ୍ରୟୋଗ', 'ක්\u200dරියාත්මක', 'نافذ', 'اجرا', 'پلي', 'реализовать',
+        'implementar', 'implémenter', 'implementer', '実装', '实现', '구현', 'implementieren',
+        'terapkan', 'implementasi', 'υλοποίηση', 'ממש', 'implementare', 'نفذ', 'zaimplementuj',
+        'uygula', 'laksanakan', 'tekeleza', 'triển_khai', 'implementează', 'implementeaza',
+        'implementeer', 'ดำเนินการ', 'megvalósít', 'valositsd_meg', 'implementuj', 'toteuta',
+        'implementera', 'ipatupad', 'implementér', 'իրականացնել', 'განხორციელება',
+        'implementa', 'muṣẹ', 'aiwatar', 'អនុវត្ត', 'အကောင်အထည်ဖော်', 'ተግባራዊ', 'ལག་བསྟར',
+        'ᎬᏔᏂᏙᎲ', 'ປະຕິບັດ', 'ᠬᠡᠷᠡᠭᠵᠢᠭᠦᠯ',
+    ],
+    "In": [
+        'in', 'में', 'মধ্যে', 'உள்', 'లో', 'માં', 'ਵਿੱਚ', 'ರಲ್ಲಿ', 'ഇൽ', 'ରେ', 'තුළ', 'میں',
+        'در', 'په', 'в', 'en', 'dans', '中', '在', '안에', 'em', 'dalam', 'σε', 'בתוך', 'في', 'w',
+        'içinde', 'icinde', 'ndani', 'trong', 'în', 'ใน', 'belül', 'belul', 'uvnitř', 'uvnitr',
+        'vnútri', 'vnutri', 'sisalla', 'inuti', 'sa', 'inni', 'indeni', 'մեջ', 'ში', 'nínú',
+        'cikin', 'ក្នុង', 'ထဲမှာ', 'ውስጥ', 'ནང', 'ᎭᏫᎾ', 'ໃນ', 'ᠳᠣᠲᠣᠷ\u180eᠠ',
+    ],
+    "Intent": [
+        'intent', 'उद्देश्य', 'উদ্দেশ্য', 'நோக்கம்', 'ఉద్దేశం', 'ઉદ્દેશ', 'ਉਦੇਸ਼', 'ಉದ್ದೇಶ',
+        'ഉദ്ദേശ്യം', 'ଉଦ୍ଦେଶ୍ୟ', 'අරමුණ', 'مقصد', 'هدف', 'موخه', 'цель', 'intención',
+        'propósito', 'intencion', 'but', 'objectif', '目的', '意図', '意图', '목적', 'absicht',
+        'intenção', 'intencao', 'proposito', 'objetivo', 'tujuan', 'niat', 'σκοπός', 'מטרה',
+        'scopo', 'intenzione', 'obiettivo', 'cel', 'intencja', 'amaç', 'amac', 'lengo',
+        'mục_đích', 'scop', 'doel', 'จุดประสงค์', 'cél', 'záměr', 'zamer', 'účel', 'ucel',
+        'tarkoitus', 'syfte', 'layunin', 'formål', 'hensikt', 'formaal', 'նպատակ', 'მიზანი',
+        'propòsit', 'proposit', 'objectiu', 'ìpinnu', 'nufin', 'គោលបំណង', 'ရည်ရွယ်ချက်', 'ዓላማ',
+        'དམིགས་ཡུལ', 'ᎤᎲᏍᏛ', 'ຈຸດປະສົງ', 'ᠵᠣᠷᠢᠯᠭ\u180eᠠ',
+    ],
+    "Interface": [
+        'trait', 'संकेत', 'अंतरापृष्ठ', 'সংকেত', 'இடைமுகம்', 'సంకేతం', 'સંકેત', 'ਸੰਕੇਤ',
+        'ಸಂಕೇತ', 'സങ്കേതം', 'ସଙ୍କେତ', 'සංකේතය', 'رابطہ', 'رابط', 'اړیکه', 'интерфейс',
+        'interfaz', 'interface', 'インターフェース', '接口', '인터페이스', 'schnittstelle', 'antarmuka',
+        'διεπαφή', 'ממשק', 'interfaccia', 'واجهة', 'interfejs', 'arayüz', 'arayuz',
+        'antaramuka', 'kiolesura', 'giao_diện', 'interfață', 'interfata', 'อินเทอร์เฟซ',
+        'felület', 'felulet', 'rozhraní', 'rozhrani', 'rozhranie', 'rajapinta', 'gränssnitt',
+        'granssnitt', 'ugnayan', 'grensesnitt', 'grænseflade', 'graenseflade', 'միջերես',
+        'ინტერფეისი', 'interfície', 'ifaramọ', 'hannu', 'ចំណុចប្រទាក់', 'မျက်နှာပြင်', 'በይነገጽ',
+        'འབྲེལ་མཐུད', 'ᎠᏓᏛᏗ', 'ສ່ວນຕິດຕໍ່', 'ᠵᠠᠯᠭᠠᠭᠤᠷ',
+    ],
+    "Invariant": [
+        'invariant', 'अपरिवर्तनीय', 'অপরিবর্তনীয়', 'மாறிலா', 'మారని', 'અચળ', 'ਅਟੱਲ', 'ಅಚಲ',
+        'അചലം', 'ଅଚଳ', 'නිශ්චල', 'غیرمتغیر', 'تغییرناپذیر', 'دايمي', 'инвариант', 'invariante',
+        '不変', '不变量', '불변', 'unveraenderlich', 'invarian', 'αμετάβλητο', 'בלתי_משתנה', 'مستقر',
+        'niezmienny', 'değişmez', 'degismez', 'tetap', 'isiyobadilika', 'bất_biến',
+        'ไม่เปลี่ยน', 'változatlan', 'valtozatlan', 'neměnný', 'nemenny', 'nemenný',
+        'muuttumaton', 'oföränderlig', 'oforanderlig', 'walangpalit', 'uforanderlig',
+        'անփոփոխ', 'უცვლელი', 'àìyípadà', 'a_canzawa', 'មិនប្រែប្រួល', 'မပြောင်းလဲ', 'የማይለወጥ',
+        'མི་འགྱུར', 'ᏂᎦᎳᏛᎾ', 'ບໍ່ປ່ຽນ', 'ᠲᠣᠭᠲᠠᠪᠤᠷᠢᠲᠠᠢ',
+    ],
+    "Is": [
+        'is', 'है', 'अस्ति', 'आहे', 'হয়', 'ஆகும்', 'ఉంది', 'છે', 'ਹੈ', 'ಇದೆ', 'ആണ്', 'ଅଟେ',
+        'වේ', 'ہے', 'است', 'دی', 'есть', 'es', 'est', 'は', '是', '이다', 'ist', 'eh', 'adalah',
+        'είναι', 'הוא', 'risulta', 'هو', 'jest', 'olur', 'ni', 'là', 'este', 'คือ', 'van',
+        'je', 'on', 'är', 'ar', 'ay', 'er', 'է', 'არის', 'està', 'és', 'ne', 'គឺ', 'ဖြစ်သည်',
+        'ነው', 'ཡིན', 'ᎨᏒ', 'ແມ່ນ', 'ᠪᠣᠯᠤᠨ\u180eᠠ',
+    ],
+    "Join": [
+        'join', 'संयोजन', 'যোগ', 'சேர்', 'సంయోగం', 'સંયોજન', 'ਸੰਯੋਜਨ', 'ಸಂಯೋಜನೆ', 'സംയോജനം',
+        'ସଂଯୋଜନ', 'සංයෝජනය', 'ملاپ', 'پیوستن', 'نښلول', 'соединить', 'unir', 'joindre', '結合',
+        '等待', '合并', '결합', 'verbinden', 'juntar', 'gabungkan', 'ένωση', 'חיבור', 'unire',
+        'اربط', 'połącz', 'polacz', 'birleştir', 'birlestir', 'gabung', 'unganisha', 'kết_hợp',
+        'unește', 'uneste', 'verbind', 'รวม', 'egyesít', 'egyesit', 'spoj', 'yhdista',
+        'förena', 'forena', 'pagsama', 'forene', 'forén', 'foren', 'միանալ', 'შეერთება',
+        'uneix', 'darapọ', 'hadawa', 'ភ្ជាប់', 'ပူးပေါင်း', 'ቀላቀል', 'མཐུན་སྦྱོར', 'ᏓᏂᎳᏫᏍᎦ',
+        'ເຊື່ອມ', 'ᠨᠡᠶᠢᠯᠡ',
+    ],
+    "Len": ['len'],
+    "Let": [
+        'assign', 'मान', 'माना', 'মান', 'ধরো', 'கொள்', 'అనుకో', 'માનો', 'ધારો', 'ਮੰਨੋ',
+        'ಊಹಿಸಿ', 'ಮಾನ್ಯ', 'കരുതുക', 'ମନେକର', 'අනුමානය', 'مانیں', 'فرض', 'بگذار', 'ووایه',
+        'пусть', 'sea', 'soit', '代入', '让', '정의', 'sei', 'seja', 'biarkan', 'misalkan', 'έστω',
+        'יהי', 'sia', 'ليكن', 'niech', 'olsun', 'acha', 'đặt', 'fie', 'laat', 'ให้', 'legyen',
+        'nechť', 'nechtt', 'nech', 'olkoon', 'låt', 'lat', 'hayaan', 'la', 'lad', 'թող',
+        'მიეცი', 'sigui', 'jẹ́', 'bari', 'អោយ', 'ထား', 'ይሁን', 'ཡོད་པར་ཤོག', 'ᎠᏁᎳ', 'ໃຫ້',
+        'ᠶᠠᠪᠤᠭᠤᠯ',
+    ],
+    "Match": [
+        'match', 'जुळवा', 'मिलान', 'मेल', 'मेलन', 'মেলে', 'মিলান', 'பொருந்து', 'సరిపోలు',
+        'મેળવો', 'ਮੇਲ', 'ಹೊಂದಾಣಿಕೆ', 'പൊരുത്തപ്പെടുത്തുക', 'ମେଳ', 'ගැලපීම', 'ملان', 'مماثلت',
+        'تطبیق', 'سمون', 'совпадение', 'coincidir', 'correspondre', '一致', 'マッチ', '匹配', '일치',
+        'übereinstimmen', 'passend', 'combinar', 'corresponder', 'cocokkan', 'padanan',
+        'αντιστοιχία', 'התאם', 'corrispondere', 'combaciare', 'طابق', 'dopasuj', 'eşle',
+        'esle', 'padan', 'linganisha', 'khớp', 'potrivește', 'potriveste', 'vergelijk',
+        'ตรงกัน', 'illeszkedik', 'egyezzen', 'odpovídej', 'odpovidej', 'porovnaj', 'vastaa',
+        'matcha', 'tugmain', 'sammenlign', 'համապատասխանեցնել', 'შესაბამისობა', 'coincideix',
+        'bámu', 'dace', 'ផ្គូផ្គង', 'ကိုက်ညီ', 'ተዛመደ', 'མཐུན', 'ᎠᏍᏓᏩᏛᏍᎩ', 'ກົງກັນ', 'ᠲᠣᠬᠢᠷᠠ',
+    ],
+    "Methods": [
+        'methods', 'विधि', 'বিধি', 'முறைகள்', 'పద్ధతులు', 'પદ્ધતિઓ', 'ਢੰਗ', 'ವಿಧಾನಗಳು',
+        'രീതികൾ', 'ପଦ୍ଧତି', 'ක්\u200dරම', 'طریقے', 'روش', 'طریقې', 'методы', 'métodos',
+        'metodos', 'méthodes', 'methodes', 'メソッド', '方法', '메서드', 'methoden', 'metode',
+        'μέθοδοι', 'שיטות', 'metodi', 'طرق', 'metody', 'metotlar', 'kaedah', 'njia',
+        'phương_thức', 'วิธีการ', 'metódusok', 'metodusok', 'metódy', 'menetelmat', 'metoder',
+        'pamamaraan', 'մեթոդներ', 'მეთოდები', 'mètodes', 'metodes', 'ipa', 'hanyoyi',
+        'វិធីសាស្ត្រ', 'နည်းလမ်း', 'ዘዴዎች', 'ཐབས་ལམ', 'ᏗᏄᎪᏗ', 'ວິທີການ', 'ᠠᠷᠭ\u180eᠠ',
+    ],
+    "Module": [
+        'mod', 'खण्ड', 'मॉड्यूल', 'খণ্ড', 'தொகுதி', 'మాడ్యూల్', 'ખંડ', 'ਖੰਡ', 'ಖಂಡ', 'ഖണ്ഡം',
+        'ଖଣ୍ଡ', 'මොඩියුලය', 'ماڈیول', 'حصہ', 'بخش', 'برخه', 'модуль', 'módulo', 'modulo',
+        'module', 'モジュール', '単位', '模块', '모듈', 'modul', 'ενότητα', 'άρθρωμα', 'מודול', 'מודולים',
+        'وحدة', 'moduł', 'modül', 'moduli', 'mô_đun', 'โมดูล', 'moduuli', 'modyul', 'մոդուլ',
+        'მოდული', 'mòdul', 'ìṣù', 'sashe', 'ម៉ូឌុល', 'ယူနစ်', 'ሞዱል', 'ཚན', 'ᎠᏯᏙᎸ', 'ໂມດູນ',
+        'ᠨᠢᠭᠡᠴᠡ',
+    ],
+    "Mut": [
+        'mut', 'बदल', 'बदलणारा', 'परिवर्तनीय', 'পরিবর্তনীয়', 'மாறக்கூடிய', 'మార్చదగిన',
+        'પરિવર્તનીય', 'ਬਦਲਣਯੋਗ', 'ಪರಿವರ್ತನೀಯ', 'മാറ്റാവുന്ന', 'ପରିବର୍ତ୍ତନୀୟ', 'පරිවර්තනීය',
+        'بدلنا', 'تغییرپذیر', 'بدلېدونکی', 'изменяемый', 'mutable', 'muable', '可変', '可变', '가변',
+        'veränderlich', 'veränderbar', 'wandelbar', 'mutável', 'mutavel', 'dapatberubah',
+        'berubah', 'μεταβλητό', 'משתנה', 'mutevole', 'متغير', 'zmienny', 'değişken',
+        'degisken', 'badilika', 'có_thể_thay_đổi', 'schimbabil', 'veranderlijk',
+        'เปลี่ยนแปลงได้', 'változó', 'valtozo', 'proměnný', 'promenny', 'meniteľný',
+        'menitelny', 'muuttuva', 'föränderlig', 'foranderlig', 'nababago', 'endrelig',
+        'mutérbar', 'փոփոխական', 'ცვალებადი', 'canviable', 'àyípadà', 'canzawa',
+        'អាចផ្លាស់ប្តូរ', 'ပြောင်းလဲနိုင်', 'ሊቀየር', 'འགྱུར', 'ᏚᎵᎮᎵᎬᎢ', 'ປ່ຽນແປງໄດ້',
+        'ᠬᠤᠪᠢᠷᠠᠮᠲᠠᠭᠠᠢ',
+    ],
+    "Parallel": [
+        'parallel', 'समानांतर', 'समान्तर प्रति', 'সমান্তরাল', 'இணை', 'సమాంతర', 'સમાંતર',
+        'ਸਮਾਂਤਰ', 'ಸಮಾನಾಂತರ', 'സമാന്തരം', 'ସମାନ୍ତର', 'සමාන්තර', 'متوازی', 'موازی', 'موازي',
+        'параллельный', 'paralelo', 'parallèle', 'parallele', '並列', '并行', '병렬', 'paralel',
+        'παράλληλο', 'מקבילי', 'parallelo', 'متوازي', 'równoległy', 'rownolegly', 'selari',
+        'sambamba', 'song_song', 'ขนาน', 'párhuzamos', 'parhuzamos', 'paralelní', 'paralelni',
+        'paralelný', 'paralelny', 'rinnakkainen', 'parallell', 'magkatulad', 'զուգահեռ',
+        'პარალელური', 'akáṣe', 'madaidaici', 'ស្របគ្នា', 'ပြိုင်တူ', 'ትይዩ', 'མཉམ', 'ᎾᏍᎩᏯ',
+        'ຂະໜານ', 'ᠵᠡᠷᠭᠡ',
+    ],
+    "Print": [
+        'write', 'लिख', 'लिखो', 'लिहा', 'लिही', 'लिहिया', 'লেখ', 'লিখো', 'எழுது', 'அச்சிடு',
+        'రాయి', 'ముద్రించు', 'લખો', 'છાપો', 'ਲਿਖੋ', 'ਛਾਪੋ', 'ಬರೆ', 'ಮುದ್ರಿಸಿ', 'എഴുതുക',
+        'അച്ചടിക്കുക', 'ଲେଖ', 'ଛାପନ୍ତୁ', 'ලියන්න', 'මුද්\u200dරණය', 'لکھو', 'چھاپو', 'چاپ',
+        'بنویس', 'ولیکه', 'печатать', 'писать', 'imprimir', 'escribir', 'écrire', 'écris',
+        'imprimer', 'imprime', 'afficher', '表示', '書く', '打印', '输出', '출력', '쓰기', 'drucken',
+        'schreiben', 'escrever', 'cetak', 'tulis', 'εκτύπωση', 'γράψε', 'הדפס', 'כתוב',
+        'stampare', 'scrivere', 'اطبع', 'drukuj', 'wypisz', 'yazdır', 'yazdir', 'chapisha',
+        'andika', 'in', 'in_ra', 'tipărește', 'scrie', 'tipareste', 'druk', 'schrijf', 'พิมพ์',
+        'nyomtat', 'nyomtass', 'vypiš', 'tiskni', 'vypis', 'vytlač', 'píš', 'vytlac', 'pis',
+        'tulosta', 'skriv', 'isulat', 'udskriv', 'տպել', 'ბეჭდვა', 'imprimeix', 'tẹ̀',
+        'rubuta', 'បោះពុម្ព', 'ပုံနှိပ်', 'ህትመት', 'པར', 'ᎠᎴᏂᏍᎬᎢ', 'ພິມ', 'ᠬᠡᠪᠯᠡ',
+    ],
+    "Prove": [
+        'prove', 'सिद्ध', 'प्रमाण', 'प्रमाणित', 'दर्शाओ', 'दाखवा', 'सिद्ध करो', 'सिद्ध करा',
+        'প্রমাণ', 'நிரூபி', 'నిరూపించు', 'પ્રમાણ', 'ਪ੍ਰਮਾਣ', 'ಸಾಬೀತುಪಡಿಸಿ', 'തെളിയിക്കുക',
+        'ପ୍ରମାଣ', 'ඔප්පු', 'ثبوت', 'اثبات', 'доказать', 'demostrar', 'démontrer', 'démontre',
+        'prouver', '証明', '证明', '증명', 'beweisen', 'provar', 'demonstrar', 'buktikan',
+        'απόδειξη', 'הוכח', 'dimostrare', 'أثبت', 'udowodnij', 'kanıtla', 'kanitla',
+        'thibitisha_kuwa', 'thibitisha_kabisa', 'chứng_minh', 'dovedește', 'dovedeste',
+        'bewijs', 'พิสูจน์', 'bizonyítsd', 'bizonyitsd', 'dokaž', 'dokaz', 'dokáž', 'todista',
+        'bevisa', 'ipakita', 'bevis', 'ապացուցել', 'დაამტკიცე', 'demostra', 'fihàn', 'nuna',
+        'បង្ហាញ', 'သက်သေပြ', 'አስረዳ', 'བསྒྲུབས', 'ᎠᎩᏠᏯᏍᏗ', 'ພິສູດ', 'ᠨᠣᠲᠠᠯᠠ',
+    ],
+    "Pub": [
+        'public', 'सार्वजनिक', 'সর্বজনীন', 'பொது', 'ప్రజా', 'જાહેર', 'ਜਨਤਕ', 'ಸಾರ್ವಜನಿಕ',
+        'പൊതു', 'ସର୍ବସାଧାରଣ', 'පොදු', 'عوامی', 'عمومی', 'عمومي', 'публичный', 'общий',
+        'público', 'publico', '公開', '公开', '공개', 'öffentlich', 'oeffentlich', 'publik', 'umum',
+        'δημόσιο', 'ציבורי', 'pubblico', 'عام', 'publiczny', 'genel', 'awam', 'umma',
+        'công_khai', 'openbaar', 'สาธารณะ', 'nyilvános', 'nyilvanos', 'veřejný', 'verejny',
+        'verejný', 'julkinen', 'offentlig', 'pampubliko', 'հանրային', 'საჯარო', 'públic',
+        'gbangba', 'gama_gari', 'សាធារណៈ', 'အများပြည်သူ', 'ሕዝባዊ', 'སྤྱི', 'ᏂᎦᏓ', 'ສາທາລະນະ',
+        'ᠨᠡᠶᠢᠲᠡ',
+    ],
+    "Pure": [
+        'pure', 'शुद्ध', 'শুদ্ধ', 'தூய', 'శుద్ధ', 'શુદ્ધ', 'ਸ਼ੁੱਧ', 'ಶುದ್ಧ', 'ശുദ്ധം', 'ଶୁଦ୍ଧ',
+        'ශුද්ධ', 'خالص', 'чистый', 'puro', 'pur', '純粋', '纯', '纯粹', '순수', 'rein', 'murni',
+        'καθαρό', 'טהור', 'نقي', 'czysty', 'saf', 'tulen', 'safi', 'thuần_túy', 'zuiver',
+        'บริสุทธิ์', 'tiszta', 'čistý', 'cisty', 'puhdas', 'ren', 'dalisay', 'մաքուր', 'სუფთა',
+        'mímọ́', 'tsabta', 'បរិសុទ្ធ', 'သန့်ရှင်း', 'ንጹህ', 'གཙང', 'ᎦᏅᎯᏛ', 'ບໍລິສຸດ', 'ᠴᠡᠪᠡᠷ',
+    ],
+    "Reduce": [
+        'reduce', 'संक्षेप', 'সংক্ষেপ', 'குறை', 'సంక్షేప', 'સંક્ષેપ', 'ਸੰਖੇਪ', 'ಸಂಕ್ಷೇಪ',
+        'സംക്ഷേപം', 'ସଂକ୍ଷେପ', 'සංක්ෂේප', 'تخفیف', 'کاهش', 'کمښت', 'сократить', 'reducir',
+        'reduire', '削減', '减少', '축소', 'reduzieren', 'reduzir', 'kurangi', 'μείωση', 'הפחתה',
+        'ridurre', 'تقليل', 'zmniejsz', 'azalt', 'kurangkan', 'punguza', 'giảm', 'verminder',
+        'ลด', 'csökkent', 'csokkent', 'zmenši', 'zmensi', 'znizit', 'vahenna', 'reducera',
+        'bawasan', 'reduser', 'reducer', 'կրճատում', 'შემცირება', 'redueix', 'dínku', 'rage',
+        'កាត់បន្ថយ', 'လျှော့ချ', 'ቀንስ', 'ཉུང་དུ', 'ᎤᏍᏗᎪᏗ', 'ຫຼຸດ', 'ᠪᠠᠭᠠᠰᠬᠠ',
+    ],
+    "Ref": [
+        'ref', 'पहा', 'देखो', 'दृष्ट्या', 'দেখ', 'பார்', 'చూడు', 'જુઓ', 'ਵੇਖੋ', 'ನೋಡಿ',
+        'നോക്കുക', 'ଦେଖନ୍ତୁ', 'බලන්න', 'دیکھیں', 'ببین', 'وګوره', 'смотри', 'ver', 'référence',
+        'voir', '参照', '引用', '참조', 'sehen', 'referência', 'lihat', 'αναφορά', 'הפנייה',
+        'vedere', 'مرجع', 'zobacz', 'gör', 'bak', 'tazama', 'tham_chiếu', 'vezi', 'zie', 'ดู',
+        'nézd', 'nezd', 'viz', 'pozri', 'katso', 'se', 'tingnan', 'տեսնել', 'ნახე', 'veure',
+        'wò', 'duba', 'មើល', 'ကြည့်', 'ይመልከት', 'ལྟ', 'ᎯᎪᎲᎢ', 'ເບິ່ງ', 'ᠦᠵᠡ',
+    ],
+    "RegionKw": [
+        'region', 'क्षेत्र', 'ক্ষেত্র', 'பகுதி', 'ప్రాంతం', 'ક્ષેત્ર', 'ਖੇਤਰ', 'ಪ್ರದೇಶ',
+        'പ്രദേശം', 'କ୍ଷେତ୍ର', 'ප්\u200dරදේශය', 'علاقہ', 'منطقه', 'سیمه', 'область', 'región',
+        'région', '領域', '区域', '영역', 'bereich', 'região', 'regiao', 'wilayah', 'περιοχή',
+        'אזור', 'regione', 'منطقة', 'obszar', 'bölge', 'bolge', 'kawasan', 'eneo', 'vùng',
+        'regiune', 'gebied', 'พื้นที่', 'tartomány', 'tartomany', 'oblast', 'oblasť', 'alue',
+        'område', 'omrade', 'rehiyon', 'omraade', 'տարածք', 'რეგიონი', 'regió', 'regio',
+        'agbègbè', 'yanki', 'តំបន់', 'ဒေသ', 'ክልል', 'ཁུལ', 'ᎦᏙᎯ', 'ພູມພາກ', 'ᠪᠥᠰᠡ',
+    ],
+    "Requires": [
+        'requires', 'अपेक्षित', 'चाहिए', 'पाहिजे', 'প্রয়োজনীয়', 'தேவை', 'అవసరం', 'જરૂરી',
+        'ਲੋੜੀਂਦਾ', 'ಅಗತ್ಯ', 'ആവശ്യം', 'ଆବଶ୍ୟକ', 'අවශ්\u200dය', 'درکار', 'نیاز', 'اړتیا',
+        'требует', 'requiere', 'exige', '前提', '要求', '필요', 'benoetigt', 'requer', 'perlu',
+        'απαιτεί', 'דורש', 'richiede', 'يتطلب', 'wymaga', 'gerek', 'memerlukan', 'hitaji',
+        'yêu_cầu', 'necesită', 'necesita', 'vereist', 'ต้องการ', 'igényel', 'igenyel',
+        'vyžaduje', 'vyzaduje', 'vaatii', 'kräver', 'krever', 'kailangan', 'kræver', 'kraever',
+        'պահանջում', 'მოითხოვს', 'requereix', 'nílò', 'bukata', 'ត្រូវការ', 'လို', 'ይፈልጋል',
+        'དགོས', 'ᎠᏎᏗ', 'ຕ້ອງການ', 'ᠱᠠᠭᠠᠷᠳᠠ',
+    ],
+    "Return": [
+        'give_back', 'परत', 'लौटाओ', 'पुनरागम', 'ফেরত', 'প্রত্যাবর্তন', 'திருப்பு', 'తిరిగి',
+        'પાછા', 'ਮੁੜੋ', 'ಹಿಂದಿರುಗಿ', 'ಮರಳಿ', 'തിരികെ', 'ଫେରନ୍ତୁ', 'ආපසු', 'واپس', 'لوٹاؤ',
+        'بازگشت', 'بېرته', 'вернуть', 'верни', 'regresar', 'retornar', 'volver', 'retourner',
+        'retourne', '戻る', '返す', '返回', '반환', '돌려주기', 'zurück', 'zurueck', 'retorne', 'kembali',
+        'kembalikan', 'επιστροφή', 'החזר', 'חזרה', 'ritornare', 'ritorna', 'أرجع', 'إرجاع',
+        'wróć', 'zwróć', 'zwroc', 'wroc', 'dön', 'döndür', 'geri', 'don', 'rudi', 'trả_về',
+        'întoarce', 'intoarce', 'terug', 'คืน', 'visszatér', 'visszater', 'vrať', 'vrat',
+        'vráť', 'palaa', 'återvänd', 'atervand', 'ibalik', 'returner', 'tilbake', 'vend',
+        'վերադարձ', 'დაბრუნება', 'retorna', 'padà', 'koma', 'ត្រលប់', 'ပြန်', 'መልስ', 'ལོག',
+        'ᏗᎬᏎᏗ', 'ກັບຄືນ', 'ᠪᠤᠴᠠ',
+    ],
+    "Struct": [
+        'record', 'संरचना', 'গঠন', 'கட்டமைப்பு', 'నిర్మాణం', 'રચના', 'ਰਚਨਾ', 'ರಚನೆ', 'ഘടന',
+        'ଗଠନ', 'ව්\u200dයුහය', 'ساخت', 'ساختار', 'جوړښت', 'структура', 'estructura',
+        'structure', '構造体', '结构', '结构体', '구조체', 'struktur', 'estrutura', 'δομή', 'מבנה',
+        'struttura', 'بنية', 'struktura', 'yapı', 'yapi', 'muundo', 'cấu_trúc', 'structură',
+        'structura', 'structuur', 'โครงสร้าง', 'szerkezet', 'štruktúra', 'rakenne',
+        'istraktura', 'կառուցվածք', 'სტრუქტურა', 'ọ̀nà', 'tsari', 'រចនាសម្ព័ន្ធ',
+        'ဖွဲ့စည်းပုံ', 'መዋቅር', 'སྒྲིག་གཞི', 'ᎠᏙᏢᏍᎩ', 'ໂຄງສ້າງ', 'ᠪᠦᠳᠦᠭᠴᠡ',
+    ],
+    "Task": [
+        'task', 'नियोग', 'নিয়োগ', 'பணி', 'కార్యం', 'નિયોગ', 'ਨਿਯੋਗ', 'ನಿಯೋಗ', 'നിയോഗം',
+        'ନିଯୋଗ', 'නියෝගය', 'ٹاسک', 'وظیفه', 'دنده', 'задача', 'tarea', 'tâche', 'travail',
+        'タスク', '任务', '작업', 'ausführbar', 'aufgabe', 'tarefa', 'tugas', 'εργασία', 'משימה',
+        'compito', 'مهمة', 'zadanie', 'görev', 'gorev', 'tugasan', 'jukumu', 'công_việc',
+        'sarcină', 'sarcina', 'taak', 'งาน', 'feladat', 'úloha', 'uloha', 'tehtävä', 'tehtava',
+        'uppgift', 'tungkulin', 'oppgave', 'opgave', 'խնդիր', 'დავალება', 'tasca', 'ojúṣe',
+        'hidima', 'ភារកិច្ច', 'တာဝန်', 'ስራ', 'ལས', 'ᏗᎦᎸᏫᏍᏓᏁᏗ', 'ວຽກງານ', 'ᠡᠭᠦᠷᠭᠡ',
+    ],
+    "Then": [
+        'then', 'तदा', 'तो', 'तर', 'তবে', 'அப்போது', 'అప్పుడు', 'પછી', 'ਤਦ', 'ನಂತರ', 'പിന്നെ',
+        'ତାହେଲେ', 'පසු', 'تب', 'سپس', 'بیا', 'тогда', 'entonces', 'alors', 'ならば', '那么', '그러면',
+        'dann', 'então', 'entao', 'maka', 'τότε', 'אז', 'allora', 'ثم', 'wtedy', 'sonra',
+        'kisha', 'thì', 'atunci', 'dan', 'แล้ว', 'akkor', 'pak', 'potom', 'sitten', 'så', 'sa',
+        'saka', 'da', 'saa', 'ապա', 'მაშინ', 'aleshores', 'nígbànáà', 'sannan', 'បន្ទាប់មក',
+        'ထို့နောက်', 'ከዚያ', 'དེ་ནས', 'ᎣᏂ', 'ແລ້ວ', 'ᠳᠠᠷᠠᠭ\u180eᠠ',
+    ],
+    "To": [
+        'to', 'तक', 'পর্যন্ত', 'வரைக்கும்', 'వరకూ', 'સુધી', 'ਤੱਕ', 'ಗೆ', 'വരെക്കും',
+        'ପର୍ଯ୍ୟନ୍ତ', 'දක්වා', 'تک', 'به', 'ته', 'до', 'hasta', 'vers', 'まで', '到', '까지', 'bis',
+        'até', 'ate', 'sampai', 'hingga', 'μέχρι', 'עד', 'finoa', 'إلى', 'do', 'kadar', 'hadi',
+        'đến', 'până', 'pana', 'tot', 'ถึง', 'határig', 'hatarig', 'asti', 'till', 'hanggang',
+        'til', 'մինչև', 'მდე', 'fins', 'dé', 'zuwa', 'ដល់', 'သို့', 'ድረስ', 'བར་དུ', 'ᎬᏛ',
+        'ເຖິງ', 'ᠬᠦᠷᠲᠡᠯᠡ',
+    ],
+    "True": [
+        'true', 'सत्य', 'सही', 'सच', 'बरोबर', 'खरे', 'সত্য', 'ঠিক', 'மெய்', 'నిజం', 'સાચું',
+        'ਸੱਚ', 'ಸತ್ಯ', 'ಸರಿ', 'സത്യം', 'ശരി', 'ସତ୍ୟ', 'සත්\u200dය', 'හරි', 'سچ', 'درست', 'سم',
+        'истина', 'верно', 'verdadero', 'vérité', 'vrai', '真', '참', 'wahr', 'verdadeiro',
+        'benar', 'αληθές', 'אמת', 'vero', 'صحيح', 'prawda', 'doğru', 'dogru', 'kweli', 'đúng',
+        'adevărat', 'adevarat', 'waar', 'จริง', 'igaz', 'pravda', 'tosi', 'sant', 'totoo',
+        'sandt', 'ճշմարիտ', 'ჭეშმარიტი', 'cert', 'veritable', 'òótọ́', 'gaskiya', 'ពិត',
+        'မှန်', 'እውነት', 'བདེན', 'ᎤᏙᎯᏳ', 'ຈິງ', 'ᠦᠨᠡᠨ',
+    ],
+    "Try": [
+        'try', 'प्रयास', 'চেষ্টা', 'முயற்சி', 'ప్రయత్నించు', 'પ્રયાસ', 'ਕੋਸ਼ਿਸ਼', 'ಪ್ರಯತ್ನ',
+        'ശ്രമിക്കുക', 'ପ୍ରୟାସ', 'උත්සාහ', 'کوشش', 'تلاش', 'هڅه', 'попробуй', 'intentar',
+        'essayer', '試行', '尝试', '시도', 'versuchen', 'tentar', 'coba', 'δοκιμή', 'נסה', 'tentare',
+        'حاول', 'spróbuj', 'sprobuj', 'dene', 'cuba', 'jaribu', 'thử', 'încearcă', 'incearca',
+        'probeer', 'ลอง', 'próbáld', 'probald', 'zkus', 'skús', 'skus', 'kokeile', 'försök',
+        'forsok', 'subukan', 'prøv', 'prov', 'proev', 'փորձել', 'სცადე', 'prova', 'gbiyanju',
+        'gwadawa', 'ព្យាយាម', 'ကြိုးစား', 'ሞክር', 'འབད', 'ᎠᏓᎫᏓᏛᏍᎩ', 'ລອງ', 'ᠣᠷᠣᠯᠳᠤ',
+    ],
+    "Type": [
+        'type', 'प्रकार', 'প্রকার', 'வகை', 'రకం', 'પ્રકાર', 'ਕਿਸਮ', 'ಪ್ರಕಾರ', 'തരം', 'ପ୍ରକାର',
+        'වර්ගය', 'قسم', 'نوع', 'ډول', 'тип', 'tipo', '型', '类型', '타입', 'typ', 'tipe', 'jenis',
+        'τύπος', 'סוג', 'טיפוס', 'tip', 'aina', 'kiểu', 'ชนิด', 'típus', 'tipus', 'tyyppi',
+        'uri', 'տեսակ', 'ტიპი', 'irú', "nau'i", 'iri', 'ប្រភេទ', 'အမျိုးအစား', 'አይነት', 'རིགས',
+        'ᎢᏳᏓᎴᎩ', 'ປະເພດ', 'ᠬᠡᠯᠪᠡᠷᠢ',
+    ],
+    "U16": ['u16', 'अहस्ताक्षरित१६'],
+    "U32": ['u32', 'अहस्ताक्षरित३२'],
+    "U64": ['u64', 'अहस्ताक्षरित६४'],
+    "U8": ['u8', 'अहस्ताक्षरित८'],
+    "Unsafe": [
+        'unsafe', 'असुरक्षित', 'অসুরক্ষিত', 'பாதுகாப்பற்ற', 'అసురక్షిత', 'અસુરક્ષિત',
+        'ਅਸੁਰੱਖਿਅਤ', 'ಅಸುರಕ್ಷಿತ', 'അസുരക്ഷിതം', 'ଅସୁରକ୍ଷିତ', 'අනාරක්ෂිත', 'غیرمحفوظ', 'ناامن',
+        'небезопасно', 'inseguro', 'dangereux', '危険', '不安全', '위험', 'unsicher', 'bahaya',
+        'επικίνδυνο', 'מסוכן', 'insicuro', 'غير_آمن', 'niebezpieczny', 'güvensiz', 'guvensiz',
+        'tidakselamat', 'hatari', 'không_an_toàn', 'nesigur', 'onveilig', 'ไม่ปลอดภัย',
+        'veszélyes', 'veszelyes', 'nebezpečný', 'nebezpecny', 'vaarallinen', 'osäker',
+        'osaker', 'mapanganib', 'usikker', 'անապահով', 'სახიფათო', 'insegur', 'àìláàbò',
+        'kasada', 'មិនមានសុវត្ថិភាព', 'ဘေးကင်းမှု', 'አደገኛ', 'ཉེན་ཁ', 'ᎠᏂᏍᎦᏂᎩᏛ', 'ບໍ່ປອດໄພ',
+        'ᠠᠶᠤᠯᠲᠠᠢ',
+    ],
+    "Use": [
+        'use', 'उपयोग', 'ব্যবহার', 'பயன்படுத்து', 'ఉపయోగించు', 'વાપરો', 'ਵਰਤੋ', 'ಬಳಸಿ',
+        'ഉപയോഗിക്കുക', 'ବ୍ୟବହାର', 'භාවිතා', 'استعمال', 'استفاده', 'وکاروه', 'использовать',
+        'usar', 'utiliser', '使用', '사용', 'verwenden', 'pakai', 'χρήση', 'השתמש', 'usare',
+        'استخدم', 'użyj', 'uzyj', 'kullan', 'guna', 'tumia', 'sử_dụng', 'folosește',
+        'foloseste', 'gebruik', 'ใช้', 'használd', 'hasznald', 'použij', 'pouzij', 'použi',
+        'pouzi', 'käytä', 'kayta', 'använd', 'anvand', 'gamitin', 'bruk', 'brug', 'օգտագործել',
+        'გამოყენება', 'usa', 'lò', 'amfani', 'ប្រើ', 'သုံး', 'ተጠቀም', 'བཀོལ', 'ᎬᏙᏗ', 'ໃຊ້',
+        'ᠬᠡᠷᠡᠭᠯᠡ',
+    ],
+    "Vec": ['Vec', 'सूची'],
+    "Vec128": ['vec128'],
+    "Vec256": ['vec256'],
+    "Vec512": ['vec512'],
+    "Where": [
+        'where', 'जहाँ', 'यत्र', 'जिथे', 'যেখানে', 'எங்கே', 'ఎక్కడ', 'જ્યાં', 'ਜਿੱਥੇ', 'ಎಲ್ಲಿ',
+        'എവിടെ', 'କେଉଁଠାରେ', 'කොහෙද', 'جہاں', 'کجا', 'چیرته', 'где', 'donde', 'où', 'ou',
+        'ここで', '其中', '여기서', 'wo', 'onde', 'dimana', 'όπου', 'איפה', 'dove', 'حيث', 'gdzie',
+        'nerede', 'tempat', 'wapi', 'ở_đâu', 'unde', 'waar_is', 'ที่ไหน', 'ahol', 'kde',
+        'missä', 'missa', 'där', 'der', 'saan', 'hvor', 'որտեղ', 'სად', 'on', 'ibo', 'ina',
+        'ណា', 'ဘယ်မှာ', 'የት', 'གང', 'ᎭᏢ', 'ບ່ອນທີ່', 'ᠬᠠᠮᠢᠭ\u180eᠠ',
+    ],
+    "While": [
+        'while', 'यावत्', 'जबतक', 'जोपर्यंत', 'যতক্ষণ', 'வரை', 'వరకు', 'જ્યારે', 'ਜਦੋਂ', 'ತನಕ',
+        'വരെ', 'ଯେତେବେଳେ', 'තෙක්', 'دوران', 'تا', 'ترڅو', 'пока', 'mientras', 'tantque', 'の間',
+        '間', '当', '동안', 'während', 'solange', 'enquanto', 'selama', 'όσο', 'כאשר', 'mentre',
+        'بينما', 'dopóki', 'dopoki', 'iken', 'wakati', 'trong_khi', 'cât_timp', 'cat_timp',
+        'zolang', 'ขณะที่', 'amíg', 'amig', 'dokud', 'pokiaľ', 'kým', 'pokial', 'kun', 'medan',
+        'habang', 'mens', 'քանի', 'სანამ', 'nígbà', 'yayin', 'ខណៈ', 'နေစဉ်', 'ሲ', 'བར', 'ᏰᎵᏊ',
+        'ໃນຂະນະທີ່', 'ᠶᠠᠭ\u180eᠠ',
+    ],
+    "With": [
+        'with', 'सह', 'সহ', 'உடன்', 'తో', 'સાથે', 'ਨਾਲ', 'ಜೊತೆ', 'കൂടെ', 'ସହିତ', 'සමඟ', 'ساتھ',
+        'با', 'سره', 'совместно', 'con', 'avec', 'と', '与', '함께', 'mit', 'com', 'dengan', 'με',
+        'עם', 'مع', 'razem', 'ile', 'na', 'với', 'cu', 'met', 'กับ', 'együtt', 'egyutt',
+        'spolu', 'kanssa', 'med', 'kasama', 'հետ', 'თან', 'amb', 'pẹ̀lú', 'tare', 'ជាមួយ',
+        'နှင့်အတူ', 'ጋር', 'དང', 'ᎠᎴ', 'ກັບ', 'ᠬᠠᠮᠲᠤ',
+    ],
+}
+# END ALL_SYNONYMS
+
 
 # ---------------------------------------------------------------------------
 # SOV word-order helpers
@@ -1530,11 +2806,32 @@ def _convert_svo_to_sov(source: str, target_lang: str) -> str:
 # ---------------------------------------------------------------------------
 
 def build_reverse_lookup() -> Dict[str, Tuple[str, str]]:
+    """Every spelling recognized as a keyword, mapped to (TokenKind, lang).
+    Seeded from ALL_SYNONYMS first (every word lexer.rs actually accepts
+    for a TokenKind, across every dialect AND English's own aliases like
+    `give`/`give_back`/`record`/`trait`/`impl`) so that translating FROM a
+    source file isn't limited to recognizing only ALIASES's single
+    curated "canonical" spelling per language -- a real file may
+    legitimately use any lexer.rs-valid synonym (e.g. Danish's ASCII
+    "formaal" alongside native "formål"; both are real Intent keywords,
+    but ALIASES only ever names one as canonical). ALIASES entries are
+    layered on top only to guarantee every canonical spelling is present
+    even for a TokenKind ALL_SYNONYMS might not have (there shouldn't be
+    any, but this keeps the invariant explicit rather than assumed). The
+    `lang` half of each tuple is unused by every caller -- only `[0]`
+    (the TokenKind) is ever read -- so an ALL_SYNONYMS-seeded entry's
+    lang field is a placeholder, not the true source language."""
     rev: Dict[str, Tuple[str, str]] = {}
+    for kind, words in ALL_SYNONYMS.items():
+        for word in words:
+            rev[word] = (kind, "")
     for kind, langs in ALIASES.items():
         for lang, spelling in langs.items():
             rev[spelling] = (kind, lang)
     return rev
+
+
+_PRAGMA_TAG_TO_LANG: Dict[str, str] = {v: k for k, v in _PRAGMA_TAG_OVERRIDES.items()}
 
 
 def detect_pragma_lang(source: str) -> Optional[str]:
@@ -1546,6 +2843,8 @@ def detect_pragma_lang(source: str) -> Optional[str]:
                 lang = stripped[len(prefix):].strip().lower()
                 if lang in SUPPORTED_LANGS:
                     return lang
+                if lang in _PRAGMA_TAG_TO_LANG:
+                    return _PRAGMA_TAG_TO_LANG[lang]
     return None
 
 
@@ -1607,6 +2906,7 @@ def _translate_keywords(source: str, target_lang: str) -> str:
     assert target_lang in SUPPORTED_LANGS, f"unknown target {target_lang!r}"
     rev = build_reverse_lookup()
     out: List[str] = []
+    pragma_written = False
     i = 0
     n = len(source)
     while i < n:
@@ -1620,7 +2920,8 @@ def _translate_keywords(source: str, target_lang: str) -> str:
             stripped = line.lstrip("/").strip()
             if stripped.startswith("vani-lang:") or stripped.startswith("vani-lang :"):
                 leading = line[: len(line) - len(line.lstrip("/ \t"))]
-                out.append(f"{leading}vani-lang: {target_lang}")
+                out.append(f"{leading}vani-lang: {pragma_tag(target_lang)}")
+                pragma_written = True
             else:
                 out.append(line)
             i = j
@@ -1677,7 +2978,23 @@ def _translate_keywords(source: str, target_lang: str) -> str:
             continue
         out.append(c)
         i += 1
-    return "".join(out)
+    result = "".join(out)
+    # Regression (2026-08-12): a source file with no `// vani-lang:`
+    # pragma at all (the common case for English -- it's the implicit
+    # default, so example files never bother declaring it) previously
+    # translated every keyword correctly but left the OUTPUT with no
+    # pragma either. For any pragma-gated ASCII-only target dialect
+    # (Swahili, Spanish, French, Malay, ...) that's fatal: the compiler
+    # never activates that dialect's keyword table without the pragma,
+    # so every translated keyword comes back as an unrecognized
+    # identifier. Native-script targets recognize their keywords
+    # unconditionally so this omission was harmless for them, which is
+    # why the gap went unnoticed for a while. Prepend one whenever the
+    # source had none and the target isn't English (which still needs
+    # no pragma, matching every existing pragma-less English example).
+    if not pragma_written and target_lang != "english":
+        result = f"// vani-lang: {pragma_tag(target_lang)}\n" + result
+    return result
 
 
 def translate(source: str, target_lang: str, src_lang: Optional[str] = None) -> str:
@@ -1698,23 +3015,101 @@ def translate(source: str, target_lang: str, src_lang: Optional[str] = None) -> 
     return text
 
 
+def _find_vanic_binary() -> Optional[str]:
+    """Locate a `vanic` binary for the optional --verify compile check:
+    PATH first, then this repo's own target/{release,debug}/vanic (dev
+    workflow -- tools/ lives at the repo root)."""
+    import shutil
+
+    found = shutil.which("vanic")
+    if found:
+        return found
+    repo_root = Path(__file__).resolve().parent.parent
+    for profile in ("release", "debug"):
+        candidate = repo_root / "target" / profile / "vanic"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _compile_check(vanic: str, text: str) -> Tuple[bool, str]:
+    """Run `vanic check` on `text`. Returns (ok, first-line-of-error)."""
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".vani", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(text)
+        tmp_path = tmp.name
+    try:
+        result = subprocess.run(
+            [vanic, "check", tmp_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return True, ""
+        first_line = (result.stderr or result.stdout).strip().splitlines()
+        return False, first_line[0] if first_line else "(no output)"
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def verify_roundtrip(source: str, target_lang: str, src_lang: Optional[str]) -> Tuple[bool, str]:
     """
     Translate source → target_lang → src_lang, then compare the
     keyword-token sequences of the original and the double-translated
     result. Returns (passed, message).
+
+    Token-sequence equality alone has a real blind spot: it can't tell
+    "every keyword translated correctly" from "some keyword silently
+    stayed untranslated and round-tripped back to itself unchanged" --
+    confirmed in practice (2026-08-12) on a build where an untranslated
+    Swahili keyword produced non-compiling output while still reporting
+    "round-trip ok" (token count/order matched -- the intermediate step
+    just never touched that one word, so translating back to Swahili
+    trivially matched the original). When a `vanic` binary can be found
+    (PATH, or this repo's own target/release or target/debug), this
+    function ALSO actually compiles the intermediate (target_lang)
+    translation via `vanic check` and folds that result into the
+    pass/fail verdict -- a real syntax/dialect-purity problem in the
+    intermediate step fails verification even if the token sequence
+    happens to still match after round-tripping back.
     """
     effective_src = src_lang or detect_pragma_lang(source) or "english"
     intermediate = translate(source, target_lang, effective_src)
     back = translate(intermediate, effective_src, target_lang)
     orig_tokens = extract_keyword_tokens(source)
     back_tokens = extract_keyword_tokens(back)
-    if orig_tokens == back_tokens:
+    tokens_match = orig_tokens == back_tokens
+
+    vanic = _find_vanic_binary()
+    compile_msgs: List[str] = []
+    compile_ok = True
+    if vanic is not None:
+        # Check BOTH hops -- a corrupted OUTPUT-side spelling for the
+        # return leg (target_lang -> effective_src) can produce a token
+        # sequence that still matches (a wrong-but-still-recognized
+        # spelling extracts as the same TokenKind) while the actual text
+        # doesn't compile; checking only the forward hop would miss
+        # exactly that case.
+        for label, text in ((target_lang, intermediate), (f"{effective_src} (back)", back)):
+            ok, msg = _compile_check(vanic, text)
+            if not ok:
+                compile_ok = False
+                compile_msgs.append(f"  {label} failed `vanic check`: {msg}")
+    else:
+        compile_msgs.append("  (vanic binary not found -- skipped the compile check)")
+
+    if tokens_match and compile_ok:
+        suffix = "" if vanic is None else ", both hops compile clean"
         return True, (
             f"round-trip ok: {effective_src} -> {target_lang} -> {effective_src} "
-            f"({len(orig_tokens)} keyword tokens preserved)"
+            f"({len(orig_tokens)} keyword tokens preserved{suffix})"
         )
-    diffs = [
+
+    diffs = list(compile_msgs)
+    diffs += [
         f"  pos {i}: {a!r} -> {b!r}"
         for i, (a, b) in enumerate(zip(orig_tokens, back_tokens))
         if a != b
@@ -2042,7 +3437,7 @@ def _translate_file(
         if not translated.lstrip().startswith("// श्री।"):
             translated = (
                 f"// श्री।\n"
-                f"// vani-lang: {target_lang}\n"
+                f"// vani-lang: {pragma_tag(target_lang)}\n"
                 f"//\n"
                 + translated
             )
