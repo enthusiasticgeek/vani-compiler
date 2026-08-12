@@ -6057,3 +6057,16 @@ int main() {
     "stdout": "",
     "stderr": "integer overflow in int64_t add\n",
     "tim
+
+---
+
+### Candidate: 20260812-082124-backend-divergence-49d5e6fa8f
+
+Repro: `tools/localfuzz/findings/20260812-082124-backend-divergence-49d5e6fa8f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-082124-backend-divergence-49d5e6fa8f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The `try_question_op.vani` program, when compiled and run with both LLVM and C backends, exhibits backend-divergence due to an integer overflow in the `doubled_q` function. This results in a crash when the multiplication operation overflows. The exact repro source and observed symptom are provided in the details above.
+
+To resolve this issue, it is necessary to investigate the logic of the `doubled_q` function and ensure that there are no potential integer overflow conditions. Additionally, it might be beneficial to update the compiler or the backend implementation to handle large integer values more gracefully.
