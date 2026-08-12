@@ -6248,3 +6248,50 @@ Fix attempt: `tools/localfuzz/findings/20260812-164605-run-crash-90c38f0f8f/fix_
 }
 ```
 
+---
+
+## Triage closeout: 2026-08-12 17:32Z batch (5 findings, 4 signatures)
+
+Findings: `20260812-143145-backend-divergence-99a23910aa`,
+`20260812-153250-backend-divergence-51ca335b1d`,
+`20260812-154554-backend-divergence-c2479366f8`,
+`20260812-164605-run-crash-90c38f0f8f`,
+`20260812-173150-run-crash-0f47f5700b`.
+
+- **3x backend-divergence (rc=134 C / rc=3 LLVM, identical stderr
+  message — "index out of bounds" x2, "integer overflow in int64_t
+  add" x1)**: the established, repeatedly-confirmed abort()-vs-exit(3)
+  trap-mechanism divergence (C backends SIGABRT, LLVM backends clean
+  exit(3), same underlying safety check firing correctly on both).
+  Accepted design, not a bug — same class as BUG-113/115/117/120/135,
+  reconfirmed identically here. No action.
+- **1x run-crash, both backends timed out** (`90c38f0f8f`, base
+  `tcp_multi_echo.vani`): fuzzer mutation duplicated a blocking
+  `tcp_accept(server)` call inside `tcp_recv_then_echo_once`. With
+  only 3 client tasks connecting, the second `tcp_accept` in the first
+  invocation blocks forever waiting for a phantom 4th connection —
+  legitimately deadlocks identically on both backends, matching the
+  exact `echo_pool.vani`/`echo_p3d_vec_struct.vani` pattern already
+  triaged and accepted in an earlier batch. Not a compiler bug — a
+  broken mutated program hanging exactly as it should.
+- **1x run-crash, C finished clean (rc=0, correct output) but LLVM
+  timed out** (`0f47f5700b`, base `maithili/early_exit.vani`): a real,
+  confirmed, ROOT-CAUSED performance divergence, NOT a correctness bug.
+  Mutation set the loop counter's start value to `i64::MIN`, so
+  reaching the loop's real exit condition (`n == 5`) takes ~9.2
+  quintillion increments if executed literally. `vanic build` (AOT)
+  and `vanic run --backend=c` both complete instantly because their
+  pipelines run a real optimizer (`opt -O3` before `llc`; `cc -O2`)
+  that performs induction-variable/scalar-evolution reduction on this
+  loop shape, collapsing it to a near-constant-time computation.
+  `vanic run`'s default LLVM JIT path feeds raw, unoptimized `.ll`
+  straight to `lli` with no `opt` pass at all — confirmed directly
+  (`src/main.rs`'s `run_llvm_jit`-equivalent path never invokes `opt`,
+  unlike the AOT build path a few hundred lines later in the same
+  file) — so the JIT genuinely executes the full 9.2-quintillion-
+  iteration loop with no closed-form shortcut, and never finishes in
+  any practical timeout. Filed as `docs/v1_limitations.md` L27 rather
+  than fixed: adding an `opt -O3` pass to the JIT path is a real,
+  legitimate design trade-off (JIT startup latency for every `vanic
+  run` invocation vs. matching AOT's optimization level for this rare
+  pathological-loop case), not something to change unilaterally.
