@@ -5903,3 +5903,14 @@ Repro: `tools/localfuzz/findings/20260812-000337-backend-divergence-30fb8d129d/r
 Fix attempt: `tools/localfuzz/findings/20260812-000337-backend-divergence-30fb8d129d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-003409-backend-divergence-dd3192e361
+
+Repro: `tools/localfuzz/findings/20260812-003409-backend-divergence-dd3192e361/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-003409-backend-divergence-dd3192e361/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani compiler exhibits backend-divergence when running the mutant-generated source on both LLVM and C backends. Specifically, the index-out-of-bounds error occurs in the "if/else and while loops with Vec mutation" test case, which is tested using the `build_range` and `sum` functions. This behavior diverges between the two backends, leading to different outcomes when running the same input through both compilers. The backend-divergence result indicates that there might be a bug in either the LLVM or C code generation for handling out-of-bounds indexing in these specific loops.
