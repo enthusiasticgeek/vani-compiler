@@ -6295,3 +6295,12 @@ Findings: `20260812-143145-backend-divergence-99a23910aa`,
   legitimate design trade-off (JIT startup latency for every `vanic
   run` invocation vs. matching AOT's optimization level for this rare
   pathological-loop case), not something to change unilaterally.
+
+---
+
+### Candidate: 20260812-184118-run-crash-ac65175aa2
+
+Repro: `tools/localfuzz/findings/20260812-184118-run-crash-ac65175aa2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-184118-run-crash-ac65175aa2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
