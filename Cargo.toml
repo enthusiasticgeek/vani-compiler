@@ -9,10 +9,13 @@ readme = "README.md"
 keywords = ["compiler", "language", "devanagari", "verification", "sanskrit"]
 categories = ["compilers", "development-tools"]
 # `vanic` is the primary CLI as of 2026-06-06 (renamed from
-# `intentc`, which stays as a legacy alias for one release cycle).
-# `intent-lsp` is a sibling binary invoked by editors. Naming the
-# default keeps `cargo run` working without a `--bin` flag for the
-# common case.
+# `intentc`, which is kept as a legacy alias -- originally planned
+# for one release cycle, still shipped 15+ release cycles later as
+# of v0.9.3/2026-08-12 since nothing has forced the removal decision;
+# see the `[[bin]] name = "intentc"` entry below for the current
+# status). `intent-lsp` is a sibling binary invoked by editors.
+# Naming the default keeps `cargo run` working without a `--bin`
+# flag for the common case.
 default-run = "vanic"
 
 [lib]
@@ -29,9 +32,12 @@ path = "src/lib.rs"
 name = "vanic"
 path = "src/main.rs"
 
-# Legacy alias — kept for back-compat one release cycle. Tests
-# reference this via CARGO_BIN_EXE_intentc; user scripts may have
-# `intentc` baked in. Both binaries are byte-identical.
+# Legacy alias — kept for back-compat. Originally planned as a
+# one-release-cycle bridge (2026-06-06); still built as of v0.9.3
+# (2026-08-12, 15+ releases later) since removing it hasn't been a
+# priority and nothing depends on it going away on any schedule.
+# Tests reference this via CARGO_BIN_EXE_intentc; user scripts may
+# have `intentc` baked in. Both binaries are byte-identical.
 [[bin]]
 name = "intentc"
 path = "src/main.rs"
