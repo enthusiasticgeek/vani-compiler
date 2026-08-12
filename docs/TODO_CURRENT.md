@@ -12541,7 +12541,7 @@ this fix).
 
 Next free bug number is **BUG-182**.
 
-## BUG-182 (2026-08-12) -- FILED, NOT FIXED: stale post-loop Vec-length fact enables unsound bounds elision
+## BUG-182 (2026-08-12) -- CLOSED: stale post-loop Vec-length fact enables unsound bounds elision
 
 Found while triaging the same localfuzz batch that found BUG-181 (a
 sibling `[2x] backend-divergence -- c.rc=0 llvm.rc=0` cluster with
@@ -12601,3 +12601,51 @@ here so it isn't lost. Repro files:
 `tools/localfuzz/findings/20260812-060747-backend-divergence-dcbf2e2a45/`
 and `.../20260812-084922-backend-divergence-eca210d4ac/` in the
 localfuzz worktree.
+
+## Update 2026-08-12: BUG-182 CLOSED
+
+Found the exact site: `checker.rs`'s post-loop fact restore did
+`*smt_facts = pre_facts;` (a snapshot from BEFORE the loop ran,
+still containing stale facts about any variable the loop body
+mutates) and then added the loop's own sound post-loop facts
+(invariants + loop-exit condition) on top -- producing the internally
+contradictory fact set described above. The loop-mutated-variable set
+(`body_muts`, via `collect_branch_mutations`) was already computed at
+every one of these sites for a different purpose (clearing stale
+`constant` bookkeeping) -- reused it to also `drop_facts_mentioning`
+each mutated variable right after the `pre_facts` restore, before
+re-adding the loop's fresh facts. Applied to all four sites sharing
+this exact `*smt_facts = pre_facts` pattern for a loop construct:
+`Stmt::While`, `Stmt::For`, `Stmt::ForIter`, and
+`check_while_loop_as_let_init` (the `let x = while ... {};`
+loop-expression form).
+
+Two pre-existing example files broke when this shipped:
+`examples/language/arabic/vec_invariants.vani` and
+`examples/language/hebrew/vec_invariants.vani`. Both were missing
+one of the three `invariant` clauses every other language's version
+of this same file has (`len(xs) == (i as u64)`) -- a pre-existing
+localization gap that the BUG-182 unsoundness had been silently
+papering over: the checker could "prove" `len(xs) == 5` after the
+loop even without a declared invariant connecting length to the
+counter, purely because the (buggy) contradictory fact set could
+prove anything, and 5 happened to be the actual right answer by
+coincidence. Fixing the fact-restore bug correctly made the proof
+fail for real, surfacing the missing invariant. While fixing it,
+found Arabic's and Hebrew's `arabic_keyword`/`hebrew_keyword` lexer
+functions had NO `as`-cast keyword translated at all (a separate,
+narrower gap) -- added `"بصفة"` (bisifat) for Arabic and `"בתור"`
+(betor) for Hebrew, regenerated `src/lsp.rs`'s keyword-completion
+lists via `tools/regen_lsp_keywords.py` (BUG-173's established
+workflow), then added the missing invariant clause to both example
+files using the new keyword.
+
+Added `bug182_stale_pre_loop_fact_does_not_leak_past_loop_exit` in
+`src/lib.rs`. Verification: `cargo test --release` (2897 lib tests +
+12 other suites, 0 failed), `vanic check` across all 1040 example
+files (back to 17 failures, exact same file set as before BUG-181/
+182, zero diff -- the 2 example files this fix's first pass broke
+are now passing again with the corrected invariant),
+`tools/leak_sweep.py` clean (matches baseline exactly).
+
+Next free bug number is **BUG-183**.

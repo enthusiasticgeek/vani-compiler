@@ -12887,6 +12887,14 @@ fn check_while_loop_as_let_init(
     env.pop_scope();
     *env = pre_env;
     *smt_facts = pre_facts;
+    // BUG-182 (2026-08-12): same fix as the statement-form `while`/
+    // `for`/`for-iter` loops -- drop stale pre-loop facts about any
+    // variable this loop-expression's body mutated, so they don't
+    // leak forward as if still true past the loop.
+    let body_muts = collect_branch_mutations(loop_body);
+    for name in &body_muts {
+        drop_facts_mentioning(smt_facts, name);
+    }
 
     // Emit: while 'lbl? cond { body }
     body.push(TypedStmt::While {
@@ -14556,6 +14564,27 @@ fn check_one_stmt(
             // drop the `!cond` if any is present. `continue` is safe
             // because it returns to the loop header.
             *smt_facts = pre_facts;
+            // BUG-182 (2026-08-12): `pre_facts` is a snapshot of
+            // `smt_facts` from BEFORE the loop ran -- it still contains
+            // whatever was true about each `body_muts` variable back
+            // then (e.g. a `len(xs) == 1` fact from the `let xs: Vec<i64>
+            // = vec(0);` right before a loop that grows `xs` via
+            // `push`). That fact is no longer true after the loop
+            // actually executes, but restoring `pre_facts` wholesale
+            // brings it right back, where it now sits alongside the
+            // loop's own (correct) invariant/`!cond` facts below --
+            // e.g. `len(xs) == 1` AND `len(xs) == i >= 5`, an
+            // internally CONTRADICTORY fact set the SMT solver can
+            // "prove" anything from, including that a negative/huge
+            // index is in bounds (confirmed: silently elided the
+            // bounds check on `xs[-1]` after the loop). Drop every
+            // fact mentioning a loop-mutated variable before re-adding
+            // the loop's own sound post-loop facts, mirroring how
+            // `Stmt::Let`/`Stmt::Assign` already drop facts on same-
+            // scope reassignment outside a loop.
+            for name in &body_muts {
+                drop_facts_mentioning(smt_facts, name);
+            }
             smt_facts.extend(invariants.iter().cloned());
             if !contains_break(body_stmts) {
                 smt_facts.push(negate(cond));
@@ -15457,6 +15486,17 @@ fn check_one_stmt(
             // skip the `>= end` fact when the body can `break`, since a
             // break exit may leave `var < end`.
             *smt_facts = pre_facts;
+            // BUG-182 (2026-08-12): same fix as the `while` arm above --
+            // `pre_facts` may still contain now-stale facts about any
+            // `body_muts` variable from before the loop ran (e.g. a
+            // `len(xs) == 1` fact from a `let` right before a loop that
+            // grows `xs` via `push`). Restoring it wholesale and then
+            // adding the loop's own sound post-loop facts on top can
+            // produce an internally contradictory fact set, from which
+            // the SMT solver can "prove" anything.
+            for name in &body_muts {
+                drop_facts_mentioning(smt_facts, name);
+            }
             smt_facts.extend(invariants.iter().cloned());
             if !contains_break(body_stmts) {
                 smt_facts.push(Expr {
@@ -15812,6 +15852,20 @@ fn check_one_stmt(
             let body_muts = collect_branch_mutations(body_stmts);
             clear_constants_for(env, &body_muts);
             *smt_facts = pre_facts;
+            // BUG-182 (2026-08-12): same fix as the `while`/`for` arms
+            // above -- `pre_facts` may still contain now-stale facts
+            // about any `body_muts` variable from before the loop ran
+            // (e.g. an accumulator's `total == 0` fact from its `let`
+            // right before a `for v in ref xs { total = total + v; }`
+            // loop). `for-iter` has no declared-invariant mechanism to
+            // immediately contradict, but the stale fact still leaks
+            // into code after the loop as if it were still true --
+            // the same unsoundness, just without this specific site
+            // being the one that hands the SMT solver a directly
+            // self-contradictory set.
+            for name in &body_muts {
+                drop_facts_mentioning(smt_facts, name);
+            }
 
             if !body_terminated {
                 validate_loop_balance(
