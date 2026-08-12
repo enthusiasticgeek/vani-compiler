@@ -12474,3 +12474,130 @@ other suites, 0 failed), `vanic check` across all 1040 example files
 clean (matches baseline).
 
 Next free bug number is **BUG-181**.
+
+## Update 2026-08-12: BUG-181 CLOSED (found by localfuzz) -- unconditional OOB memory-safety hole
+
+Found by localfuzz (mutated `examples/language/english/anon_fn.vani`,
+changing a loop increment `j = j + 1;` to `j = j + -1;`). The C
+backend segfaulted outright (SIGSEGV, exit 139 -- not the usual
+SIGABRT/134 trap pattern); the LLVM backend printed correct output
+then hit a genuine "index out of bounds: -1, len 6" trap. The
+divergent exit code (139 vs the expected 134) was the tell that this
+wasn't the already-accepted abort-vs-exit(3) pattern -- this was an
+actual, uncaught out-of-bounds memory access.
+
+Root cause: sibling of BUG-127, but in the Index/bounds-elision arm
+of `try_elide_bounds_in_typed_expr` (`src/checker.rs`) rather than
+the Binary (arithmetic-overflow) arm BUG-127 fixed. That fix's own
+comment claimed Index elision was safe inside a loop ("a `for`
+loop's own induction-variable facts are freshly and soundly
+re-derived every iteration by construction, unlike the possibly-
+stale facts used here") -- true for `for`, but the `inside_loop`
+flag the Index arm receives doesn't distinguish a `for` loop's
+compiler-synthesized induction variable from an arbitrary
+`while`-loop variable the user mutates by hand. For the latter, the
+exact same stale-fact problem applies: `smt_facts` deliberately
+survives a same-scope reassignment inside a loop body (for a
+separate loop-invariant-preservation check), so a fact like `j == 0`
+(true only on the first iteration) got used to "prove" both
+`j < len(dsc)` and `j >= 0` were ALWAYS true, silently dropping the
+runtime bounds check for the entire loop -- not just eliding a
+narrow, provably-safe case. `--smt-debug` confirmed the exact stale
+fact: `(assert (= v_j (_ bv0 64)))` unconditionally fixed inside the
+query for an expression that runs on every iteration.
+
+This is more severe than BUG-127 in kind, not just degree: BUG-127's
+elided overflow guard turned an intended-finite loop into an
+infinite one (a hang, still memory-safe). This elided bounds check
+produced an **unconditional, always-reachable out-of-bounds memory
+access with no runtime guard at all** -- confirmed to segfault on
+the C backend (raw negative-index pointer arithmetic, no trap
+mechanism engaged) and to silently read arbitrary out-of-bounds heap
+memory FOREVER on the LLVM backend (no crash, no trap, just garbage
+values printed in an unbounded loop) on a minimized repro. Directly
+contradicts the compiler's own stated design contract ("hosted
+programs are safe by construction -- no segfault surface, no UAF, no
+buffer overrun").
+
+Fixed by giving the Index arm the identical `if inside_loop { return;
+}` guard the Binary arm already had, and correcting that arm's now-
+inaccurate comment about Index elision being safe. Accepted trade-off:
+a `for` loop's own otherwise-safe indexing (e.g. `for i from 0 to
+len(xs) { xs[i] }`) now also keeps its runtime bounds check --
+a performance regression, not a correctness one; a future loop-
+invariant-aware elision pass could recover it soundly. Updated
+`smt_elides_vec_bounds_in_for_loop_body` (renamed
+`smt_no_longer_elides_vec_bounds_in_for_loop_body`) to assert the
+corrected expectation.
+
+Added `bug181_loop_carried_bounds_check_is_not_elided` in
+`src/lib.rs`. Verification: `cargo test --release` (2897 lib tests +
+12 other suites, 0 failed), `vanic check` across all 1040 example
+files (17 failures, exact same file set, zero diff),
+`tools/leak_sweep.py` clean (matches baseline exactly -- this sweep
+actually RUNS every example under ASan/LSan/UBSan, so it also serves
+as an output-behavior-equivalence check across the whole corpus for
+this fix).
+
+Next free bug number is **BUG-182**.
+
+## BUG-182 (2026-08-12) -- FILED, NOT FIXED: stale post-loop Vec-length fact enables unsound bounds elision
+
+Found while triaging the same localfuzz batch that found BUG-181 (a
+sibling `[2x] backend-divergence -- c.rc=0 llvm.rc=0` cluster with
+DIFFERING stdout, not a crash). Both findings mutate a *constant*
+out-of-range index (`xs[-1]`, `xs[i64::MAX]`) into a top-level
+`print`/`vypiš` statement placed AFTER a loop that grows a `Vec` via
+`push` inside its body -- **not inside the loop itself**, so BUG-181's
+`if inside_loop { return; }` fix does not cover this case. Confirmed
+still reproducible against the BUG-181-fixed binary: both backends
+exit 0 and print a garbage value (81 on both backends now that
+BUG-181 no longer lets them diverge on WHICH garbage value, but it's
+still an unguarded out-of-bounds read).
+
+Minimal shape:
+```vani
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(0);        // len(xs) == 1 fact recorded here
+  let i: i64 = 1;
+  while i < 5
+  invariant len(xs) == (i as u64);
+  {
+    xs = push(xs, i * 10);          // reassigns xs 4x; loop-body fact-drop is
+    i = i + 1;                      // deliberately SKIPPED (see BUG-127 comment)
+  }
+  // xs now has len 5, but the pre-loop `len(xs) == 1` fact from the
+  // `vec(0)` literal was never dropped or superseded -- it's still
+  // sitting in smt_facts here, contradicting the invariant-derived
+  // len(xs) == i == 5 fact from the loop that also survives.
+  print xs[-1];  // both facts combine into a CONTRADICTORY (self-
+                 // inconsistent) fact set, from which the SMT prover
+                 // can "prove" anything -- including that -1 is a
+                 // valid index. Bounds check silently elided.
+  return 0;
+}
+```
+
+`--smt-debug` confirms the exact contradiction feeding the prover for
+the `xs[-1]` goal: `(assert (= v_xs_len (_ bv1 64)))` (stale,
+pre-loop) alongside `(assert (= v_xs_len v_i))` + `(assert (bvsge v_i
+(_ bv5 64)))` (post-loop, correctly reflecting the invariant) --
+`v_xs_len` is asserted to be simultaneously `1` and `>= 5`, an
+inconsistent axiom set that trivially "proves" every goal put to it,
+including the false claim that a negative/huge index is in bounds.
+
+**Not yet fixed.** The likely fix -- dropping every fact that
+mentions a variable reassigned inside a loop body once the loop
+exits (mirroring `drop_facts_mentioning`'s existing same-scope-
+outside-loop behavior for `Stmt::Let`/`Stmt::Assign`) -- needs
+careful design: the loop's own DECLARED invariant clause
+(`invariant len(xs) == (i as u64);` here) is legitimately supposed
+to feed POST-loop reasoning (that's how `dokáž len(xs) == 5;`/`assert
+len(xs) == 5;` after a loop gets proven at all), so an overzealous
+blanket drop could break that mechanism instead of just the stale
+pre-loop leftover. This needs its own dedicated investigation
+session, not a rushed fix layered onto the BUG-181 change -- filed
+here so it isn't lost. Repro files:
+`tools/localfuzz/findings/20260812-060747-backend-divergence-dcbf2e2a45/`
+and `.../20260812-084922-backend-divergence-eca210d4ac/` in the
+localfuzz worktree.

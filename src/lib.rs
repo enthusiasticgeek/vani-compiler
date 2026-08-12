@@ -1722,6 +1722,59 @@ mod tests {
     }
 
     #[test]
+    fn bug181_loop_carried_bounds_check_is_not_elided() {
+        // BUG-181 (2026-08-12): found via localfuzz (mutated
+        // examples/language/english/anon_fn.vani, changing a loop
+        // increment `j = j + 1;` to `j = j + -1;`). Sibling of
+        // BUG-127, but in the Index/bounds-elision arm of
+        // try_elide_bounds_in_typed_expr rather than the Binary
+        // (arithmetic-overflow) arm. That fix's own comment claimed
+        // Index elision was safe inside a loop ("a `for` loop's own
+        // induction-variable facts are freshly and soundly
+        // re-derived every iteration by construction, unlike the
+        // possibly-stale facts used here") -- true for `for`, but
+        // `inside_loop` doesn't distinguish a `for` loop's
+        // synthesized induction variable from an arbitrary
+        // `while`-loop variable the user mutates by hand. For the
+        // latter, the exact same stale `j == 0` pre-loop fact let
+        // the elision pass "prove" both `j < len` and `j >= 0` for
+        // EVERY iteration using only the first iteration's value,
+        // dropping the runtime bounds check entirely -- confirmed to
+        // segfault outright on the C backend (uncaught negative-
+        // index pointer arithmetic) and silently read arbitrary
+        // out-of-bounds heap memory forever on the LLVM backend (no
+        // trap of any kind, not even a crash). Unlike BUG-127, this
+        // is an unconditional, always-reachable memory-safety hole,
+        // not a narrower silent-wraparound-into-infinite-loop case.
+        // Fixed by giving the Index arm the identical
+        // `if inside_loop { return; }` guard the Binary arm already
+        // had.
+        let source = r#"
+            fn main() -> i64 {
+              let dsc: Vec<i64> = vec(5, 2, 8, 1, 9, 3);
+              let j: i64 = 0;
+              while j < 6 {
+                print dsc[j];
+                j = j + -1;
+              }
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("loop should compile to LLVM");
+        assert!(
+            llvm.contains("index out of bounds"),
+            "BUG-181 regression: the loop-carried bounds check was elided \
+             again using a stale pre-loop fact (tree-LLVM), got: {llvm}"
+        );
+        let c = compile_to_c(source).expect("loop should compile to C");
+        assert!(
+            c.contains("index out of bounds"),
+            "BUG-181 regression: the loop-carried bounds check was elided \
+             again using a stale pre-loop fact (tree-C), got: {c}"
+        );
+    }
+
+    #[test]
     fn bug129_tree_c_requires_guard_uses_exit3_not_raw_assert() {
         // BUG-129: tree-C's `requires`-clause runtime guard still
         // used the raw libc `assert()` macro (SIGABRT on failure)
@@ -44731,13 +44784,31 @@ função main() -> i64 {
     }
 
     #[test]
-    fn smt_elides_vec_bounds_in_for_loop_body() {
+    fn smt_no_longer_elides_vec_bounds_in_for_loop_body() {
         if !z3_available() {
             return;
         }
-        // Inside `for i in 0..len(xs) { … }`, `i >= 0` and `i < len(xs)`
-        // are both in scope (added by the for-body fact pass), so
-        // `xs[i]` should discharge without a runtime guard.
+        // BUG-181 (2026-08-12): this test used to assert the OPPOSITE
+        // -- that `xs[i]` inside `for i from 0 to len(xs) { ... }`
+        // elided its bounds check, reasoning that `i >= 0` and
+        // `i < len(xs)` are both in scope from the for-body fact
+        // pass. That was true for THIS specific for-loop shape, but
+        // the elision code had no way to distinguish a `for` loop's
+        // safe, compiler-synthesized induction variable from an
+        // arbitrary `while`-loop variable the user mutates by hand --
+        // and for the latter, the exact same code path unsoundly
+        // elided a bounds check using a stale pre-loop fact,
+        // producing a confirmed, unconditional out-of-bounds read
+        // (segfault on the C backend, silent OOB heap read forever
+        // on LLVM). The fix gives the Index-elision arm the same
+        // `if inside_loop { return; }` guard the sibling Binary
+        // (arithmetic-overflow) arm already had for the identical
+        // BUG-127 staleness problem -- which means this for-loop's
+        // otherwise-safe `xs[i]` now also keeps its runtime check.
+        // That's an accepted performance regression (a future loop-
+        // invariant-aware elision pass could recover it safely), not
+        // a correctness one -- soundness wins over eliding a check
+        // that happens to be safe in this one shape.
         let source = r#"
             fn sum_to(xs: ref Vec<i64>) -> i64 {
               let total: i64 = 0;
@@ -44756,16 +44827,17 @@ função main() -> i64 {
         "#;
 
         let c = compile_to_c(source).expect("sum_to should compile");
-        // Inside fn_sum_to's body, `xs[i]` should not invoke the
-        // bounds-check helper.
+        // Inside fn_sum_to's body, `xs[i]` must invoke the
+        // bounds-check helper -- eliding it was BUG-181.
         let def_start = c.find("fn_sum_to(const intent_vec_int64_t* v_xs) {")
             .expect("fn_sum_to definition");
         let def = &c[def_start..];
         let def_end = def.find("\n}\n").map(|i| i + 1).unwrap_or(def.len());
         let def = &def[..def_end];
         assert!(
-            !def.contains("intent_check_bounds"),
-            "expected for-loop bounds elided in fn_sum_to, got:\n{}",
+            def.contains("intent_check_bounds"),
+            "BUG-181 regression: for-loop bounds check elided again \
+             using a loop-carried stale fact in fn_sum_to, got:\n{}",
             def
         );
     }
