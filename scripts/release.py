@@ -13,15 +13,26 @@ What it does (mirrors RELEASING.md steps 2–9):
   2. Runs scripts/sync_version.py to sync all doc version strings
   3. Scaffolds RELEASE_NOTES/v<new-version>.md if it doesn't exist
   4. Prepends a stub entry to CHANGELOG.md
-  5. Commits: "chore: bump version to <new-version>"
-  6. Tags:   git tag -a v<new-version> -m "Release <new-version>"
-  7. Pushes the tag (triggers release.yml binary builds)
-  8. Attempts cargo publish (skips gracefully if no token)
-  9. Bumps Cargo.toml to <new-version-patch+1>-dev, syncs, commits, pushes main
+  5. Refuses to continue if either of the above still has an unfilled
+     "TODO" / "YYYY-MM-DD" scaffold placeholder (see check_notes_not_
+     stale) -- write real content for BOTH files BEFORE running this
+     script (steps 3/4 skip scaffolding when the file/entry already
+     exists) so this check passes cleanly. Override with
+     --allow-stale-notes if you genuinely mean to ship placeholders.
+  6. Commits: "chore: bump version to <new-version>"
+  7. Tags:   git tag -a v<new-version> -m "Release <new-version>"
+  8. Pushes the tag (triggers release.yml binary builds)
+  9. Attempts cargo publish (skips gracefully if no token)
+  10. Bumps Cargo.toml to <new-version-patch+1>-dev, syncs, commits, pushes main
 
 Flags:
-  --dry-run   Print every shell command without executing it.
-  --no-push   Skip git push and cargo publish (for local testing).
+  --dry-run          Print every shell command without executing it.
+  --no-push          Skip git push and cargo publish (for local testing).
+  --allow-stale-notes
+                      Don't abort when RELEASE_NOTES/CHANGELOG still have
+                      unfilled scaffold placeholders (not recommended --
+                      v0.9.2 shipped with placeholder docs precisely
+                      because nothing enforced this).
   --no-publish Skip cargo publish only.
 """
 
@@ -165,6 +176,63 @@ def prepend_changelog(ver: str, dry_run: bool) -> None:
     print("  CHANGELOG.md — stub prepended")
 
 
+def check_notes_not_stale(ver: str) -> list[str]:
+    """Return human-readable problems if RELEASE_NOTES/v<ver>.md or
+    CHANGELOG.md's '## [v<ver>]' entry still contain an unfilled scaffold
+    placeholder ("- TODO" line / "YYYY-MM-DD" date). Empty list means
+    both are ready to ship.
+
+    Matches the exact scaffold bullet shape (a line starting with
+    "- TODO"), not a bare "TODO" substring search -- real release-note
+    prose legitimately mentions filenames like `docs/TODO_CURRENT.md`,
+    which a naive substring check would misfire on.
+
+    v0.9.2 (2026-08-11) was tagged and released with BOTH files still
+    holding their auto-scaffolded stub content untouched -- nothing in
+    this script (or the release workflow) ever checked, so the mistake
+    went unnoticed until a later pass caught it and rewrote both files
+    retroactively. This function exists so that can't happen silently
+    again.
+    """
+    problems: list[str] = []
+    todo_line_re = re.compile(r"(?m)^- TODO\b")
+
+    def stale_hits(text: str) -> list[str]:
+        hits = []
+        if todo_line_re.search(text):
+            hits.append("a '- TODO' scaffold bullet")
+        if "YYYY-MM-DD" in text:
+            hits.append("the 'YYYY-MM-DD' placeholder date")
+        return hits
+
+    notes_path = ROOT / "RELEASE_NOTES" / f"v{ver}.md"
+    if notes_path.exists():
+        text = notes_path.read_text(encoding="utf-8")
+        hits = stale_hits(text)
+        if hits:
+            problems.append(
+                f"RELEASE_NOTES/v{ver}.md still contains {' and '.join(hits)} "
+                f"-- replace the scaffolded template with real content."
+            )
+    else:
+        problems.append(f"RELEASE_NOTES/v{ver}.md does not exist.")
+
+    changelog_path = ROOT / "CHANGELOG.md"
+    text = changelog_path.read_text(encoding="utf-8") if changelog_path.exists() else ""
+    m = re.search(rf"## \[v{re.escape(ver)}\].*?(?=\n## \[|\Z)", text, re.DOTALL)
+    if not m:
+        problems.append(f"CHANGELOG.md has no '## [v{ver}]' entry.")
+    else:
+        hits = stale_hits(m.group(0))
+        if hits:
+            problems.append(
+                f"CHANGELOG.md's '## [v{ver}]' entry still contains "
+                f"{' and '.join(hits)} -- replace the scaffolded "
+                f"stub with real content."
+            )
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -179,6 +247,12 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-push", action="store_true")
     parser.add_argument("--no-publish", action="store_true")
+    parser.add_argument(
+        "--allow-stale-notes",
+        action="store_true",
+        help="Ship even if RELEASE_NOTES/CHANGELOG still have unfilled "
+             "scaffold placeholders (not recommended).",
+    )
     args = parser.parse_args()
 
     dry = args.dry_run
@@ -203,24 +277,49 @@ def main() -> None:
     print(f"\nReleasing v{new_ver}  (dry_run={dry})\n")
 
     # Step 1 — bump Cargo.toml
-    print("[1/9] Bump Cargo.toml")
+    print("[1/10] Bump Cargo.toml")
     if not dry:
         set_cargo_version(new_ver)
 
     # Step 2 — sync docs
-    print("[2/9] Sync version strings")
+    print("[2/10] Sync version strings")
     run(["python3", "scripts/sync_version.py"], dry_run=dry)
 
     # Step 3 — release notes
-    print("[3/9] Scaffold release notes")
+    print("[3/10] Scaffold release notes")
     notes_path = scaffold_release_notes(new_ver, dry)
 
     # Step 4 — changelog
-    print("[4/9] Update CHANGELOG.md")
+    print("[4/10] Update CHANGELOG.md")
     prepend_changelog(new_ver, dry)
 
-    # Step 5 — commit
-    print("[5/9] Commit")
+    # Step 5 — refuse to ship placeholder docs
+    print("[5/10] Verify release notes + changelog are filled in")
+    if dry:
+        print("  --dry-run: skipping (files not necessarily written)")
+    else:
+        problems = check_notes_not_stale(new_ver)
+        if problems and not args.allow_stale_notes:
+            print("\nERROR: refusing to cut a release with placeholder docs:")
+            for p in problems:
+                print(f"  - {p}")
+            print(
+                f"\nEdit RELEASE_NOTES/v{new_ver}.md and CHANGELOG.md's "
+                f"'## [v{new_ver}]' entry with real content, then re-run "
+                f"this script (steps 3/4 will skip scaffolding since both "
+                f"already exist). Override with --allow-stale-notes if you "
+                f"genuinely mean to ship placeholders."
+            )
+            sys.exit(1)
+        elif problems:
+            print("  WARNING: shipping with placeholder docs (--allow-stale-notes set):")
+            for p in problems:
+                print(f"    - {p}")
+        else:
+            print("  OK — no placeholder markers found")
+
+    # Step 6 — commit
+    print("[6/10] Commit")
     changed = run(["git", "diff", "--name-only"], dry_run=False)
     untracked_notes = str(notes_path.relative_to(ROOT)).replace("\\", "/")
     files_to_add = [
@@ -233,19 +332,19 @@ def main() -> None:
         dry_run=dry,
     )
 
-    # Step 6 — tag
-    print("[6/9] Tag")
+    # Step 7 — tag
+    print("[7/10] Tag")
     run(["git", "tag", "-a", f"v{new_ver}", "-m", f"Release {new_ver}"], dry_run=dry)
 
-    # Step 7 — push tag
-    print("[7/9] Push tag")
+    # Step 8 — push tag
+    print("[8/10] Push tag")
     if not args.no_push:
         run(["git", "push", "origin", f"v{new_ver}"], dry_run=dry)
     else:
         print("  --no-push: skipping git push tag")
 
-    # Step 8 — cargo publish
-    print("[8/9] cargo publish")
+    # Step 9 — cargo publish
+    print("[9/10] cargo publish")
     if not args.no_push and not args.no_publish:
         result = subprocess.run(
             ["cargo", "publish"],
@@ -261,8 +360,8 @@ def main() -> None:
     else:
         print("  skipping cargo publish")
 
-    # Step 9 — post-release dev bump
-    print("[9/9] Post-release dev bump")
+    # Step 10 — post-release dev bump
+    print("[10/10] Post-release dev bump")
     dev_ver = dev_version(new_ver)
     if not dry:
         set_cargo_version(dev_ver)

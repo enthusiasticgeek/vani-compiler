@@ -1,14 +1,112 @@
 # Changelog
 
-## [v0.9.2] — YYYY-MM-DD
+## [v0.9.2] — 2026-08-11
+
+Patch release. No new language features beyond positional `break`/`continue`
+targets (below), no breaking changes — consolidates roughly 38 bug fixes
+(BUG-141 through BUG-178) found across several audit rounds and a systematic
+ASan/LeakSanitizer sweep since v0.9.1 (2026-08-07 through 2026-08-11). See
+`RELEASE_NOTES/v0.9.2.md` for the full sweep-by-sweep writeup; full per-bug
+detail lives in `docs/TODO_CURRENT.md`.
 
 ### Added
 
-- TODO
+- **Positional `break`/`continue` targets** (BUG-176): `break inner` /
+  `outer` / `middle` now resolve by loop-nesting *depth* rather than
+  requiring a declared label, closing a feature gap three pre-existing
+  `examples/edge_cases/mix_break_*.vani` files had been testing against
+  code that was never actually implemented.
 
-### Fixed
+### Fixed (leak / use-after-free sweep — BUG-153–161, 2026-08-09–10)
 
-- TODO
+- A systematic ASan/LeakSanitizer sweep of the full example corpus
+  (BUG-153/154) found a real leak and a general use-after-free, then
+  traced the same root shape to three more independent call sites over
+  the next two days: a closure returned from (or simply called inside) a
+  function leaked its captured-environment struct (BUG-155/156); a fresh
+  `OwnedStr` narrowed to a `Str` — via a struct field assignment
+  (BUG-157/158, confirmed general, not async-specific despite an initial
+  narrower diagnosis, and separately confirmed to recur inside the async
+  state-machine transform) or as a bare function-call argument
+  (BUG-159) — could dangle or leak depending on the call shape; and the
+  same escape vector recurred narrowly in `hashmap_get`/
+  `contains_key`/`remove` and every `Trie` key operation (BUG-160/161).
+
+### Fixed (backend safety / consistency — BUG-141–149, 162–164)
+
+- **BUG-146–149**: four independent missing-bounds-check gaps found by a
+  dedicated audit round: `Box<dyn Iface>` forward-declaration ordering
+  plus a shift-amount width mismatch (BUG-146), `clone_at()` (BUG-147),
+  `vec_remove_at()` (BUG-148), and fixed-size array indexing on
+  tree-LLVM (BUG-149) — each a genuine unguarded out-of-bounds access on
+  at least one backend.
+- **BUG-141–145**: an `i64`-narrower `set()`/`set_mut()` call producing a
+  mismatched LLVM call signature, a top-level `const` colliding with a
+  same-named parameter in the checker's root scope, a nonexistent
+  `.len` field reference in tree-C for fixed-array `while`-loop
+  indexing, interface methods/local `let` annotations missing an
+  existing type-existence check, and an unguarded overflow in LLVM
+  `parallel for`'s GOMP trip-count arithmetic for any reduction
+  operator.
+- **BUG-162**: both LLVM runtime safety guards (overflow, div-by-zero,
+  shift-range, bounds) exited silently on trap — now print the same
+  kind of message the C backend already did.
+- **BUG-163**: a struct field of type `Vec<T>` had NO bounds check on
+  its index read on tree-LLVM — an unguarded out-of-bounds read, not
+  just a message-parity issue.
+- **BUG-164**: SSA-C rejected *any* `Vec<T>`-returning function outright,
+  silently falling the entire enclosing program back to the slower
+  tree-C path rather than just that one function.
+
+### Fixed (soundness / localization — BUG-166–170)
+
+- **BUG-167** (soundness): the SMT identifier sanitizer collapsed every
+  non-ASCII character to the same single underscore, aliasing distinct
+  variables with different non-Latin names into one SMT symbol — a real
+  proof-soundness bug, not a cosmetic one.
+- **BUG-166**: mojibake-corrupted `async`/`await` spellings in 4
+  languages, zero non-English `eprint` coverage, and 2 dialect-purity
+  violations.
+- **BUG-168**: both backends spliced raw non-ASCII source identifiers
+  directly into target-language symbol names at several call sites
+  instead of mangling them, a latent crash/collision risk BUG-167's fix
+  made newly reachable.
+- **BUG-169/170**: two structure-keyword parity rounds across the
+  India-language and "global language" dialect tables (59 of 60+
+  dialect functions had at least one missing keyword), plus a
+  SOV-vs-SVO grammar consistency check and a Pashto dead-multi-word-key
+  fix.
+
+### Fixed (native-speaker linguistic review + example corpus — BUG-171–175)
+
+- **BUG-171**: a native-speaker-style review across ~40 dialects (Tiers
+  A–D) found real word-choice mistakes, cross-dialect keyword
+  contamination, and `prove`-vs-`assert` mixups — and, independently, a
+  widespread `vec(0)`-is-not-an-empty-vec bug affecting 46 example
+  files. Khmer/Burmese/Lao/Amharic and Tier E flagged for real human
+  review rather than further automated passes.
+- **BUG-172**: 66 pre-existing example-corpus failures closed (unqualified
+  `Some`/`None`, dropped `ref`, `Box(...)` vs `box(...)`, block-bodied
+  `match` arms, a genuine Georgian type-name-recognition compiler bug,
+  several dialect-specific one-offs).
+- **BUG-173**: `src/lsp.rs`'s completion keyword lists had drifted 263
+  stale entries from the lexer's real tables; now mechanically
+  regenerated (`tools/regen_lsp_keywords.py`) with a CI test guarding
+  future re-drift.
+- **BUG-174**: `break i;`/`continue i;` with `i` a plain local variable
+  (not a loop label) was unconditionally misparsed as a label
+  reference.
+- **BUG-175**: the lexer treated any bare `'` as a label-start token
+  even mid-identifier, breaking Hebrew geresh notation
+  (`פיבונאצ'י`); fixing it exposed a second, previously-unreachable gap
+  in both backends' identifier-mangling for `'`.
+
+### Fixed (backend edge cases — BUG-177/178)
+
+- **BUG-177**: a closure bound inside a block-expression `let` (as
+  opposed to a top-level `let`) failed to compile on the C backend.
+- **BUG-178**: `abs()` on an integer narrower than `i64` crashed the
+  LLVM backend with a type-mismatched `@llabs` call.
 
 ---
 
