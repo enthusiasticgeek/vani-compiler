@@ -6304,3 +6304,18 @@ Repro: `tools/localfuzz/findings/20260812-184118-run-crash-ac65175aa2/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260812-184118-run-crash-ac65175aa2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-190129-run-crash-0b551088db
+
+Repro: `tools/localfuzz/findings/20260812-190129-run-crash-0b551088db/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-190129-run-crash-0b551088db/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This bug report indicates a crash in the vani-compiler's local staging log during a mutational test of the `iterate.vani` file with the persian language support. The mutant/generated source provided is intended to demonstrate a smoke-test scenario, but it appears to lead to a segmentation fault or other error that causes the program to terminate unexpectedly.
+
+To resolve this issue, we need more detailed information about the specific backend(s) affected by this crash. Additionally, reproducing the steps leading up to the crash will be crucial in diagnosing the root cause. Once these details are available, human experts can provide guidance on how to fix the underlying problem and ensure that the compiler behaves correctly under various scenarios.
+
+If possible, please add more details about which backend(s) this issue affects so that the frontiers model can focus on mitigating this specific backend-related bug.
