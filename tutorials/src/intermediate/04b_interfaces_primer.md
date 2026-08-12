@@ -286,6 +286,33 @@ to declare the implementation explicitly. The opt-in stops
 accidental conformance (e.g., two types both with `clone`
 methods accidentally treated as "Cloneable").
 
+**The signature must match exactly** -- parameter count, each
+parameter's type, and the return type, not just "close enough":
+
+```vani
+interface Shape {
+  fn area(self: Circle, scale: f64) -> i64;
+}
+
+implement Shape for Circle {
+  fn area(self: Circle, scale: i64) -> i64 { ... }   // scale: i64, not f64
+}
+```
+
+```
+error: impl method 'Circle::area' declares parameter 'scale' as i64 but interface 'Shape' declares it as f64
+```
+
+This isn't pedantry -- a mismatched parameter type used to compile
+silently in early v1 (BUG-187, fixed 2026-08-12), and the two
+backends disagreed on the calling-convention slot for the
+mismatched parameter when dispatched through `dyn Shape`, producing
+backend-dependent garbage at runtime instead of a compile error.
+`self`'s type is the one exception: it necessarily differs per
+`implement` block (that's the whole point of implementing for
+different types), so only the non-`self` parameters and the return
+type need to match the interface's declared types verbatim.
+
 ## Multi-interface types
 
 A single type can implement many interfaces:
