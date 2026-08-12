@@ -7424,6 +7424,51 @@ mod tests {
     }
 
     #[test]
+    fn bug186_task_spawn_or_join_inside_a_loop_body_does_not_panic_the_checker() {
+        // BUG-186: `substitute_expr` (used by the bounds-elision pass's
+        // per-loop-iteration reassignment tracker, `walk_for_reassigns`)
+        // hit an `unreachable!()` on any `TaskSpawnCall`/`TaskJoinExpr`
+        // it was asked to substitute into -- on the assumption that
+        // task/join could never appear in that context. False:
+        // `walk_for_reassigns` calls `substitute_expr` on the RHS of
+        // *every* `let`/assign in a loop body unconditionally, so a
+        // loop that spawns or joins a task at all crashed the whole
+        // compiler outright, regardless of whether the loop had any
+        // `requires`/`ensures`/`invariant` clause. Found building a
+        // timed tic-tac-toe variant (a task races reading stdin
+        // against a countdown, spawned fresh each turn inside the game
+        // loop). Fixed by leaving the task/join expression unchanged
+        // in the substitution instead of panicking -- it's not
+        // something the SMT layer can reason about symbolically
+        // anyway, so any later fact depending on it just goes
+        // unprovable (a normal, non-crashing outcome), not a panic.
+        let source = r#"
+            fn worker(n: i64, done: mut ref Atomic<bool>) -> i64 {
+              let _ = atomic_store(done, true);
+              return n * 2;
+            }
+            fn main() -> i64 {
+              let i: i64 = 0;
+              while i < 3 {
+                let done: Atomic<bool> = atomic_new(false);
+                let t: Task<i64> = task worker(i, mut ref done);
+                while true {
+                  if atomic_load(ref done) {
+                    break;
+                  }
+                  sleep_ms(10);
+                }
+                let r: i64 = join t;
+                print "iter", i, "->", r;
+                i = i + 1;
+              }
+              return 0;
+            }
+        "#;
+        compile(source).expect("task/join inside a loop body should not panic the checker");
+    }
+
+    #[test]
     fn fn_returning_str_compiles() {
         // `fn label() -> Str { return "hello"; }` — Str
         // return position is supported (unlike OwnedStr,

@@ -13027,4 +13027,45 @@ parses and verifies the emitted module). Verification: `cargo test
 --release --lib` (2909 tests, 0 failed), `cargo test --release --test
 run_end_to_end` (243 passed, 8 pre-existing ignored, 0 failed).
 
-Next free bug number is **BUG-186**.
+## BUG-186: `task`/`join` inside any loop body crashed the checker outright (FIXED 2026-08-12)
+
+Found immediately after BUG-185, while building a timed tic-tac-toe
+variant (a `task` races reading stdin against a countdown, spawned
+fresh each turn inside the game's `while true` loop). The very first
+version that spawned a task inside a loop body -- no
+`requires`/`ensures`/`invariant` clause anywhere in sight -- crashed
+`vanic check` outright:
+
+```
+thread 'main' panicked at src/checker.rs:37069:13:
+internal error: entered unreachable code: task/join cannot appear in a proof position (requires/ensures/invariant)
+```
+
+Root cause: `substitute_expr`'s `TaskSpawnCall`/`TaskJoinExpr` arm was
+`unreachable!()`, on the assumption that task/join could never reach
+a substitution context. False -- `walk_for_reassigns` (the
+bounds-elision pass's per-loop-iteration reassignment tracker, used
+to symbolically model "what does variable X equal after one
+iteration" for the compiler's OWN internal loop-invariant reasoning,
+not anything the user writes) calls `substitute_expr` on the RHS of
+*every* `let`/assign statement in a loop body unconditionally --
+including `let t: Task<i64> = task worker(...);` and `let r: i64 =
+join t;`. This runs on every loop regardless of whether it has an
+explicit `invariant` clause, so any loop containing task/join at all
+crashed the compiler, 100% reproducible, not a corner case.
+
+Fixed by having that arm return the expression unchanged instead of
+panicking: task/join results aren't something the SMT layer can
+reason about symbolically anyway (real threads, real side effects),
+so any later fact that ends up depending on one just goes unprovable
+(a normal `Unknown`/`SkippedUnsupported` outcome with a runtime-check
+fallback, the same as any other unprovable shape) -- not a crash.
+
+Regression test: `bug186_task_spawn_or_join_inside_a_loop_body_does_not_panic_the_checker`
+in `src/lib.rs`, using the exact minimal repro (a 3-iteration loop
+spawning+joining a task per iteration, checked via `compile()`
+directly since this is a pure checker-level panic, not a
+backend/runtime issue). Verification: `cargo test --release --lib`
+(2910 tests, 0 failed).
+
+Next free bug number is **BUG-187**.

@@ -37065,11 +37065,24 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
             // AnonFn is lifted before contract substitution runs.
             unreachable!("AnonFn should have been lifted before substitute_expr")
         }
-        ExprKind::TaskSpawnCall { .. } | ExprKind::TaskJoinExpr { .. } => {
-            unreachable!(
-                "task/join cannot appear in a proof position (requires/ensures/invariant)"
-            )
-        }
+        // BUG-186: this used to be `unreachable!()` on the assumption
+        // that task/join could never reach a substitution context.
+        // False -- `walk_for_reassigns` (the bounds-elision pass's
+        // per-loop-iteration reassignment tracker) calls
+        // `substitute_expr` on the RHS of every `let`/assign in a
+        // loop body unconditionally, including one that spawns or
+        // joins a task, and panicked the whole compiler on any loop
+        // containing `task`/`join` at all -- found building a timed
+        // tic-tac-toe variant (a task races stdin input against a
+        // countdown). Task/join results aren't something the SMT
+        // layer can reason about symbolically either way (they're
+        // real threads with real side effects), so the correct,
+        // conservative substitution is to leave the expression
+        // exactly as-is: any *later* SMT fact that ends up depending
+        // on this opaque value simply won't be provable (falls back
+        // to a runtime check, the same as any other unprovable
+        // shape), which is the intended behavior here -- not a crash.
+        ExprKind::TaskSpawnCall { .. } | ExprKind::TaskJoinExpr { .. } => expr.kind.clone(),
     };
     Expr {
         kind: new_kind,
