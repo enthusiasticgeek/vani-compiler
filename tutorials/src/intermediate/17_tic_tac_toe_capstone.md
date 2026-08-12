@@ -3,10 +3,12 @@
 > **Learning goal**: build one small, complete, *real* program from
 > pieces you already have -- `Vec<i64>` as mutable state, `ref`
 > parameters, `stdin_read_line()` + `parse_int()` + `if let`,
-> string concatenation, ANSI color via the `\x` hex escape, and a
-> `requires`/`ensures` contract the SMT solver actually proves. No
-> new language features are introduced here; this chapter is about
-> combining what you already know.
+> string concatenation, ANSI color via the `\x` hex escape, a
+> `requires`/`ensures` contract the SMT solver actually proves, and a
+> small heuristic computer opponent built from the same win-detection
+> logic as the human-vs-human game. No new language features are
+> introduced here; this chapter is about combining what you already
+> know.
 
 This is a walking tour of
 [`examples/language/english/tic_tac_toe.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/tic_tac_toe.vani),
@@ -36,8 +38,9 @@ printed on a real tic-tac-toe sheet:
 ```
 
 Play a full game and X's marks render in red, O's in blue, and the
-win/draw banner in the matching color (yellow for a draw). That
-color is the newest piece of this file -- more on it below.
+win/draw banner in the matching color (yellow for a draw). You'll
+also be asked up front whether to play against another human or the
+computer -- both are covered below.
 
 ---
 
@@ -142,12 +145,16 @@ concatenation.
 ## Detecting a winner
 
 ```vani
-fn winner_of(board: ref Vec<i64>) -> i64 {
-  let lines: Vec<i64> = vec(
+fn win_lines() -> Vec<i64> {
+  return vec(
     0, 1, 2,  3, 4, 5,  6, 7, 8,
     0, 3, 6,  1, 4, 7,  2, 5, 8,
     0, 4, 8,  2, 4, 6
   );
+}
+
+fn winner_of(board: ref Vec<i64>) -> i64 {
+  let lines: Vec<i64> = win_lines();
   let li: u64 = 0;
   while li < 8 as u64 {
     let base: u64 = li * 3 as u64;
@@ -167,12 +174,134 @@ fn winner_of(board: ref Vec<i64>) -> i64 {
 }
 ```
 
-`lines` is the flat list of all 8 winning triples -- 3 rows, 3
-columns, 2 diagonals -- 3 board indices each, 24 numbers total. The
-loop walks all 8 and checks whether the 3 cells they name are equal
-and non-empty. Returning `0` (no winner) after the loop, `1` for X,
-or `2` for O reuses the same encoding as the board cells themselves
--- one value space, no extra enum needed.
+`win_lines()` is the flat list of all 8 winning triples -- 3 rows, 3
+columns, 2 diagonals -- 3 board indices each, 24 numbers total,
+factored into its own function because the computer opponent below
+needs the exact same list. `winner_of`'s loop walks all 8 and checks
+whether the 3 cells they name are equal and non-empty. Returning `0`
+(no winner) after the loop, `1` for X, or `2` for O reuses the same
+encoding as the board cells themselves -- one value space, no extra
+enum needed.
+
+---
+
+## A simple computer opponent
+
+```vani
+fn find_winning_move(board: ref Vec<i64>, player: i64) -> i64 {
+  let lines: Vec<i64> = win_lines();
+  let li: u64 = 0;
+  while li < 8 as u64 {
+    let base: u64 = li * 3 as u64;
+    let ia: u64 = lines[base] as u64;
+    let ib: u64 = lines[base + 1 as u64] as u64;
+    let ic: u64 = lines[base + 2 as u64] as u64;
+    let a: i64 = board[ia];
+    let b: i64 = board[ib];
+    let c: i64 = board[ic];
+    if a == player {
+      if b == player {
+        if c == 0 {
+          return ic as i64;
+        }
+      }
+    }
+    if a == player {
+      if c == player {
+        if b == 0 {
+          return ib as i64;
+        }
+      }
+    }
+    if b == player {
+      if c == player {
+        if a == 0 {
+          return ia as i64;
+        }
+      }
+    }
+    li = li + 1 as u64;
+  }
+  return 0 - 1;
+}
+
+fn ai_move(board: ref Vec<i64>, ai_player: i64, human_player: i64) -> i64 {
+  let win_idx: i64 = find_winning_move(board, ai_player);
+  if win_idx >= 0 {
+    return win_idx;
+  }
+  let block_idx: i64 = find_winning_move(board, human_player);
+  if block_idx >= 0 {
+    return block_idx;
+  }
+  if board[4 as u64] == 0 {
+    return 4;
+  }
+  if board[0 as u64] == 0 {
+    return 0;
+  }
+  if board[2 as u64] == 0 {
+    return 2;
+  }
+  if board[6 as u64] == 0 {
+    return 6;
+  }
+  if board[8 as u64] == 0 {
+    return 8;
+  }
+  if board[1 as u64] == 0 {
+    return 1;
+  }
+  if board[3 as u64] == 0 {
+    return 3;
+  }
+  if board[5 as u64] == 0 {
+    return 5;
+  }
+  return 7;
+}
+```
+
+`find_winning_move` reuses `win_lines()` to answer one question:
+"is there a cell `player` could place at right now to complete three
+in a row?" `ai_move` calls it twice with the arguments swapped --
+first checking whether *it* can win outright, then whether it needs
+to block the human -- before falling back to a fixed cell-priority
+order (center, then corners, then edges). This is a **heuristic, not
+full minimax**: it never misses an immediate win or an immediate
+block, so it's a genuine opponent rather than a random-mover, but it
+doesn't look more than one move ahead. Item 5 in
+[Try it yourself](#try-it-yourself) below is exactly the gap between
+this and an unbeatable player.
+
+The final fallback is `return 7;`, not another `if board[7 as u64]
+== 0 { return 7; } return 0 - 1;` -- if every earlier branch's cell
+was occupied, index 7 (cell 8) is the *only* cell that can still be
+empty, since `ai_move` is only ever called when the board isn't full.
+Writing the unreachable `-1` fallback anyway would just be dead code
+protecting against a precondition the caller already guarantees.
+
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a real compiler bug, found and fixed"/>
+
+**A real compiler bug was found building this section.** Early
+versions of the game's mode-selection prompt did roughly `let
+vs_computer: bool = ...; print vs_computer;` followed later by
+`vec_fill(9, 0)` for the board -- and `vanic run` failed outright
+with `lli` rejecting the compiled module ("PHI node entries do not
+match predecessors!"). This traced back to a real bug in the LLVM
+backend (BUG-185, fixed the same day): printing a `bool` branches
+internally to two blocks (one for `"true"`, one for `"false"`) and
+merges them back together, but the merge never updated the codegen
+context's notion of "which block are we in now" -- so *any* later
+control-flow-producing code in the same function (not just
+`vec_fill`; an `if` or `while` would trigger it too) computed its
+own control flow against a stale, wrong predecessor block. Fixed by
+one missing assignment once found, but finding it took bisecting a
+much bigger repro down to four lines with no string builtins at all.
+This is worth knowing not because you'll hit this exact bug again --
+it's fixed -- but because it's a real example of what "the compiler
+has a bug in a construct you're using" actually looks like from the
+user side, and how bisection finds it.
 
 ---
 
@@ -287,18 +416,46 @@ caught here in milliseconds by construction.
 
 ```vani
 fn main() -> i64 {
+  print "vani tic-tac-toe -- two players, one terminal";
+  print "";
+  print "Play against another human, or the computer?";
+  print "Type 'c' for computer, anything else for two humans ('quit' or blank to exit):";
+  flush_stdout();
+  let mode_input: OwnedStr = stdin_read_line();
+  let mode_trimmed: OwnedStr = str_trim(mode_input);
+  if mode_trimmed == "" {
+    print "Goodbye!";
+    return 0;
+  }
+  if mode_trimmed == "quit" {
+    print "Goodbye!";
+    return 0;
+  }
+  let mode_lower: OwnedStr = str_to_lower(mode_trimmed);
+  let vs_computer: bool = str_starts_with(mode_lower, "c");
+
   let board: Vec<i64> = vec_fill(9, 0);
   let player: i64 = 1;
   let winner: i64 = 0;
   let moves_made: i64 = 0;
 
-  print "vani tic-tac-toe -- two players, one terminal";
   print "";
 
   while true {
     print_board(ref board);
     print "";
-    let idx: i64 = read_move(ref board, player);
+    let idx: i64 = 0 - 1;
+    if vs_computer {
+      if player == 2 {
+        idx = ai_move(ref board, 2, 1);
+        let ai_msg: OwnedStr = "Computer plays " + player_label(2) + " at " + i64_to_str(idx + 1) + ".";
+        print ai_msg;
+      } else {
+        idx = read_move(ref board, player);
+      }
+    } else {
+      idx = read_move(ref board, player);
+    }
     if idx < 0 {
       print "Goodbye!";
       return 0;
@@ -333,13 +490,20 @@ fn main() -> i64 {
 }
 ```
 
-Nothing new here -- a `while true` loop
-([Beginner 5 -- while/for loops](../beginner/05_loops.md)) that
-prints the board, reads one validated move, checks for a winner,
-checks for a draw, and flips `player` between `1` and `2`. The
-`idx < 0` check right after `read_move` is the quit path from the
-gotcha above, handled at the one call site that needs to care about
-it.
+The mode prompt reuses the same blank-or-`"quit"`-means-exit
+convention as `read_move` -- consistent behavior, and it means an
+automated, non-interactive run (like `tools/leak_sweep.py`) exits
+cleanly at the very first prompt instead of the second. `vs_computer`
+is decided with `str_to_lower` + `str_starts_with(mode_lower, "c")`,
+so `"c"`, `"computer"`, and `"Computer"` all work the same way; the
+game loop's `while true`
+([Beginner 5 -- while/for loops](../beginner/05_loops.md)) then
+picks `ai_move` or `read_move` per turn based on both `vs_computer`
+and whose turn it is. The human is always X and always goes first;
+the computer is always O. The `idx < 0` check right after that branch
+is the quit path from the gotcha above, handled at the one call site
+that needs to care about it -- unchanged by the AI addition, since
+`ai_move` (unlike `read_move`) always returns a real cell, never -1.
 
 ---
 
@@ -353,9 +517,20 @@ it.
 3. Color the empty-cell position numbers too (dim gray,
    `\x1b[2m...\x1b[0m`) so the placement guide is visually distinct
    from a placed mark.
-4. *(Bigger)* Generalize `winner_of`'s `lines` table to an N×N board
-   with a `k`-in-a-row win condition, and thread `N`/`k` through
-   `print_board` and `read_move` as parameters.
+4. *(Bigger)* Generalize `win_lines()` to an N×N board with a
+   `k`-in-a-row win condition, and thread `N`/`k` through
+   `print_board`, `read_move`, and `ai_move` as parameters.
+5. *(Bigger)* Replace `ai_move`'s fixed heuristic with real minimax
+   (or minimax + alpha-beta pruning): search every remaining move to
+   the end of the game, scoring wins/losses/draws, and pick the move
+   with the best guaranteed outcome. On a 3x3 board the full game
+   tree is small enough that a straightforward recursive
+   implementation is fast even unoptimized -- unlike the heuristic
+   above, minimax is provably unbeatable.
+6. Let the human choose to play O (and go second) instead of always
+   being X -- `ai_move`'s `ai_player`/`human_player` arguments are
+   already general enough to support this; only the mode-selection
+   prompt and the initial `player` value need to change.
 
 ---
 
@@ -375,6 +550,14 @@ it.
   ANSI color and there was no way to write the ESC byte otherwise --
   a small, generic lexer feature that outlived the one example that
   motivated it.
+- The computer opponent is a small heuristic (win, else block, else
+  a fixed cell-priority order) built on the exact same `win_lines()`
+  table `winner_of` already needed -- no new state, no new types,
+  just two more functions and a branch in the turn loop.
+- Building this section found a real LLVM backend bug (BUG-185) --
+  a reminder that "the compiler might have a bug in the exact
+  construct you're using" is a real possibility worth knowing how to
+  bisect toward, not just a hypothetical.
 
 ---
 
