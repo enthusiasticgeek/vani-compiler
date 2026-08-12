@@ -14546,3 +14546,78 @@ fn main() -> i64 {
         String::from_utf8_lossy(&llvm_out.stderr)
     );
 }
+
+// BUG-185 (2026-08-12): the tree-LLVM backend's `print <bool-expr>;`
+// codegen (`emit_print_expr_no_newline`, the `Type::Bool` arm)
+// branches to two blocks (print "true" / print "false"), merges them
+// back into a `p_done<N>` block, but never updated `ctx.current_block`
+// to point at that merge block afterward. Any later codegen in the
+// same function that reads `ctx.current_block` to compute a phi
+// node's incoming-block list -- `vec_fill`'s fill loop is one, but
+// this is a general `ctx` bookkeeping bug, not specific to vec_fill --
+// captured the STALE pre-branch block instead, producing a PHI node
+// whose declared predecessor doesn't match the block's real (fell-
+// through-via-p_done) predecessor. `lli` rejects the resulting module
+// outright ("PHI node entries do not match predecessors!"), so this
+// wasn't a silent-wrong-answer bug -- every affected program failed
+// to run at all on the default backend. Found while adding an AI
+// opponent to examples/language/english/tic_tac_toe.vani: the game's
+// own mode-selection prompt does `let vs_computer: bool = ...; print
+// vs_computer;` followed later by `vec_fill(9, 0)` for the board --
+// the exact shape that triggers this. Bisected down to a 4-line
+// minimal repro with no string builtins at all (`print true;` alone
+// is sufficient) before finding the root cause in backend_llvm.rs.
+// Fixed by adding the missing `ctx.current_block = m_lbl;` after the
+// merge block, matching the pattern used at every other branch-merge
+// site in this file.
+#[test]
+fn bug185_print_bool_then_vec_fill_does_not_corrupt_llvm_phi_predecessors() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-bug185-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let file = dir.join("bug185.vani");
+    fs::write(
+        &file,
+        "fn main() -> i64 {\n\
+         \x20 print true;\n\
+         \x20 let board: Vec<i64> = vec_fill(9, 0);\n\
+         \x20 print board[0 as u64];\n\
+         \x20 return 0;\n\
+         }\n",
+    )
+    .expect("write source");
+    let path = file.to_str().unwrap().to_string();
+
+    for backend_args in [vec!["run", &path], vec!["run", &path, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "true\n0\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -19026,6 +19026,7 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
             ));
             out.push_str(&format!("  br label %{}\n", m_lbl));
             out.push_str(&format!("{}:\n", m_lbl));
+            ctx.current_block = m_lbl;
         }
         ty if ty.is_unsigned_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, false);

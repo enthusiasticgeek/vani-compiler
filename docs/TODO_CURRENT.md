@@ -12974,3 +12974,57 @@ every `vanic run` invocation, not a clear-cut bug fix, and wasn't
 changed unilaterally. Full per-finding triage:
 `vani-compiler-localfuzz`'s `docs/TODO_LOCAL_STAGING.md`, "Triage
 closeout: 2026-08-12 17:32Z batch".
+
+## BUG-185: `print <bool>;` followed by `vec_fill` (or any later phi-consuming construct) corrupted LLVM codegen (FIXED 2026-08-12)
+
+Found while adding an AI opponent to
+`examples/language/english/tic_tac_toe.vani`: a mode-selection prompt
+did `let vs_computer: bool = ...; print vs_computer;` followed later
+by `vec_fill(9, 0)` for the board, and `vanic run` failed outright --
+`lli` rejected the emitted module with "PHI node entries do not match
+predecessors!". Not a silent-wrong-answer bug: every affected program
+failed to run at all on the default (LLVM) backend.
+
+Bisected down to a 4-line minimal repro with no string builtins
+involved at all:
+
+```vani
+fn main() -> i64 {
+  print true;
+  let board: Vec<i64> = vec_fill(9, 0);
+  print board[0 as u64];
+  return 0;
+}
+```
+
+Root cause: `backend_llvm.rs`'s `emit_print_expr_no_newline`, the
+`Type::Bool` arm, branches to two blocks (print "true" / print
+"false"), merges them back into a `p_done<N>` block -- but never
+updated `ctx.current_block` to point at that merge block afterward.
+Any later codegen in the same function that reads `ctx.current_block`
+to compute a phi node's incoming-block list (`vec_fill`'s fill loop
+is one; this is a general `FnCtx` bookkeeping bug, not specific to
+`vec_fill` -- an `if`/`while` after a bool print would hit the same
+gap) captured the stale pre-branch block instead of the real
+fell-through-via-`p_done` predecessor. Independently confirmed the
+bug generalizes beyond `vec_fill` (if-expression merge, while loop --
+both correct after the fix, both would have been wrong before it,
+not separately tested pre-fix since the vec_fill repro was already
+conclusive).
+
+Fixed by adding the missing `ctx.current_block = m_lbl;` right after
+emitting the merge block's label, matching the pattern used at every
+other branch-merge site in this file (`ctx.current_block = done_lbl;`
+etc.). The SSA-LLVM backend (`ssa_backend_llvm.rs`) doesn't have this
+bug -- checked directly, its bool-print codegen has no matching
+`p_done`-style branch/merge shape to begin with.
+
+Regression test: `bug185_print_bool_then_vec_fill_does_not_corrupt_llvm_phi_predecessors`
+in `tests/run_end_to_end.rs`, runs the minimal repro through both
+backends via a real `vanic run` (not just a `compile_to_llvm`
+substring check -- this class of bug only surfaces once `lli` itself
+parses and verifies the emitted module). Verification: `cargo test
+--release --lib` (2909 tests, 0 failed), `cargo test --release --test
+run_end_to_end` (243 passed, 8 pre-existing ignored, 0 failed).
+
+Next free bug number is **BUG-186**.
