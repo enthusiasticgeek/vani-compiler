@@ -6070,3 +6070,64 @@ STATUS: needs human/frontier root-cause review.
 The `try_question_op.vani` program, when compiled and run with both LLVM and C backends, exhibits backend-divergence due to an integer overflow in the `doubled_q` function. This results in a crash when the multiplication operation overflows. The exact repro source and observed symptom are provided in the details above.
 
 To resolve this issue, it is necessary to investigate the logic of the `doubled_q` function and ensure that there are no potential integer overflow conditions. Additionally, it might be beneficial to update the compiler or the backend implementation to handle large integer values more gracefully.
+
+---
+
+### Candidate: 20260812-084922-backend-divergence-eca210d4ac
+
+Repro: `tools/localfuzz/findings/20260812-084922-backend-divergence-eca210d4ac/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-084922-backend-divergence-eca210d4ac/fix_attempt.md`
+
+```plaintext
+vani-compiler: [LOCAL-STAGING] /home/virgo/source/vani-compiler-localfuzz/examples/language/czech/vec_invariants.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/vec_invariants.vani              # LLVM
+//   vanic run examples/language/czech/vec_invariants.vani --backend=c  # C
+
+záměr "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(0);
+  let i: i64 = 1;
+
+  dokud i < 5
+  neměnný len(xs) == (i jako u64);
+  neměnný i >= 1;
+  neměnný i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  dokaž i == 5;
+  dokaž len(xs) == 5;
+
+  vypiš xs[0];
+  vypiš xs[1];
+  vypiš xs[9223372036854775807];
+  vypiš xs[3];
+
+  vrať 0;
+}
+```
+
+Finding kind: backend-divergence
+Raw result data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "0\n10\n81\n30\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "0\n10\n80\n30\n",
+    "stderr":
