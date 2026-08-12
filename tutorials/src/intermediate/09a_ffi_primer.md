@@ -8,7 +8,8 @@
 > follows this; read this primer first if you've never used
 > a foreign-function call before.
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real `extern "C"` code once
+the analogy lands.
 
 ## Hiring a translator
 

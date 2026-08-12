@@ -8,7 +8,8 @@
 > here; then [Intermediate 3 -- Affine ownership](03_affine.md)
 > for syntax.
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real code illustrating the
+error messages it walks through.
 
 ## Recap
 

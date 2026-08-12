@@ -7,7 +7,8 @@
 > standalone foundation; read it before
 > [Intermediate 6 closures + iterator combinators](06_closures.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real closure code once the
+analogy lands.
 
 ## A function that "remembers"
 

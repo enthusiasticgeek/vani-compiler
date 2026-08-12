@@ -6,9 +6,10 @@
 > time after [Beginner 03 -- Functions and the four return
 > aliases](03_functions.md) and [Beginner 05 -- Loops](05_loops.md).
 
-This chapter has **no compiler code** until the last section, which
-uses tiny snippets only to point back at the analogy below. Read the
-analogy first.
+This chapter leads with an analogy, then real (small) vāṇी functions
+throughout to ground it -- nothing here uses syntax beyond what
+[Beginner 3](03_functions.md) and [Beginner 5](05_loops.md) already
+covered. Read the analogy first.
 
 ## The nesting dolls
 

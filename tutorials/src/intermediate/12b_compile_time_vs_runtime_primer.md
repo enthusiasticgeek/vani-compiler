@@ -8,7 +8,8 @@
 > primer](12a_smt_primer.md) and [Intermediate 10b -- Runtime
 > errors](10b_runtime_errors_primer.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real code illustrating
+several compile-time-vs-runtime tradeoffs.
 
 ## The recipe and the cooking
 
@@ -143,7 +144,7 @@ declaration scopes at each ref-source site.
 
 ### Race-free `parallel for`
 
-`parallel for i in 0..n { print "hi"; }` rejects: `print`
+`parallel for i from 0 to n { print "hi"; }` rejects: `print`
 is an observable side effect that would race. The effects
 checker walks every parallel-for body.
 

@@ -7,7 +7,8 @@
 > order: [Beginner 6b heap/stack primer](../beginner/06b_heap_vs_stack_primer.md)
 > -> this -> [Advanced 4 -- Embedded](04_embedded.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real code illustrating
+embedded-specific constructs once the analogy lands.
 
 ## The microwave and the laptop
 

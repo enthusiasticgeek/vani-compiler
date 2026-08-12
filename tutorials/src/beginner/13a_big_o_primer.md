@@ -8,7 +8,8 @@
 > per-fn `O(...)` annotation that this chapter teaches you to
 > read.
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with a couple of small loop
+examples to ground the Big-O classifications.
 
 ## Four ways to find a name
 

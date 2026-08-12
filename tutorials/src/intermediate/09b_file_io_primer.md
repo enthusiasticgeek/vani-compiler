@@ -6,8 +6,8 @@
 > Reading order: [Intermediate 9 -- FFI](09_ffi.md) -> here ->
 > [Intermediate 10 -- Result/try](10_result_try.md).
 
-This chapter has **no compiler code**. Pure concepts, then the
-one-page API reference.
+This chapter leads with concepts, then a one-page API reference
+with real code.
 
 ## Checking out a library book
 

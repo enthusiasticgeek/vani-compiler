@@ -8,7 +8,9 @@
 > [02a parallelism primer](02a_parallelism_primer.md) -> here
 > -> [Advanced 1 async/await](01_async.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real `async`/`await` code
+once the analogy lands (one Rust-style preview snippet is a plain,
+non-`vani`-tagged block, not real vāṇी code).
 
 ## The problem: waiting
 

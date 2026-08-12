@@ -7,7 +7,10 @@
 > order: 04a -> here -> [Intermediate 4 generics+interfaces](04_generics_iface.md)
 > -> [Intermediate 5 dyn dispatch](05_dyn.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with the real `interface`/
+`implement` syntax previewed once the analogy lands (plus a quick
+generics-with-a-bound aside, explained inline where it appears --
+[Intermediate 4c](04c_generics_primer.md) covers generics in full).
 
 ## The LEGO brick and the baseplate
 

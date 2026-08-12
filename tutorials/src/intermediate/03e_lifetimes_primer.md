@@ -8,7 +8,8 @@
 > deeper](03b_affine_deeper_primer.md), and [Intermediate 3d --
 > Cyclic references](03d_cyclic_references_primer.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with many small worked examples
+showing what the lifetime checker accepts and rejects.
 
 ## The borrowed ladder
 

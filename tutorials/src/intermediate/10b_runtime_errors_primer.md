@@ -9,7 +9,7 @@
 > + [Beginner 09 -- first contract](../beginner/09_smt_intro.md).
 > Optional follow-up: [Intermediate 12a -- SMT primer](12a_smt_primer.md).
 
-This chapter has **no compiler code**. Pure intuition with
+This chapter is mostly intuition, with real code for the
 side-by-side comparisons.
 
 ## The safety interlock

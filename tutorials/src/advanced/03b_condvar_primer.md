@@ -6,8 +6,8 @@
 > Reading order: [Advanced 3 -- Concurrency](03_concurrency.md)
 > -> here -> [Advanced 4a -- Embedded primer](04a_embedded_primer.md).
 
-This chapter has **no compiler code**. Pure intuition, then the
-one-page API reference.
+This chapter leads with intuition, then a one-page API reference
+with real code.
 
 ---
 

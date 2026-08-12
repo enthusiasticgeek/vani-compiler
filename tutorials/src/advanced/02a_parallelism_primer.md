@@ -8,7 +8,8 @@
 > Reading order: [06c ownership primer](../beginner/06c_ownership_primer.md)
 > -> here -> [Advanced 2 parallel for](02_parallel.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is mostly intuition, with real `parallel for` code
+once the analogy lands.
 
 ## The restaurant kitchen
 
