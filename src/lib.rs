@@ -51819,6 +51819,73 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug179_bptr_new_without_bptr_get_does_not_reference_undeclared_option_enum() {
+        // BUG-179 (2026-08-11): found while writing tutorial docs for
+        // `bptr_len`. `emit_intent_bptr_helpers_c_body`/
+        // `emit_intent_bptr_i64_helpers_llvm` unconditionally emitted
+        // `intent_bptr_i64_get`, whose return type is
+        // `Enum_Option__i64` -- but that typedef/LLVM type is only
+        // materialized when the checker's "Option<i64> auto-register
+        // pre-pass" fires, which only happens when `bptr_get` itself
+        // is CALLED (see the `walk_expr_for_search_builtins` match
+        // arm for `"bptr_get"`), not merely when `BoundedPtr<i64>` is
+        // used via `bptr_new`/`bptr_set`/`bptr_len`. A program using
+        // only the latter three compiled to C/LLVM text that LOOKED
+        // fine (the pre-existing `bptr_emits_helper_bundle_in_c`/
+        // `_llvm` tests above only assert substring presence, never
+        // actually invoke `cc`/`lli`) but failed outright at
+        // cc/lli time: "unknown type name 'Enum_Option__i64'" (C) /
+        // "invalid indices for insertvalue" on the undeclared LLVM
+        // type (LLVM) -- confirmed via `vanic run --backend=c`/
+        // default LLVM on a minimal `bptr_new` + `bptr_len` (no
+        // `bptr_get`) repro. Fixed by gating `intent_bptr_i64_get`'s
+        // emission on the `Option__i64` enum registry, exactly like
+        // every other Option<i64>-returning collection helper family
+        // (`heap_pop`/`btreeset_min`/`binary_heap_pop`/etc.) already
+        // does.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make(p: *mut i64, n: i64) -> i64 {
+              let bp: BoundedPtr<i64> = bptr_new(p, n, n);
+              return bptr_len(ref bp);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("BoundedPtr without bptr_get compiles to C");
+        assert!(
+            !c.contains("Enum_Option__i64"),
+            "bptr_get's helper (and its Enum_Option__i64 return type) \
+             must not be emitted when bptr_get is never called:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source)
+            .expect("BoundedPtr without bptr_get compiles to LLVM");
+        assert!(
+            !ll.contains("Enum_Option__i64"),
+            "bptr_get's helper (and its Enum_Option__i64 return type) \
+             must not be emitted when bptr_get is never called:\n{}",
+            ll
+        );
+
+        // And the positive case: bptr_get called => the helper (and
+        // its Option__i64 type) IS emitted, and still resolves
+        // correctly (not a regression on the working path).
+        let source_with_get = r#"
+            fn make(p: *mut i64, n: i64) -> i64 {
+              let bp: BoundedPtr<i64> = bptr_new(p, n, n);
+              return option_unwrap_or(bptr_get(ref bp, 0), -1);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c2 = compile_to_c(source_with_get)
+            .expect("BoundedPtr with bptr_get compiles to C");
+        assert!(
+            c2.contains("intent_bptr_i64_get"),
+            "expected intent_bptr_i64_get helper when bptr_get is called"
+        );
+    }
+
+    #[test]
     fn bptr_helpers_not_emitted_when_unused() {
         let source = r#"
             fn main() -> i64 { return 42; }

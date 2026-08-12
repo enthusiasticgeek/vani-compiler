@@ -81,6 +81,52 @@ The C backend lowers `raw_load`/`raw_store`/`bptr_get`/`bptr_set`
 to plain `*` dereferences; the LLVM backend uses `load` / `store`
 instructions.
 
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `bptr_new` | `(p: *mut i64, len, cap: i64) -> BoundedPtr<i64>` | wrap a raw pointer with a length + capacity |
+| `bptr_get` | `(ref bp, i: i64) -> Option<i64>` | bounds-checked read; `None` if `i` is out of range |
+| `bptr_set` | `(mut ref bp, i, v: i64) -> bool` | bounds-checked write; `false` if `i` is out of range |
+| `bptr_len` | `(ref bp) -> i64` | the length passed to `bptr_new` |
+
+Unlike `raw_load`/`raw_store`, `bptr_get`/`bptr_set` don't need
+`Tainted<i64>`/`assert_safe` -- the bounds check itself is the
+safety proof, so a bad index just returns `None` / `false` instead
+of reading/writing out of bounds.
+
+### Manual heap allocation: `unsafe_alloc` / `unsafe_free`
+
+For a heap block whose size isn't known until runtime (unlike
+`region`'s arena, which is scoped to one block, or `Pool<T>`, which
+is meant for many same-sized slots), there's a direct `malloc`/`free`
+pair:
+
+```vani
+fn scratch_buffer(n: i64) -> i64 {
+  unsafe(reason = "manual heap block for a scratch computation") {
+    let p: *mut i64 = unsafe_alloc(n);
+    let _ = raw_store(p, 100);
+    let t: Tainted<i64> = raw_load(p);
+    let v: i64 = assert_safe(t);
+    let _ = unsafe_free(p);
+    return v;
+  }
+}
+```
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `unsafe_alloc` | `(n: i64) -> *mut i64` | allocate room for `n` `i64`s on the heap |
+| `unsafe_free` | `(p: *mut i64) -> i64` | release a block returned by `unsafe_alloc` |
+
+There's no bounds checking and no generation tracking here -- this
+is the same trust level as C's `malloc`/`free`, just wrapped in
+`unsafe(reason = ...)` so the deviation is labeled at the call site.
+Prefer `Pool<T>` (safe, runtime-checked) or `region { ... }` (safe,
+compile-time-checked) above whenever either fits; reach for
+`unsafe_alloc`/`unsafe_free` only when you genuinely need a
+runtime-sized block with neither a pool's generation slots nor a
+region's single-scope lifetime.
+
 ## Two arena mechanisms: `Pool<T>` (v1, runtime-checked) vs `Region` + `ArenaRef<T>` (v2, compile-time-checked)
 
 `unsafe.md`'s embedded plan ships arena-style allocation in two
@@ -167,6 +213,17 @@ fn use_region() -> i64 {
   pointer deref on both backends; there's no bounds check, no
   canary, no generation check, because the compiler's escape
   analysis is the entire safety proof.
+- **`region_len(ref r) -> i64`** returns how many `i64` slots have
+  been bump-allocated in `r` so far.
+- **`region_alloc_i64(mut ref r, v) -> *mut i64`** is the same
+  bump-allocation as `region_borrow_i64`, but hands back a raw
+  `*mut i64` instead of an `ArenaRef<i64>` -- no compile-time escape
+  check, so it's gated behind `unsafe(...)` and reads/writes go
+  through `raw_load`/`raw_store` like any other raw pointer. Reach
+  for `region_borrow_i64` by default; `region_alloc_i64` exists for
+  the rare case where you need to hand the slot to `unsafe`-only code
+  (e.g. an FFI call taking a raw pointer) that can't accept an
+  `ArenaRef<i64>`.
 - **The escape check, verified directly**: returning an `ArenaRef`
   tied to a `Region` declared inside the same function --
   `fn dangler() -> ArenaRef<i64> { region r { return

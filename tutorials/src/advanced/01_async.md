@@ -135,6 +135,82 @@ backend currently miscompiles this specific example on Windows
 (`lli` rejects the emitted IR with an undefined-SSA-value error --
 a known gap, not something introduced by reading this chapter).
 
+That `drive(...)` loop's `ep` handle -- the thing `epoll_wait_one`
+polls -- comes from a small set of setup/teardown builtins that
+never shows up in the desugared snippets above, only in the full
+example file:
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `epoll_new` | `() -> i64` | create an epoll instance; returns its handle (`-1` on error) |
+| `epoll_add_read` | `(epfd, fd: i64) -> i64` | register `fd` for readability events on `epfd` |
+| `epoll_wait_one` | `(epfd, timeout_ms: i64) -> i64` | block until one registered fd is ready; returns that fd, `-2` on timeout, `-1` on error |
+| `epoll_close` | `(epfd: i64) -> i64` | close the epoll instance |
+
+The pattern every non-blocking example in this chapter follows:
+`epoll_new()` once, `tcp_set_nonblocking` + `epoll_add_read` on every
+socket you register, then loop on `epoll_wait_one` between poll
+attempts, and `epoll_close` when done.
+
+## You don't have to go async: the plain blocking socket API
+
+Everything above -- suspend points, `Task`, `select`, `epoll` -- exists
+because a real server juggles many connections on one thread. If
+you're writing a short script that talks to exactly one peer at a
+time, none of that machinery is required: vāṇी also ships an
+ordinary **blocking** socket API, the same shape you'd reach for
+first in Python or C.
+
+```vani
+intent "Plain blocking TCP -- no async, no epoll";
+
+fn main() -> i64 {
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task client {
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ping");
+    let _ = tcp_close(c);
+  }
+
+  // Blocks the calling thread until a client connects -- fine for
+  // a short-lived script, wrong for a server juggling many peers.
+  let peer: i64 = tcp_accept(server);
+  let n: i64 = tcp_recv(peer, 64);
+  print "bytes received:", n;   // 4  ("ping")
+  let _ = tcp_send_buf(peer, n);   // echo it back
+
+  join client;
+  let _ = tcp_close(peer);
+  let _ = tcp_close(server);
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `tcp_listen` | `(port: i64) -> i64` | bind a server socket; `port = 0` lets the OS pick one |
+| `tcp_socket_port` | `(fd: i64) -> i64` | read back the bound port (useful after `tcp_listen(0)`) |
+| `tcp_accept` | `(server_fd: i64) -> i64` | **block** until a client connects; return its fd |
+| `tcp_connect_local` | `(port: i64) -> i64` | connect to `127.0.0.1:port` |
+| `tcp_send_str` | `(fd: i64, s: Str) -> i64` | send a string's bytes |
+| `tcp_recv` | `(fd: i64, max: i64) -> i64` | **block** until data arrives (or EOF); return byte count |
+| `tcp_send_buf` | `(fd: i64, n: i64) -> i64` | send the first `n` bytes most recently read by `tcp_recv` |
+| `tcp_close` | `(fd: i64) -> i64` | close a socket |
+
+`tcp_recv` reads into a per-thread buffer (4KB, one buffer per OS
+thread -- concurrent `task` bodies each get their own), which
+`tcp_send_buf` echoes from directly, so a request/response echo is
+just `tcp_recv` then `tcp_send_buf(fd, n)`. This is the same
+"one-thread-per-connection" model `task`/`join` already gives you
+elsewhere in vāṇी -- reach for it before reaching for `async`/
+`epoll`, and only graduate to the suspend-point machinery above once
+you actually need one thread serving many connections at once.
+`tcp_accept_nb`/`tcp_recv_nb` (used earlier in this chapter) are the
+non-blocking siblings of `tcp_accept`/`tcp_recv` -- same socket, same
+data, the only difference is whether the call waits.
+
 ## What's coming and what's queued
 
 | Today | Queued |
