@@ -89,6 +89,7 @@
 - [RwLock: shared reads, exclusive writes -- intuition primer](advanced/02c_rwlock_primer.md)
 - [`parallel for` + reductions + race-freedom](advanced/02_parallel.md)
 - [`task` / `join` + atomics / mutexes / channels / barriers / rwlocks](advanced/03_concurrency.md)
+- [Capstone: timed tic-tac-toe (task/join/Atomic)](advanced/03c_timed_tic_tac_toe_capstone.md)
 - [Condition variables: wait-until-predicate -- intuition primer](advanced/03b_condvar_primer.md)
 - [Embedded, `unsafe`, and regions -- intuition primer](advanced/04a_embedded_primer.md)
 - [Cross-compilation and bare-metal targets -- intuition primer](advanced/04b_cross_compile_primer.md)
