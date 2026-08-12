@@ -6486,3 +6486,59 @@ Harness refreshed to main HEAD `7ba35f99` (via `refresh.sh`) before
 closing this batch, so the BUG-187 fix is already live in the
 fuzzed binary going forward -- no risk of re-discovering the same
 finding.
+
+---
+
+### Candidate: 20260812-231730-backend-divergence-16a948ecfe
+
+Repro: `tools/localfuzz/findings/20260812-231730-backend-divergence-16a948ecfe/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-231730-backend-divergence-16a948ecfe/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Staging Entry:**
+
+---
+
+**Date:** [Insert Date]
+
+**Time:** [Insert Time]
+
+**Bug Report Author:** [Your Name]
+
+**Report Identifier:** [Unique Identifier for this Bug Report]
+
+---
+
+**Description of the Bug:**
+
+A vani compiler bug was encountered during local staging. The base corpus file `vec_invariants.vani` was provided, and a mutation was generated to cause a crash or divergent behavior in the target backend (LLVM).
+
+**Steps to Reproduce the Bug:**
+
+1. **Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/sanskrit/vec_invariants.vani`
+2. **Mutant/generated Source:**
+   ```vani
+   // श्री।.
+   // vani-lang: sanskrit
+   //
+   // build & run:
+   //   vanic run examples/language/english/vec_invariants.vani                          # LLVM backend, JIT via lli
+   //   vanic run examples/language/english/vec_invariants.vani --backend=c              # C backend, gcc
+   //   vanic build examples/language/english/vec_invariants.vani -o /tmp/vec_invariants && /tmp/vec_invariants   # native binary
+   ```
+
+**Observations:**
+
+- **LLVM Backend (RC 134):**
+  ```json
+  {
+    "kind": "backend-divergence",
+    "c": {
+      "rc": 134,
+      "stdout": "\u0966\n\u0967\u0966\n\u0968\u0966\n\u0969\u0966\n",
+      "stderr": "index out of bounds\n",
+      "timed_out": false
+    },
+    "llvm": {
+      "rc": 1
