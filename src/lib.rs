@@ -7469,6 +7469,78 @@ mod tests {
     }
 
     #[test]
+    fn bug187_implement_block_param_type_mismatch_with_interface_is_rejected() {
+        // BUG-187: the checker validated an `implement` block's method
+        // against its `interface` declaration for parameter COUNT and
+        // return type, but never for each parameter's actual TYPE. An
+        // impl could silently redeclare a parameter's type (interface
+        // says `f64`, impl says `i64`) and the checker accepted it --
+        // the two backends then disagreed on the calling convention for
+        // a `dyn Iface` vtable call (float vs. integer register/ABI
+        // slot), producing backend-dependent garbage at runtime instead
+        // of a compile error. Found by localfuzz mutating
+        // examples/language/english/design_patterns/behavioral/
+        // observer.vani's interface parameter type from i64 to f64
+        // (while its three `implement` blocks stayed at i64) -- LLVM
+        // read garbage for 2 of 3 observers' dyn-dispatched calls, C
+        // happened to read the right value for all 3. Fixed by adding a
+        // per-parameter type check (skipping `self`, which legitimately
+        // varies per impl by design, and substituting the interface's
+        // own `Self` placeholder via the existing `substitute_self_type`
+        // helper before comparing -- reused from default-method
+        // injection, so `eq(self: ref Self, other: ref Self)` style
+        // interfaces where `Self` is used for a NON-self parameter too
+        // still correctly compile).
+        let source = r#"
+            struct Thing { tag: Str }
+            interface Greeter {
+              fn greet(self: Thing, value: f64) -> i64;
+            }
+            implement Greeter for Thing {
+              fn greet(self: Thing, value: i64) -> i64 {
+                print self.tag, "value =", value;
+                return 0;
+              }
+            }
+            fn main() -> i64 {
+              let t: Thing = Thing { tag: "hi" };
+              let _ = t.greet(42);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("f64-vs-i64 param mismatch should be rejected");
+        assert!(errors.iter().any(|e| e.message.contains("declares parameter 'value' as i64")
+            && e.message.contains("interface 'Greeter' declares it as f64")));
+    }
+
+    #[test]
+    fn bug187_self_placeholder_param_still_matches_across_different_impls() {
+        // Companion to the fix above: an interface using `Self` for a
+        // non-`self` parameter (the common "compare to another instance
+        // of the same type" shape, e.g. `Eq`) must still compile --
+        // `Self` gets substituted with each impl's own concrete type
+        // before the per-parameter comparison, not compared literally.
+        let source = r#"
+            struct Key { id: i64 }
+            interface Eq {
+              fn eq(self: ref Self, other: ref Self) -> bool;
+            }
+            implement Eq for Key {
+              fn eq(self: ref Key, other: ref Key) -> bool {
+                return self.id == other.id;
+              }
+            }
+            fn main() -> i64 {
+              let a: Key = Key { id: 1 };
+              let b: Key = Key { id: 1 };
+              assert a.eq(ref b);
+              return 0;
+            }
+        "#;
+        compile(source).expect("Self-substituted param types must still be accepted");
+    }
+
+    #[test]
     fn fn_returning_str_compiles() {
         // `fn label() -> Str { return "hello"; }` — Str
         // return position is supported (unlike OwnedStr,
