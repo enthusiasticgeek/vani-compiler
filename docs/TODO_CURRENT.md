@@ -12783,3 +12783,92 @@ set), `tools/leak_sweep.py` clean (18 skipped / 4 flagged, matches
 baseline exactly).
 
 Next free bug number is **BUG-184**.
+
+## BUG-184 (2026-08-12) -- CLOSED: `--big-o` misclassified 3 real builtins as O(1) instead of O(log n)
+
+Found while adding regression-test coverage for `src/big_o.rs` (the
+`--big-o`/`// complexity:` annotation pass) at the user's request, after
+noticing the existing test suite only ever exercised `binary_search` for
+the `Logarithmic` classification -- none of the BTreeMap/BTreeSet/BST
+builtins `is_logn_builtin` also lists were ever actually called by a
+test. Cross-checking that function's match list against the real builtin
+name registry (`checker.rs`'s `BUILTIN_NAMES` list) found three wrong
+entries: `"btreemap_contains"` (the real builtin is
+`"btreemap_contains_key"` -- missing the `_key` suffix, confirmed via
+the existing `btreemap_basics_typecheck_and_compile` test's own call
+site) and `"btreeset_get"` / `"bst_search"` (neither exists as a
+builtin at all -- BTreeSet has no `get`, and BST's lookup builtin is
+`bst_contains`, already listed separately). All three were silent
+no-ops: a fn whose only superlinear-ish operation was
+`btreemap_contains_key` fell through to the "unknown builtin -> O(1)"
+default and got classified `Constant` instead of `Logarithmic`. Low
+severity (this pass only affects an advisory comment/CLI annotation,
+never compiled code), but a real, confirmed inaccuracy nonetheless.
+Fixed by correcting the string and removing the two phantom entries.
+
+Also added 6 regression tests covering paths the existing 19 big_o
+tests never exercised: `is_linear_builtin` called standalone at
+depth-0 (must classify `Linear`, not just contribute inside a loop);
+the same builtin called INSIDE a loop (must bump to `Polynomial(2)`,
+per the "linear builtin in a loop adds a nesting level" comment in
+`merge_with_expr_and_callees`); `parallel for`'s `parallel: bool`
+field being correctly ignored by the `TypedStmt::For {  .., .. }`
+match arm (i.e. it still bumps nesting depth like a sequential `for`,
+rather than silently falling through the `_ => {}` catch-all);
+`propagate_callee_into_summary`'s `BigO::Polynomial(k)` arm (a
+Polynomial(2) callee inside the caller's own loop must combine to
+Polynomial(3), not stay at 2); and the corrected `btreemap_contains_
+key` classification plus a `bst_contains` sanity check.
+
+Added `big_o_btreemap_contains_key_is_logarithmic`,
+`big_o_bst_contains_is_logarithmic`,
+`big_o_linear_builtin_at_top_level_is_linear`,
+`big_o_linear_builtin_inside_loop_bumps_to_polynomial`,
+`big_o_parallel_for_bumps_depth_like_regular_for`, and
+`big_o_polynomial_callee_propagates_through_loop` in `src/lib.rs`
+(25 big_o tests total now, up from 19). Verification: `cargo test
+--release` (2906 lib tests + 12 other suites, 0 failed), `vanic check
+examples` (1022/1040 ok, same 18 non-ok as baseline, zero new
+failures), `tools/leak_sweep.py` clean (18 skipped / 4 flagged,
+matches baseline exactly).
+
+Next free bug number is **BUG-185**.
+
+## Tooling: `scripts/release.py` now refuses to ship placeholder release notes / changelog (2026-08-12)
+
+Prompted directly by discovering, while checking on the same request
+above, that `v0.9.2` (tagged 2026-08-11) had been released with BOTH
+`RELEASE_NOTES/v0.9.2.md` and `CHANGELOG.md`'s `## [v0.9.2]` entry
+still holding their auto-scaffolded `TODO`/`YYYY-MM-DD` placeholder
+content, completely unfilled -- unlike every prior release. Backfilled
+real content into both files (a themed writeup of the ~38 bugs,
+BUG-141 through BUG-178, that actually shipped in that release), then
+fixed the root cause: nothing in `scripts/release.py` or
+`.github/workflows/release.yml` ever checked whether the scaffolded
+files got real content before the tag was pushed.
+
+Added `check_notes_not_stale(ver)` to `scripts/release.py`: matches
+the exact scaffold-bullet shape (a line starting with `- TODO`, not a
+bare `"TODO"` substring search -- caught during testing that a naive
+substring check false-positives on legitimate prose mentioning
+`docs/TODO_CURRENT.md`) plus the literal `YYYY-MM-DD` placeholder
+date, checked against both `RELEASE_NOTES/v<ver>.md` and
+`CHANGELOG.md`'s `## [v<ver>]` block. Wired in as new step 5/10
+(renumbered from the previous 9 steps), right after the
+scaffold/prepend steps and before the commit -- so the intended
+workflow (write real content BEFORE running the script, letting
+steps 3/4 detect the files already exist and skip scaffolding) passes
+cleanly, while the v0.9.2 failure mode (scaffold, then tag/push
+without ever touching the content) now hard-fails with a clear error
+naming exactly which file/marker is still a placeholder. Added
+`--allow-stale-notes` as an explicit, clearly-discouraged override for
+genuine edge cases. `--dry-run` skips the check entirely (files aren't
+necessarily written to disk in that mode).
+
+Verified via `python3 -m py_compile scripts/release.py`, a direct
+`check_notes_not_stale` call against every existing release
+(`v0.3.0`..`v0.9.2` all report zero problems -- confirms the retroactive
+backfill left no other release accidentally still stale), a freshly-
+scaffolded throwaway version (`0.0.1-test`, cleaned up after) correctly
+reporting both markers, and a full `--dry-run --no-push --patch` run
+completing cleanly end-to-end with the renumbered step output.
