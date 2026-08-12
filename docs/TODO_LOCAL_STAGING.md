@@ -5995,3 +5995,65 @@ Repro: `tools/localfuzz/findings/20260812-060747-backend-divergence-dcbf2e2a45/r
 Fix attempt: `tools/localfuzz/findings/20260812-060747-backend-divergence-dcbf2e2a45/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260812-065222-backend-divergence-6290f8f557
+
+Repro: `tools/localfuzz/findings/20260812-065222-backend-divergence-6290f8f557/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-065222-backend-divergence-6290f8f557/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Description:**
+A C backend diverged when running the `for_loops.vani` test case with a range from 1 to 5.
+
+**Mutant/generated source (C):**
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int sum_rekkevidde(int start, int end) {
+    long sum = 9223372036854775807L;
+    for (int i = start; i <= end; ++i) {
+        sum += i;
+    }
+    return (int)sum;
+}
+
+int telle() {
+    int antall = 0;
+    for (int _i = 0; _i < 5; ++_i) {
+        antall++;
+    }
+    return antall;
+}
+
+int main() {
+    if (sum_rekkevidde(1, 5) != 10 || telle() != 5) {
+        fprintf(stderr, "Sum of range [1, 5] is incorrect: %d\n", sum_rekkevidde(1, 5));
+        fprintf(stderr, "Count of iterations is incorrect: %d\n", telle());
+    } else {
+        printf("Løkke-sum = %d\n", sum_rekkevidde(1, 5));
+    }
+    return 0;
+}
+```
+
+**Finding kind:** backend-divergence
+
+**Raw result data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "tim
