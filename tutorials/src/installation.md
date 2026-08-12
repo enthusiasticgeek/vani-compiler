@@ -286,9 +286,11 @@ If you see `42`, your install is healthy and you're ready for [Lesson 1 ->](begi
 
 ## Editor integration (LSP)
 
-vāṇी ships a Language Server that gives you hover types, go-to-definition,
-find-references, rename, completion, quick-fix code actions, and semantic
-highlighting in any LSP-compatible editor.
+vāṇी ships a Language Server implementing the **Language Server
+Protocol (LSP)** -- the standard JSON-RPC interface most editors use
+to talk to a language's tooling. It gives you hover types,
+go-to-definition, find-references, rename, completion, quick-fix code
+actions, and semantic highlighting in any LSP-compatible editor.
 
 ### Build the language server
 

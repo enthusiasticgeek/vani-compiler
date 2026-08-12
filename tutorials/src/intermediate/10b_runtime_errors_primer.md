@@ -192,8 +192,11 @@ the caller to handle, or is structurally prevented (Row 1).
 **Aside -- why the SAME source line can print differently-worded
 messages on the two `--backend=c` runs, or even between LLVM and C.**
 There are actually TWO C backends (and two LLVM backends) under the
-hood: a fast "SSA" path for the common case, and a slower "tree"
-fallback for constructs the SSA path doesn't (yet) support -- picked
+hood: a fast "SSA" (Static Single Assignment -- each variable is
+assigned exactly once, which makes optimization passes simpler; see
+the [glossary](../glossary.md#compiler-pipeline)) path for the common
+case, and a slower "tree" fallback for constructs the SSA path
+doesn't (yet) support -- picked
 per-program, independently on each of the four backend/path
 combinations. `Vec<T>` used to be one such gap as of early
 2026-08-10 (a program using `Vec` could take the SSA path on LLVM
