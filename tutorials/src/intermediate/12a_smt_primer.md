@@ -303,6 +303,13 @@ SMT solvers are powerful but not omniscient. They struggle with:
   solver has theories for these but they get expensive.
 - **Recursion without a recursion bound**: same as loops --
   needs a manual hint.
+- **Bounds elision inside any loop body**: unlike the
+  straight-line examples above, `xs[i]` never has its bounds
+  check elided when it's lexically inside a `while`/`for`
+  loop, even if `i` is provably in range every iteration. This
+  is a deliberate soundness trade-off (see `docs/
+  v1_limitations.md`'s L26), not a solver weakness -- the check
+  stays in the emitted code on purpose.
 
 When the solver fails, you get a clear diagnostic: "couldn't
 prove `xs[i] < 100` at this point; consider adding an

@@ -168,6 +168,14 @@ surrounding context (an enclosing `requires` clause, an
 index on a known-length array), the guard is **elided**.
 The runtime check disappears from the artifact.
 
+This elision never applies to an index expression lexically
+inside a loop body (`while`, `for`, `for..in`), even when the
+index is provably safe -- e.g. a `for` loop's own induction
+variable. That case keeps its runtime guard unconditionally
+as of 2026-08-12; see [`docs/v1_limitations.md`'s L26](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)
+for why (a real memory-safety bug, not a missed optimization
+opportunity, forced this trade-off).
+
 ### Integer overflow
 
 `a + b` may overflow if `a` and `b` are close to `i64::MAX`.

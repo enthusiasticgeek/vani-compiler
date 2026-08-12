@@ -12649,3 +12649,43 @@ are now passing again with the corrected invariant),
 `tools/leak_sweep.py` clean (matches baseline exactly).
 
 Next free bug number is **BUG-183**.
+
+## Update 2026-08-12: tutorial sweep for BUG-179..182, one real gap found (docs-only, no new bug number)
+
+Audited every tutorial that touches SMT bounds/overflow elision,
+loop invariants, `bptr_*`, and generics-in-unsafe/task-blocks for
+claims invalidated by BUG-179 through BUG-182. Findings:
+
+- BUG-179 (bptr_get gating) and BUG-180 (generics inside unsafe/
+  task blocks): neither was ever a documented tutorial claim --
+  both were pure compiler gaps with no prior tutorial text to
+  correct. The existing `bptr_new`/`bptr_get` worked example in
+  Advanced 4/4a already calls `bptr_get`, so it was never affected
+  by BUG-179's specific gap (`bptr_get` never called) either way.
+  Nothing to change.
+- BUG-182 (stale post-loop fact): no tutorial demonstrates a loop
+  invariant proving a post-loop Vec-length fact, so there was no
+  stale claim to fix. The two example files it broke/fixed
+  (`examples/language/{arabic,hebrew}/vec_invariants.vani`) aren't
+  tutorial-referenced.
+- BUG-181 (loop-body bounds elision removed): **was** a real,
+  previously-undocumented behavior change worth surfacing --
+  before this fix, a `for` loop's own provably-safe indexing could
+  have its bounds check elided; after, it never does, inside any
+  loop body. Added `docs/v1_limitations.md`'s **L26** describing
+  the trade-off and why it's permanent-for-now (BUG-181 was a real
+  memory-safety hole, not a false positive), plus short
+  cross-reference notes in [Intermediate 12a](../tutorials/src/intermediate/12a_smt_primer.md)'s
+  "what the solver can't do" list and [Intermediate 12b](../tutorials/src/intermediate/12b_compile_time_vs_runtime_primer.md)'s
+  bounds-check elision section, so a reader who expects loop-body
+  elision (per the straight-line examples elsewhere in those two
+  chapters) finds the answer instead of a silent gap.
+
+No `mdbook` binary available locally to render-verify the new
+cross-reference links; anchor slugs and relative paths were
+checked by hand against the existing link conventions used
+elsewhere in the same two files (both already link to sibling
+`../v1_limitations.md`-style targets successfully).
+
+Proceeding to BUG_PATTERN_AUDIT_TODO_12.md's round-12 targeted
+smt_facts audit next.
