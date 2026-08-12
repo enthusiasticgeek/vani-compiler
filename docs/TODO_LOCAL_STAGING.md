@@ -5940,3 +5940,12 @@ vanic run examples/language/amharic/option_types.vani --backend=c
 // Note: Amharic has no native match keyword; Option<T> tested via ? chaining.
 
 
+
+---
+
+### Candidate: 20260812-021501-run-crash-aafdb01382
+
+Repro: `tools/localfuzz/findings/20260812-021501-run-crash-aafdb01382/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-021501-run-crash-aafdb01382/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
