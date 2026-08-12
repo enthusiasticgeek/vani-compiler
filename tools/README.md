@@ -4,6 +4,7 @@ Out-of-tree utilities that do not ship with the compiler binary.
 
 - [`vani_translate.py`](#vani_translatepy) — keyword translation between 57 languages with optional LLM translation of comments, strings, and identifiers
 - [`leak_sweep.py`](#leak_sweeppy) — ASan + LeakSanitizer + UBSan sweep over the example corpus, run in CI
+- [`install-cross-qemu.sh`](#install-cross-qemush) — set up AArch64 / RISC-V 64 QEMU user-mode emulation + cross-compilers for local `--target=` testing
 - [`llm_context/`](llm_context/README.md) — prompt-engineering bundle and MCP server for AI agents (Phase ML-2)
 
 ---
@@ -300,6 +301,33 @@ python3 tools/leak_sweep.py --update-baseline
 ```
 
 Full methodology writeup, and the reasoning behind each currently-baselined finding, is in `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+---
+
+## `install-cross-qemu.sh`
+
+**Status**: Dev-environment helper; installs the same packages `.github/workflows/ci.yml`'s `test-aarch64-qemu` / `test-riscv64-qemu` jobs use
+
+Sets up local AArch64 and RISC-V 64-bit cross-compilation + QEMU
+user-mode emulation on Debian/Ubuntu, so `vanic run --target=...`
+and `cargo test --target ...` can be exercised without CI:
+`qemu-user-static` (provides `qemu-aarch64-static` /
+`qemu-riscv64-static` and kernel binfmt_misc registration, so
+foreign-arch binaries run transparently), `gcc-aarch64-linux-gnu`,
+and `gcc-riscv64-linux-gnu`.
+
+```bash
+./tools/install-cross-qemu.sh          # install + verify (needs sudo)
+./tools/install-cross-qemu.sh --check  # verify only, no install/sudo
+```
+
+Prints ready-to-use `CARGO_TARGET_*_RUNNER` / `vanic run --target=`
+invocations on success, including the `QEMU_RISCV64`/`--cpu=sifive-x280`
+combo needed to exercise RVV (Vector extension) codegen and the
+`QEMU_AARCH64`/`--sve2` combo for SVE. See
+[Advanced 4b -- Cross-compilation](../tutorials/src/advanced/04b_cross_compile_primer.md)
+and [`docs/qemu_testing.md`](../docs/qemu_testing.md) for the full
+reference.
 
 ---
 
