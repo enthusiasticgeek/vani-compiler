@@ -151,6 +151,61 @@ p2.b = 14
 | Move ownership out | pass by value (no `ref`) |
 | Pass a `Vec<T>` to a function for reading | `ref Vec<T>` |
 
+## A third option: copying instead of moving or borrowing
+
+Move and borrow (`ref`/`mut ref`) cover most cases, but sometimes
+you genuinely want a second, independent copy of a non-Copy value --
+not a borrow (which can't outlive the original) and not a move
+(which empties the original). `clone`/`clone_at` are the explicit,
+visible-cost way to do that:
+
+```vani
+intent "clone and clone_at";
+
+struct Point { x: i64, y: i64 }
+
+fn main() -> i64 {
+  // clone(xs): deep-copy a WHOLE Vec. Note the call syntax --
+  // no `ref` -- but unlike every other by-value builtin argument,
+  // `clone` is special-cased to NOT move-consume `xs`: it stays
+  // usable afterward.
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let ys: Vec<i64> = clone(xs);
+  let _ = push(mut ref ys, 4);   // mutating the clone...
+  print "xs untouched:", xs[0], xs[1], xs[2];     // 1 2 3
+  print "ys has the push:", ys[0], ys[3];          // 1 4
+
+  // clone_at(ref xs, i): deep-copy just ONE element, by index.
+  // This is the answer to "how do I read xs[i] when the element
+  // type is non-Copy" -- plain indexing (`xs[i]`) is rejected for
+  // those (see the sibling primer on Vec<T>/HashMap for why:
+  // it would alias the owner's slot and double-free on drop).
+  let names: Vec<OwnedStr> = vec("alice" + "", "bob" + "");
+  let first: OwnedStr = clone_at(ref names, 0);
+  print "clone_at OwnedStr:", first;               // alice
+
+  let pts: Vec<Point> = vec(Point { x: 1, y: 2 }, Point { x: 3, y: 4 });
+  let p0: Point = clone_at(ref pts, 0);
+  print "clone_at struct field:", p0.x;             // 1
+
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `clone(xs)` | `Vec<T> -> Vec<T>` | deep-copy an entire `Vec`; does NOT consume `xs` (a deliberate exception to normal by-value move semantics) |
+| `clone_at(ref xs, i)` | `ref Vec<T> \| ref [T; N], i64 -> T` | deep-copy just element `i`, by value, out of a `Vec` or fixed-size array |
+
+`clone_at` supports `Copy` element types (redundant there, but
+legal), `Vec<T>`, `OwnedStr`, structs, enums, and tuples. It does
+**not** yet support other owning, non-Copy element types nested
+inside a `Vec`/array -- `Box<T>`, `Mutex<T>`, `HashMap<K,V>`, and
+similar -- the checker rejects those with a clear diagnostic rather
+than let either backend's codegen see an element type it can't
+safely deep-clone (a naive bitwise copy of, say, `Box<T>` would
+alias the same heap allocation and double-free it).
+
 ## What the compiler catches
 
 ### Passing by value where `ref` is expected

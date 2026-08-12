@@ -1596,10 +1596,16 @@ pub fn emit_c(program: &TypedProgram) -> String {
     }
     // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> fat pointer.
     // The `bptr_get` builtin returns `Enum_Option__i64`; the
-    // auto-register pre-pass in checker.rs ensures the
-    // Option__i64 typedef is materialized before this bundle.
+    // auto-register pre-pass in checker.rs only fires when
+    // `bptr_get` itself is called (not merely `bptr_new`/
+    // `bptr_set`/`bptr_len`), so -- like every other Option<i64>-
+    // returning collection helper family -- gate the get() helper
+    // on the registry instead of assuming it's always populated.
     if program_uses_bptr(program) {
-        emit_intent_bptr_helpers_c_body(&mut body);
+        let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
+            r.borrow().contains_key("Option__i64")
+        });
+        emit_intent_bptr_helpers_c_body(&mut body, has_option_i64);
     }
     // Layer 5 v2 foundation of `unsafe.md` — Region bump-
     // allocator arena.
@@ -3212,7 +3218,7 @@ fn emit_intent_unsafe_alloc_helpers_c_body(out: &mut String) {
 /// `capacity` is recorded for future-resize APIs (Layer 3.2+
 /// could add `bptr_with_capacity` / `bptr_push` patterns) but
 /// not yet exercised — `len` is the active bound for v1.
-fn emit_intent_bptr_helpers_c_body(out: &mut String) {
+fn emit_intent_bptr_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
         "typedef struct { int64_t* data; uint64_t len; uint64_t capacity; } intent_bptr_i64;\n\
          static INTENT_UNUSED intent_bptr_i64 intent_bptr_i64_new(int64_t* p, int64_t len, int64_t capacity) {\n\
@@ -3222,11 +3228,6 @@ fn emit_intent_bptr_helpers_c_body(out: &mut String) {
          \x20 bp.capacity = (uint64_t)(capacity < 0 ? 0 : capacity);\n\
          \x20 return bp;\n\
          }\n\
-         static INTENT_UNUSED Enum_Option__i64 intent_bptr_i64_get(const intent_bptr_i64* bp, int64_t i) {\n\
-         \x20 Enum_Option__i64 r;\n\
-         \x20 if (i < 0 || (uint64_t)i >= bp->len) { r.tag = 1; r.payload = 0; return r; }\n\
-         \x20 r.tag = 0; r.payload = bp->data[i]; return r;\n\
-         }\n\
          static INTENT_UNUSED bool intent_bptr_i64_set(intent_bptr_i64* bp, int64_t i, int64_t v) {\n\
          \x20 if (i < 0 || (uint64_t)i >= bp->len) return false;\n\
          \x20 bp->data[i] = v; return true;\n\
@@ -3235,6 +3236,15 @@ fn emit_intent_bptr_helpers_c_body(out: &mut String) {
          \x20 return (int64_t)bp->len;\n\
          }\n\n",
     );
+    if has_option_i64 {
+        out.push_str(
+            "static INTENT_UNUSED Enum_Option__i64 intent_bptr_i64_get(const intent_bptr_i64* bp, int64_t i) {\n\
+             \x20 Enum_Option__i64 r;\n\
+             \x20 if (i < 0 || (uint64_t)i >= bp->len) { r.tag = 1; r.payload = 0; return r; }\n\
+             \x20 r.tag = 0; r.payload = bp->data[i]; return r;\n\
+             }\n\n",
+        );
+    }
 }
 
 /// Layer 5 v2 foundation of `unsafe.md` — `Region` bump-

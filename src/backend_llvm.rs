@@ -2166,9 +2166,17 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     if crate::backend_c::program_uses_unsafe_alloc(program) {
         emit_intent_unsafe_alloc_helpers_llvm(&mut out);
     }
-    // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> helpers.
+    // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> helpers. Like
+    // the C backend, gate the Option<i64>-returning `bptr_get`
+    // helper on the registry rather than assuming it's always
+    // populated -- the checker's auto-register pre-pass only
+    // fires when `bptr_get` itself is called, not merely
+    // `bptr_new`/`bptr_set`/`bptr_len`.
     if crate::backend_c::program_uses_bptr(program) {
-        emit_intent_bptr_i64_helpers_llvm(&mut out);
+        let has_option_i64 = LLVM_ENUM_PAYLOAD_REGISTRY.with(|r| {
+            r.borrow().contains_key("Option__i64")
+        });
+        emit_intent_bptr_i64_helpers_llvm(&mut out, has_option_i64);
     }
     // Layer 5 v2 foundation of `unsafe.md` — Region bump arena.
     if crate::backend_c::program_uses_region(program) {
@@ -39510,7 +39518,7 @@ fn emit_intent_region_helpers_llvm(out: &mut String) {
 /// helpers in LLVM IR. Mirror of
 /// `emit_intent_bptr_helpers_c_body`. Struct layout:
 ///   `%intent_bptr_i64 = type { i64*, i64, i64 }` (data, len, capacity)
-fn emit_intent_bptr_i64_helpers_llvm(out: &mut String) {
+fn emit_intent_bptr_i64_helpers_llvm(out: &mut String, has_option_i64: bool) {
     out.push_str(
         "define %intent_bptr_i64 @intent_bptr_i64_new(i64* %p, i64 %len, i64 %cap) {\n\
          \x20 ; Clamp negative len/cap to 0 (matches the C side's defensive cast).\n\
@@ -39522,29 +39530,35 @@ fn emit_intent_bptr_i64_helpers_llvm(out: &mut String) {
          \x20 %r1 = insertvalue %intent_bptr_i64 %r0, i64 %len_clamped, 1\n\
          \x20 %r2 = insertvalue %intent_bptr_i64 %r1, i64 %cap_clamped, 2\n\
          \x20 ret %intent_bptr_i64 %r2\n\
-         }\n\
-         define %Enum_Option__i64 @intent_bptr_i64_get(%intent_bptr_i64* %bp, i64 %i) {\n\
-         \x20 %neg = icmp slt i64 %i, 0\n\
-         \x20 br i1 %neg, label %bg_none, label %bg_check_upper\n\
-         bg_check_upper:\n\
-         \x20 %lp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 1\n\
-         \x20 %len = load i64, i64* %lp\n\
-         \x20 %oob = icmp uge i64 %i, %len\n\
-         \x20 br i1 %oob, label %bg_none, label %bg_some\n\
-         bg_some:\n\
-         \x20 %dp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 0\n\
-         \x20 %data = load i64*, i64** %dp\n\
-         \x20 %cell = getelementptr i64, i64* %data, i64 %i\n\
-         \x20 %val = load i64, i64* %cell\n\
-         \x20 %s0 = insertvalue %Enum_Option__i64 undef, i32 0, 0\n\
-         \x20 %s1 = insertvalue %Enum_Option__i64 %s0, i64 %val, 1\n\
-         \x20 ret %Enum_Option__i64 %s1\n\
-         bg_none:\n\
-         \x20 %n0 = insertvalue %Enum_Option__i64 undef, i32 1, 0\n\
-         \x20 %n1 = insertvalue %Enum_Option__i64 %n0, i64 0, 1\n\
-         \x20 ret %Enum_Option__i64 %n1\n\
-         }\n\
-         define i1 @intent_bptr_i64_set(%intent_bptr_i64* %bp, i64 %i, i64 %v) {\n\
+         }\n",
+    );
+    if has_option_i64 {
+        out.push_str(
+            "define %Enum_Option__i64 @intent_bptr_i64_get(%intent_bptr_i64* %bp, i64 %i) {\n\
+             \x20 %neg = icmp slt i64 %i, 0\n\
+             \x20 br i1 %neg, label %bg_none, label %bg_check_upper\n\
+             bg_check_upper:\n\
+             \x20 %lp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 1\n\
+             \x20 %len = load i64, i64* %lp\n\
+             \x20 %oob = icmp uge i64 %i, %len\n\
+             \x20 br i1 %oob, label %bg_none, label %bg_some\n\
+             bg_some:\n\
+             \x20 %dp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 0\n\
+             \x20 %data = load i64*, i64** %dp\n\
+             \x20 %cell = getelementptr i64, i64* %data, i64 %i\n\
+             \x20 %val = load i64, i64* %cell\n\
+             \x20 %s0 = insertvalue %Enum_Option__i64 undef, i32 0, 0\n\
+             \x20 %s1 = insertvalue %Enum_Option__i64 %s0, i64 %val, 1\n\
+             \x20 ret %Enum_Option__i64 %s1\n\
+             bg_none:\n\
+             \x20 %n0 = insertvalue %Enum_Option__i64 undef, i32 1, 0\n\
+             \x20 %n1 = insertvalue %Enum_Option__i64 %n0, i64 0, 1\n\
+             \x20 ret %Enum_Option__i64 %n1\n\
+             }\n",
+        );
+    }
+    out.push_str(
+        "define i1 @intent_bptr_i64_set(%intent_bptr_i64* %bp, i64 %i, i64 %v) {\n\
          \x20 %neg = icmp slt i64 %i, 0\n\
          \x20 br i1 %neg, label %bs_false, label %bs_check_upper\n\
          bs_check_upper:\n\

@@ -12389,3 +12389,88 @@ none reference `abs()`, no new failures), `tools/leak_sweep.py` clean
 (18 skipped / 4 flagged, matches baseline exactly).
 
 Next free bug number is **BUG-179**.
+
+## Update 2026-08-11: BUG-179 CLOSED (found while writing tutorial docs)
+
+Found while writing tutorial coverage for `bptr_len` (part of a
+broader tutorial pass adding missing-feature documentation:
+`BTreeSet`/`BTreeMap`/`BinaryHeap`, `Pool<T>`/`Handle<T>` worked
+example, the plain blocking TCP API, `epoll_new`/`epoll_add_read`/
+`epoll_close`, and `unsafe_alloc`/`unsafe_free`/`bptr_len`/
+`region_alloc_i64`/`region_len`). A minimal `bptr_new` + `bptr_len`
+program (no `bptr_get` call anywhere) crashed BOTH backends outright
+at cc/lli time: C said "unknown type name 'Enum_Option__i64'"; LLVM's
+`lli` rejected the IR with "invalid indices for insertvalue" on the
+same undeclared type.
+
+Root cause: `emit_intent_bptr_helpers_c_body` (`src/backend_c.rs`)
+and `emit_intent_bptr_i64_helpers_llvm` (`src/backend_llvm.rs`)
+unconditionally emitted `intent_bptr_i64_get`, whose return type is
+`Enum_Option__i64` -- but that typedef/LLVM type is only
+materialized by checker.rs's "Option<i64> auto-register pre-pass"
+when `bptr_get` is actually CALLED somewhere in the program (see the
+`walk_expr_for_search_builtins` match arm for `"bptr_get"`), not
+merely when `BoundedPtr<i64>` is used via `bptr_new`/`bptr_set`/
+`bptr_len`. Every OTHER Option<i64>-returning collection helper
+family (`heap_pop`/`btreeset_min`/`binary_heap_pop`/`bst_min`/
+`skiplist_min`/etc.) already gates its Option-returning helper on
+`has_option_i64` (read from the enum registry) for exactly this
+reason -- `bptr` was the one family that never got this treatment.
+The pre-existing `bptr_emits_helper_bundle_in_c`/`_llvm` tests didn't
+catch it because they only assert substring presence in the emitted
+text, never actually invoke `cc`/`lli`.
+
+Fixed by gating `intent_bptr_i64_get`'s emission (both backends) on
+the `Option__i64` registry, matching every other collection family.
+`bptr_new`/`bptr_set`/`bptr_len` are unconditionally emitted (as
+before); only the Option-returning `bptr_get` helper is now gated.
+
+Added `bug179_bptr_new_without_bptr_get_does_not_reference_undeclared_option_enum`
+in `src/lib.rs` (asserts `Enum_Option__i64` is ABSENT from both C and
+LLVM output for a bptr_get-free program, and that `bptr_get`'s helper
+still IS emitted and still works correctly when actually called).
+Verification: `cargo test --release` (2895 lib tests + 12 other
+suites, 0 failed), `vanic check` across all 1040 example files (17
+failures, exact same file set, zero diff), `tools/leak_sweep.py`
+clean (18 skipped / 4 flagged, matches baseline).
+
+Next free bug number is **BUG-180**.
+
+## Update 2026-08-11: BUG-180 CLOSED (found spot-checking the BUG-179 fix)
+
+Found while sanity-checking whether BUG-179's fix generalized beyond
+`bptr_get` specifically. It didn't, fully: an explicit generic type
+annotation (`Option<i64>`, and by the same code path `Result<T,E>`
+or any user generic struct/enum) written on a `let` INSIDE an
+`unsafe(...) { ... }` block, or inside a `task { ... }` spawn block,
+failed to resolve at all -- "unknown type 'Option' referenced in let
+annotation" followed by "let initializer must be assignable to
+Option<i64>, got Option__i64" (the checker's own monomorphized enum
+and the user's written annotation disagreeing about whether
+`Option<i64>` exists). Not specific to `bptr_get`/BUG-179 --
+reproduces with any `Option<i64>`-returning call (confirmed with
+`find`).
+
+Root cause: `collect_apply_in_stmt` (walks the whole program
+collecting which generic instantiations need a monomorphized
+concrete decl materialized) and its sibling `rewrite_apply_in_stmt`
+(substitutes the written `Type::Apply` annotation with the resolved
+concrete `Type::Enum`/`Type::Struct`) both have match arms for
+`Stmt::If`/`Stmt::While`/`Stmt::For`/`Stmt::ForIter` to recurse into
+nested block bodies -- but neither had an arm for `Stmt::UnsafeBlock`
+or `Stmt::TaskSpawn`, so a `let` annotation nested inside either
+construct's body was never discovered (silently swallowed by the
+`_ => {}` catch-all), nor rewritten in the AST actually type-checked
+later. Fixed by adding a `Stmt::UnsafeBlock { body, .. } |
+Stmt::TaskSpawn { body, .. }` arm to both functions in
+`src/checker.rs`, mirroring the existing `Stmt::While` arm exactly.
+
+Added
+`bug180_explicit_generic_annotation_inside_unsafe_or_task_block_resolves`
+in `src/lib.rs` (covers both the `unsafe` block and `task` spawn
+cases). Verification: `cargo test --release` (2896 lib tests + 12
+other suites, 0 failed), `vanic check` across all 1040 example files
+(17 failures, exact same file set, zero diff), `tools/leak_sweep.py`
+clean (matches baseline).
+
+Next free bug number is **BUG-181**.

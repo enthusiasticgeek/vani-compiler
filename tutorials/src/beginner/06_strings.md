@@ -563,6 +563,127 @@ parsed 42: 42
 fixed 2dp: 3.10
 ```
 
+### Byte-level access
+
+For when you need a `Str`'s raw bytes rather than substring
+matching -- parsing a wire format, hand-rolling a tokenizer, or just
+inspecting one character's code point:
+
+```vani
+intent "byte-level string access";
+
+fn main() -> i64 {
+  let s: Str = "Hello, World! 123";
+
+  print "byte_at(0):", str_byte_at(s, 0);                  // 72 ('H')
+  print "len_bytes:", str_len_bytes(s);                    // 17
+  print "starts_with_byte('H'=72):", str_starts_with_byte(s, 72);  // true
+  print "ends_with_byte('3'=51):", str_ends_with_byte(s, 51);      // true
+  print "byte_count('l'=108):", str_byte_count(s, 108);            // 3
+  print "index_of_byte('W'=87):", option_unwrap_or(str_index_of_byte(s, 87), -1);        // 7
+  print "last_index_of_byte('l'=108):", option_unwrap_or(str_last_index_of_byte(s, 108), -1);  // 10
+  print "first_byte:", option_unwrap_or(str_first_byte(s), -1);    // 72
+  print "last_byte:", option_unwrap_or(str_last_byte(s), -1);      // 51 ('3')
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `str_byte_at(s, i)` | `Str, i64 -> i64` | byte value at index `i` (no bounds check -- caller's responsibility) |
+| `str_len_bytes(s)` | `Str -> i64` | byte length (same as `len(s)` for ASCII; differs for multi-byte UTF-8) |
+| `str_starts_with_byte(s, b)` / `str_ends_with_byte(s, b)` | `Str, i64 -> bool` | does the first/last byte equal `b`? |
+| `str_byte_count(s, b)` | `Str, i64 -> i64` | how many times byte `b` occurs |
+| `str_index_of_byte(s, b)` / `str_last_index_of_byte(s, b)` | `Str, i64 -> Option<i64>` | index of the first/last occurrence of byte `b` |
+| `str_first_byte(s)` / `str_last_byte(s)` | `Str -> Option<i64>` | first/last byte, or `None` if `s` is empty |
+
+### ASCII-class counting and classification
+
+```vani
+intent "ASCII-class counting";
+
+fn main() -> i64 {
+  let s: Str = "Hello, World! 123";
+
+  print "digits:", str_count_ascii_digits(s);         // 3
+  print "alpha:", str_count_ascii_alpha(s);            // 10
+  print "alphanumeric:", str_count_ascii_alphanumeric(s);  // 13
+  print "whitespace:", str_count_ascii_whitespace(s);  // 2
+  print "upper:", str_count_ascii_upper(s);            // 2
+  print "lower:", str_count_ascii_lower(s);            // 8
+  print "punct:", str_count_ascii_punct(s);            // 2 (',' and '!')
+  print "control:", str_count_ascii_control(s);        // 0
+
+  print "is_ascii:", str_is_ascii(s);                       // true
+  print "is_digit_only('123'):", str_is_digit_only("123");  // true
+  print "is_alpha_only('abc'):", str_is_alpha_only("abc");  // true
+  print "is_empty(''):", str_is_empty("");                  // true
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `str_count_ascii_digits/alpha/alphanumeric/whitespace/upper/lower/punct/control(s)` | `Str -> i64` | count of ASCII bytes in that class |
+| `str_is_ascii(s)` | `Str -> bool` | every byte is in the 0-127 ASCII range |
+| `str_is_digit_only(s)` / `str_is_alpha_only(s)` / `str_is_alphanumeric_only(s)` / `str_is_whitespace_only(s)` | `Str -> bool` | every character belongs to that class (empty string is vacuously true) |
+| `str_is_empty(s)` | `Str -> bool` | `len(s) == 0`, spelled out as a builtin |
+
+**Single-byte classifiers** (`is_ascii_digit` etc., no `str_` prefix)
+take a raw byte CODE (an `i64`, from e.g. `str_byte_at`), not a
+`Str` -- easy to confuse with the `str_is_*_only` family above,
+which classify a whole string:
+
+```vani
+intent "single-byte classifiers";
+
+fn main() -> i64 {
+  print "is_ascii_digit('5'):", is_ascii_digit(53);            // true -- 53 is '5'
+  print "is_ascii_alpha('a'):", is_ascii_alpha(97);             // true -- 97 is 'a'
+  print "is_ascii_alphanumeric('5'):", is_ascii_alphanumeric(53);  // true
+  print "is_ascii_whitespace(' '):", is_ascii_whitespace(32);   // true -- 32 is ' '
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `is_ascii_digit(byte)` / `is_ascii_alpha(byte)` / `is_ascii_alphanumeric(byte)` / `is_ascii_whitespace(byte)` | `i64 -> bool` | classify ONE byte code, not a `Str` |
+
+### Characters, stripping, and `parse_bool`
+
+```vani
+intent "chars, strip, parse_bool";
+
+fn main() -> i64 {
+  // str_chars: a Str exploded into one i64 byte code per element.
+  let ch: Vec<i64> = str_chars("abc");
+  print "chars len:", len(ref ch) as i64;   // 3
+  print "chars[0]:", ch[0];                  // 97 ('a')
+
+  print "strip_prefix:", str_strip_prefix("hello world", "hello ");  // "world"
+  print "strip_suffix:", str_strip_suffix("hello world", " world");  // "hello"
+  print "count_char('l' in 'hello'):", str_count_char("hello", "l"); // 2
+
+  // parse_bool returns Option<bool> -- unwrap with match (option_unwrap_or
+  // is i64/f64-specific, so it doesn't apply to Option<bool>).
+  let pb: Option<bool> = parse_bool("true");
+  let ok: bool = match pb {
+    Option.Some(v) then v,
+    Option.None then false,
+  };
+  print "parse_bool('true'):", ok;   // true
+  return 0;
+}
+```
+
+| Builtin | Signature | Description |
+|---|---|---|
+| `str_chars(s)` | `Str -> Vec<i64>` | one byte code per character (ASCII; not full Unicode codepoint decoding) |
+| `str_strip_prefix(s, prefix)` / `str_strip_suffix(s, suffix)` | `Str, Str -> OwnedStr` | remove the prefix/suffix if present; return `s` unchanged if it doesn't match |
+| `str_count_char(s, needle)` | `Str, Str -> i64` | count of occurrences of `needle` (itself a `Str`, not a byte code) |
+| `parse_bool(s)` | `Str -> Option<bool>` | parse `"true"`/`"false"`; `None` for anything else |
+
 ---
 
 ## Summary: `Str` vs `OwnedStr`

@@ -366,6 +366,78 @@ The first option is fine for "build the list, walk it,
 drop it." The third is what serious code reaches for. The
 second is a debug-mode shortcut.
 
+### Worked example -- `Pool<T>` + `Handle<T>`
+
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
+Here's what "use a `Pool<T>`" actually looks like as real, running
+code -- a coat-check counter (the analogy from the top of this
+page) that hands out a ticket (`Handle<i64>`) for each item it
+holds, and can tell a fake or already-used ticket from a real one
+without you writing that check yourself:
+
+```vani
+intent "Pool<T> + Handle<T> -- generation-checked slot allocator";
+
+fn main() -> i64 {
+  let p: Pool<i64> = pool_new();
+
+  let ha: Handle<i64> = pool_alloc(mut ref p, 10);
+  let hb: Handle<i64> = pool_alloc(mut ref p, 20);
+
+  print "get a:", option_unwrap_or(pool_get(ref p, ha), -1);   // 10
+  print "get b:", option_unwrap_or(pool_get(ref p, hb), -1);   // 20
+
+  // Free a's slot. Behind the scenes this bumps a hidden counter
+  // on that slot, so `ha` -- the OLD ticket -- no longer matches.
+  let _ = pool_free(mut ref p, ha);
+  print "get a after free:", option_unwrap_or(pool_get(ref p, ha), -1);   // -1 (None -- stale handle)
+  print "get b still fine:", option_unwrap_or(pool_get(ref p, hb), -1);   // 20 (untouched)
+
+  // Allocate again -- this reuses a's freed slot to avoid growing
+  // the pool, but hands back a NEW ticket for it. The old ticket
+  // `ha` still can't see the slot, even though the slot is live again.
+  let hc: Handle<i64> = pool_alloc(mut ref p, 99);
+  print "get c (fresh handle, same slot as a):", option_unwrap_or(pool_get(ref p, hc), -1);   // 99
+  print "get a (stale, even though its slot is reused):", option_unwrap_or(pool_get(ref p, ha), -1);   // -1
+  return 0;
+}
+```
+
+Expected output (identical on both backends):
+
+```
+get a: 10
+get b: 20
+get a after free: -1
+get b still fine: 20
+get c (fresh handle, same slot as a): 99
+get a (stale, even though its slot is reused): -1
+```
+
+### Pool\<T\> / Handle\<T\> API
+
+| Builtin | Signature | Description |
+|---------|-----------|-------------|
+| `pool_new` | `() -> Pool<i64>` | empty pool |
+| `pool_alloc` | `(mut ref p, v: i64) -> Handle<i64>` | store `v`; return a ticket for it |
+| `pool_get` | `(ref p, h: Handle<i64>) -> Option<i64>` | look up by ticket; `None` if the ticket is stale |
+| `pool_free` | `(mut ref p, h: Handle<i64>) -> i64` | release the slot; invalidates every existing ticket for it |
+
+That's the whole API -- no `.upgrade()`, no `Weak`, no reference
+counting. A `Handle<i64>` is a plain, `Copy`-able value (an index
+plus a hidden "which generation of ticket is this" counter): store
+it in a struct, put it in a `Vec`, pass it around by value, compare
+it -- there's no lifetime tied to it and nothing to leak. v1 is
+`Pool<i64>` / `Handle<i64>` only (no other element type yet). This
+is the `unsafe.md` Layer 2 pattern the deletion subtlety above
+pointed at, and the concrete form of the `Pool<CacheEntry>` /
+`Pool<Callback>` rows in the cheat sheet further down this page.
+[Advanced 4 -- Embedded](../advanced/04_embedded.md#two-arena-mechanisms-poolt-v1-runtime-checked-vs-region--arenareft-v2-compile-time-checked)
+compares `Pool<T>` against its zero-cost, compile-time-checked
+sibling `Region` / `ArenaRef<T>`, for when you don't need a handle
+to outlive its allocator.
+
 ## Shape 3 -- Observer pattern
 
 A `Subject` notifies many `Observer`s when state changes. The

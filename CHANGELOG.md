@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.9.2] — YYYY-MM-DD
+
+### Added
+
+- TODO
+
+### Fixed
+
+- TODO
+
+---
+
 ## [v0.9.1] — 2026-08-07
 
 Patch release consolidating roughly 70 bug fixes across five sweeps since
