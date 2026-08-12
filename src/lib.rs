@@ -7381,6 +7381,49 @@ mod tests {
     }
 
     #[test]
+    fn string_with_hex_escape_compiles() {
+        // `\xHH` — a generic 2-digit hex byte escape, restricted to
+        // the ASCII range (00-7f) since Str is UTF-8 text with no
+        // separate byte-string form. `\x1b` is the ANSI ESC byte,
+        // the main motivating use case (terminal color codes).
+        let source = r#"
+            fn main() -> i64 {
+              print "\x1b[31mred\x1b[0m";
+              return 0;
+            }
+        "#;
+        compile(source).expect("\\x hex escape should compile");
+    }
+
+    #[test]
+    fn hex_escape_above_ascii_range_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              print "\xff";
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("\\xff should be rejected");
+        assert!(errors
+            .iter()
+            .any(|error| error.message.contains("out of range")));
+    }
+
+    #[test]
+    fn hex_escape_with_too_few_digits_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              print "\x1";
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("\\x1 (1 hex digit) should be rejected");
+        assert!(errors
+            .iter()
+            .any(|error| error.message.contains("expected 2 hex digits")));
+    }
+
+    #[test]
     fn fn_returning_str_compiles() {
         // `fn label() -> Str { return "hello"; }` — Str
         // return position is supported (unlike OwnedStr,

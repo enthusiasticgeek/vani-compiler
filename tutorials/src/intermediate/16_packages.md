@@ -461,11 +461,13 @@ Whether to commit `vendor/` is up to you:
 - To become a publisher: `vanic apply-publisher` -> read agreement ->
   `vanic apply-publisher --accept-agreement` -> wait for operator approval.
 
-In the next chapter we look at interfaces and trait-style polymorphism.
+The next chapter is a capstone: a small, complete terminal game that
+pulls together `Vec`, `ref`, `if let`, and a `requires`/`ensures`
+contract from across this track into one real program.
 
 
 ---
 
 **Previous**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
-**Next**: [Advanced track: Async / await -- intuition primer ->](../advanced/01a_async_primer.md)
+**Next**: [Sec.17 -- Capstone: a terminal tic-tac-toe game ->](17_tic_tac_toe_capstone.md)
 

@@ -78,6 +78,7 @@
 - [Compile time vs runtime -- intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Packages with Kosh](intermediate/16_packages.md)
+- [Capstone: a terminal tic-tac-toe game](intermediate/17_tic_tac_toe_capstone.md)
 
 # Advanced
 

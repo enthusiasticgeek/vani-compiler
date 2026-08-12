@@ -7191,6 +7191,38 @@ impl<'a> Lexer<'a> {
                         b't' => value.push('\t'),
                         b'r' => value.push('\r'),
                         b'0' => value.push('\0'),
+                        b'x' => {
+                            let hex_start = self.pos;
+                            let hi = self.peek().and_then(|b| (b as char).to_digit(16));
+                            let Some(hi) = hi else {
+                                return Err(Diagnostic::new(
+                                    Span::new(hex_start.saturating_sub(2), hex_start),
+                                    "expected 2 hex digits after '\\x'".to_string(),
+                                ));
+                            };
+                            self.advance();
+                            let lo = self.peek().and_then(|b| (b as char).to_digit(16));
+                            let Some(lo) = lo else {
+                                return Err(Diagnostic::new(
+                                    Span::new(hex_start.saturating_sub(2), self.pos),
+                                    "expected 2 hex digits after '\\x'".to_string(),
+                                ));
+                            };
+                            self.advance();
+                            let code = hi * 16 + lo;
+                            if code > 0x7f {
+                                return Err(Diagnostic::new(
+                                    Span::new(hex_start.saturating_sub(2), self.pos),
+                                    format!(
+                                        "'\\x{:02x}' is out of range -- \\x escapes only cover \
+                                         ASCII (00-7f); vāṇी string literals don't have a \
+                                         separate byte-string form",
+                                        code
+                                    ),
+                                ));
+                            }
+                            value.push(code as u8 as char);
+                        }
                         other => {
                             return Err(Diagnostic::new(
                                 Span::new(self.pos.saturating_sub(2), self.pos),

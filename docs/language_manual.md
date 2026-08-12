@@ -344,6 +344,18 @@ let t: OwnedStr = str_concat(s, " world");
 let i: i64  = str_find(s, "ell");   // -1 if absent
 ```
 
+String literals support these backslash escapes:
+
+| Escape | Meaning |
+|--------|---------|
+| `\"` | double quote |
+| `\\` | backslash |
+| `\n` / `\t` / `\r` | newline / tab / carriage return |
+| `\0` | NUL byte |
+| `\xHH` | a byte by its 2-digit hex value, `00`-`7f` only (ASCII range -- `Str` is UTF-8 text with no separate byte-string form, so higher values are a compile error). `\x1b` is the ANSI ESC byte, useful for terminal color codes: `"\x1b[31mred\x1b[0m"`. |
+
+A string literal cannot span multiple lines.
+
 ---
 
 ## Error handling
