@@ -12540,3 +12540,64 @@ as an output-behavior-equivalence check across the whole corpus for
 this fix).
 
 Next free bug number is **BUG-182**.
+
+## BUG-182 (2026-08-12) -- FILED, NOT FIXED: stale post-loop Vec-length fact enables unsound bounds elision
+
+Found while triaging the same localfuzz batch that found BUG-181 (a
+sibling `[2x] backend-divergence -- c.rc=0 llvm.rc=0` cluster with
+DIFFERING stdout, not a crash). Both findings mutate a *constant*
+out-of-range index (`xs[-1]`, `xs[i64::MAX]`) into a top-level
+`print`/`vypiš` statement placed AFTER a loop that grows a `Vec` via
+`push` inside its body -- **not inside the loop itself**, so BUG-181's
+`if inside_loop { return; }` fix does not cover this case. Confirmed
+still reproducible against the BUG-181-fixed binary: both backends
+exit 0 and print a garbage value (81 on both backends now that
+BUG-181 no longer lets them diverge on WHICH garbage value, but it's
+still an unguarded out-of-bounds read).
+
+Minimal shape:
+```vani
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(0);        // len(xs) == 1 fact recorded here
+  let i: i64 = 1;
+  while i < 5
+  invariant len(xs) == (i as u64);
+  {
+    xs = push(xs, i * 10);          // reassigns xs 4x; loop-body fact-drop is
+    i = i + 1;                      // deliberately SKIPPED (see BUG-127 comment)
+  }
+  // xs now has len 5, but the pre-loop `len(xs) == 1` fact from the
+  // `vec(0)` literal was never dropped or superseded -- it's still
+  // sitting in smt_facts here, contradicting the invariant-derived
+  // len(xs) == i == 5 fact from the loop that also survives.
+  print xs[-1];  // both facts combine into a CONTRADICTORY (self-
+                 // inconsistent) fact set, from which the SMT prover
+                 // can "prove" anything -- including that -1 is a
+                 // valid index. Bounds check silently elided.
+  return 0;
+}
+```
+
+`--smt-debug` confirms the exact contradiction feeding the prover for
+the `xs[-1]` goal: `(assert (= v_xs_len (_ bv1 64)))` (stale,
+pre-loop) alongside `(assert (= v_xs_len v_i))` + `(assert (bvsge v_i
+(_ bv5 64)))` (post-loop, correctly reflecting the invariant) --
+`v_xs_len` is asserted to be simultaneously `1` and `>= 5`, an
+inconsistent axiom set that trivially "proves" every goal put to it,
+including the false claim that a negative/huge index is in bounds.
+
+**Not yet fixed.** The likely fix -- dropping every fact that
+mentions a variable reassigned inside a loop body once the loop
+exits (mirroring `drop_facts_mentioning`'s existing same-scope-
+outside-loop behavior for `Stmt::Let`/`Stmt::Assign`) -- needs
+careful design: the loop's own DECLARED invariant clause
+(`invariant len(xs) == (i as u64);` here) is legitimately supposed
+to feed POST-loop reasoning (that's how `dokáž len(xs) == 5;`/`assert
+len(xs) == 5;` after a loop gets proven at all), so an overzealous
+blanket drop could break that mechanism instead of just the stale
+pre-loop leftover. This needs its own dedicated investigation
+session, not a rushed fix layered onto the BUG-181 change -- filed
+here so it isn't lost. Repro files:
+`tools/localfuzz/findings/20260812-060747-backend-divergence-dcbf2e2a45/`
+and `.../20260812-084922-backend-divergence-eca210d4ac/` in the
+localfuzz worktree.
