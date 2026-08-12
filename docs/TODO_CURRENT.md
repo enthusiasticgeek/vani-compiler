@@ -12953,3 +12953,24 @@ Verification: `python3 tools/test_vani_translate.py` passes clean (0
 `regen --check` problems across 48 TokenKinds x 62 languages, 62/62
 dialects compile in both directions, 62/62 `--verify` round-trips
 pass including the new dual-hop compile check).
+
+## Localfuzz triage: 2026-08-12 17:32Z batch -- 0 new bugs, 1 new documented limitation (L27)
+
+5 findings, 4 signatures. 3x the established, repeatedly-confirmed
+abort()-vs-exit(3) trap-mechanism divergence (accepted design, no
+action). 1x a fuzzer-duplicated blocking `tcp_accept()` call
+legitimately deadlocking both backends identically (same pattern as
+the earlier `echo_pool.vani` finding, not a compiler bug). 1x a real,
+root-caused, confirmed PERFORMANCE (not correctness) divergence: a
+loop counter mutated to start at `i64::MIN` completes instantly under
+`vanic build`/`--backend=c` (both run LLVM's `opt -O3` or gcc `-O2`,
+which can collapse this loop shape via scalar-evolution analysis) but
+hangs indefinitely under plain `vanic run`'s JIT path, which feeds
+unoptimized IR straight to `lli` with no `opt` pass at all. Confirmed
+directly by testing all three invocation forms. Documented as
+`docs/v1_limitations.md`'s new **L27** rather than fixed -- adding
+`opt -O3` to the JIT path is a real startup-latency trade-off for
+every `vanic run` invocation, not a clear-cut bug fix, and wasn't
+changed unilaterally. Full per-finding triage:
+`vani-compiler-localfuzz`'s `docs/TODO_LOCAL_STAGING.md`, "Triage
+closeout: 2026-08-12 17:32Z batch".
