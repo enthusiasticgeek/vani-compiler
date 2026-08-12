@@ -5914,3 +5914,29 @@ Fix attempt: `tools/localfuzz/findings/20260812-003409-backend-divergence-dd3192
 STATUS: needs human/frontier root-cause review.
 
 The vani compiler exhibits backend-divergence when running the mutant-generated source on both LLVM and C backends. Specifically, the index-out-of-bounds error occurs in the "if/else and while loops with Vec mutation" test case, which is tested using the `build_range` and `sum` functions. This behavior diverges between the two backends, leading to different outcomes when running the same input through both compilers. The backend-divergence result indicates that there might be a bug in either the LLVM or C code generation for handling out-of-bounds indexing in these specific loops.
+
+---
+
+### Candidate: 20260812-012958-backend-divergence-2dc338316f
+
+Repro: `tools/localfuzz/findings/20260812-012958-backend-divergence-2dc338316f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-012958-backend-divergence-2dc338316f/fix_attempt.md`
+
+Vani-compiler localfuzz: Amharic Option<T> Smoke Test
+
+**Run Command:**
+```sh
+vanic run examples/language/amharic/option_types.vani --backend=c
+```
+
+**Input Source:**
+```vani
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/option_types.vani              # LLVM
+//   vanic run examples/language/amharic/option_types.vani --backend=c  # C
+//
+// Note: Amharic has no native match keyword; Option<T> tested via ? chaining.
+
+
