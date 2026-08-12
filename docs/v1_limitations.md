@@ -1432,3 +1432,50 @@ names) compiled once per process into a real DLL and `-load`ed into
 `lli`. Full writeup, including a regression this uncovered in 20
 pre-existing `lli_*` tests, in `docs/TODO_CURRENT.md`'s BUG-5 / L25
 entry.
+
+### L26 -- Vec/array indexing inside a loop body never elides its bounds check, even when provably safe
+
+Prior to 2026-08-12, the SMT elision pass would sometimes elide the
+runtime bounds check on `xs[i]` when `i` was a loop's own induction
+variable and the index was provably in range for every iteration
+(e.g. `for i from 0 to len(xs) { xs[i] }`). As of the BUG-181 fix,
+**no index expression inside any loop body (`while`, `for`,
+`for..in`) is ever elided, regardless of whether it's actually
+safe** -- the runtime `if (i >= len(xs)) abort();` guard is always
+present in the emitted code for these sites now.
+
+**Why**: the elision pass reasons from `smt_facts`, a running list
+of "facts assumed true at this point," which is deliberately allowed
+to go stale across loop iterations for an unrelated reason (loop-
+invariant-preservation checking needs the pre-iteration fact set
+intact). BUG-181 found that this staleness let the pass "prove" an
+index in-bounds using a fact that was only true on the loop's first
+iteration (e.g. `j == 0`), producing an unconditional out-of-bounds
+memory access -- a real memory-safety hole (SIGSEGV on the C
+backend), not a false-positive rejection. The fix was a blanket
+`if inside_loop { return; }` guard on the Index-elision arm,
+matching the guard the arithmetic-overflow-elision arm already had
+(added earlier for BUG-127). This trades a narrow, previously-real
+performance optimization for soundness: the fix cannot distinguish
+a `for` loop's compiler-synthesized, always-safe induction variable
+from an arbitrary hand-mutated `while`-loop variable, so it
+conservatively disables elision for both.
+
+**Impact**: performance only, not correctness -- code that indexes a
+`Vec`/array inside a loop keeps its runtime bounds check where it
+used to be optimized away. Measured cost: bounds checks alone can be
+5-15% overhead on numerical code (see [Intermediate 12b -- Compile
+time vs runtime primer](../tutorials/src/intermediate/12b_compile_time_vs_runtime_primer.md)).
+Code outside loop bodies (straight-line accesses guarded by a
+`requires` clause, as in [Intermediate 10b](../tutorials/src/intermediate/10b_runtime_errors_primer.md)'s
+`sum_first_three` example) is unaffected -- this limitation is
+specific to accesses lexically inside a loop body.
+
+**Workaround**: none that recovers the optimization soundly today.
+A future loop-invariant-aware elision pass -- one that reasons about
+per-iteration induction-variable bounds explicitly (the way
+`verify_loop_invariants_with_havoc` already does for invariant
+preservation) rather than reusing possibly-stale `smt_facts` -- could
+recover this class of elision without reintroducing BUG-181's hole.
+Filed as part of the round-12 audit focus; see
+`docs/BUG_PATTERN_AUDIT_TODO_12.md`.
