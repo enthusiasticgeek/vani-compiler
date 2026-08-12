@@ -6356,3 +6356,12 @@ Raw result data:
   "kind": "backend-divergence",
   "c": {
     "rc": 
+
+---
+
+### Candidate: 20260812-194925-backend-divergence-f854ac392d
+
+Repro: `tools/localfuzz/findings/20260812-194925-backend-divergence-f854ac392d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-194925-backend-divergence-f854ac392d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
