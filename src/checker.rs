@@ -10422,6 +10422,14 @@ fn collect_apply_in_stmt(
                 );
             }
         }
+        Stmt::UnsafeBlock { body, .. } | Stmt::TaskSpawn { body, .. } => {
+            for s in body {
+                collect_apply_in_stmt(
+                    s, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -10499,6 +10507,11 @@ fn rewrite_apply_in_stmt(
             }
         }
         Stmt::For { body, .. } | Stmt::ForIter { body, .. } => {
+            for s in body.iter_mut() {
+                rewrite_apply_in_stmt(s, struct_names, enum_names);
+            }
+        }
+        Stmt::UnsafeBlock { body, .. } | Stmt::TaskSpawn { body, .. } => {
             for s in body.iter_mut() {
                 rewrite_apply_in_stmt(s, struct_names, enum_names);
             }

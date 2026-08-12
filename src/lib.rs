@@ -51886,6 +51886,70 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug180_explicit_generic_annotation_inside_unsafe_or_task_block_resolves() {
+        // BUG-180 (2026-08-11): found while spot-checking whether the
+        // BUG-179 fix generalized -- it didn't fully. An explicit
+        // generic type annotation (`Option<i64>`, and by the same
+        // code path `Result<T,E>` or any user generic struct/enum)
+        // written on a `let` INSIDE an `unsafe(...) { ... }` block, or
+        // inside a `task { ... }` spawn block, failed to resolve at
+        // all: "unknown type 'Option' referenced in let annotation"
+        // followed by "let initializer must be assignable to
+        // Option<i64>, got Option__i64" -- the checker's own
+        // monomorphized enum and the user's written annotation
+        // disagreeing about whether `Option<i64>` exists. Not
+        // specific to `bptr_get`/BUG-179 -- reproduces with any
+        // Option<i64>-returning call (`find`, in this test).
+        //
+        // Root cause: `collect_apply_in_stmt` (walks the whole
+        // program collecting which generic instantiations need a
+        // monomorphized concrete decl materialized) and its sibling
+        // `rewrite_apply_in_stmt` (substitutes the written
+        // `Type::Apply` annotation with the resolved concrete
+        // `Type::Enum`/`Type::Struct`) both have match arms for
+        // `Stmt::If`/`Stmt::While`/`Stmt::For`/`Stmt::ForIter` to
+        // recurse into nested block bodies -- but neither had an arm
+        // for `Stmt::UnsafeBlock` or `Stmt::TaskSpawn`, so a `let`
+        // annotation nested inside either construct's body was never
+        // discovered (silently swallowed by the `_ => {}` catch-all),
+        // NOR rewritten in the AST actually type-checked later. Fixed
+        // by adding a `Stmt::UnsafeBlock { body, .. } | Stmt::TaskSpawn
+        // { body, .. }` arm to both functions, mirroring the existing
+        // `Stmt::While` arm exactly.
+        let source_unsafe = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              unsafe(reason = "test") {
+                let v: Option<i64> = find(ref xs, 2);
+                return option_unwrap_or(v, -1);
+              }
+            }
+        "#;
+        {
+            let _guard = EmbeddedTargetGuard::embedded();
+            compile(source_unsafe)
+                .expect("Option<i64> annotation inside an unsafe block must resolve");
+        }
+
+        let source_task = r#"
+            pure fn safe_lookup(k: i64) -> Option<i64> {
+              if k == 5 { return Option.Some(100); }
+              return Option.None;
+            }
+            fn main() -> i64 {
+              task worker {
+                let v: Option<i64> = safe_lookup(5);
+                let _ = option_unwrap_or(v, -1);
+              }
+              join worker;
+              return 0;
+            }
+        "#;
+        compile(source_task)
+            .expect("Option<i64> annotation inside a task-spawn block must resolve");
+    }
+
+    #[test]
     fn bptr_helpers_not_emitted_when_unused() {
         let source = r#"
             fn main() -> i64 { return 42; }

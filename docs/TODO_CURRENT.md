@@ -12435,3 +12435,42 @@ failures, exact same file set, zero diff), `tools/leak_sweep.py`
 clean (18 skipped / 4 flagged, matches baseline).
 
 Next free bug number is **BUG-180**.
+
+## Update 2026-08-11: BUG-180 CLOSED (found spot-checking the BUG-179 fix)
+
+Found while sanity-checking whether BUG-179's fix generalized beyond
+`bptr_get` specifically. It didn't, fully: an explicit generic type
+annotation (`Option<i64>`, and by the same code path `Result<T,E>`
+or any user generic struct/enum) written on a `let` INSIDE an
+`unsafe(...) { ... }` block, or inside a `task { ... }` spawn block,
+failed to resolve at all -- "unknown type 'Option' referenced in let
+annotation" followed by "let initializer must be assignable to
+Option<i64>, got Option__i64" (the checker's own monomorphized enum
+and the user's written annotation disagreeing about whether
+`Option<i64>` exists). Not specific to `bptr_get`/BUG-179 --
+reproduces with any `Option<i64>`-returning call (confirmed with
+`find`).
+
+Root cause: `collect_apply_in_stmt` (walks the whole program
+collecting which generic instantiations need a monomorphized
+concrete decl materialized) and its sibling `rewrite_apply_in_stmt`
+(substitutes the written `Type::Apply` annotation with the resolved
+concrete `Type::Enum`/`Type::Struct`) both have match arms for
+`Stmt::If`/`Stmt::While`/`Stmt::For`/`Stmt::ForIter` to recurse into
+nested block bodies -- but neither had an arm for `Stmt::UnsafeBlock`
+or `Stmt::TaskSpawn`, so a `let` annotation nested inside either
+construct's body was never discovered (silently swallowed by the
+`_ => {}` catch-all), nor rewritten in the AST actually type-checked
+later. Fixed by adding a `Stmt::UnsafeBlock { body, .. } |
+Stmt::TaskSpawn { body, .. }` arm to both functions in
+`src/checker.rs`, mirroring the existing `Stmt::While` arm exactly.
+
+Added
+`bug180_explicit_generic_annotation_inside_unsafe_or_task_block_resolves`
+in `src/lib.rs` (covers both the `unsafe` block and `task` spawn
+cases). Verification: `cargo test --release` (2896 lib tests + 12
+other suites, 0 failed), `vanic check` across all 1040 example files
+(17 failures, exact same file set, zero diff), `tools/leak_sweep.py`
+clean (matches baseline).
+
+Next free bug number is **BUG-181**.
