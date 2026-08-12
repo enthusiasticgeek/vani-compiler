@@ -20,10 +20,11 @@ before you dive in.
 **No CS background required.** Every computer-science concept
 in these tutorials is introduced with an everyday analogy BEFORE
 the code. Look for chapters labelled *"intuition primer"* -- they
-contain no code and exist specifically for readers coming from
-non-technical backgrounds. You can read them on a train with no
-laptop. The code chapters then assume you've built the mental
-model first.
+lead with the analogy, not syntax drills, and exist specifically
+for readers coming from non-technical backgrounds; most still show
+a little real code once the analogy lands, to ground it, but never
+before explaining the concept in plain terms first. The code
+chapters then assume you've built the mental model first.
 
 > **⚠️ Note on natural-language dialects.** vāṇी ships keyword
 > tables for 62 dialects across 26 scripts, but only **English**
@@ -113,11 +114,12 @@ a feature that's planned but not implemented in v1 yet; see
 If you're completely new to programming or coming from a
 non-CS background, start with the beginner track in order --
 the primer chapters (marked *"intuition primer"* in the sidebar)
-come first in each section and build the mental model before any
-code appears. If you have experience in another language (Python,
-JavaScript, Java), skim the primers and read the code chapters
-straight through. If you have Rust experience, you can probably
-skip Beginner 1-5 and dive in from Sec.6 (Strings).
+come first in each section and build the mental model with an
+analogy before leaning on any new syntax. If you have experience
+in another language (Python, JavaScript, Java), skim the primers
+and read the code chapters straight through. If you have Rust
+experience, you can probably skip Beginner 1-5 and dive in from
+Sec.6 (Strings).
 
 ## A note on dialects
 
