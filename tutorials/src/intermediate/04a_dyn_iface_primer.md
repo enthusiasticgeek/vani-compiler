@@ -7,7 +7,9 @@
 > already know what a Rust trait object is, skip to
 > [Intermediate 5](05_dyn.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter is pure intuition — the couple of code snippets below
+are explicitly marked `HYPOTHETICAL`, previewing what the next
+chapters let you actually write.
 
 ## The problem: a zoo of shapes
 
@@ -19,10 +21,13 @@ shape has a different formula:
 - Square: side x side
 - Triangle: 1/2 x base x height
 
-In a previous chapter you wrote a `Shape` **interface** (vāṇी's
-word for "the set of methods any shape supports") with one
-method, `area`. Each shape type (`Circle`, `Square`, `Triangle`)
-has its own `implement Shape for X` block.
+Imagine a `Shape` **interface** (vāṇी's word for "the set of
+methods any shape supports") with one method, `area` — the next
+two chapters ([4b](04b_interfaces_primer.md),
+[Intermediate 4](04_generics_iface.md)) show you how to actually
+write one. For now, just picture each shape type (`Circle`,
+`Square`, `Triangle`) having its own `implement Shape for X` block
+that fills in `area` for that type.
 
 Now you want a list of shapes: `[circle1, square1, triangle1,
 circle2]`. The catch: each item is a DIFFERENT TYPE. A `Vec<Circle>`

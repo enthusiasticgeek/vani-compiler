@@ -11,24 +11,24 @@
 1. [Syntax conventions](#syntax-conventions)
 2. [Multilingual keywords](#multilingual-keywords)
 3. [Types](#types)
-3. [Ownership and references](#ownership-and-references)
-4. [Control flow](#control-flow)
-5. [Functions and closures](#functions-and-closures)
-6. [Structs, enums, and generics](#structs-enums-and-generics)
-7. [Collections](#collections)
-8. [Strings](#strings)
-9. [Error handling](#error-handling)
-10. [Modules and visibility](#modules-and-visibility)
-11. [Concurrency](#concurrency)
-12. [Async / await](#async--await)
-13. [SMT verification](#smt-verification)
-14. [Safety attributes](#safety-attributes)
-15. [SIMD and vectorization](#simd-and-vectorization)
-16. [File I/O](#file-io)
-17. [Bare-metal and cross-compilation](#bare-metal-and-cross-compilation)
-18. [Tooling reference](#tooling-reference)
-19. [FFI and linking](#ffi-and-linking)
-20. [Glossary](#glossary)
+4. [Ownership and references](#ownership-and-references)
+5. [Control flow](#control-flow)
+6. [Functions and closures](#functions-and-closures)
+7. [Structs, enums, and generics](#structs-enums-and-generics)
+8. [Collections](#collections)
+9. [Strings](#strings)
+10. [Error handling](#error-handling)
+11. [Modules and visibility](#modules-and-visibility)
+12. [Concurrency](#concurrency)
+13. [Async / await](#async--await)
+14. [SMT verification](#smt-verification)
+15. [Safety attributes](#safety-attributes)
+16. [SIMD and vectorization](#simd-and-vectorization)
+17. [File I/O](#file-io)
+18. [Bare-metal and cross-compilation](#bare-metal-and-cross-compilation)
+19. [Tooling reference](#tooling-reference)
+20. [FFI and linking](#ffi-and-linking)
+21. [Glossary](#glossary)
 
 ---
 
@@ -314,24 +314,24 @@ implement Drawable for Point {
 | `vec(a, b, …)` | `-> Vec<T>` | literal |
 | `vec_fill(n, val)` | `-> Vec<T>` | bulk init |
 | `vec_with_capacity(n)` | `-> Vec<T>` | pre-alloc |
-| `vec_push(mut ref xs, val)` | `-> ()` | append |
-| `vec_len(ref xs)` | `-> i64` | length |
+| `push(mut ref xs, val)` | `-> ()` | append (bare builtin, not `vec_push`) |
+| `len(xs)` | `-> u64` | length; also callable as `xs.len()` method-call sugar, same builtin either way |
 | `vec_sum/min/max/mean` | `-> T` | `Vec<i64>` and `Vec<f64>` |
 | `vec_fold/map/filter` | HOF | `Vec<i64>` and `Vec<f64>` |
 | `vec_dot(ref a, ref b)` | `-> T` | `Vec<i64>→i64`, `Vec<f64>→f64` |
 | `sort(mut ref xs)` | in-place | `Vec<i64>` and `Vec<f64>` |
 | `vec_kth_smallest(ref xs, k)` | `-> T` | returns -1 / qNaN on OOB |
-| `HashMap<K, V>` | | `hashmap_new/insert/get/remove` |
+| `HashMap<K, V>` | | `hashmap_new/insert/get/contains_key/remove` |
 | `HashSet<T>` | | `hashset_new/insert/contains/remove` |
 | `BTreeMap<K, V>` | | sorted map; `btreemap_range_keys/values` |
 | `BTreeSet<T>` | | sorted set; range queries |
-| `BinaryHeap<T>` | | `heap_push/pop/peek`; max-heap |
+| `BinaryHeap<T>` | | `binary_heap_new/push/pop/peek`; max-heap. (`heap_push`/`heap_pop`/`heap_peek` are a separate, older API operating on a raw `Vec<i64>`, not this wrapper type — don't mix the two families.) |
 | `Deque<T>` | | ring buffer; `deque_push_front/push_back/pop_front/pop_back` |
 | `Graph` | | weighted directed; BFS/DFS/Dijkstra/A*/topo/Kruskal/Prim |
-| `Bst<T>` | | AVL self-balancing BST; insert/delete/contains |
+| `Bst<T>` | | AVL self-balancing BST; `bst_insert/remove/contains` |
 | `SkipList<T>` | | probabilistic sorted list; `skiplist_insert/remove/max` |
-| `UnionFind` | | path-compression + union-by-rank; `uf_new/union/find` |
-| `BloomFilter` | | probabilistic membership; `bloom_insert/contains` |
+| `UnionFind` | | path-compression + union-by-rank; `union_find_new/union/find` |
+| `BloomFilter` | | probabilistic membership; `bloom_filter_insert/contains` |
 
 ---
 
@@ -423,14 +423,15 @@ reduce sum with +;
 }
 
 // task (affine handle — forgetting to join is a compile error)
-let t: TaskHandle = task { expensive_work(); };
-join t;
+let t: Task<i64> = task expensive_work();
+let result: i64 = join t;   // blocks until the task exits
 
 // mutex
 let m: Mutex<i64> = mutex_new(0);
-let g: Guard<i64> = mutex_lock(ref m);
-*g = *g + 1;
-// Guard drops here → unlock
+{
+  let g: Guard<i64> = mutex_lock(ref m);
+  guard_set(mut ref g, guard_get(ref g) + 1);
+}   // Guard drops here → unlock
 
 // channel — bounded MPMC queue
 let ch: Channel<i64, 16> = channel_new();
@@ -470,23 +471,33 @@ kqueue (macOS), IOCP (Windows).
 
 ```vani
 fn divide(a: i64, b: i64) -> i64
-  requires b != 0
-  ensures  result * b == a
+  requires b != 0;
 {
   return a / b;
 }
 
-fn sum_to(n: i64) -> i64 {
-  let s: i64 = 0;
-  for i in 0 to n
-    invariant s == i * (i - 1) / 2
+fn count_to(n: i64) -> i64
+requires n >= 0;
+requires n < 1000;
+ensures _return >= 0;
+{
+  let i: i64 = 0;
+  while i < n
+  invariant i >= 0;
+  invariant i <= n;
   {
-    s = s + i;
+    i = i + 1;
   }
-  prove s == n * (n - 1) / 2;
-  return s;
+  prove i >= 0;
+  return i;
 }
 ```
+
+`requires`/`ensures` clauses need a trailing `;` (they're statements,
+not a header block); `_return` — not `result` — is the only valid
+name for "the value being returned" inside an `ensures`/`prove`
+clause; bounded loops use `for i from START to END { … }`, and
+unbounded ones use `while COND invariant …; { … }` as shown above.
 
 Backed by Z3. Three-stage pipeline: constant-fold → structural tautology →
 full SMT solve. `--no-verify` skips SMT for fast iteration.

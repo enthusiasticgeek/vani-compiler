@@ -118,6 +118,10 @@ count_positive = 2
   runtime value. Both have type `u64`. Mixing `u64` and `i64`
   needs an explicit cast -- that's the most common beginner
   speed-bump.
+- **`xs.len()` is the same thing as `len(xs)`**, just written as
+  a method call instead of a free function -- the compiler treats
+  them identically. Both spellings show up in later chapters and
+  examples; use whichever reads better at the call site.
 
   <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 

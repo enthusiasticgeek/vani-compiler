@@ -7,8 +7,8 @@
 > [Intermediate 3c -- shared ownership without Rc/Arc](03c_shared_ownership_primer.md)
 > + [Intermediate 3a -- Box+RAII primer](03a_box_raii_primer.md).
 
-This chapter has **no compiler code**. Pure intuition with
-side-by-side worked examples.
+This chapter is mostly intuition, with side-by-side worked examples
+(Rust on one side, vāṇी on the other) once each shape is introduced.
 
 ## The coat-check ticket
 
@@ -480,6 +480,16 @@ subject) AND set up the Weak edges correctly AND check
 upgrades at every traversal.
 
 ### The vāṇी shape
+
+> **New syntax ahead**: `interface Name { fn method(...) -> T; }`
+> declares a set of methods a type can implement, and `dyn Name` is
+> a value of "some type implementing `Name`, known only through
+> those methods" — used below so `World.observers` can hold
+> different observer types uniformly. Both get their own chapters
+> shortly ([Intermediate 4a](04a_dyn_iface_primer.md),
+> [4b](04b_interfaces_primer.md), and
+> [5](05_dyn.md)); this primer only needs "a `dyn Observer` is a
+> stand-in for any type with an `on_change` method" to follow along.
 
 ```vani
 struct Subject {
