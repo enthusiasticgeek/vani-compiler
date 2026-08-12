@@ -6319,3 +6319,40 @@ This bug report indicates a crash in the vani-compiler's local staging log durin
 To resolve this issue, we need more detailed information about the specific backend(s) affected by this crash. Additionally, reproducing the steps leading up to the crash will be crucial in diagnosing the root cause. Once these details are available, human experts can provide guidance on how to fix the underlying problem and ensure that the compiler behaves correctly under various scenarios.
 
 If possible, please add more details about which backend(s) this issue affects so that the frontiers model can focus on mitigating this specific backend-related bug.
+
+---
+
+### Candidate: 20260812-192155-backend-divergence-7dc0c9257a
+
+Repro: `tools/localfuzz/findings/20260812-192155-backend-divergence-7dc0c9257a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260812-192155-backend-divergence-7dc0c9257a/fix_attempt.md`
+
+```
+Staging Entry:
+vani-compiler-localfuzz/examples/language/english/design_patterns/behavioral/observer.vani
+Mutant/generated source:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "[stdout] value = 50\n[file: app.log ] value = 140611376477632\n[ALERT] value 140611376477632 exceeded threshold 100\n---\n[stdout] value = 150\n[file: app.log ] value = 140611376477632\n[ALERT] value 140611376477632 exceeded threshold 100\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "[stdout] value = 50\n[file: app.log ] value = 140611376477632\n[ALERT] value 140611376477632 exceeded threshold 100\n---\n[stdout] value = 150\n[file: app.log ] value = 140611376477632\n[ALERT] value 140611376477632 exceeded threshold 100\n",
+    "stderr": "",
+    "timed_out": false
+  }
+}
+```
+
+Finding kind: backend-divergence
+Raw result data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 
