@@ -1639,3 +1639,53 @@ a one-line patch, and one that needs to land identically on both
 backends to actually close this gap rather than just relocate it.
 Left as a documented, understood limitation rather than changed
 unilaterally.
+
+### L29 -- `for i from lo to hi` is ascending-only, step 1, with silent zero iterations when `lo >= hi`
+
+`for VAR from START to END { ... }` has exactly one grammar and one
+direction (`src/parser.rs::parse_for_stmt_inner`, ~line 3957): it
+always counts up by 1, over the half-open range `START, START+1, ...,
+END-1`. There is no `downto` keyword, no `step`/`by` clause, and no
+direction inference from `START` vs `END` -- this is a fixed grammar,
+not a runtime decision. If `START >= END`, the range is legitimately
+empty and the loop body runs **zero times**, with no diagnostic:
+
+```vani
+fn main() -> i64 {
+  let count: i64 = 0;
+  for i from 5 to 0 {
+    count = count + 1;
+  }
+  print "count =", count;   // count = 0
+  return 0;
+}
+```
+
+This is existing, deliberate, regression-tested behavior, not a bug
+-- see `for_loop_reverse_range_compiles` and `for_loop_empty_range_compiles`
+in `src/lib.rs` (~lines 4797-4823). It's listed here because the
+surface reads like it should count down (`for i from 5 to 0` looks
+like English for "5 down to 0"), and the compiler gives no error or
+warning when that intuition is wrong -- the same class of silent
+footgun as the half-open upper bound itself, just easier to trip on.
+
+**Workaround**: use a `while` loop with manual arithmetic for
+descending ranges or any step other than 1:
+
+```vani
+let i: i64 = 5;
+while i >= 1 {
+  print i;
+  i = i - 1;       // descending
+  // or: i = i - 3;  for a step of 3
+}
+```
+
+**Fix**: not planned as a grammar change -- adding `downto`/`step`
+would be a real language-surface addition (new keywords, new SMT
+bound-fact derivation for the range, new bytecode/backend lowering),
+not a bug fix, and `while` already covers the case with no loss of
+expressiveness. Tracked here purely as a documentation/discoverability
+gap: see [Beginner 5's "Counting down, or stepping by more than
+1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-or-stepping-by-more-than-1)
+for the tutorial-side fix (added 2026-08-13).

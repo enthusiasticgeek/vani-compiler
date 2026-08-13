@@ -245,7 +245,8 @@ if x > 0 { … } else { … }
 // while
 while cond { … }
 
-// for over range
+// for over range -- ascending only, step 1, half-open [0, n).
+// no `downto`/`step`; for descending or stride N, use `while`.
 for i from 0 to n { … }
 
 // for over collection

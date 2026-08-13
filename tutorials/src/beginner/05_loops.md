@@ -96,6 +96,75 @@ first_multiple_of_seven(20) = 21
   Intermediate track. This is a documented v1 deviation --
   see [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md).
 
+### Counting down, or stepping by more than 1
+
+`for k from lo to hi { ... }` is deliberately narrow: it only
+counts **up**, one at a time, from `lo` to `hi - 1`. There's no
+`downto` keyword and no `step` clause -- v1's `for` sugar doesn't
+have a direction or stride to configure. If you need to count
+down, or step by something other than 1, reach for `while` and do
+the arithmetic yourself, exactly like `sum_to_n` above but with a
+different update expression:
+
+```vani
+fn countdown_sum(n: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = n;
+  while i >= 1 {
+    total = total + i;
+    i = i - 1;       // descending: subtract each iteration
+  }
+  return total;
+}
+
+fn sum_every_third(start: i64, end: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = start;
+  while i <= end {
+    total = total + i;
+    i = i + 3;        // step of 3 instead of 1
+  }
+  return total;
+}
+```
+
+```
+countdown_sum(5) = 15
+sum_every_third(1, 10) = 22
+```
+
+`countdown_sum` walks `5, 4, 3, 2, 1` (sum `15`); `sum_every_third`
+walks `1, 4, 7, 10` (sum `22`). Both are just a `while` with the
+update expression you need -- `i = i - 1` to descend, `i = i + 3`
+to skip by 3, `i = i - 2` to descend by 2, and so on. There's
+nothing special-cased in the language for "backwards" or "by N";
+it's the same `while` shape, pointed a different direction.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code does not do what it looks like it does"/>
+
+**Don't try to fake a countdown with `for ... from ... to`** by
+just swapping the bounds -- `for i from 5 to 0 { ... }` does not
+count down to `0`. Because `for` is ascending-only, `5 to 0` is
+already a range with nothing in it (`5 > 0`, so there's no valid
+`lo, lo+1, ...` sequence below the upper bound), and the loop body
+runs **zero times**, silently -- no error, no warning:
+
+```vani
+fn main() -> i64 {
+  let count: i64 = 0;
+  for i from 5 to 0 {
+    count = count + 1;
+  }
+  print "count =", count;   // count = 0, not 5
+  return 0;
+}
+```
+
+This is the same half-open-range rule from the bullet above (`lo
+to hi` means `lo, lo+1, ..., hi-1`) -- it just surprises people
+more when `lo > hi`, since "count from 5 to 0" reads like English
+for "count down," but vāṇी's `for` never reads it that way.
+
 ### A closer look: don't forget to advance
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
