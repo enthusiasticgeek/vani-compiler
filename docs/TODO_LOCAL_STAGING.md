@@ -6944,3 +6944,57 @@ Repro: `tools/localfuzz/findings/20260813-111221-run-crash-a809e61a50/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260813-111221-run-crash-a809e61a50/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-112826-backend-divergence-b6a0858775
+
+Repro: `tools/localfuzz/findings/20260813-112826-backend-divergence-b6a0858775/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-112826-backend-divergence-b6a0858775/fix_attempt.md`
+
+**Staging Entry:**
+
+Vani-compiler (Local Fuzzing) - `try_question_op.vani` mutation
+
+**Mutation Location:**
+```vani
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/try_question_op.vani              # LLVM
+//   vanic run examples/language/mandarin/try_question_op.vani --backend=c  # C
+
+目的 "Mandarin ? operator smoke-test";
+
+函数 解析(n: i64) -> Option<i64> {
+  如果 n < 0 {
+  }
+  返回 Option.Some(n * 3);
+}
+
+函数 计算(n: i64) -> Option<i64> {
+  让 v: i64 = 解析(n)?;
+  返回 Option.Some(v + 1);
+}
+
+函数 解开(o: Option<i64>, 默认值: i64) -> i64 {
+  返回 匹配 o {
+    Option.Some(v) 那么 v,
+    Option.None 那么 默认值,
+  };
+}
+
+函数 main() -> i64 {
+  让 好的: Option<i64> = 计算(-9223372036854775808);
+  让 v1: i64 = 解开(好的, 0 - 999);
+  断言 v1 == 13;
+  让 坏的: Option<i64> = 计算(-1);
+  让 v2: i64 = 解开(坏的, 0 - 999);
+  断言 v2 == 0 - 999;
+  打印 "Mandarin ? op OK";
+  返回 0;
+}
+```
+
+**Mutant Result:**
+- **Backend (C
