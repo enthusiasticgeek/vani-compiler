@@ -7253,3 +7253,63 @@ Actual result:
 - C backend failed with RC=134, stderr "index out of bounds"
 
 This is a backend-divergence issue where the compiler produces different results for different backends (LLVM and C) when faced with an index-out-of-bounds error in the given input.
+
+---
+
+### Candidate: 20260813-205434-run-crash-a310c2b2eb
+
+Repro: `tools/localfuzz/findings/20260813-205434-run-crash-a310c2b2eb/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-205434-run-crash-a310c2b2eb/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Status: needs human/frontier root-cause review.**
+
+**Mutant generated source:**
+```vani
+// vani-lang: urdu
+مقصد "Urdu Vec invariants smoke-test";
+فنکشن main() -> i64 {
+  مانیں فہرست: Vec<i64> = vec();
+  فہرست = push(فہرست, 10);
+  فہرست = push(فہرست, 20);
+  فہرست = push(فہرست, 30);
+  فہرست = push(فہرست, 40);
+  فہرست = push(فہرست, 50);
+  یقینی (len(فہرست) بطور i64) == 5;
+  مانیں i: i64 = 0;
+  دوران i < 5
+  غیرمتغیر i >= 0;
+  غیرمتغیر i <= 5;
+  {
+    یقینی فہرست[i] > 0;
+  }
+  لکھو "Urdu vec invariants OK";
+  واپس 0;
+}
+```
+
+**Mutant ID: <generated>`**
+**Mutation Description:**
+Changes the size of the vector from 5 to 6.
+
+**Raw result data:**
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "Segmentation fault (core dumped)",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "Segmentation fault (core dumped)",
+    "timed_out": true
+  }
+}
+```
+
+**Backend A
