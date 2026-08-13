@@ -302,8 +302,14 @@ SMT solvers are powerful but not omniscient. They struggle with:
   about all heap shapes.
 - **Floating-point edge cases**: NaN handling, denormals -- the
   solver has theories for these but they get expensive.
-- **Recursion without a recursion bound**: same as loops --
-  needs a manual hint.
+- **Recursion**: never inlined or unrolled, even for a self-call --
+  every call, recursive or not, is verified purely from the callee's
+  `requires`/`ensures` signature. For a recursive call this means the
+  `ensures` doubles as an induction hypothesis: it has to be tight
+  enough to prove itself from itself, not just true. See [Intermediate
+  12's "Recursive and reentrant calls"](12_smt_deepdive.md#recursive-and-reentrant-calls)
+  for a worked example of a too-weak `ensures` failing and a tightened
+  one succeeding.
 - **Bounds elision inside any loop body**: unlike the
   straight-line examples above, `xs[i]` never has its bounds
   check elided when it's lexically inside a `while`/`for`
@@ -348,8 +354,9 @@ worth several seconds of compile time.
 - When proofs succeed, runtime checks vanish -- your code runs
   AS FAST AS the C version that just assumes the precondition,
   but with no UB risk.
-- The solver isn't omniscient -- loops/recursion may need
-  manual invariants.
+- The solver isn't omniscient -- loops need manual invariants,
+  and recursion needs an `ensures` tight enough to serve as its
+  own induction hypothesis.
 - `VANIC_NO_VERIFY=1` skips SMT entirely for fast iteration.
 
 This is the feature that most distinguishes vāṇी from Rust /

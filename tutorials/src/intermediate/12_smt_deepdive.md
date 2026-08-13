@@ -172,6 +172,114 @@ fails for this reason; here, the *same* call site succeeds
 because `double_if_positive` (and `checked_sub`) carry the
 needed `ensures`.
 
+## Recursive and reentrant calls
+
+The verifier never inlines or unrolls a callee's body -- not for an
+ordinary call, and not for a recursive one either. Every call site is
+checked the same way: substitute the actual arguments into the
+callee's *declared* `requires`/`ensures` and reason from that
+signature alone. A self-call, a mutual-recursion call, or a call back
+into a function that's currently being checked all look identical to
+the verifier -- it only ever consults the callee's contract, never its
+body. There's no "currently verifying" stack and no recursion-depth
+limit in the checker, because none is needed: a call site never
+re-descends into a callee's body, so the checker's own logic can't
+loop just because your program's call graph does.
+
+One consequence: on a recursive call, the callee's `ensures` is
+*assumed* as a fact -- which, for the recursive case, means it's
+assumed about the very call you're in the middle of proving. That's
+an induction hypothesis, and like any induction proof, it only works
+if the hypothesis is strong enough to carry the inductive step. Watch
+what happens with a postcondition that's true, but too weak:
+
+```vani
+fn sum_to(n: i64) -> i64
+requires n >= 0;
+requires n <= 1000;
+ensures _return >= 0;
+{
+  if n == 0 {
+    return 0;
+  }
+  return n + sum_to(n - 1);
+}
+```
+
+```
+error: function 'sum_to' ensures clause does not hold at this return
+       [counterexample: n = 1000, sum_to((n - 1)) = 9223372036854775800]
+ensures _return >= 0;
+        ^^^^^^^^^^^^
+```
+
+`_return >= 0` is true of `sum_to` -- but it's the *only* thing the
+solver is allowed to assume about `sum_to(n - 1)` at the recursive
+call site, so it's free to pick `9223372036854775800` (any
+non-negative value) as that call's result, and `n +
+9223372036854775800` overflows `i64`. This is direct evidence the
+verifier isn't inlining: if it were substituting the real recursive
+computation, no such counterexample would exist -- `sum_to(999)` is
+actually `499500`, nowhere near overflow. The counterexample is an
+artifact of assume-guarantee reasoning, not a real bug in `sum_to`.
+
+The fix is a tighter `ensures` -- one that bounds growth enough for
+the inductive step to go through:
+
+```vani
+fn sum_to(n: i64) -> i64
+requires n >= 0;
+requires n <= 1000;
+ensures _return >= 0;
+ensures _return <= n * 1000000;
+{
+  if n == 0 {
+    return 0;
+  }
+  return n + sum_to(n - 1);
+}
+```
+
+Now the induction step is: assuming `sum_to(n - 1) <= (n - 1) *
+1000000` (the hypothesis, for the recursive call), prove `n +
+sum_to(n - 1) <= n * 1000000`. That's linear arithmetic Z3 discharges
+easily, so this version compiles and runs -- `sum_to(5)` still
+correctly returns `15`. The lesson generalizes: a recursive function's
+`ensures` isn't just documentation of its result, it's the exact fact
+budget every recursive call site has to work with, so it needs to be
+tight enough to prove itself from itself.
+
+If you want to forbid recursion outright rather than verify it,
+`#[no_recursion]` (see [Advanced 12 -- Safety
+standards](../advanced/12_safety_standards.md)) rejects any recursive
+call at compile time via a call-graph cycle check -- a completely
+separate mechanism from the SMT contract machinery above, with no
+attempt to prove anything about what the recursion computes.
+
+### Is this fast? (Big-O of the SMT pass)
+
+Because a call site never re-examines the callee's body, the checker's
+cost **does not scale with recursion depth or call-graph shape** --
+only with the size of the AST actually being walked. Concretely:
+
+- Each function's fact generation is one structural walk over that
+  function's own body -- O(nodes in that function), full stop, whether
+  or not it's recursive.
+- Across the whole program, the checker's own control flow visits each
+  function exactly once (`checker.rs:1787`), so the pass is O(total
+  AST size) overall, not exponential in the call graph.
+- Each `assert`/`ensures`/`requires` obligation issues one Z3 query
+  built from the facts accumulated so far, so per function the total
+  query text is roughly quadratic in statement count in the worst
+  case -- not driven by recursion at all.
+- Each Z3 call is capped at a 5-second wall-clock timeout, and queries
+  are cached by exact text so an incremental rebuild skips proofs
+  whose facts didn't change.
+
+The same "why is this slow" mitigations from [Sec.12a](12a_smt_primer.md#doesnt-this-slow-the-compiler-down)
+apply here unchanged: `VANIC_NO_VERIFY=1` for fast local iteration,
+full verification for CI.
+
 ## How to debug a failing proof
 
 Run with `VANIC_SMT_DEBUG=1`:

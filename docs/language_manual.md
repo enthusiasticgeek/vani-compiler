@@ -514,6 +514,31 @@ unbounded ones use `while COND invariant …; { … }` as shown above.
 Backed by Z3. Three-stage pipeline: constant-fold → structural tautology →
 full SMT solve. `--no-verify` skips SMT for fast iteration.
 
+**Recursion and reentrancy**: every call — including a function calling
+itself, mutual recursion, or a call back into a function currently being
+checked — is verified against the callee's `requires`/`ensures`
+*signature* only; the checker never re-descends into a callee's body (not
+even its own). This means a self-recursive call is proven exactly like any
+other call: the caller's `requires` is discharged against the callee's
+declared precondition, and the callee's `ensures` is assumed as a fact for
+the result. No separate recursion-handling code path or depth tracking
+exists, and none is needed — the checker's own control flow never
+recurses across the call graph, so mutual/self recursion cannot make it
+loop. Practical effect: an `ensures` clause on a recursive function acts
+as an induction hypothesis (the recursive call's `ensures` is assumed
+while proving the current call's `ensures`), so recursive functions need
+a tight enough `ensures` to make that induction step provable — see
+[Sec.12 SMT deep-dive](../tutorials/src/intermediate/12_smt_deepdive.md#recursive-and-reentrant-calls)
+for a worked example. `#[no_recursion]` (below) rejects recursion
+outright instead of verifying it, via an unrelated call-graph cycle
+check.
+
+**Complexity**: fact generation is a single linear walk per function
+over its own AST; nothing re-walks a callee's body, so cost doesn't
+scale with recursion depth. Each proof obligation issues one Z3 query
+capped at a 5s timeout, with queries cached by exact text to skip
+repeats.
+
 ---
 
 ## Safety attributes

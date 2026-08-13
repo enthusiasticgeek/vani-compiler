@@ -692,6 +692,38 @@ the actionable hint suggesting one be added:
 - `lib.rs::smt_hint_when_callee_missing_ensures` pins the
   "add an ensures clause" diagnostic.
 
+**Recursive / mutually-recursive / reentrant calls are not a special
+case of this mechanism — they're the same mechanism.** `check_function`
+(`checker.rs:11396`) checks each function exactly once, in a flat
+top-level loop (`checker.rs:1787-1788`); a `Call` node's fact-generation
+(`record_ensures_facts`, `checker.rs:39149`; `verify_call_args_in_expr`,
+`checker.rs:39459`) only ever looks up the callee's *signature*
+(`requires`/`ensures`) in the `signatures: &HashMap<String, Signature>`
+table — never the callee's body, so it can't distinguish "callee is
+some other function" from "callee is the function currently being
+checked." There is deliberately no "currently verifying" stack
+(confirmed absent by grep, and stated at `checker.rs:11704-11707`): none
+is needed, because a call site never re-descends into a callee's body
+in the first place, recursive or not. The practical upshot: a
+recursive call's `ensures` is *assumed* as a fact at the recursive call
+site while proving the *current* call's `ensures` — i.e. the `ensures`
+clause doubles as an induction hypothesis, so it must be tight enough
+for the induction step to hold, not just true for the base case. A
+too-loose `ensures` (e.g. only `_return >= 0` on a summing recursion)
+lets the solver pick an unconstrained huge value for the recursive
+sub-call and find an overflow counterexample; tightening the `ensures`
+to bound growth (e.g. `_return <= n * K`) gives the solver what it
+needs to discharge the inductive step. See [Sec.12 SMT
+deep-dive](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/intermediate/12_smt_deepdive.md#recursive-and-reentrant-calls)
+for a worked before/after example of exactly this.
+
+**Complexity**: because callee bodies are never revisited, per-function
+fact generation is a single structural walk over that function's own
+AST (no blowup with recursion depth), and each proof obligation is one
+Z3 query over the accumulated `smt_facts`, capped at a 5-second
+wall-clock timeout (`run_z3`, `smt.rs:259-272`) with an exact-text query
+cache (`smt.rs:165-197`) to skip repeat solver calls.
+
 ---
 
 ## Language-surface limitations
