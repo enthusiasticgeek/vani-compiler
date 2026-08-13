@@ -182,6 +182,11 @@ It doesn't handle yet:
 - Quantifiers (`forall i. xs[i] > 0`).
 - Recursion across calls without `ensures`.
 
+(Recursion *with* an `ensures` works, but the `ensures` doubles as an
+induction hypothesis for the recursive call -- see [Intermediate 12's
+"Recursive and reentrant calls"](../intermediate/12_smt_deepdive.md#recursive-and-reentrant-calls)
+for the mechanics and a worked example.)
+
 When you hit a boundary, the answer is usually "rewrite the
 predicate in the supported subset" -- e.g. replace a string
 length check with the `u64` return of `len(s)`.

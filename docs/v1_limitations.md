@@ -692,6 +692,38 @@ the actionable hint suggesting one be added:
 - `lib.rs::smt_hint_when_callee_missing_ensures` pins the
   "add an ensures clause" diagnostic.
 
+**Recursive / mutually-recursive / reentrant calls are not a special
+case of this mechanism — they're the same mechanism.** `check_function`
+(`checker.rs:11396`) checks each function exactly once, in a flat
+top-level loop (`checker.rs:1787-1788`); a `Call` node's fact-generation
+(`record_ensures_facts`, `checker.rs:39149`; `verify_call_args_in_expr`,
+`checker.rs:39459`) only ever looks up the callee's *signature*
+(`requires`/`ensures`) in the `signatures: &HashMap<String, Signature>`
+table — never the callee's body, so it can't distinguish "callee is
+some other function" from "callee is the function currently being
+checked." There is deliberately no "currently verifying" stack
+(confirmed absent by grep, and stated at `checker.rs:11704-11707`): none
+is needed, because a call site never re-descends into a callee's body
+in the first place, recursive or not. The practical upshot: a
+recursive call's `ensures` is *assumed* as a fact at the recursive call
+site while proving the *current* call's `ensures` — i.e. the `ensures`
+clause doubles as an induction hypothesis, so it must be tight enough
+for the induction step to hold, not just true for the base case. A
+too-loose `ensures` (e.g. only `_return >= 0` on a summing recursion)
+lets the solver pick an unconstrained huge value for the recursive
+sub-call and find an overflow counterexample; tightening the `ensures`
+to bound growth (e.g. `_return <= n * K`) gives the solver what it
+needs to discharge the inductive step. See [Sec.12 SMT
+deep-dive](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/intermediate/12_smt_deepdive.md#recursive-and-reentrant-calls)
+for a worked before/after example of exactly this.
+
+**Complexity**: because callee bodies are never revisited, per-function
+fact generation is a single structural walk over that function's own
+AST (no blowup with recursion depth), and each proof obligation is one
+Z3 query over the accumulated `smt_facts`, capped at a 5-second
+wall-clock timeout (`run_z3`, `smt.rs:259-272`) with an exact-text query
+cache (`smt.rs:165-197`) to skip repeat solver calls.
+
 ---
 
 ## Language-surface limitations
@@ -1607,3 +1639,53 @@ a one-line patch, and one that needs to land identically on both
 backends to actually close this gap rather than just relocate it.
 Left as a documented, understood limitation rather than changed
 unilaterally.
+
+### L29 -- `for i from lo to hi` is ascending-only, step 1, with silent zero iterations when `lo >= hi`
+
+`for VAR from START to END { ... }` has exactly one grammar and one
+direction (`src/parser.rs::parse_for_stmt_inner`, ~line 3957): it
+always counts up by 1, over the half-open range `START, START+1, ...,
+END-1`. There is no `downto` keyword, no `step`/`by` clause, and no
+direction inference from `START` vs `END` -- this is a fixed grammar,
+not a runtime decision. If `START >= END`, the range is legitimately
+empty and the loop body runs **zero times**, with no diagnostic:
+
+```vani
+fn main() -> i64 {
+  let count: i64 = 0;
+  for i from 5 to 0 {
+    count = count + 1;
+  }
+  print "count =", count;   // count = 0
+  return 0;
+}
+```
+
+This is existing, deliberate, regression-tested behavior, not a bug
+-- see `for_loop_reverse_range_compiles` and `for_loop_empty_range_compiles`
+in `src/lib.rs` (~lines 4797-4823). It's listed here because the
+surface reads like it should count down (`for i from 5 to 0` looks
+like English for "5 down to 0"), and the compiler gives no error or
+warning when that intuition is wrong -- the same class of silent
+footgun as the half-open upper bound itself, just easier to trip on.
+
+**Workaround**: use a `while` loop with manual arithmetic for
+descending ranges or any step other than 1:
+
+```vani
+let i: i64 = 5;
+while i >= 1 {
+  print i;
+  i = i - 1;       // descending
+  // or: i = i - 3;  for a step of 3
+}
+```
+
+**Fix**: not planned as a grammar change -- adding `downto`/`step`
+would be a real language-surface addition (new keywords, new SMT
+bound-fact derivation for the range, new bytecode/backend lowering),
+not a bug fix, and `while` already covers the case with no loss of
+expressiveness. Tracked here purely as a documentation/discoverability
+gap: see [Beginner 5's "Counting down, or stepping by more than
+1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-or-stepping-by-more-than-1)
+for the tutorial-side fix (added 2026-08-13).
