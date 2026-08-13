@@ -6752,3 +6752,12 @@ Fix attempt: `tools/localfuzz/findings/20260813-065200-run-crash-643677d448/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260813-072134-backend-divergence-0d0d40802c
+
+Repro: `tools/localfuzz/findings/20260813-072134-backend-divergence-0d0d40802c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-072134-backend-divergence-0d0d40802c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
