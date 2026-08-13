@@ -7155,3 +7155,45 @@ Repro: `tools/localfuzz/findings/20260813-191632-backend-divergence-464790277a/r
 Fix attempt: `tools/localfuzz/findings/20260813-191632-backend-divergence-464790277a/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-192342-backend-divergence-54f4c341dc
+
+Repro: `tools/localfuzz/findings/20260813-192342-backend-divergence-54f4c341dc/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-192342-backend-divergence-54f4c341dc/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+I ran a local fuzz test using the provided mutant source and observed that it diverged between LLVM and Clang backends, resulting in an integer overflow error during multiplication. The specific code snippet causing this issue is:
+
+```vani
+// Phase 13.17: second Slavic Latin variant (after Polish).
+// Czech uses ř (the only language with this letter) plus
+// extensive háček diacritics č/ď/ě/ň/š/ť/ž + standard
+// á/é/í/ó/ú/ý + ů.
+
+záměr "Compute a small score with checked constraints";
+
+funkce add(a: i64, b: i64) -> i64 {
+  vrať a + b;
+}
+
+funkce bounded_score(base: i64) -> i64
+vyžaduje base >= 0;
+{
+  nechť doubled: i64 = base * 9223372036854775807;
+  tvrď doubled >= base;
+  vrať add(doubled, 2);
+}
+
+funkce main() -> i64 {
+  nechť answer = bounded_score(20);
+  dokaž 2 + 2 == 4;
+  tvrď answer >= 0;
+  vypiš answer;
+  vrať 0;
+}
+```
+
+The error occurs when the `doubled` variable is multiplied by `9223372036854775807`. This value, which is the maximum possible integer in a 64-bit signed integer, results in an overflow, causing the program to crash or hang.
