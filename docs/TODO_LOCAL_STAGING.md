@@ -7052,3 +7052,14 @@ Fix attempt: `tools/localfuzz/findings/20260813-144531-run-crash-97d95cec20/fix_
 RUN: /home/virgo/source/vani-compiler-localfuzz/examples/language/russian/control_flow.vani --backend=c
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-155555-backend-divergence-0f196f88b2
+
+Repro: `tools/localfuzz/findings/20260813-155555-backend-divergence-0f196f88b2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-155555-backend-divergence-0f196f88b2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This staging entry provides a description of the bug report for the vani-compiler project's local staging log. It includes the base corpus file, the mutant/generated source code, the observed symptom (crash/hang/ divergent output), and which backend(s) it affects. The draft does not claim a root cause but only describes the details that are necessary to understand and investigate the bug effectively.
