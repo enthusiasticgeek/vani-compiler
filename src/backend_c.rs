@@ -14937,6 +14937,7 @@ return __intent_ret; }}\n",
             parallel,
             reductions,
             label,
+            descending,
             ..
         } => {
             let local = local_name(var);
@@ -14999,13 +15000,23 @@ return __intent_ret; }}\n",
                 // freely use SIMD without gather/scatter.
                 out.push_str("  _Pragma(\"GCC ivdep\")\n");
             }
-            out.push_str(&format!(
-                "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
-                c_ty,
-                local,
-                start_v,
-                end_v
-            ));
+            if *descending {
+                out.push_str(&format!(
+                    "  for ({0} {1} = {2}; {1} > {3}; {1}--) {{\n",
+                    c_ty,
+                    local,
+                    start_v,
+                    end_v
+                ));
+            } else {
+                out.push_str(&format!(
+                    "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
+                    c_ty,
+                    local,
+                    start_v,
+                    end_v
+                ));
+            }
             for s in body {
                 emit_stmt(s, out);
             }

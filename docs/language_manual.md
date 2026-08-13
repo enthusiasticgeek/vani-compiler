@@ -245,9 +245,11 @@ if x > 0 { … } else { … }
 // while
 while cond { … }
 
-// for over range -- ascending only, step 1, half-open [0, n).
-// no `downto`/`step`; for descending or stride N, use `while`.
+// for over range -- step 1, half-open. `to` ascends [0, n);
+// `downto` descends and excludes its lower bound the same way
+// (English dialect only for now). No `step`/stride-N; use `while`.
 for i from 0 to n { … }
+for i from n downto 0 { … }
 
 // for over collection
 for x in ref xs { … }

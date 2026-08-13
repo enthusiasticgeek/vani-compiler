@@ -1,0 +1,33 @@
+// build & run:
+//   vanic run examples/language/english/for_loop_downto.vani
+//   vanic run examples/language/english/for_loop_downto.vani --backend=c
+
+intent "for VAR from HIGH downto LOW -- descending, step 1, half-open range";
+
+// `downto` is the descending counterpart of `to`: it walks
+// HIGH, HIGH-1, ..., LOW+1 -- excluding LOW, the same half-open
+// convention `to` uses for its own upper bound.
+fn countdown_sum(n: i64) -> i64 {
+  let total: i64 = 0;
+  for i from n downto 0 {
+    total = total + i;
+  }
+  return total;
+}
+
+// `for i from 0 downto 5` has no valid descending sequence
+// (0 <= 5), so the body never executes -- mirrors `for i from 5
+// to 3` silently running zero times for the ascending form.
+fn empty_when_backwards() -> i64 {
+  let count: i64 = 0;
+  for i from 0 downto 5 {
+    count = count + 1;
+  }
+  return count;
+}
+
+fn main() -> i64 {
+  print "countdown_sum(5)       =", countdown_sum(5);
+  print "empty_when_backwards() =", empty_when_backwards();
+  return 0;
+}

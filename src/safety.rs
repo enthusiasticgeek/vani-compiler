@@ -1193,11 +1193,12 @@ fn wcet_stmt(
             Some(c.saturating_add(t.max(e)).saturating_add(2))
         }
         S::While { .. } => None, // unbounded — no static iteration count
-        S::For { start, end, body, .. } => {
+        S::For { start, end, body, descending, .. } => {
             let start_const = const_int(start);
             let end_const = const_int(end);
             let iters = match (start_const, end_const) {
-                (Some(s), Some(e)) if e >= s => (e - s) as u64,
+                (Some(s), Some(e)) if !descending && e >= s => (e - s) as u64,
+                (Some(s), Some(e)) if *descending && s >= e => (s - e) as u64,
                 _ => return None,
             };
             let body_cycles = wcet_body(body, fn_map, visiting, recursion_bound)?;

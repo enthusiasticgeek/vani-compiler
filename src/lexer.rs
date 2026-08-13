@@ -102,6 +102,12 @@ pub enum TokenKind {
     /// `to EXPR` — closing of the range form (and future slice
     /// shape `xs[lo to hi]`). T0.0.
     To,
+    /// `downto EXPR` — descending counterpart of `to`, valid only
+    /// in the `for VAR from HIGH downto LOW { ... }` range form.
+    /// English dialect only for now; other dialects still only
+    /// have `to` (ascending). `xs[lo to hi]` slicing is unaffected
+    /// -- `downto` is not accepted there.
+    DownTo,
     DotDot,
     /// `.` — field access (`p.x`) and tuple-index (`t.0`)
     /// postfix operator. Distinct from `DotDot`. T1.1 / T1.2.
@@ -7012,6 +7018,12 @@ impl<'a> Lexer<'a> {
             "ref" => TokenKind::Ref,
             "from" => TokenKind::From,
             "to" => TokenKind::To,
+            // Descending counterpart of `to`, valid only in
+            // `for VAR from HIGH downto LOW { ... }`. English
+            // dialect only for now -- other dialects keep `to`
+            // ascending-only until a dedicated keyword-parity
+            // sweep adds native `downto` words everywhere.
+            "downto" => TokenKind::DownTo,
             // Data shape: `struct` / `record`.
             "struct" | "record" => TokenKind::Struct,
             "enum" => TokenKind::Enum,

@@ -4820,6 +4820,58 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_downto_parses_and_compiles() {
+        // `for i from 5 downto 0` — descending, step 1, half-open
+        // (excludes 0, mirroring `to`'s exclusion of its upper
+        // bound). Walks 5, 4, 3, 2, 1.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 5 downto 0 { n = n + 1; }
+              return n;
+            }
+        "#;
+        compile(source).expect("downto range should compile");
+    }
+
+    #[test]
+    fn for_loop_downto_empty_when_start_le_end_compiles() {
+        // `for i from 0 downto 5` — start <= end, so there's no
+        // valid descending sequence; body never executes. Mirrors
+        // `for_loop_reverse_range_compiles` for the other direction.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 downto 5 { n = n + 1; }
+              return n;
+            }
+        "#;
+        compile(source).expect("empty downto range should compile");
+    }
+
+    #[test]
+    fn for_loop_downto_rejected_on_parallel_for() {
+        // `parallel for ... downto ...` is out of scope for now --
+        // the parser rejects it with a clear message rather than
+        // silently mis-threading it.
+        let source = r#"
+            fn main() -> i64 {
+              let acc: i64 = 0;
+              parallel for i from 10 downto 0 reduce acc with +; {
+                acc = acc + i;
+              }
+              return acc;
+            }
+        "#;
+        let err = compile(source).expect_err("parallel downto should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("'parallel for' does not support 'downto'")),
+            "expected a 'parallel for' + 'downto' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn cast_bool_to_int_rejected() {
         // bool ↔ int casts are rejected — different semantic
         // domains. Forces explicit if/else conversion.
