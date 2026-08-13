@@ -6724,3 +6724,31 @@ The test case `iterate.vani` was run with both LLVM and C backends on the base c
 
 **Observed Symptom:**
 The test case experienced a backend divergence, specifically with both LLVM and C backends. The exact error message was `index out of bounds
+
+---
+
+### Candidate: 20260813-065200-run-crash-643677d448
+
+Repro: `tools/localfuzz/findings/20260813-065200-run-crash-643677d448/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-065200-run-crash-643677d448/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
