@@ -141,8 +141,33 @@ sum_every_third(1, 10) = 22
 ```
 
 `sum_every_third` walks `1, 4, 7, 10` (sum `22`) -- `i = i + 3` to
-step by 3, `i = i - 2` to descend by 2, and so on. `parallel for`
-doesn't support `downto` yet either; it's sequential-only for now.
+step by 3. The same trick works in reverse: flip the comparison to
+`>=` and subtract instead of add:
+
+```vani
+fn sum_descending_step(hi: i64, lo: i64, step: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = hi;
+  while i >= lo {
+    total = total + i;
+    i = i - step;
+  }
+  return total;
+}
+```
+
+```
+sum_descending_step(20, 0, 3) = 77
+```
+
+`sum_descending_step(20, 0, 3)` walks `20, 17, 14, 11, 8, 5, 2` (sum
+`77`) -- `i = i - step` each time, stopping once `i` drops below
+`lo`. Note this version is *inclusive* of both ends (`i <= hi` isn't
+needed since `i` starts there; the loop keeps going `while i >= lo`),
+unlike `for ... to`/`downto`'s half-open, exclusive-of-one-end
+convention -- swap `>=`/`<=` for `>`/`<` if you want the exclusive
+version to match. `parallel for` doesn't support `downto` yet
+either; it's sequential-only for now.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code does not do what it looks like it does"/>
 
