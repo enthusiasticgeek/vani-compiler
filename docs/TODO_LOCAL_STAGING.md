@@ -7081,3 +7081,12 @@ Repro: `tools/localfuzz/findings/20260813-161905-backend-divergence-eb9b3a59df/r
 Fix attempt: `tools/localfuzz/findings/20260813-161905-backend-divergence-eb9b3a59df/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-173757-backend-divergence-4625e255d6
+
+Repro: `tools/localfuzz/findings/20260813-173757-backend-divergence-4625e255d6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-173757-backend-divergence-4625e255d6/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
