@@ -6887,3 +6887,42 @@ Repro: `tools/localfuzz/findings/20260813-102413-backend-divergence-018869771b/r
 Fix attempt: `tools/localfuzz/findings/20260813-102413-backend-divergence-018869771b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-104024-backend-divergence-a011393bc9
+
+Repro: `tools/localfuzz/findings/20260813-104024-backend-divergence-a011393bc9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-104024-backend-divergence-a011393bc9/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+**Mutant Generated Source:**
+```vani
+// build & run:
+//   vanic run examples/language/english/try_keyword.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/try_keyword.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/try_keyword.vani -o /tmp/try_keyword && /tmp/try_keyword   # native binary
+```
+
+**Finding Kind:** `backend-divergence`
+**Raw Result Data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  }
+}
+```
+
+**STATUS: needs human/frontier root-cause review.**
