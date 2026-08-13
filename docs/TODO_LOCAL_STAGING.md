@@ -6619,3 +6619,12 @@ fn main() -> i64 {
 Backend-divergence
 
 **Raw Result Data
+
+---
+
+### Candidate: 20260813-014458-backend-divergence-65d8124e22
+
+Repro: `tools/localfuzz/findings/20260813-014458-backend-divergence-65d8124e22/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-014458-backend-divergence-65d8124e22/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
