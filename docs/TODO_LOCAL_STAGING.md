@@ -7041,3 +7041,14 @@ Fix attempt: `tools/localfuzz/findings/20260813-115501-backend-divergence-e7a69e
     ბეჭდვა სია[3];
 
     დაბრუნება 0
+
+---
+
+### Candidate: 20260813-144531-run-crash-97d95cec20
+
+Repro: `tools/localfuzz/findings/20260813-144531-run-crash-97d95cec20/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-144531-run-crash-97d95cec20/fix_attempt.md`
+
+RUN: /home/virgo/source/vani-compiler-localfuzz/examples/language/russian/control_flow.vani --backend=c
+
+STATUS: needs human/frontier root-cause review.
