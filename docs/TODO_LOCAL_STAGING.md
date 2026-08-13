@@ -6779,3 +6779,26 @@ Repro: `tools/localfuzz/findings/20260813-085341-run-crash-b830763bec/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260813-085341-run-crash-b830763bec/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-090219-backend-divergence-0330bc5d18
+
+Repro: `tools/localfuzz/findings/20260813-090219-backend-divergence-0330bc5d18/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-090219-backend-divergence-0330bc5d18/fix_attempt.md`
+
+STAGING ENTRY: `mongolian/vec_invariants.vani` with mutation: `<add>` on line 13 (`arr[i] > 0`) in the C backend.
+
+### RUN DETAILS:
+- **Input**: The base corpus file `mongolian/vec_invariants.vani`.
+- **Mutant**: The `<add>` mutation added an extra element to the vector at index 5.
+- **Backend**: C (LLVM).
+- **Result**:
+  - LLVM: Returns a runtime error indicating that the index is out of bounds (`index out of bounds`).
+  - C: Returns with exit code `3`.
+
+### OBSERVED SYMptom:
+The program crashes with an index out of bounds error when run in the C backend, while it runs without issues in the LLVM backend.
+
+### WHICH BACKEND(S) IT AFFECTS:
+This bug only affects the C backend (LLVM).
