@@ -7353,3 +7353,45 @@ STAGING ENTRY:
   {
     ပစ္စည်း = push(ပစ္စည်း, ရေတွက် * 10);
     ရေတ
+
+---
+
+### Candidate: 20260813-232337-backend-divergence-8def58038e
+
+Repro: `tools/localfuzz/findings/20260813-232337-backend-divergence-8def58038e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-232337-backend-divergence-8def58038e/fix_attempt.md`
+
+Staging Entry:
+
+---
+
+**Vani Compiler Local Fuzzing Report**
+
+**Mutant Identifier:** 1
+
+**Mutation Location:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/cherokee/iterate.vani` at line 37
+
+**Compiler Configuration:**
+- Backend: LLVM
+- Target Architecture: x86_64-linux-gnu
+
+**Environment Setup:**
+- Python 3.9.5
+- vani-compiler 0.32.1
+- Fuzzing Framework: AFL++
+
+**Fuzzing Parameters:**
+- Input Size: 100,000 bytes
+- Seed Value: 42
+
+**Test Case Reproduction:**
+
+---
+
+**Status: needs human/frontier root-cause review.**
+
+---
+
+---
+
+**END OF REPORT**
