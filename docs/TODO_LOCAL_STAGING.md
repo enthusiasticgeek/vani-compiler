@@ -6551,3 +6551,71 @@ Repro: `tools/localfuzz/findings/20260813-000259-backend-divergence-53d6b21bbb/r
 Fix attempt: `tools/localfuzz/findings/20260813-000259-backend-divergence-53d6b21bbb/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-012844-backend-divergence-89e6907be7
+
+Repro: `tools/localfuzz/findings/20260813-012844-backend-divergence-89e6907be7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-012844-backend-divergence-89e6907be7/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Date:** [Insert Date]
+
+**Time:** [Insert Time]
+
+**Build Environment:**
+- Compiler Version: vanic v0.18.0 (Local Fuzzing)
+- Operating System: Linux Ubuntu 20.04
+- Backend(s) Used: C, LLVM
+
+**Repository:**
+- Repository URL: https://github.com/virgo/vani-compiler
+- Local Checkout: /home/virgo/source/vani-compiler-localfuzz
+
+**Description:**
+
+A new mutant was generated and run against the vani-compiler local staging log. The mutant, as described in the mutant source below, exhibits behavior divergent from the expected outcomes of both C and LLVM backends.
+
+**Mutant Source:**
+```vani
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/vec_invariants.vani              # LLVM
+//   vanic run examples/language/catalan/vec_invariants.vani --backend=c  # C
+
+propòsit "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  sigui xs: Vec<i64> = vec(0);
+  sigui i: i64 = 1;
+
+  mentre i < 5
+  invariant len(xs) == (i com u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  demostra i == 5;
+  demostra len(xs) == 5;
+
+  imprimeix xs[0];
+  imprimeix xs[1];
+  imprimeix xs[-1];
+  imprimeix xs[4];
+
+  retorna 0;
+}
+```
+
+**Finding Kind:**
+Backend-divergence
+
+**Raw Result Data
