@@ -13150,3 +13150,144 @@ saturating float-to-int casts) is a semantics decision affecting both
 backends, not a one-line patch.
 
 Next free bug number is **BUG-188**.
+
+## Feature: `for VAR from HIGH downto LOW { .. }` -- descending for-loops (SHIPPED 2026-08-13)
+
+Requested directly by the user after the loops tutorial's new
+"counting down" section (added while documenting the SMT
+recursion/reentrancy write-up) had to fall back to a `while`-based
+workaround, since `for` was ascending-only with no way to count down
+or step by more than 1. `step`/stride-N is still unsupported (see
+"Still open" below) but the descending case -- by far the more common
+one in practice (reverse iteration, countdowns) -- is now a real
+language feature, not just a documented workaround.
+
+**Design**: extend the existing `Stmt::For` / `TypedStmt::For` AST/IR
+node with a new `descending: bool` field rather than desugar `downto`
+into a synthetic `while` loop. A desugar would have silently broken
+loop labels (`outer: for i from 10 downto 0 { break outer; }`) --
+`parse_labeled_loop_stmt` only attaches labels to `Stmt::For` /
+`Stmt::ForIter`, not `Stmt::While` -- and there's no generic
+`Stmt::Block` wrapper to scope a synthetic `let`+`while` pair without
+leaking the loop variable into the enclosing scope. Extending the
+field instead reuses `for`'s existing scoping and label-attachment
+for free; the majority of the ~60 `Stmt::For`/`TypedStmt::For` match
+sites across the codebase use `..` wildcards and needed zero changes.
+
+`downto` is the exact mirror of `to`: half-open, step 1, excludes its
+lower bound the same way `to` excludes its upper bound (`hi downto
+lo` walks `hi, hi-1, ..., lo+1`). Scoped to the English dialect's
+keyword table only, added right after `"to" => TokenKind::To,` in
+`lexer.rs::lex_ident`'s explicitly English-only section -- avoids the
+class of single-char-keyword-collision bug that hit BUG-170's
+62-dialect keyword-parity sweep. `parallel for` rejects `downto` with
+a clear diagnostic (descending ranges are sequential-only for now).
+
+**Touched**: `ast.rs`/`ir.rs` (`descending` field), `lexer.rs`
+(`TokenKind::DownTo`, English-only), `parser.rs` (both
+`parse_for_stmt_inner` and the Devanagari SOV-order
+`parse_sov_for_stmt`), `checker.rs` (mirrored `>=`/`>` SMT bound facts
+and `-`-instead-of-`+` reassignment tracking for the induction step,
+at both the main type-check pass and the `break`-bound fact site),
+`backend_c.rs` (`i--` vs `i++`), `backend_llvm.rs` (`sgt`/`ugt` vs
+`slt`/`ult` compare + `sub` vs `add` step), `main.rs`
+(`stmt_ssa_supported` routes `descending` loops to the tree backends
+-- the SSA pass doesn't lower them yet, tree-C/tree-LLVM do),
+`safety.rs` (`wcet_stmt`'s trip-count formula, `s - e` instead of
+`e - s`), `format.rs` (pretty-printer emits `downto` instead of always
+`to`). `big_o.rs` and all 5 `lsp.rs` for-loop sites needed no change
+-- confirmed direction-agnostic by reading them (bounded-loop
+detection only checks both bounds are constant; hover/span logic
+doesn't care about direction).
+
+Regression tests: `for_loop_downto_parses_and_compiles`,
+`for_loop_downto_empty_when_start_le_end_compiles`,
+`for_loop_downto_rejected_on_parallel_for` (src/lib.rs), plus
+`for_loop_downto_example_produces_correct_output_on_both_backends`
+(tests/run_end_to_end.rs) against the new
+`examples/language/english/for_loop_downto.vani`. Full suite:
+2915/2915 lib tests pass (2912 pre-existing + 3 new, 0 regressions);
+new e2e test passes on both backends. Verified manually via direct
+`vanic run` on both backends: descending sum correct
+(`countdown_sum(5) = 15`), empty-range correct
+(`for i from 0 downto 5` -> 0 iterations), SMT bound facts provable,
+`parallel for` + `downto` correctly rejected.
+
+Docs: `docs/language_manual.md`'s `for` grammar example updated;
+`docs/v1_limitations.md`'s **L29** rewritten from "ascending-only" to
+"partially resolved" (still open: `step`/stride-N, workaround
+unchanged); `tutorials/src/beginner/05_loops.md`'s "counting down"
+section rewritten to lead with `downto` (the `while`-based
+`sum_every_third` workaround kept only for the still-unsupported
+step-N case). mdBook rebuilt clean (only the 7 known pre-existing
+false-positive `unclosed HTML tag` warnings); new
+`#counting-down-with-downto-or-stepping-by-more-than-1` anchor
+confirmed resolving in the built HTML.
+
+**Still open**: `step`/stride-N (e.g. `for i from 0 to 10 step 2`) --
+`while` remains the only way to stride by more than 1 in either
+direction, in both directions (see the follow-up entry below for a
+worked descending-step example added to the tutorial).
+
+**Update 2026-08-13**: rolled `downto` out to all 62 dialects the
+same day -- see the next entry.
+
+## Feature follow-up: `downto` rolled out to all 62 dialects (SHIPPED 2026-08-13)
+
+Direct follow-up to the English-only `downto` ship above, requested
+by the user right after. Every dialect that already has a native
+`to`/`until` spelling in `src/lexer.rs` (61 of them, plus the
+already-shipped Sanskrit/Hindi/Marathi trio) now has a matching
+`downto` spelling -- the same keyword-parity-sweep pattern as
+BUG-170, done in the same session rather than deferred.
+
+**Method**: each dialect's `downto` word is a new coinage compounding
+its existing (already-shipped, already-reviewed-at-whatever-
+confidence) `to`/`until` word with that dialect's word for
+"down"/"below"/"descend" -- following the same fused-compound
+convention the codebase already used for Italian's `finoa` ("until-to"
+fused) and the `EPrint` coinages. A few picks turned out to already be
+real, attested words/phrases (Swedish `nertill`, Czech `dolů`,
+Portuguese `até baixo`, Spanish `hasta abajo`, Russian `донизу`, all
+rated **High** confidence); most are engineering-grade best-effort
+(**Medium**); Persian, Pashto, Khmer, Amharic, Tibetan, Cherokee,
+Mongolian, Armenian, Arabic, Hebrew, Filipino, and Yoruba are flagged
+**Low** confidence pending native-speaker review -- the same
+languages/scripts BUG-171's native-speaker pass already flagged for
+human review. Full table with per-dialect confidence ratings:
+`docs/archive/grammar_review_queue.md`'s "downto keyword-parity
+sweep" section.
+
+**Touched**: `src/lexer.rs` (one new match arm per dialect function,
+inserted right after that dialect's existing `to` arm; also closed a
+real pre-existing gap where `TokenKind::DownTo` was missing from
+`is_structure_keyword_kind`, so the new keyword is now correctly
+subject to the script-purity gate like `To` already was), the
+Sanskrit/Hindi/Marathi dialect-purity table
+(`spelling_supports_dialect`), `tools/vani_translate.py`
+(`ALL_SYNONYMS` regenerated via
+`tools/regen_vani_translate_keywords.py` -- this step is required
+after any lexer keyword-table change or the "vani_translate.py
+regression suite" CI job fails, confirmed the hard way on the
+English-only commit's first CI run).
+
+Regression tests: a new mechanical parity test,
+`downto_keyword_parity_all_62_dialects` (`src/lib.rs`), reusing
+BUG-170's own `include_str!`-based extraction approach to assert
+every dialect with a `to` spelling also has a `downto` spelling
+(single-table and split native+ascii-table dialects both covered).
+Plus 4 full end-to-end compiles: Devanagari in both English and SOV
+word order, Japanese (3-script, SOV), and Russian (Cyrillic, SVO) --
+chosen to cover the grammatically/script-wise most different
+pipelines, not just a reachability check. Full suite: 2920/2920 lib
+tests pass (2915 pre-existing + 5 new, 0 regressions);
+`tools/test_vani_translate.py`'s full 4-step suite passes; 1043-file
+example corpus check matches the known 18-file non-ok baseline
+exactly; mdBook rebuilds clean.
+
+**Still open**: the Low-confidence dialects listed above need a
+native speaker before shipping with real confidence -- this sweep
+only proves lexer-level reachability (the word tokenizes to
+`TokenKind::DownTo` and round-trips through the translator), not
+linguistic correctness. `step`/stride-N remains unimplemented in any
+dialect.

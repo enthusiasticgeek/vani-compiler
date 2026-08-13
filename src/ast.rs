@@ -1845,6 +1845,12 @@ pub enum Stmt {
         /// gives each thread a private partial value and combines
         /// them after the loop. Only valid when `parallel` is true.
         reductions: Vec<Reduction>,
+        /// `true` when written `for VAR from HIGH downto LOW { .. }`
+        /// (descending, step 1) instead of `for VAR from LOW to HIGH
+        /// { .. }` (ascending, step 1, the `false`/default case).
+        /// Both forms are half-open: `to` excludes `end`; `downto`
+        /// excludes `end` too (walks `start, start-1, ..., end+1`).
+        descending: bool,
     },
     /// `for x in &xs { body }` (borrow) or `for x in xs { body }` (consume).
     /// In both cases `x` is the (Copy) element type. `consumes = true`

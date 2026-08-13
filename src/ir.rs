@@ -281,6 +281,10 @@ pub enum TypedStmt {
         /// `reduction(op:var)` to OpenMP (C) or rewrite the body's
         /// Reassign to `atomicrmw` (LLVM).
         reductions: Vec<TypedReduction>,
+        /// `true` for `downto` (descending, step 1); `false` for
+        /// `to` (ascending, step 1, the default). See
+        /// `ast::Stmt::For::descending` for the full semantics.
+        descending: bool,
     },
     ForIter {
         label: Option<String>,

@@ -4060,7 +4060,16 @@ impl Parser {
             |k| matches!(k, TokenKind::From),
         )?;
         let start = self.parse_expr()?;
-        self.expect_keyword("'to'", |k| matches!(k, TokenKind::To))?;
+        let to_tok = self.expect_keyword("'to' or 'downto'", |k| {
+            matches!(k, TokenKind::To | TokenKind::DownTo)
+        })?;
+        let descending = matches!(to_tok.kind, TokenKind::DownTo);
+        if descending && parallel {
+            return Err(Diagnostic::new(
+                to_tok.span,
+                "'parallel for' does not support 'downto' -- descending ranges are English-only, sequential for now",
+            ));
+        }
         let end = self.parse_expr()?;
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
@@ -4082,6 +4091,7 @@ impl Parser {
             span: start_tok.span.merge(end_span),
             parallel,
             reductions,
+            descending,
         })
     }
 
@@ -4117,10 +4127,17 @@ impl Parser {
             |k| matches!(k, TokenKind::From),
         )?;
         let end_expr = self.parse_expr()?;
-        self.expect_keyword(
-            "'to' / 'à¤¤à¤•' postposition after the end value",
-            |k| matches!(k, TokenKind::To),
+        let to_tok = self.expect_keyword(
+            "'to' / 'downto' / 'à¤¤à¤•' postposition after the end value",
+            |k| matches!(k, TokenKind::To | TokenKind::DownTo),
         )?;
+        let descending = matches!(to_tok.kind, TokenKind::DownTo);
+        if descending && parallel {
+            return Err(Diagnostic::new(
+                to_tok.span,
+                "'parallel for' does not support 'downto' -- descending ranges are English-only, sequential for now",
+            ));
+        }
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
         if !reductions.is_empty() && !parallel {
@@ -4144,6 +4161,7 @@ impl Parser {
             span: var_span.merge(end_span),
             parallel,
             reductions,
+            descending,
         })
     }
 

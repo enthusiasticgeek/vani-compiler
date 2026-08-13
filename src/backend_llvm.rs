@@ -4378,7 +4378,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; continue outside a loop\n");
             }
         }
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions, label, .. } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions, label, descending, .. } => {
             if !ty.is_integer() {
                 // The parser only accepts integer literals on the
                 // bounds and the checker enforces integer type on
@@ -4443,8 +4443,10 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let cur = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", cur, lty, lty, i_addr));
             let cmp = ctx.fresh_tmp();
-            let lt = if ty.is_signed_integer() { "slt" } else { "ult" };
-            out.push_str(&format!("  {} = icmp {} {} {}, {}\n", cmp, lt, lty, cur, end_v));
+            let cond_op = if *descending {
+                if ty.is_signed_integer() { "sgt" } else { "ugt" }
+            } else if ty.is_signed_integer() { "slt" } else { "ult" };
+            out.push_str(&format!("  {} = icmp {} {} {}, {}\n", cmp, cond_op, lty, cur, end_v));
             out.push_str(&format!(
                 "  br i1 {}, label %{}, label %{}\n",
                 cmp, body_lbl, exit
@@ -4470,7 +4472,8 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let now = ctx.fresh_tmp();
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", now, lty, lty, i_addr));
-            out.push_str(&format!("  {} = add {} {}, 1\n", next, lty, now));
+            let step_op = if *descending { "sub" } else { "add" };
+            out.push_str(&format!("  {} = {} {} {}, 1\n", next, step_op, lty, now));
             out.push_str(&format!("  store {} {}, {}* {}\n", lty, next, lty, i_addr));
             out.push_str(&format!("  br label %{}\n", header));
             ctx.terminated = outer_terminated;
@@ -46145,7 +46148,7 @@ fn rewrite_stmt_for_reductions(
             cond: cond.clone(),
             body: rewrite_body_for_reductions(body, reductions),
         },
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs, label } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs, label, descending } => {
             TypedStmt::For {
                 label: label.clone(),
                 var: var.clone(),
@@ -46155,6 +46158,7 @@ fn rewrite_stmt_for_reductions(
                 body: rewrite_body_for_reductions(body, reductions),
                 parallel: *parallel,
                 reductions: rs.clone(),
+                descending: *descending,
             }
         }
         other => other.clone(),

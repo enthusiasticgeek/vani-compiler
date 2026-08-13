@@ -603,8 +603,12 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         TypedStmt::While { cond, body, .. } => {
             expr_ssa_supported(cond) && stmts_ssa_supported(body, extra_reject)
         }
-        TypedStmt::For { start, end, body, .. } => {
-            expr_ssa_supported(start)
+        // `downto` (descending) for-loops aren't lowered by the SSA
+        // pass yet -- route through tree-C / tree-LLVM, which fully
+        // support them. Ascending `to` loops are unaffected.
+        TypedStmt::For { start, end, body, descending, .. } => {
+            !descending
+                && expr_ssa_supported(start)
                 && expr_ssa_supported(end)
                 && stmts_ssa_supported(body, extra_reject)
         }

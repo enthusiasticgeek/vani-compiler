@@ -10,7 +10,29 @@ $ErrorActionPreference = "Stop"
 
 $Repo   = "enthusiasticgeek/vani-compiler"
 $BinName = "vanic.exe"
-$Archive = "vanic-windows-x86_64.zip"
+
+# ── detect architecture ────────────────────────────────────────────────────────
+# RuntimeInformation.OSArchitecture reports the OS's native architecture
+# regardless of whether this script is itself running under a 32-bit or
+# WOW64-emulated PowerShell host — $env:PROCESSOR_ARCHITECTURE alone can
+# lie in that case, so this is the reliable one.
+$OsArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+switch ($OsArch) {
+    "X64" {
+        $Archive = "vanic-windows-x86_64.zip"
+    }
+    "Arm64" {
+        # No native win-arm64 build yet (see .github/workflows/release.yml) --
+        # fall back to the x86_64 build, which runs under Windows 11's
+        # (and Windows 10 22H2+'s optional) built-in x86_64-on-ARM64
+        # emulation. Not as fast as a native build, but it works.
+        Write-Warning "No native Windows-on-ARM64 build of vanic yet -- installing the x86_64 build, which will run under Windows' built-in emulation."
+        $Archive = "vanic-windows-x86_64.zip"
+    }
+    default {
+        throw "Unsupported Windows architecture: $OsArch (vanic ships x86_64 and ARM64-via-emulation builds only)."
+    }
+}
 
 # Default install dir: %LOCALAPPDATA%\vanic\bin  (no admin required)
 $InstallDir = if ($env:VANIC_INSTALL) { $env:VANIC_INSTALL } `

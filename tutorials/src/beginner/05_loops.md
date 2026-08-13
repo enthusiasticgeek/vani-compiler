@@ -96,27 +96,35 @@ first_multiple_of_seven(20) = 21
   Intermediate track. This is a documented v1 deviation --
   see [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md).
 
-### Counting down, or stepping by more than 1
+### Counting down with `downto`, or stepping by more than 1
 
-`for k from lo to hi { ... }` is deliberately narrow: it only
-counts **up**, one at a time, from `lo` to `hi - 1`. There's no
-`downto` keyword and no `step` clause -- v1's `for` sugar doesn't
-have a direction or stride to configure. If you need to count
-down, or step by something other than 1, reach for `while` and do
-the arithmetic yourself, exactly like `sum_to_n` above but with a
-different update expression:
+`for k from lo to hi { ... }` only counts **up**, one at a time.
+To count down, use its descending counterpart, `downto`, in place
+of `to`:
 
 ```vani
 fn countdown_sum(n: i64) -> i64 {
   let total: i64 = 0;
-  let i: i64 = n;
-  while i >= 1 {
+  for i from n downto 0 {
     total = total + i;
-    i = i - 1;       // descending: subtract each iteration
   }
   return total;
 }
+```
 
+```
+countdown_sum(5) = 15
+```
+
+`for i from n downto 0` walks `n, n-1, ..., 1` -- **excluding**
+`0`, the same half-open convention `to` uses for its own upper
+bound (`lo to hi` excludes `hi`; `hi downto lo` excludes `lo`).
+That's why `countdown_sum(5)` sums `5, 4, 3, 2, 1 = 15`, not
+`5, 4, 3, 2, 1, 0`. Like `to`, `downto` is step-1 only -- there's
+no `step`/`by` clause for a stride other than 1. For that, reach
+for `while` and do the arithmetic yourself:
+
+```vani
 fn sum_every_third(start: i64, end: i64) -> i64 {
   let total: i64 = 0;
   let i: i64 = start;
@@ -129,25 +137,46 @@ fn sum_every_third(start: i64, end: i64) -> i64 {
 ```
 
 ```
-countdown_sum(5) = 15
 sum_every_third(1, 10) = 22
 ```
 
-`countdown_sum` walks `5, 4, 3, 2, 1` (sum `15`); `sum_every_third`
-walks `1, 4, 7, 10` (sum `22`). Both are just a `while` with the
-update expression you need -- `i = i - 1` to descend, `i = i + 3`
-to skip by 3, `i = i - 2` to descend by 2, and so on. There's
-nothing special-cased in the language for "backwards" or "by N";
-it's the same `while` shape, pointed a different direction.
+`sum_every_third` walks `1, 4, 7, 10` (sum `22`) -- `i = i + 3` to
+step by 3. The same trick works in reverse: flip the comparison to
+`>=` and subtract instead of add:
+
+```vani
+fn sum_descending_step(hi: i64, lo: i64, step: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = hi;
+  while i >= lo {
+    total = total + i;
+    i = i - step;
+  }
+  return total;
+}
+```
+
+```
+sum_descending_step(20, 0, 3) = 77
+```
+
+`sum_descending_step(20, 0, 3)` walks `20, 17, 14, 11, 8, 5, 2` (sum
+`77`) -- `i = i - step` each time, stopping once `i` drops below
+`lo`. Note this version is *inclusive* of both ends (`i <= hi` isn't
+needed since `i` starts there; the loop keeps going `while i >= lo`),
+unlike `for ... to`/`downto`'s half-open, exclusive-of-one-end
+convention -- swap `>=`/`<=` for `>`/`<` if you want the exclusive
+version to match. `parallel for` doesn't support `downto` yet
+either; it's sequential-only for now.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code does not do what it looks like it does"/>
 
-**Don't try to fake a countdown with `for ... from ... to`** by
-just swapping the bounds -- `for i from 5 to 0 { ... }` does not
-count down to `0`. Because `for` is ascending-only, `5 to 0` is
-already a range with nothing in it (`5 > 0`, so there's no valid
-`lo, lo+1, ...` sequence below the upper bound), and the loop body
-runs **zero times**, silently -- no error, no warning:
+**`for ... from ... to` still doesn't count down, even if you
+swap the bounds.** `for i from 5 to 0 { ... }` is not a countdown
+-- `to` is always ascending, so `5 to 0` is a range with nothing
+in it (`5 > 0`, so there's no valid `lo, lo+1, ...` sequence below
+the upper bound), and the loop body runs **zero times**, silently
+-- no error, no warning:
 
 ```vani
 fn main() -> i64 {
@@ -163,7 +192,8 @@ fn main() -> i64 {
 This is the same half-open-range rule from the bullet above (`lo
 to hi` means `lo, lo+1, ..., hi-1`) -- it just surprises people
 more when `lo > hi`, since "count from 5 to 0" reads like English
-for "count down," but vāṇी's `for` never reads it that way.
+for "count down." If you meant to count down, write `for i from 5
+downto 0` instead.
 
 ### A closer look: don't forget to advance
 

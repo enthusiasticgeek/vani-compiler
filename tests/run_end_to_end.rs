@@ -380,6 +380,46 @@ fn nested_enum_str_payload_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// `downto` (2026-08-13): descending counterpart of `to`, step 1,
+// same half-open convention (excludes its lower bound the way `to`
+// excludes its upper bound). This is an execution test, not just a
+// compile check, because the earlier ascending `for` codegen
+// (backend_c.rs / backend_llvm.rs) hardcoded `<` / `++` for the loop
+// condition and step -- a descending loop that merely COMPILES could
+// still emit the ascending condition and either never run or run
+// forever, which only real stdout on both backends would catch.
+#[test]
+fn for_loop_downto_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/for_loop_downto.vani",
+        manifest_dir
+    );
+    let expected = "countdown_sum(5)       = 15\nempty_when_backwards() = 0\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "downto example produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");

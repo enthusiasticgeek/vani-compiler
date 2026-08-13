@@ -140,6 +140,91 @@ The full list is mirrored in two places:
 
 A single-source-of-truth refactor is queued in TODO.md.
 
+## `downto` keyword-parity sweep (2026-08-13) — needs review
+
+`downto` (descending counterpart of `to`, see `docs/v1_limitations.md`
+L29) shipped English-only first, then was extended to all 62 dialects
+in the same session as a keyword-parity sweep matching the BUG-170
+precedent. Every pick below is a **new coinage** — none have been
+native-speaker reviewed. The general pattern: take the dialect's
+existing `to`/`until` word (already shipped, already reviewed at
+whatever confidence it originally had) and compound it with that
+dialect's word for "down"/"below"/"descend", following the same
+fused-compound convention already used for `finoa` (Italian,
+"until-to fused") and the `EPrint` coinages (`त्रुटिलिख` etc.).
+Several picks turned out to already be real, attested words/phrases
+in their language (marked **High**); most are engineering-grade
+best-effort (**Medium**); a handful for scripts/languages with very
+thin training coverage are flagged **Low** and most need a native
+speaker before shipping with confidence.
+
+| Dialect | Pick | Confidence | Notes |
+|---|---|---|---|
+| Sanskrit/Hindi/Marathi | `अधोतक` *adhotak* | Medium | adhas/adho- "below" + tak |
+| Bengali | `নিম্নপর্যন্ত` | Medium | nimno "lower" + paryanta |
+| Tamil | `கீழ்வரைக்கும்` | Medium | kīḻ "below" + varaikkum |
+| Telugu | `దిగువవరకూ` | Medium | diguva "lower" + varakuu |
+| Gujarati | `નીચેસુધી` | Medium | niche "down" + sudhee |
+| Punjabi | `ਹੇਠਤੱਕ` | Medium | heth "under" + takk |
+| Kannada | `ಕೆಳಗೆ` | Medium-High | kelage already natively means "down/below/downward" |
+| Malayalam | `താഴെവരെക്കും` | Medium | thazhe "down" + varekkum |
+| Odia | `ନିମ୍ନପର୍ଯ୍ୟନ୍ତ` | Medium | nimna "lower" + paryanta |
+| Sinhala | `පහළදක්වා` | Medium | pahala "below" + dakvaa |
+| Urdu | `نیچےتک` | Medium | neeche "down" + tak |
+| Persian | `فروبه` | **Low** | speculative "foru-" (descend) + be |
+| Pashto | `ښکتهته` | **Low** | speculative xkta (down) + ta |
+| Khmer | `ក្រោមដល់` | **Low** | kraom "below" + dol |
+| Burmese | `အောက်သို့` | Medium | auk-thou is a real natural phrase ("downward/to below") |
+| Amharic | `ታችድረስ` | **Low** | tachi "down" + dress |
+| Tibetan | `མར་བར་དུ` | **Low** | mar "down" + bar-du |
+| Cherokee | `ᎡᎳᏗᎬᏛ` | **Low** | eladi (down, uncertain) + gvdv |
+| Lao | `ລົງເຖິງ` | Medium-High | long "descend" + theung reads as a natural verb phrase |
+| Mongolian (traditional script) | `ᠳᠣᠣᠷᠠᠬᠦᠷᠲᠡᠯᠡ` | **Low** | speculative doora (down) + kürtele |
+| Slovak | `nadol` | Medium-High | real Slovak word "downward" |
+| Finnish (ascii) | `alasasti` | Medium | alas "down" + asti |
+| Catalan (ascii) | `finsavall` | Medium | fins + avall "down(river)" |
+| Yoruba | `désílẹ̀` | Medium-Low | dé + sílẹ̀ "down" |
+| Hausa (ascii) | `zuwakasa` | Medium | zuwa "toward" + kasa "ground/down" |
+| Norwegian (ascii) | `nedtil` | Medium-High | ned "down" + til |
+| Danish (ascii) | `nedtil` | Medium-High | ned "down" + til |
+| Armenian | `ներքևմինչև` | Low-Medium | nerqev "down" + minchev |
+| Georgian | `ქვემოთმდე` | Medium | kvemot "below" + mde |
+| Hungarian | `lehatárig` / ascii `lehatarig` | Medium-High | le- (down, productive verbal prefix) + határig |
+| Czech | `dolů` / ascii `dolu` | Medium-High | real Czech word "down/downward" |
+| Swedish | `nertill` | High | real Swedish word ("at/toward the bottom") |
+| Filipino (ascii) | `pababahanggang` | Medium-Low | pababa "downward" + hanggang |
+| Vietnamese | `xuốngđến` | Medium | xuống "descend" + đến |
+| Romanian | `pânăjos` / ascii `panajos` | Medium | până + jos "down" |
+| Dutch (ascii) | `totbeneden` | Medium | tot + beneden "below" |
+| Thai | `ลงถึง` | Medium-High | long "down" + thueng (Thai doesn't space-separate words anyway) |
+| Polish (ascii) | `dodolu` | Medium | do + dolu "to the bottom" |
+| Turkish | `aşağıkadar` / ascii `asagikadar` | Medium-High | aşağı "down" + kadar |
+| Malay (ascii) | `hinggabawah` | Medium | hingga + bawah "below" |
+| Swahili (ascii) | `hadichini` | Medium-High | hadi + chini "down/below" |
+| Italian (ascii) | `finogiu` | Medium-High | fino + giù "down", same fused style as the existing `finoa` |
+| Arabic | `إلىأسفل` | Low-Medium | ilā + asfal "below" |
+| Greek | `μέχρικάτω` | Medium | méhri + káto "down" |
+| Hebrew | `עדלמטה` | Low-Medium | ad + lemata "downward" |
+| Indonesian (ascii) | `sampaibawah` / `hinggabawah` | Medium | sampai/hingga + bawah "below" |
+| Portuguese | `atébaixo` / ascii `atebaixo` | High | real Portuguese phrase "até baixo" ("until down"), fused |
+| Spanish (ascii) | `hastaabajo` | High | real Spanish phrase "hasta abajo" ("until down"), fused |
+| French (ascii) | `versbas` | Medium-High | vers + bas "down" |
+| German (ascii) | `bisrunter` | Medium-High | bis + runter "down" |
+| Korean | `아래까지` | High | arae "down" + kkaji, natural Korean compound |
+| Japanese | `下まで` | High | shita "down" + made, natural Japanese compound |
+| Mandarin | `下到` | Medium-High | xià "down" + dào |
+| Russian (Cyrillic) | `донизу` | High | real Russian word ("down to the bottom") |
+
+**Please revise.** Same process as the SOV-S9 queue above: update the
+table, update `src/lexer.rs` (the relevant `*_keyword` function, plus
+`spelling_supports_dialect` for the Devanagari entry), add/adjust a
+lib test, and regenerate `tools/vani_translate.py` via
+`tools/regen_vani_translate_keywords.py`. The Low/Low-Medium entries
+(Persian, Pashto, Khmer, Amharic, Tibetan, Cherokee, Mongolian,
+Armenian, Arabic, Hebrew, Filipino, Yoruba) are the highest-priority
+revision targets — same languages/scripts flagged for human review in
+the BUG-171 native-speaker pass.
+
 ## Sources / references
 
 - **Sanskrit**: Monier-Williams Sanskrit–English Dictionary

@@ -11878,9 +11878,9 @@ fn inject_shallow_free_before_returns(
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions,
+                    label, var, ty, start, end, parallel, reductions, descending,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
@@ -11955,9 +11955,9 @@ fn inject_before_matching_continues(
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions,
+                    label, var, ty, start, end, parallel, reductions, descending,
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
@@ -15282,6 +15282,7 @@ fn check_one_stmt(
             span,
             parallel,
             reductions,
+            descending,
         } => {
             verify_call_args_in_expr(start, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(end, smt_facts, env, signatures, diagnostics);
@@ -15396,12 +15397,16 @@ fn check_one_stmt(
                 });
             }
 
-            // Inside the body, the invariants, `var >= start`, and
-            // `var < end` all hold for the current iteration.
+            // Inside the body, the invariants and the range bounds
+            // both hold for the current iteration. Ascending (`to`):
+            // `var >= start && var < end`. Descending (`downto`):
+            // `var <= start && var > end` -- the exact mirror, since
+            // `downto` walks start, start-1, ..., end+1 (excludes
+            // `end`, same half-open convention as `to` excluding it).
             smt_facts.extend(invariants.iter().cloned());
             smt_facts.push(Expr {
                 kind: ExprKind::Binary {
-                    op: BinaryOp::Ge,
+                    op: if *descending { BinaryOp::Le } else { BinaryOp::Ge },
                     left: Box::new(Expr {
                         kind: ExprKind::Var(var.clone()),
                         span: *span,
@@ -15412,7 +15417,7 @@ fn check_one_stmt(
             });
             smt_facts.push(Expr {
                 kind: ExprKind::Binary {
-                    op: BinaryOp::Lt,
+                    op: if *descending { BinaryOp::Gt } else { BinaryOp::Lt },
                     left: Box::new(Expr {
                         kind: ExprKind::Var(var.clone()),
                         span: *span,
@@ -15476,12 +15481,14 @@ fn check_one_stmt(
             // body, plus the implicit `var = var + 1` for the for-loop step.
             if !body_terminated {
                 let mut summary = collect_last_reassigns_with_env(body_stmts, env);
-                // Implicit auto-increment of the loop variable.
+                // Implicit auto-increment (ascending `to`) or
+                // auto-decrement (descending `downto`) of the loop
+                // variable, each iteration.
                 summary.subs.insert(
                     var.clone(),
                     Expr {
                         kind: ExprKind::Binary {
-                            op: BinaryOp::Add,
+                            op: if *descending { BinaryOp::Sub } else { BinaryOp::Add },
                             left: Box::new(Expr {
                                 kind: ExprKind::Var(var.clone()),
                                 span: *span,
@@ -15562,7 +15569,7 @@ fn check_one_stmt(
             if !contains_break(body_stmts) {
                 smt_facts.push(Expr {
                     kind: ExprKind::Binary {
-                        op: BinaryOp::Ge,
+                        op: if *descending { BinaryOp::Le } else { BinaryOp::Ge },
                         left: Box::new(Expr {
                             kind: ExprKind::Var(var.clone()),
                             span: *span,
@@ -15679,6 +15686,7 @@ fn check_one_stmt(
                 body: inner_stmts,
                 parallel: *parallel,
                 reductions: typed_reductions,
+                descending: *descending,
             });
             let _ = reduction_set;
             false
@@ -37570,7 +37578,7 @@ fn strip_reduction_uses(
                         body: rec(body, reductions, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs, descending } => {
                     if any_read_of_reductions(start, reductions)
                         || any_read_of_reductions(end, reductions)
                     {
@@ -37585,6 +37593,7 @@ fn strip_reduction_uses(
                         body: rec(body, reductions, context, diagnostics),
                         parallel: *parallel,
                         reductions: rs.clone(),
+                        descending: *descending,
                     });
                 }
                 other => {
@@ -37693,7 +37702,7 @@ fn strip_safe_same_index_writes(
                         body: rec(body, loop_var, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
                     out.push(TypedStmt::For {
                         label: label.clone(),
                         var: var.clone(),
@@ -37713,6 +37722,7 @@ fn strip_safe_same_index_writes(
                         body: rec(body, loop_var, context, diagnostics),
                         parallel: *parallel,
                         reductions: reductions.clone(),
+                        descending: *descending,
                     });
                 }
                 other => out.push(other.clone()),

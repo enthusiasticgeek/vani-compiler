@@ -975,6 +975,142 @@ mod tests {
     }
 
     #[test]
+    fn downto_keyword_parity_all_62_dialects() {
+        // 2026-08-13: `downto` (descending counterpart of `to`,
+        // see docs/v1_limitations.md L29) shipped English-only
+        // first, then was extended to every dialect that already
+        // had a `to`/`until` spelling, as a keyword-parity sweep
+        // matching the BUG-170 precedent above. This test reuses
+        // BUG-170's own mechanical extraction approach (reading
+        // src/lexer.rs via `include_str!` rather than
+        // hand-transcribing every non-Latin/accented spelling) to
+        // confirm every dialect that has a `To` spelling also has
+        // a `DownTo` spelling, covering the Sanskrit/Hindi/Marathi
+        // shared table (`devanagari_keyword`) plus every dialect
+        // BUG-170 already tracks. New coinages -- see
+        // docs/archive/grammar_review_queue.md's "downto
+        // keyword-parity sweep" section for confidence ratings;
+        // this test only proves lexer-level reachability, not
+        // linguistic correctness.
+        let lexer_src: &str = include_str!("lexer.rs");
+
+        fn extract_kinds_for_fn(src: &str, fn_name: &str) -> Vec<String> {
+            let marker_variants = [
+                format!("fn {fn_name}(text: &str) -> Option<TokenKind> {{"),
+                format!("pub(crate) fn {fn_name}(text: &str) -> Option<TokenKind> {{"),
+            ];
+            let (start, marker_len) = marker_variants
+                .iter()
+                .find_map(|m| src.find(m).map(|idx| (idx, m.len())))
+                .unwrap_or_else(|| panic!("dialect fn `{fn_name}` not found in lexer.rs"));
+            let body_start = start + marker_len;
+            let close = src[body_start..]
+                .find("\n}\n")
+                .unwrap_or_else(|| panic!("no closing `}}` found for `{fn_name}`"));
+            let body = &src[body_start..body_start + close];
+            let mut kinds = Vec::new();
+            let mut rest = body;
+            while let Some(idx) = rest.find("TokenKind::") {
+                let after = &rest[idx + "TokenKind::".len()..];
+                let end = after
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                kinds.push(after[..end].to_string());
+                rest = &after[end..];
+            }
+            kinds
+        }
+
+        // Single-table dialects (+ the Devanagari trio, which
+        // share one function gated by a separate dialect-purity
+        // table rather than three lexer functions).
+        let single_table_dialects: &[(&str, &str)] = &[
+            ("Sanskrit/Hindi/Marathi", "devanagari_keyword"),
+            ("Bengali", "bengali_keyword"),
+            ("Tamil", "tamil_keyword"),
+            ("Telugu", "telugu_keyword"),
+            ("Gujarati", "gujarati_keyword"),
+            ("Punjabi", "punjabi_keyword"),
+            ("Kannada", "kannada_keyword"),
+            ("Malayalam", "malayalam_keyword"),
+            ("Odia", "odia_keyword"),
+            ("Sinhala", "sinhala_keyword"),
+            ("Urdu", "urdu_keyword"),
+            ("Persian", "persian_keyword"),
+            ("Pashto", "pashto_keyword"),
+            ("Khmer", "khmer_keyword"),
+            ("Burmese", "burmese_keyword"),
+            ("Amharic", "amharic_keyword"),
+            ("Tibetan", "tibetan_keyword"),
+            ("Cherokee", "cherokee_keyword"),
+            ("Lao", "lao_keyword"),
+            ("Mongolian", "mongolian_keyword"),
+            ("Yoruba", "yoruba_keyword"),
+            ("Armenian", "armenian_keyword"),
+            ("Georgian", "georgian_keyword"),
+            ("Filipino", "filipino_ascii_keyword"),
+            ("Dutch", "dutch_ascii_keyword"),
+            ("Thai", "thai_keyword"),
+            ("Malay", "malay_ascii_keyword"),
+            ("Swahili", "swahili_ascii_keyword"),
+            ("Italian", "italian_ascii_keyword"),
+            ("Arabic", "arabic_keyword"),
+            ("Greek", "greek_keyword"),
+            ("Hebrew", "hebrew_keyword"),
+            ("Indonesian", "indonesian_ascii_keyword"),
+            ("Korean", "korean_keyword"),
+            ("Japanese", "japanese_keyword"),
+            ("Mandarin", "mandarin_keyword"),
+            ("Russian", "cyrillic_keyword"),
+        ];
+        let split_table_dialects: &[(&str, &str, &str)] = &[
+            ("Spanish", "spanish_keyword", "spanish_ascii_keyword"),
+            ("French", "french_keyword", "french_ascii_keyword"),
+            ("German", "german_keyword", "german_ascii_keyword"),
+            ("Portuguese", "portuguese_keyword", "portuguese_ascii_keyword"),
+            ("Polish", "polish_keyword", "polish_ascii_keyword"),
+            ("Turkish", "turkish_keyword", "turkish_ascii_keyword"),
+            ("Romanian", "romanian_keyword", "romanian_ascii_keyword"),
+            ("Vietnamese", "vietnamese_keyword", "vietnamese_ascii_keyword"),
+            ("Hungarian", "hungarian_keyword", "hungarian_ascii_keyword"),
+            ("Czech", "czech_keyword", "czech_ascii_keyword"),
+            ("Swedish", "swedish_keyword", "swedish_ascii_keyword"),
+            ("Norwegian", "norwegian_keyword", "norwegian_ascii_keyword"),
+            ("Danish", "danish_keyword", "danish_ascii_keyword"),
+            ("Slovak", "slovak_keyword", "slovak_ascii_keyword"),
+            ("Finnish", "finnish_keyword", "finnish_ascii_keyword"),
+            ("Catalan", "catalan_keyword", "catalan_ascii_keyword"),
+            ("Hausa", "hausa_keyword", "hausa_ascii_keyword"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for &(dialect_name, fn_name) in single_table_dialects {
+            let kinds = extract_kinds_for_fn(lexer_src, fn_name);
+            let has_to = kinds.iter().any(|k| k == "To");
+            let has_downto = kinds.iter().any(|k| k == "DownTo");
+            if has_to && !has_downto {
+                gaps.push(format!("{dialect_name} ({fn_name}) has `To` but no `DownTo` spelling"));
+            }
+        }
+        for &(dialect_name, native_fn, ascii_fn) in split_table_dialects {
+            let mut kinds = extract_kinds_for_fn(lexer_src, native_fn);
+            kinds.extend(extract_kinds_for_fn(lexer_src, ascii_fn));
+            let has_to = kinds.iter().any(|k| k == "To");
+            let has_downto = kinds.iter().any(|k| k == "DownTo");
+            if has_to && !has_downto {
+                gaps.push(format!(
+                    "{dialect_name} ({native_fn} + {ascii_fn} union) has `To` but no `DownTo` spelling"
+                ));
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "downto keyword-parity gaps found (dialect has `to` but no `downto`):\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
     fn bug170_pashto_dead_multiword_entries_now_reachable() {
         // BUG-170 follow-up (2026-08-10): found while auditing Pashto
         // keyword coverage. `pashto_keyword` had 5 entries whose
@@ -4820,6 +4956,58 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_downto_parses_and_compiles() {
+        // `for i from 5 downto 0` — descending, step 1, half-open
+        // (excludes 0, mirroring `to`'s exclusion of its upper
+        // bound). Walks 5, 4, 3, 2, 1.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 5 downto 0 { n = n + 1; }
+              return n;
+            }
+        "#;
+        compile(source).expect("downto range should compile");
+    }
+
+    #[test]
+    fn for_loop_downto_empty_when_start_le_end_compiles() {
+        // `for i from 0 downto 5` — start <= end, so there's no
+        // valid descending sequence; body never executes. Mirrors
+        // `for_loop_reverse_range_compiles` for the other direction.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 downto 5 { n = n + 1; }
+              return n;
+            }
+        "#;
+        compile(source).expect("empty downto range should compile");
+    }
+
+    #[test]
+    fn for_loop_downto_rejected_on_parallel_for() {
+        // `parallel for ... downto ...` is out of scope for now --
+        // the parser rejects it with a clear message rather than
+        // silently mis-threading it.
+        let source = r#"
+            fn main() -> i64 {
+              let acc: i64 = 0;
+              parallel for i from 10 downto 0 reduce acc with +; {
+                acc = acc + i;
+              }
+              return acc;
+            }
+        "#;
+        let err = compile(source).expect_err("parallel downto should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("'parallel for' does not support 'downto'")),
+            "expected a 'parallel for' + 'downto' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn cast_bool_to_int_rejected() {
         // bool ↔ int casts are rejected — different semantic
         // domains. Forces explicit if/else conversion.
@@ -8150,6 +8338,40 @@ mod tests {
             }
         "#;
         compile(source).expect("Hindi multi-word for should compile");
+    }
+
+    #[test]
+    fn devanagari_downto_english_word_order_compiles() {
+        // 2026-08-13: `अधोतक` is the shared Sanskrit/Hindi/Marathi
+        // coinage for `downto` (see docs/archive/
+        // grammar_review_queue.md's "downto keyword-parity sweep").
+        // English word order: `के लिए i से START अधोतक END`.
+        let source = r#"
+            फलन main() -> i64 {
+              मान r: i64 = 0;
+              के लिए i से 5 अधोतक 0 {
+                r = r + i;
+              }
+              परत r;
+            }
+        "#;
+        compile(source).expect("Devanagari downto (English word order) should compile");
+    }
+
+    #[test]
+    fn devanagari_downto_sov_word_order_compiles() {
+        // Same as above but SOV word order (Closure #265):
+        // `i के लिए START से END अधोतक`.
+        let source = r#"
+            कार्य main() -> i64 {
+              माना r: i64 = 0;
+              i के लिए 5 से 0 अधोतक {
+                r = r + i;
+              }
+              पुनरागम r;
+            }
+        "#;
+        compile(source).expect("Devanagari downto (SOV word order) should compile");
     }
 
     #[test]
@@ -40381,6 +40603,24 @@ função main() -> i64 {
     }
 
     #[test]
+    fn japanese_downto_for_range_compiles() {
+        // 2026-08-13: `下まで` (shita+made, "down-to") is the
+        // Japanese coinage for `downto` -- see docs/archive/
+        // grammar_review_queue.md's "downto keyword-parity sweep".
+        let source = "// vani-lang: japanese\n\
+                      目的 \"Japanese downto for-range\";\n\
+                      関数 main() -> i64 {\n  \
+                        代入 合計: i64 = 0;\n  \
+                        対象 i から 5 下まで 0 {\n    \
+                          合計 = 合計 + i;\n  \
+                        }\n  \
+                        確認 合計 == 15;\n  \
+                        戻る 0;\n\
+                      }\n";
+        crate::compile(source).expect("Japanese downto for-range compiles");
+    }
+
+    #[test]
     fn japanese_match_enum_compiles() {
         let source = "// vani-lang: japanese\n\
                       目的 \"Japanese match/enum\";\n\
@@ -41061,6 +41301,25 @@ função main() -> i64 {
                         вернуть 0;\n\
                       }\n";
         crate::compile(source).expect("Russian basics compile");
+    }
+
+    #[test]
+    fn russian_downto_for_range_compiles() {
+        // 2026-08-13: `донизу` ("down to the bottom") is a real,
+        // attested Russian word, chosen for `downto` -- see
+        // docs/archive/grammar_review_queue.md's "downto
+        // keyword-parity sweep".
+        let source = "// vani-lang: russian\n\
+                      цель \"Russian downto for-range\";\n\
+                      функция main() -> i64 {\n  \
+                        пусть итог: i64 = 0;\n  \
+                        для i от 5 донизу 0 {\n    \
+                          итог = итог + i;\n  \
+                        }\n  \
+                        утверждать итог == 15;\n  \
+                        вернуть 0;\n\
+                      }\n";
+        crate::compile(source).expect("Russian downto for-range compiles");
     }
 
     #[test]

@@ -1640,15 +1640,15 @@ backends to actually close this gap rather than just relocate it.
 Left as a documented, understood limitation rather than changed
 unilaterally.
 
-### L29 -- `for i from lo to hi` is ascending-only, step 1, with silent zero iterations when `lo >= hi`
+### L29 -- `for i from lo to hi` is ascending-only ✅ Partially resolved 2026-08-13 (`downto` added; `step`/stride-N still unsupported)
 
-`for VAR from START to END { ... }` has exactly one grammar and one
-direction (`src/parser.rs::parse_for_stmt_inner`, ~line 3957): it
-always counts up by 1, over the half-open range `START, START+1, ...,
-END-1`. There is no `downto` keyword, no `step`/`by` clause, and no
-direction inference from `START` vs `END` -- this is a fixed grammar,
-not a runtime decision. If `START >= END`, the range is legitimately
-empty and the loop body runs **zero times**, with no diagnostic:
+`for VAR from START to END { ... }` only ever counted up by 1, over
+the half-open range `START, START+1, ..., END-1`
+(`src/parser.rs::parse_for_stmt_inner`, ~line 3957). There was no
+`downto` keyword, no `step`/`by` clause, and no direction inference
+from `START` vs `END`. If `START >= END`, the range was (and still
+is) legitimately empty and the loop body runs **zero times**, with
+no diagnostic:
 
 ```vani
 fn main() -> i64 {
@@ -1669,23 +1669,57 @@ like English for "5 down to 0"), and the compiler gives no error or
 warning when that intuition is wrong -- the same class of silent
 footgun as the half-open upper bound itself, just easier to trip on.
 
-**Workaround**: use a `while` loop with manual arithmetic for
-descending ranges or any step other than 1:
+**Fix (2026-08-13)**: added `downto` as the descending counterpart of
+`to`, step 1, same half-open convention (`for i from 5 downto 0`
+walks `5, 4, 3, 2, 1`, excluding `0`, mirroring how `to` excludes its
+own upper bound). Shipped English-only first, then extended to every
+dialect that already has a native `to`/`until` spelling -- all 62,
+via the same-day BUG-170-style keyword-parity sweep (each dialect's
+`downto` word is a new coinage compounding its existing `to` word
+with its word for "down"/"below"; see
+`docs/archive/grammar_review_queue.md`'s "downto keyword-parity
+sweep" section for the full per-dialect table and confidence ratings
+-- several are flagged **Low** confidence pending native-speaker
+review, same languages/scripts as the BUG-171 review queue). A
+mechanical parity test (`downto_keyword_parity_all_62_dialects` in
+`src/lib.rs`) asserts every dialect with a `to` spelling also has a
+`downto` spelling; full end-to-end compiles additionally cover
+Devanagari (both English and SOV word order), Japanese, and Russian.
+`parallel for` doesn't support `downto` yet either (rejected at parse
+time with a clear diagnostic) -- only sequential `for`. The fix
+threads a new `descending: bool`
+field through `Stmt::For`/`TypedStmt::For` (extending the existing
+node rather than a full while-loop desugaring, to keep the loop
+variable's existing dedicated scoping and avoid re-deriving label
+attachment for `break`/`continue`) and updates every site that baked
+in "ascending" arithmetic: the SMT bound-fact mirror (`var <= start
+&& var > end` instead of `var >= start && var < end`), the implicit
+per-iteration reassignment tracking (`var - 1` instead of `var + 1`),
+both backends' loop codegen (`src/backend_c.rs`: `>` / `--`;
+`src/backend_llvm.rs`: `sgt`/`ugt` / `sub`), WCET trip-count
+computation (`src/safety.rs`), and the AST pretty-printer
+(`src/format.rs`). Descending loops are routed through the tree
+backends rather than the SSA pass (`src/main.rs::stmt_ssa_supported`
+rejects `descending` there), matching the existing pattern for other
+SSA-unsupported constructs -- ascending loops are unaffected.
+Regression tests: `for_loop_downto_parses_and_compiles`,
+`for_loop_downto_empty_when_start_le_end_compiles`,
+`for_loop_downto_rejected_on_parallel_for` in `src/lib.rs`, plus an
+end-to-end stdout check on both backends in `tests/run_end_to_end.rs`
+against `examples/language/english/for_loop_downto.vani`.
+
+**Still open**: `step`/`by` (a stride other than 1, ascending or
+descending) is not implemented -- use a `while` loop with manual
+arithmetic:
 
 ```vani
-let i: i64 = 5;
-while i >= 1 {
+let i: i64 = 10;
+while i <= 20 {
   print i;
-  i = i - 1;       // descending
-  // or: i = i - 3;  for a step of 3
+  i = i + 3;       // step of 3
 }
 ```
 
-**Fix**: not planned as a grammar change -- adding `downto`/`step`
-would be a real language-surface addition (new keywords, new SMT
-bound-fact derivation for the range, new bytecode/backend lowering),
-not a bug fix, and `while` already covers the case with no loss of
-expressiveness. Tracked here purely as a documentation/discoverability
-gap: see [Beginner 5's "Counting down, or stepping by more than
-1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-or-stepping-by-more-than-1)
-for the tutorial-side fix (added 2026-08-13).
+See [Beginner 5's "Counting down with `downto`, or stepping by more
+than 1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-with-downto-or-stepping-by-more-than-1)
+for the tutorial-side coverage.
