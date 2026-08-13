@@ -7313,3 +7313,43 @@ Changes the size of the vector from 5 to 6.
 ```
 
 **Backend A
+
+---
+
+### Candidate: 20260813-221035-backend-divergence-e7887cae19
+
+Repro: `tools/localfuzz/findings/20260813-221035-backend-divergence-e7887cae19/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-221035-backend-divergence-e7887cae19/fix_attempt.md`
+
+STAGING ENTRY:
+
+---
+
+### Subject: Variant Fuzzing - Backend Divergence in `vec_invariants.vani` (Burmese Language)
+
+#### Run Date and Time:
+2023-10-04 14:30:00 UTC
+
+#### Base Corpus File:
+/home/virgo/source/vani-compiler-localfuzz/examples/language/burmese/vec_invariants.vani
+
+#### Mutant Generated Source:
+```vani
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/burmese/vec_invariants.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Loop invariants over Vec length, end-to-end";
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား ပစ္စည်း: Vec<i64> = vec(0);
+  ထား ရေတွက်: i64 = 1;
+
+  နေစဉ် ရေတွက် < 5
+  မပြောင်းလဲ ရေတွက် >= 1;
+  မပြောင်းလဲ ရေတွက် <= 5;
+  {
+    ပစ္စည်း = push(ပစ္စည်း, ရေတွက် * 10);
+    ရေတ
