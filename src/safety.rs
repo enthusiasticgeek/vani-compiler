@@ -1414,6 +1414,7 @@ fn wcet_builtin_cycles(name: &str) -> u64 {
 
         // ── I/O / timing ──────────────────────────────────────────────
         "sleep_ms" => 500, // context switch minimum
+        "stdin_ready_within_ms" => 500, // same context-switch-minimum model as sleep_ms
         "taint" | "assert_safe" => 1, // type-level only; zero runtime cost
 
         // ── Collections (affine, heap-backed) ─────────────────────────

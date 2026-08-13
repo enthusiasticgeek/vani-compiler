@@ -5008,6 +5008,419 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_to_downto_invariant_near_i64_extremes_provable() {
+        // 2026-08-13: prompted by a question about whether `to`/
+        // `downto` are sound at i64::MIN/MAX. Runtime is sound
+        // (verified separately via manual `vanic run` testing at
+        // those exact boundaries -- half-open semantics mean the
+        // loop variable itself never needs to step past the type's
+        // range, regardless of how close start/end are to the
+        // extremes). This test covers the SMT side, using
+        // i64_min_value()/i64_max_value() for the extreme bounds --
+        // a raw i64::MIN integer literal doesn't parse (its positive
+        // magnitude, 9223372036854775808, is one past i64::MAX so
+        // the lexer types the bare literal as u64, and `0 -
+        // <u64 literal>` is rejected by the no-silent-promotion
+        // rule; i64_min_value()/i64_max_value() are the actual
+        // idiomatic way to spell these bounds, used throughout the
+        // example corpus).
+        let source = r#"
+            fn descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from i64_min_value() + 5 downto i64_min_value()
+                invariant i >= i64_min_value();
+                invariant i <= i64_min_value() + 5;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+            fn ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from i64_max_value() - 5 to i64_max_value()
+                invariant i <= i64_max_value();
+                invariant i >= i64_max_value() - 5;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+            fn main() -> i64 {
+              let a: i64 = descend_near_min();
+              assert a == 5;
+              let b: i64 = ascend_near_max();
+              assert b == 5;
+              return 0;
+            }
+        "#;
+        compile(source).expect("invariants near i64::MIN/MAX with literal bounds should be SMT-provable");
+    }
+
+    #[test]
+    fn for_loop_downto_false_invariant_with_literal_bounds_rejected() {
+        // Companion to the ascending-direction check that already
+        // existed: a false invariant on a DESCENDING for-loop with
+        // literal (SMT-decidable) bounds must be statically rejected
+        // with a counterexample, exactly like the ascending case --
+        // confirming invariant verification isn't silently skipped
+        // for `descending` loops.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 10 downto 0
+                invariant i > 100;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+        "#;
+        let err = compile(source).expect_err("false invariant on downto loop should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("does not hold at the for-loop's first iteration")),
+            "expected a loop-invariant-entry-check failure, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn for_loop_to_downto_compiles_at_narrow_integer_type_extremes() {
+        // 2026-08-13 follow-up to the i64::MIN/MAX check above: `for`
+        // accepts any integer type for the loop variable
+        // (promoted_integer_type only requires both bounds be
+        // integers), not just i64/u64 -- confirm `to`/`downto` are
+        // correct at EACH type's own extremes too, both directions.
+        // Manually verified via `vanic run` on both backends before
+        // adding this as a permanent compile-only regression guard
+        // (u8/i8/u16/i32/u64 -- a representative spread of widths
+        // and signedness, not literally all 8 integer types).
+        let source = r#"
+            fn u8_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 252 as u8 to 255 as u8 { n = n + 1; }
+              return n;
+            }
+            fn u8_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from 3 as u8 downto 0 as u8 { n = n + 1; }
+              return n;
+            }
+            fn i8_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 124 as i8 to 127 as i8 { n = n + 1; }
+              return n;
+            }
+            fn i8_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from (0 - 125) as i8 downto (0 - 128) as i8 { n = n + 1; }
+              return n;
+            }
+            fn u16_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 65532 as u16 to 65535 as u16 { n = n + 1; }
+              return n;
+            }
+            fn i32_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from (0 - 2147483645) as i32 downto (0 - 2147483648) as i32 { n = n + 1; }
+              return n;
+            }
+            fn u64_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 18446744073709551612 as u64 to 18446744073709551615 as u64 { n = n + 1; }
+              return n;
+            }
+            fn main() -> i64 {
+              assert u8_ascend_near_max() == 3;
+              assert u8_descend_near_min() == 3;
+              assert i8_ascend_near_max() == 3;
+              assert i8_descend_near_min() == 3;
+              assert u16_ascend_near_max() == 3;
+              assert i32_descend_near_min() == 3;
+              assert u64_ascend_near_max() == 3;
+              return 0;
+            }
+        "#;
+        compile(source).expect("to/downto should compile correctly at narrow integer type extremes");
+    }
+
+    #[test]
+    fn while_loop_conditions_correct_at_i64_extreme_bounds() {
+        // 2026-08-13 extensive-testing sweep: `while` conditions
+        // comparing against i64::MIN/MAX, both ascending and
+        // descending, plus an exact-equality (!=) stop condition
+        // right at the boundary. Manually verified via `vanic run`
+        // on both backends (all four return 3) before locking in as
+        // a permanent compile-only regression guard. A companion
+        // manual check (not a permanent test, since it deliberately
+        // triggers a real overflow) confirmed a `while` condition
+        // that itself computes past i64::MAX correctly traps with
+        // "integer overflow in i64 add" on both backends rather than
+        // silently wrapping -- checked arithmetic applies inside
+        // loop conditions exactly like anywhere else.
+        let source = r#"
+            fn while_ascend_near_max() -> i64 {
+              let i: i64 = i64_max_value() - 3;
+              let n: i64 = 0;
+              while i < i64_max_value() {
+                i = i + 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn while_descend_near_min() -> i64 {
+              let i: i64 = i64_min_value() + 3;
+              let n: i64 = 0;
+              while i > i64_min_value() {
+                i = i - 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn while_stop_exactly_at_max() -> i64 {
+              let i: i64 = i64_max_value() - 3;
+              let n: i64 = 0;
+              while i != i64_max_value() {
+                i = i + 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn main() -> i64 {
+              assert while_ascend_near_max() == 3;
+              assert while_descend_near_min() == 3;
+              assert while_stop_exactly_at_max() == 3;
+              return 0;
+            }
+        "#;
+        compile(source).expect("while conditions should be correct at i64::MIN/MAX boundaries");
+    }
+
+    #[test]
+    fn break_continue_positional_and_boundary_iteration_edge_cases() {
+        // 2026-08-13 extensive-testing sweep: named-label break out
+        // of triple-nested loops, positional `break middle;` (per
+        // BUG-176's depth-based resolution -- see
+        // bug176_positional_break_inner_outer_middle_resolve_by_depth
+        // above for the original coverage this extends), `continue`
+        // on the very first iteration, `break` on the very last
+        // valid iteration, `continue` inside a `downto` loop, and
+        // 4-deep positional `break outer`. All six were manually
+        // verified via `vanic run` on both backends against the
+        // exact expected values asserted here before being locked in.
+        let source = r#"
+            fn labeled_break_outer() -> i64 {
+              let hits: i64 = 0;
+              outer: for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break outer; }
+                    hits = hits + 1;
+                  }
+                }
+              }
+              return hits;
+            }
+            fn positional_break_middle() -> i64 {
+              let hits: i64 = 0;
+              for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break middle; }
+                    hits = hits + 1;
+                  }
+                }
+              }
+              return hits;
+            }
+            fn continue_on_first_iteration() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 5 {
+                if i == 0 { continue; }
+                sum = sum + i;
+              }
+              return sum;
+            }
+            fn break_on_last_iteration() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 5 {
+                if i == 4 { break; }
+                n = n + 1;
+              }
+              return n;
+            }
+            fn continue_in_downto() -> i64 {
+              let sum: i64 = 0;
+              for i from 10 downto 0 {
+                if i % 2 == 0 { continue; }
+                sum = sum + i;
+              }
+              return sum;
+            }
+            fn deep_positional_break_outer() -> i64 {
+              let hits: i64 = 0;
+              for a from 0 to 2 {
+                for b from 0 to 2 {
+                  for c from 0 to 2 {
+                    for d from 0 to 2 {
+                      if d == 1 { break outer; }
+                      hits = hits + 1;
+                    }
+                  }
+                }
+              }
+              return hits;
+            }
+            fn main() -> i64 {
+              assert labeled_break_outer() == 1;
+              assert positional_break_middle() == 3;
+              assert continue_on_first_iteration() == 10;
+              assert break_on_last_iteration() == 4;
+              assert continue_in_downto() == 25;
+              assert deep_positional_break_outer() == 1;
+              return 0;
+            }
+        "#;
+        compile(source).expect("break/continue positional and boundary-iteration edge cases should compile correctly");
+    }
+
+    #[test]
+    fn if_if_let_while_let_match_correct_at_extreme_payload_bounds() {
+        // 2026-08-13 extensive-testing sweep: deeply nested if/else
+        // comparing i64::MIN/MAX, if-let with an extreme Option
+        // payload, while-let counting down from an extreme starting
+        // value, and match with extreme payload arms. Manually
+        // verified via `vanic run` on both backends against the
+        // exact expected values before being locked in.
+        let source = r#"
+            fn classify(x: i64) -> i64 {
+              if x == i64_min_value() {
+                return 1;
+              } else {
+                if x == i64_max_value() {
+                  return 2;
+                } else {
+                  return 3;
+                }
+              }
+            }
+            fn if_let_extreme_payload(opt: Option<i64>) -> i64 {
+              if let Option.Some(v) = opt {
+                if v == i64_min_value() {
+                  return 100;
+                }
+                return v;
+              }
+              return 0 - 999;
+            }
+            fn step_down(n: i64, floor: i64) -> Option<i64> {
+              if n > floor {
+                return Option.Some(n - 1);
+              }
+              return Option.None;
+            }
+            fn while_let_from_extreme() -> i64 {
+              let n: i64 = i64_min_value() + 5;
+              let steps: i64 = 0;
+              while let Option.Some(next) = step_down(n, i64_min_value()) {
+                n = next;
+                steps = steps + 1;
+              }
+              return steps;
+            }
+            fn classify_extreme(v: i64) -> i64 {
+              if v == i64_max_value() {
+                return 1;
+              }
+              if v == i64_min_value() {
+                return 2;
+              }
+              return 3;
+            }
+            fn match_extreme(opt: Option<i64>) -> i64 {
+              return match opt {
+                Option.Some(v) then classify_extreme(v),
+                Option.None then 0,
+              };
+            }
+            fn main() -> i64 {
+              assert classify(i64_min_value()) == 1;
+              assert classify(i64_max_value()) == 2;
+              assert classify(0) == 3;
+              assert if_let_extreme_payload(Option.Some(i64_min_value())) == 100;
+              assert if_let_extreme_payload(Option.Some(42)) == 42;
+              assert if_let_extreme_payload(Option.None) == 0 - 999;
+              assert while_let_from_extreme() == 5;
+              assert match_extreme(Option.Some(i64_max_value())) == 1;
+              assert match_extreme(Option.Some(i64_min_value())) == 2;
+              assert match_extreme(Option.Some(7)) == 3;
+              assert match_extreme(Option.None) == 0;
+              return 0;
+            }
+        "#;
+        compile(source).expect("if/if-let/while-let/match should be correct at extreme payload bounds");
+    }
+
+    #[test]
+    fn for_in_iterator_empty_single_and_extreme_value_edge_cases() {
+        // 2026-08-13 extensive-testing sweep: `for x in ref xs`
+        // (ForIter) over an empty Vec, a single-element Vec, a Vec
+        // containing i64::MIN/MAX (summing to exactly -1, not an
+        // overflow -- MIN + MAX is always representable), break on
+        // the very first element, and continue skipping extreme
+        // values mid-iteration. Manually verified via `vanic run` on
+        // both backends against the exact expected values.
+        let source = r#"
+            fn sum_empty() -> i64 {
+              let xs: Vec<i64> = vec_fill(0, 0);
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn sum_single() -> i64 {
+              let xs: Vec<i64> = vec(42);
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn sum_extreme_values() -> i64 {
+              let xs: Vec<i64> = vec(i64_min_value(), 0, i64_max_value());
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn break_on_first_element() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let n: i64 = 0;
+              for x in ref xs {
+                if x == 1 { break; }
+                n = n + 1;
+              }
+              return n;
+            }
+            fn continue_skips_extreme_value() -> i64 {
+              let xs: Vec<i64> = vec(1, i64_min_value(), 2, i64_max_value(), 3);
+              let sum: i64 = 0;
+              for x in ref xs {
+                if x == i64_min_value() { continue; }
+                if x == i64_max_value() { continue; }
+                sum = sum + x;
+              }
+              return sum;
+            }
+            fn main() -> i64 {
+              assert sum_empty() == 0;
+              assert sum_single() == 42;
+              assert sum_extreme_values() == 0 - 1;
+              assert break_on_first_element() == 0;
+              assert continue_skips_extreme_value() == 6;
+              return 0;
+            }
+        "#;
+        compile(source).expect("for-in should be correct on empty/single/extreme-value Vecs");
+    }
+
+    #[test]
     fn cast_bool_to_int_rejected() {
         // bool ↔ int casts are rejected — different semantic
         // domains. Forces explicit if/else conversion.

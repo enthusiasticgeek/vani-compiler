@@ -203,6 +203,6 @@ Use `Condvar` when: the predicate is complex (multiple fields), the waiting thre
 
 ---
 
-**Previous**: [Sec.3c -- Capstone: timed tic-tac-toe (task/join/Atomic) ->](03c_timed_tic_tac_toe_capstone.md)
+**Previous**: [Sec.3c -- Capstone: timed tic-tac-toe (stdin_ready_within_ms) ->](03c_timed_tic_tac_toe_capstone.md)
 **Next**: [Sec.4a -- Embedded, unsafe, and regions primer ->](04a_embedded_primer.md)
 

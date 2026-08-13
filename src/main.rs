@@ -1008,6 +1008,17 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "skiplist_len"
                 || name == "skiplist_min" || name == "skiplist_max"
                 || name == "skiplist_clear"
+                // 2026-08-13: no SSA-backend lowering for the new
+                // non-blocking stdin readiness poll yet -- tree-LLVM
+                // and tree-C both have it (see backend_llvm.rs /
+                // backend_c.rs). Without this exclusion, calls to it
+                // silently fell through to the SSA backend's
+                // "unrecognized builtin -> treat as a user fn" path,
+                // emitting an uncallable `@fn_stdin_ready_within_ms`
+                // reference -- caught by
+                // stdin_ready_within_ms_does_not_wait_past_its_timeout
+                // in tests/run_end_to_end.rs.
+                || name == "stdin_ready_within_ms"
             {
                 return false;
             }

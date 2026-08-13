@@ -1175,6 +1175,61 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("  store i8 0, i8* %_isrl_endslot\n");
     out.push_str("  ret i8* %_isrl_finbuf\n");
     out.push_str("}\n");
+    // 2026-08-13 -- `stdin_ready_within_ms(timeout_ms) -> bool`, a
+    // genuinely non-blocking readiness poll on stdin (see the
+    // checker.rs dispatch-site comment for why this exists).
+    // Split by HOST target, same as the printf/snprintf/dprintf
+    // MinGW shims above -- Windows has no `poll()`, so it uses
+    // `WaitForSingleObject` on the console input handle instead
+    // (VERIFICATION DEFERRED, no Windows host access; works for
+    // interactive console input, less certain for redirected/
+    // piped stdin -- same caveat as the C backend's own version).
+    #[cfg(target_os = "windows")]
+    {
+        out.push_str("declare i8* @GetStdHandle(i32)\n");
+        out.push_str("declare i32 @WaitForSingleObject(i8*, i32)\n");
+        out.push_str("define i1 @intent_stdin_ready_within_ms(i64 %_sr_ms) {\n");
+        out.push_str("  %_sr_h = call i8* @GetStdHandle(i32 -10)\n");
+        out.push_str("  %_sr_hnull = icmp eq i8* %_sr_h, null\n");
+        out.push_str("  %_sr_hinv = icmp eq i8* %_sr_h, inttoptr (i64 -1 to i8*)\n");
+        out.push_str("  %_sr_hbad = or i1 %_sr_hnull, %_sr_hinv\n");
+        out.push_str("  br i1 %_sr_hbad, label %_sr_bad, label %_sr_wait\n");
+        out.push_str("_sr_wait:\n");
+        out.push_str("  %_sr_tmo32 = trunc i64 %_sr_ms to i32\n");
+        out.push_str("  %_sr_neg = icmp slt i64 %_sr_ms, 0\n");
+        out.push_str("  %_sr_tmo = select i1 %_sr_neg, i32 -1, i32 %_sr_tmo32\n");
+        out.push_str("  %_sr_rc = call i32 @WaitForSingleObject(i8* %_sr_h, i32 %_sr_tmo)\n");
+        out.push_str("  %_sr_ready = icmp eq i32 %_sr_rc, 0\n");
+        out.push_str("  ret i1 %_sr_ready\n");
+        out.push_str("_sr_bad:\n");
+        out.push_str("  ret i1 false\n");
+        out.push_str("}\n");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        out.push_str("declare i32 @poll(i8*, i64, i32)\n");
+        out.push_str("define i1 @intent_stdin_ready_within_ms(i64 %_sr_ms) {\n");
+        out.push_str("  %_sr_pfd = alloca { i32, i16, i16 }\n");
+        out.push_str("  %_sr_fdp = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 0\n");
+        out.push_str("  store i32 0, i32* %_sr_fdp\n");
+        out.push_str("  %_sr_evp = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 1\n");
+        out.push_str("  store i16 1, i16* %_sr_evp\n");
+        out.push_str("  %_sr_rep = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 2\n");
+        out.push_str("  store i16 0, i16* %_sr_rep\n");
+        out.push_str("  %_sr_pfdi8 = bitcast { i32, i16, i16 }* %_sr_pfd to i8*\n");
+        out.push_str("  %_sr_tmo32 = trunc i64 %_sr_ms to i32\n");
+        out.push_str("  %_sr_rc = call i32 @poll(i8* %_sr_pfdi8, i64 1, i32 %_sr_tmo32)\n");
+        out.push_str("  %_sr_rcpos = icmp sgt i32 %_sr_rc, 0\n");
+        out.push_str("  br i1 %_sr_rcpos, label %_sr_check, label %_sr_notready\n");
+        out.push_str("_sr_check:\n");
+        out.push_str("  %_sr_revents = load i16, i16* %_sr_rep\n");
+        out.push_str("  %_sr_masked = and i16 %_sr_revents, 17\n");
+        out.push_str("  %_sr_ready = icmp ne i16 %_sr_masked, 0\n");
+        out.push_str("  ret i1 %_sr_ready\n");
+        out.push_str("_sr_notready:\n");
+        out.push_str("  ret i1 false\n");
+        out.push_str("}\n");
+    }
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memset(i8*, i32, i64)\n");
@@ -4256,6 +4311,18 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str("  call void @exit(i32 3)\n");
             out.push_str("  unreachable\n");
             out.push_str(&format!("{}:\n", ok));
+            // 2026-08-13: same "phi predecessor tracking" class of
+            // bug as BUG-185 (print<bool>'s missing update) -- this
+            // was a latent gap until the new &&/|| short-circuit
+            // codegen (see the Binary And/Or arm in emit_expr) became
+            // the first thing to actually read `ctx.current_block`
+            // right after an `assert`, exposing it: a malformed
+            // "PHI node entries do not match predecessors!" when an
+            // assert is immediately followed by a short-circuit
+            // expression, because the phi's edge claimed whatever
+            // stale block was current BEFORE the assert instead of
+            // this `ok` block.
+            ctx.current_block = ok;
         }
         TypedStmt::Print { items } => emit_print_items(items, ctx, out),
         TypedStmt::EPrint { items } => emit_eprint_items_llvm(items, ctx, out),
@@ -5448,6 +5515,70 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ),
             };
             out.push_str(&format!("  {} = {} {} {}, {}\n", dest, mnemonic, ty, l, r));
+            dest
+        }
+        TypedExprKind::Binary { op: op @ (BinaryOp::And | BinaryOp::Or), left, right, .. }
+            if is_int_or_bool(&left.ty) =>
+        {
+            // 2026-08-13: short-circuit evaluation for `&&`/`||`.
+            // The generic eager-binary-op arm below (shared with
+            // bitwise `&`/`|`, which correctly always evaluate both
+            // operands) unconditionally emits BOTH operands before
+            // looking at the actual operator -- correct for BitAnd/
+            // BitOr, wrong for logical And/Or, whose right operand
+            // must never be evaluated once the left side alone
+            // already decides the result (`a == 0 || b / a > 0` must
+            // not evaluate `b / a` when `a == 0`; same for a
+            // bounds-guard idiom like `i < len(xs) && xs[i] > 0`).
+            // ssa.rs's lowering already special-cases this (see its
+            // "short-circuit lowering for `&&` and `||`" comment,
+            // 2026-06-09) -- this tree-LLVM path apparently never got
+            // the equivalent fix, so any function routed through the
+            // tree backend (anything calling a non-SSA-eligible
+            // builtin, e.g. `i64_max_value()`) kept the eager,
+            // unsound behavior. Mirrors ssa.rs's structure: branch on
+            // the left value, only evaluate `right` on the taken
+            // path, phi-merge the short-circuit constant with the
+            // right's value on the other path.
+            let l = emit_expr(left, ctx, out);
+            let left_block = ctx.current_block.clone();
+            let eval_rhs = ctx.fresh_label("sc_rhs");
+            let merge = ctx.fresh_label("sc_merge");
+            let is_or = matches!(op, BinaryOp::Or);
+            let (then_target, else_target) = if is_or {
+                (merge.clone(), eval_rhs.clone())
+            } else {
+                (eval_rhs.clone(), merge.clone())
+            };
+            out.push_str(&format!(
+                "  br i1 {}, label %{}, label %{}\n",
+                l, then_target, else_target
+            ));
+            out.push_str(&format!("{}:\n", eval_rhs));
+            // BUG-185-class fix: the codegen context's "current
+            // block" must be updated the moment a new block is
+            // opened, BEFORE emitting anything inside it -- otherwise
+            // a `right` that doesn't itself branch leaves
+            // `ctx.current_block` stuck at whatever it was before
+            // (`left_block`), so `rhs_end_block` below would
+            // wrongly equal `left_block` and the phi's two edges
+            // would collide onto the same predecessor label instead
+            // of the correct `left_block`/`eval_rhs` pair -- exactly
+            // the "PHI node entries do not match predecessors!"
+            // failure this comment's sibling call sites in this file
+            // already guard against.
+            ctx.current_block = eval_rhs.clone();
+            let r = emit_expr(right, ctx, out);
+            let rhs_end_block = ctx.current_block.clone();
+            out.push_str(&format!("  br label %{}\n", merge));
+            out.push_str(&format!("{}:\n", merge));
+            let dest = ctx.fresh_tmp();
+            let short_circuit_value = if is_or { "true" } else { "false" };
+            out.push_str(&format!(
+                "  {} = phi i1 [ {}, %{} ], [ {}, %{} ]\n",
+                dest, short_circuit_value, left_block, r, rhs_end_block
+            ));
+            ctx.current_block = merge;
             dest
         }
         TypedExprKind::Binary { op, left, right, checked } if is_int_or_bool(&left.ty) => {
@@ -7542,6 +7673,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i8* @intent_stdin_read_line()\n",
                     result
+                ));
+                return result;
+            }
+            if name == "stdin_ready_within_ms" {
+                // stdin_ready_within_ms(timeout_ms) -> bool
+                let ms = emit_expr(&args[0], ctx, out);
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i1 @intent_stdin_ready_within_ms(i64 {})\n",
+                    result, ms
                 ));
                 return result;
             }

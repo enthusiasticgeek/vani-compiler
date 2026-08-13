@@ -64,6 +64,7 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // File I/O primitives â€” POSIX FILE* wrapped as i64 FileHandle.
     "file_open", "file_is_ok", "file_read_line", "file_write",
     "file_close", "file_flush", "stdin_read_line", "flush_stdout",
+    "stdin_ready_within_ms",
     // Arc 8 step 8e proper â€” TCP networking primitives. Real
     // sockets via libc; thread-local 4KB recv/send buffer.
     "tcp_listen", "tcp_socket_port", "tcp_accept",
@@ -24814,6 +24815,25 @@ fn check_call(
                 args, env, signatures, span, diagnostics,
             );
         }
+        // 2026-08-13 -- `stdin_ready_within_ms(timeout_ms: i64) ->
+        // bool`. A genuinely non-blocking readiness poll on stdin
+        // (POSIX `poll()` on fd 0 / Windows `WaitForSingleObject`
+        // on the console input handle), mirroring the
+        // `tcp_set_nonblocking`/`tcp_recv_nb` precedent below but
+        // for stdin, which previously had none (a gap called out
+        // explicitly in examples/language/english/
+        // tic_tac_toe_timed.vani's "KNOWN LIMITATION" comment: no
+        // way to find out whether `stdin_read_line()` would block
+        // without just calling it and blocking). Lets a caller
+        // race a countdown against user input WITHOUT spawning a
+        // `task`/thread at all -- only call the blocking
+        // `stdin_read_line()` once this returns `true`, so a
+        // timeout never leaves anything blocked waiting.
+        "stdin_ready_within_ms" => {
+            return check_stdin_ready_within_ms_builtin(
+                args, env, signatures, span, diagnostics,
+            );
+        }
         // Arc 8 step 8e proper â€” TCP networking. All wrap
         // libc socket / bind / listen / accept / connect /
         // read / write / close via per-backend runtime
@@ -34122,6 +34142,45 @@ fn check_sleep_ms_builtin(
             args: vec![ms.expr],
         },
         Type::I64,
+        None,
+        span,
+    )
+}
+
+/// `stdin_ready_within_ms(timeout_ms: i64) -> bool`. See the
+/// dispatch-site comment above for why this exists.
+fn check_stdin_ready_within_ms_builtin(
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if args.len() != 1 {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "stdin_ready_within_ms() expects 1 argument, got {}",
+                args.len()
+            ),
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+        return CheckedExpr::fallback(Type::Bool, span);
+    }
+    let ms_raw = check_expr(&args[0], env, signatures, diagnostics);
+    let ms = coerce_checked(
+        ms_raw,
+        &Type::I64,
+        args[0].span,
+        "stdin_ready_within_ms timeout_ms",
+        diagnostics,
+    );
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "stdin_ready_within_ms".to_string(),
+            name_span: span,
+            args: vec![ms.expr],
+        },
+        Type::Bool,
         None,
         span,
     )

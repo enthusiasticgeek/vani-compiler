@@ -272,4 +272,4 @@ final total. Use `Atomic<i64>` for the running total.
 ---
 
 **Previous**: [Sec.2 -- `parallel for` + reductions + race-freedom ->](02_parallel.md)
-**Next**: [Sec.3c -- Capstone: timed tic-tac-toe (task/join/Atomic) ->](03c_timed_tic_tac_toe_capstone.md)
+**Next**: [Sec.3c -- Capstone: timed tic-tac-toe (stdin_ready_within_ms) ->](03c_timed_tic_tac_toe_capstone.md)

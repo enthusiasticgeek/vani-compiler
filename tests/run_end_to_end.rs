@@ -14756,3 +14756,237 @@ fn tic_tac_toe_timed_example_exits_immediately_on_closed_stdin() {
         );
     }
 }
+
+// Regression coverage for stdin_ready_within_ms itself: a genuinely
+// non-blocking readiness poll on stdin (see checker.rs's dispatch
+// comment for why this exists -- it's what let
+// tic_tac_toe_timed.vani drop task/Atomic/join entirely). This test
+// is the whole point of that builtin: input that arrives AFTER the
+// poll's timeout must not be waited for -- the process should exit
+// promptly on the timeout, not block until the late input shows up.
+#[test]
+fn stdin_ready_within_ms_does_not_wait_past_its_timeout() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_stdin_ready_nb_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src_path = dir.join("stdin_ready_nb.vani");
+    fs::write(
+        &src_path,
+        "intent \"stdin_ready_within_ms must not wait past its timeout\";\n\
+         fn main() -> i64 {\n  \
+           let ready: bool = stdin_ready_within_ms(300);\n  \
+           if ready {\n    \
+             print \"ready\";\n  \
+           } else {\n    \
+             print \"timed_out\";\n  \
+           }\n  \
+           return 0;\n\
+         }\n",
+    )
+    .expect("write stdin_ready_nb.vani");
+
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let mut cmd = Command::new(binary);
+        cmd.args(&backend_args);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        // Deliberately never write to child.stdin, and keep it alive
+        // in `_stdin_keepalive` (NOT dropped) for as long as we're
+        // waiting on the child -- `Child::wait_with_output` closes
+        // stdin as one of its first steps (by design, to avoid
+        // deadlocking a child that's blocked reading it), which would
+        // deliver an immediate EOF and make stdin_ready_within_ms
+        // report "ready" right away instead of genuinely timing out.
+        // Using `wait()` (which doesn't touch stdin) plus manual
+        // stdout/stderr reads keeps the pipe open with no data for
+        // the whole run, the scenario this test actually needs.
+        let _stdin_keepalive = child.stdin.take();
+        let mut stdout_handle = child.stdout.take().expect("child stdout");
+        let mut stderr_handle = child.stderr.take().expect("child stderr");
+        let start = std::time::Instant::now();
+        let status = child.wait().expect("wait for intentc");
+        let elapsed = start.elapsed();
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+        {
+            use std::io::Read;
+            let _ = stdout_handle.read_to_string(&mut stdout_buf);
+            let _ = stderr_handle.read_to_string(&mut stderr_buf);
+        }
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            stdout_buf,
+            stderr_buf
+        );
+        assert!(
+            elapsed.as_secs() < 10,
+            "expected stdin_ready_within_ms(300) to return well under 10s for {:?}, took {:?}",
+            backend_args,
+            elapsed
+        );
+        assert_eq!(
+            stdout_buf.replace("\r\n", "\n"),
+            "timed_out\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// 2026-08-13: `&&` / `||` must short-circuit on BOTH backends -- the
+// right operand must not be evaluated (no side effects, no traps)
+// once the left operand already decides the result. The C backend
+// gets this for free from native C's own && / || semantics; the
+// tree-LLVM backend did NOT (a real bug: it eagerly evaluated both
+// operands via a plain `and`/`or` instruction, identical to how it
+// -- correctly -- handles bitwise `&`/`|`). Found via a
+// `false && overflowing_call()` repro that spuriously trapped with
+// "integer overflow in i64 add" on `vanic run` but not `--backend=c`.
+// Fixed by lowering And/Or to a branch + phi merge in backend_llvm.rs
+// (mirroring ssa.rs's own short-circuit lowering, in place since
+// 2026-06-09) -- but this specific repro requires a call routed
+// through the TREE backend specifically (i64_max_value() isn't
+// SSA-eligible), since the SSA path was already correct.
+#[test]
+fn short_circuit_and_or_do_not_evaluate_right_operand_when_left_decides() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_short_circuit_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src_path = dir.join("short_circuit.vani");
+    fs::write(
+        &src_path,
+        "intent \"short-circuit && / || must not evaluate the right operand when the left decides\";\n\
+         fn would_overflow() -> bool {\n  \
+           let x: i64 = i64_max_value();\n  \
+           let y: i64 = x + 1;\n  \
+           return y > 0;\n\
+         }\n\
+         fn main() -> i64 {\n  \
+           let a: bool = false && would_overflow();\n  \
+           print \"a =\", a;\n  \
+           let b: bool = true || would_overflow();\n  \
+           print \"b =\", b;\n  \
+           return 0;\n\
+         }\n",
+    )
+    .expect("write short_circuit.vani");
+
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?} (short-circuit should prevent the overflow trap)\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "a = false\nb = true\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Companion control case: when the left operand does NOT decide the
+// result (`true && ...` / `false || ...`), the right operand MUST
+// still be evaluated -- confirming the fix didn't overshoot into
+// never evaluating the right side at all.
+#[test]
+fn short_circuit_and_or_still_evaluate_right_operand_when_left_does_not_decide() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_short_circuit_control_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+
+    let cases = [
+        (
+            "and_control.vani",
+            "let a: bool = true && would_overflow();\n  print \"unreachable:\", a;\n",
+        ),
+        (
+            "or_control.vani",
+            "let a: bool = false || would_overflow();\n  print \"unreachable:\", a;\n",
+        ),
+    ];
+    for (filename, body) in cases {
+        let src_path = dir.join(filename);
+        fs::write(
+            &src_path,
+            format!(
+                "intent \"control case: right operand must still be evaluated\";\n\
+                 fn would_overflow() -> bool {{\n  \
+                   let x: i64 = i64_max_value();\n  \
+                   let y: i64 = x + 1;\n  \
+                   return y > 0;\n\
+                 }}\n\
+                 fn main() -> i64 {{\n  \
+                   {}\
+                   return 0;\n\
+                 }}\n",
+                body
+            ),
+        )
+        .expect("write control case");
+
+        for backend_args in [
+            vec!["run", src_path.to_str().unwrap()],
+            vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                !output.status.success(),
+                "intentc {:?} for {} should trap (right operand must still be evaluated), but succeeded\nstdout: {}",
+                backend_args,
+                filename,
+                String::from_utf8_lossy(&output.stdout)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("integer overflow"),
+                "intentc {:?} for {} should trap with an overflow message, got stderr:\n{}",
+                backend_args,
+                filename,
+                stderr
+            );
+        }
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}

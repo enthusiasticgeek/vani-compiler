@@ -1960,6 +1960,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
     emit_intent_file_io_helpers_c(&mut out, &body);
+    emit_intent_stdin_ready_helpers_c(&mut out, &body);
     // Force TCP helpers to emit when epoll helpers do so the
     // `accept()` / `recv()` declares + the thread-local buffer
     // are available to the nb variants AND `read()` lands for
@@ -2612,6 +2613,42 @@ fn emit_intent_file_io_helpers_c(out: &mut String, body: &str) {
          static char* intent_stdin_read_line(void) {\n\
          \x20 return intent_file_read_line(stdin);\n\
          }\n\n",
+    );
+}
+
+/// 2026-08-13 -- `stdin_ready_within_ms(timeout_ms) -> bool`, a
+/// genuinely non-blocking readiness poll on stdin. POSIX: `poll()`
+/// on fd 0. Windows: `WaitForSingleObject` on the console input
+/// handle (works for interactive console input; less reliable for
+/// redirected/piped stdin, where a pipe handle's signaled state
+/// doesn't as cleanly mean "a full line is ready" -- VERIFICATION
+/// DEFERRED, no Windows host access to confirm the piped case).
+fn emit_intent_stdin_ready_helpers_c(out: &mut String, body: &str) {
+    if !body.contains("intent_stdin_ready_within_ms") {
+        return;
+    }
+    out.push_str(
+        "#if defined(_WIN32)\n\
+         #include <windows.h>\n\
+         static INTENT_UNUSED bool intent_stdin_ready_within_ms(int64_t timeout_ms) {\n\
+         \x20 HANDLE h = GetStdHandle(STD_INPUT_HANDLE);\n\
+         \x20 if (h == INVALID_HANDLE_VALUE || h == NULL) return false;\n\
+         \x20 DWORD tmo = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;\n\
+         \x20 return WaitForSingleObject(h, tmo) == WAIT_OBJECT_0;\n\
+         }\n\
+         #else\n\
+         #include <poll.h>\n\
+         static INTENT_UNUSED bool intent_stdin_ready_within_ms(int64_t timeout_ms) {\n\
+         \x20 struct pollfd pfd;\n\
+         \x20 pfd.fd = 0;\n\
+         \x20 pfd.events = POLLIN;\n\
+         \x20 pfd.revents = 0;\n\
+         \x20 int tmo = (timeout_ms < 0) ? -1 : (int)timeout_ms;\n\
+         \x20 int rc = poll(&pfd, 1, tmo);\n\
+         \x20 if (rc <= 0) return false;\n\
+         \x20 return (pfd.revents & (POLLIN | POLLHUP)) != 0;\n\
+         }\n\
+         #endif\n\n",
     );
 }
 
@@ -20006,6 +20043,15 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // Always returns 0; passes ms straight through.
         "sleep_ms" => {
             format!("intent_sleep_ms(({}))", emit_expr(&args[0]))
+        }
+        // 2026-08-13 — `stdin_ready_within_ms(timeout_ms) -> bool`.
+        // Wraps `intent_stdin_ready_within_ms`, emitted by
+        // `emit_intent_stdin_ready_helpers_c` when referenced.
+        "stdin_ready_within_ms" => {
+            format!(
+                "intent_stdin_ready_within_ms(({}))",
+                emit_expr(&args[0])
+            )
         }
         // Arc 8 step 8e proper — TCP networking primitives.
         // All resolve to runtime helpers emitted by

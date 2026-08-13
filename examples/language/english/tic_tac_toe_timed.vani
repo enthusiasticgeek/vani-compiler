@@ -5,24 +5,41 @@
 
 intent "Terminal tic-tac-toe, timed edition -- each player has 15 seconds per move; run out of time and you forfeit the game";
 
-// A `task`/`join`/`Atomic<T>` demonstration built on top of
+// A `stdin_ready_within_ms` demonstration built on top of
 // examples/language/english/tic_tac_toe.vani's board/win-detection/
 // color logic (duplicated here rather than shared, since this is a
 // standalone example, not a library). See that file (and its
 // tutorial, Intermediate 17) for the non-timed version's own
 // commentary -- this file's comments focus on what's NEW: the timer.
 //
-// The core idea: each turn, spawn a `task` that does the actual
-// blocking `stdin_read_line()` + validation loop (identical to the
-// non-timed game's read_move), while the main thread independently
-// polls a shared `Atomic<bool>` "done" flag on a short sleep_ms
-// cadence, counting elapsed time. Whichever finishes first -- the
-// human typing a valid move, or the clock -- decides the outcome.
+// The core idea: `stdin_ready_within_ms(timeout_ms) -> bool` is a
+// genuinely NON-BLOCKING readiness poll on stdin (POSIX `poll()` on
+// fd 0 / Windows `WaitForSingleObject` on the console input handle)
+// -- it returns whether a full line is available WITHOUT reading it.
+// `read_move` below calls it in short slices, clamped to whatever
+// time is left in the turn's budget, and only calls the blocking
+// `stdin_read_line()` once a slice reports readiness. That means a
+// timeout is checked between every slice with nothing ever left
+// half-read or half-blocked -- when time runs out, `read_move`
+// returns immediately, no thread, no task, no lingering wait.
 //
-// This is deliberately NOT a general-purpose "any blocking call with
-// a timeout" pattern -- see the "Known limitation" note above
-// read_move_worker below for why cancellation doesn't actually work
-// here, and what the code does about it.
+// This file used to spawn a `task` (a real OS thread) per turn and
+// race it against a polled `Atomic<bool>` -- see this example's git
+// history / the tutorial's older revision if you want to compare.
+// That version had a real, unavoidable limitation: `Task<R>` is
+// affine (every spawned task must eventually be `join`ed, no
+// exceptions), and there was no way to interrupt a thread stuck
+// inside a blocking `stdin_read_line()` call -- so when the clock
+// ran out, the game still had to wait for that thread's pending
+// read to actually complete before the process could exit. Async
+// (`async fn`/`await`) wouldn't have fixed that either: v1's async
+// surface still desugars synchronously (see docs/v1_limitations.md),
+// so wrapping the same blocking call in `async fn` doesn't make it
+// non-blocking, it just moves the same block onto whatever runs the
+// async body. The actual fix was a non-blocking I/O primitive, not
+// a different way to run a blocking one -- `stdin_ready_within_ms`
+// is exactly that, and it means this game never needs a second
+// thread at all.
 
 fn ansi_red() -> Str { return "\x1b[31m"; }
 fn ansi_blue() -> Str { return "\x1b[34m"; }
@@ -86,60 +103,67 @@ fn winner_of(board: ref Vec<i64>) -> i64 {
   return 0;
 }
 
-// Runs in a spawned `task` (a real OS thread), one per turn. Identical
-// read-validate-retry loop to the non-timed game's read_move, except
-// the result is published through `done`/`result` (Atomic<bool> /
-// Atomic<i64>) instead of just being a return value -- the main
-// thread needs to observe "are we done yet?" from OUTSIDE this
-// thread, without blocking on it, which a plain return value can't
-// do.
-//
-// KNOWN LIMITATION -- there is no way to cancel this task once
-// spawned. vāṇी has no non-blocking or cancellable stdin read in v1
-// (checked: `tcp_set_nonblocking`/`tcp_recv_nb` exist for sockets,
-// nothing equivalent exists for stdin), and `Task<R>` is affine --
-// the compiler requires every spawned task to eventually be `join`ed,
-// no exceptions, no "fire and forget." So when the countdown below
-// expires first, this thread is still sitting inside a real blocking
-// `stdin_read_line()` call, and the game HAS to `join` it before the
-// process can fully exit -- see the comment on that `join` in main()
-// for what this means for the player who timed out.
-fn read_move_worker(board: ref Vec<i64>, player: i64, done: mut ref Atomic<bool>, result: mut ref Atomic<i64>) -> i64 {
+// Reads one validated move for `player`, racing against
+// `turn_timeout_ms` total budget. Polls stdin readiness in
+// `poll_ms` slices (clamped to whatever's left of the budget) so no
+// slice ever overruns the deadline, and only calls the blocking
+// `stdin_read_line()` once a full line is already known to be
+// available -- so a timeout never leaves anything blocked. Returns
+// the chosen 0-based board index, or:
+//   -1  timed out (deadline reached with no valid move entered)
+//   -2  player typed 'quit' or hit Enter on an empty line
+fn read_move(board: ref Vec<i64>, player: i64, turn_timeout_ms: i64, poll_ms: i64) -> i64 {
+  let elapsed_ms: i64 = 0;
+  let prompted: bool = false;
   while true {
-    let prompt: OwnedStr = "Player " + player_label(player) + ", enter a position (1-9), or 'quit' to exit:";
-    print prompt;
-    flush_stdout();
+    if elapsed_ms >= turn_timeout_ms {
+      return 0 - 1;
+    }
+    if !prompted {
+      let prompt: OwnedStr = "Player " + player_label(player) + ", enter a position (1-9), or 'quit' to exit:";
+      print prompt;
+      flush_stdout();
+      prompted = true;
+    }
+    let budget: i64 = turn_timeout_ms - elapsed_ms;
+    let slice: i64 = poll_ms;
+    if slice > budget {
+      slice = budget;
+    }
+    let ready: bool = stdin_ready_within_ms(slice);
+    elapsed_ms = elapsed_ms + slice;
+    if !ready {
+      continue;
+    }
     let input: OwnedStr = stdin_read_line();
     let trimmed: OwnedStr = str_trim(input);
     if trimmed == "" {
-      let _ = atomic_store(result, 0 - 1);
-      let _ = atomic_store(done, true);
-      return 0 - 1;
+      return 0 - 2;
     }
     if trimmed == "quit" {
-      let _ = atomic_store(result, 0 - 1);
-      let _ = atomic_store(done, true);
-      return 0 - 1;
+      return 0 - 2;
     }
     if let Option.Some(n) = parse_int(trimmed) {
       if n >= 1 {
         if n <= 9 {
           let idx: i64 = n - 1;
           if board[idx as u64] == 0 {
-            let _ = atomic_store(result, idx);
-            let _ = atomic_store(done, true);
             return idx;
           } else {
             print "That cell is already taken -- try again.";
+            prompted = false;
           }
         } else {
           print "Please enter a number from 1 to 9.";
+          prompted = false;
         }
       } else {
         print "Please enter a number from 1 to 9.";
+        prompted = false;
       }
     } else {
       print "That's not a number -- try again.";
+      prompted = false;
     }
   }
   return 0 - 1;
@@ -160,54 +184,18 @@ fn main() -> i64 {
     print_board(ref board);
     print "";
 
-    let done: Atomic<bool> = atomic_new(false);
-    let result: Atomic<i64> = atomic_new(0 - 1);
-    let t: Task<i64> = task read_move_worker(ref board, player, mut ref done, mut ref result);
+    let idx: i64 = read_move(ref board, player, turn_timeout_ms, poll_ms);
 
-    // Race: poll `done` on a 200ms cadence against the countdown.
-    // `task`/`join` must appear in the same block (v1 doesn't support
-    // cross-block joins), so `t` is both spawned and joined here in
-    // main(), not inside a helper -- this loop only ever READS `done`
-    // through the atomic, it never joins.
-    let elapsed_ms: i64 = 0;
-    let timed_out: bool = false;
-    while true {
-      if atomic_load(ref done) {
-        break;
-      }
-      if elapsed_ms >= turn_timeout_ms {
-        timed_out = true;
-        break;
-      }
-      sleep_ms(poll_ms);
-      elapsed_ms = elapsed_ms + poll_ms;
-    }
-
-    if timed_out {
+    if idx == 0 - 1 {
+      let winner_by_time: i64 = 3 - player;
       let timeout_msg: OwnedStr = player_label(player) + "'s time ran out!";
       print timeout_msg;
-      print "(the game is over -- still waiting on that player's pending input so the program can fully exit; press Enter or Ctrl-D)";
-    }
-    // Always exactly one `join`, always right here (same block as the
-    // spawn above) -- required either way, but the WAIT differs: if
-    // `done` was already true, this returns instantly. If we got here
-    // via timeout, the worker thread is still blocked on a real
-    // stdin_read_line() call with no way to interrupt it, so this
-    // blocks for real until that player's pending input actually
-    // arrives (or the process is killed) -- the honest consequence of
-    // "no cancellable blocking I/O in v1," not a bug.
-    let idx: i64 = join t;
-
-    if timed_out {
-      let winner_by_time: i64 = 3 - player;
-      print "";
-      print_board(ref board);
       let win_msg: OwnedStr = player_label(winner_by_time) + " wins on time!";
       print win_msg;
       return 0;
     }
 
-    if idx < 0 {
+    if idx == 0 - 2 {
       print "Goodbye!";
       return 0;
     }
