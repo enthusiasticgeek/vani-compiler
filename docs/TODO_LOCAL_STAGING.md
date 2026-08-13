@@ -6675,3 +6675,14 @@ STATUS: needs human/frontier root-cause review.
 The test case with input `/home/virgo/source/vani-compiler-localfuzz/examples/language/finnish/try_question_op.vani` and the generated source `kaksinkertaistettu_q(o: Opt) -> Opt { olkoon v: i64 = o?; palaa Opt.Some(v * -9223372036854775808); }` resulted in a backend-divergence error with integer overflow on the `mul` instruction. The LLVM version (`rc`: 3) crashed, while the C backend (`c: rc`: 134) produced an "integer overflow in i64 mul" error.
 
 The crash occurred during the execution of the `mul` operation in the `kaksinkertaistettu_q` function, which multiplies an `i64` value by `-9223372036854775808`. The overflow causes the program to terminate unexpectedly, leading to a backend-divergence issue.
+
+---
+
+### Candidate: 20260813-035602-backend-divergence-bc67a2c427
+
+Repro: `tools/localfuzz/findings/20260813-035602-backend-divergence-bc67a2c427/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-035602-backend-divergence-bc67a2c427/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vanic compiler was run with multiple backends, including LLVM and C, on the given mutant/generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/bounds_elision.vani`. The observed symptom was a backend-divergence where the C backend produced incorrect output (integer overflow) while the LLVM backend produced the expected result (`10\n30\n50\n`).
