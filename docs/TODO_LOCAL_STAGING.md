@@ -7206,3 +7206,50 @@ Repro: `tools/localfuzz/findings/20260813-192838-backend-divergence-ba2add2c19/r
 Fix attempt: `tools/localfuzz/findings/20260813-192838-backend-divergence-ba2add2c19/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-195438-backend-divergence-b1351f7ce7
+
+Repro: `tools/localfuzz/findings/20260813-195438-backend-divergence-b1351f7ce7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-195438-backend-divergence-b1351f7ce7/fix_attempt.md`
+
+```plaintext
+STATUS: needs human/frontier root-cause review.
+
+Fuzzing for backend-divergence in the given mutation/test case:
+
+Generated source:
+```vani
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/iterate.vani              # LLVM
+//   vanic run examples/language/portuguese/iterate.vani --backend=c  # C
+
+intenção "Vec iteration";
+
+função main() -> i64 {
+  seja xs: Vec<i64> = vec(10, 20, 30);
+  seja total: i64 = 0;
+  para i desde -1 até 3 {
+    total = total + xs[i como u64];
+  }
+  afirmar total == 60;
+  imprimir total;
+  retornar 0;
+}
+
+```
+
+Fuzzing parameters:
+- Target: `examples/language/portuguese/iterate.vani`
+- Backend: `c` (C)
+
+Expected behavior: Normal execution without crashing or hanging
+
+Actual result:
+- LLVM build failed with RC=3, stderr "index out of bounds"
+- C backend failed with RC=134, stderr "index out of bounds"
+
+This is a backend-divergence issue where the compiler produces different results for different backends (LLVM and C) when faced with an index-out-of-bounds error in the given input.
