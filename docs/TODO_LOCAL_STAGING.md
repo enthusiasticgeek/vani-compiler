@@ -6641,3 +6641,24 @@ Fix attempt: `tools/localfuzz/findings/20260813-025707-backend-divergence-7562b3
 Found in `/home/virgo/source/vani-compiler-localfuzz/test-results/backend-divergence/main.0.json`.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-032427-backend-divergence-a4331dec2d
+
+Repro: `tools/localfuzz/findings/20260813-032427-backend-divergence-a4331dec2d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-032427-backend-divergence-a4331dec2d/fix_attempt.md`
+
+Test run:
+- Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/amharic/option_types.vani
+- Mutant/generated source:
+```vani
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/option_types.vani              # LLVM
+//   vanic run examples/language/amharic/option_types.vani --backend=c  # C
+//
+// Note: Amharic has no native match keyword; Option<T> tested via ? chaining.
+
+
