@@ -6926,3 +6926,12 @@ Fix attempt: `tools/localfuzz/findings/20260813-104024-backend-divergence-a01139
 ```
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260813-110152-run-crash-6e5a62531d
+
+Repro: `tools/localfuzz/findings/20260813-110152-run-crash-6e5a62531d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-110152-run-crash-6e5a62531d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
