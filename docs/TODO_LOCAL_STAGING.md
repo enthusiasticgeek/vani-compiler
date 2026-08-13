@@ -7197,3 +7197,12 @@ funkce main() -> i64 {
 ```
 
 The error occurs when the `doubled` variable is multiplied by `9223372036854775807`. This value, which is the maximum possible integer in a 64-bit signed integer, results in an overflow, causing the program to crash or hang.
+
+---
+
+### Candidate: 20260813-192838-backend-divergence-ba2add2c19
+
+Repro: `tools/localfuzz/findings/20260813-192838-backend-divergence-ba2add2c19/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-192838-backend-divergence-ba2add2c19/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
