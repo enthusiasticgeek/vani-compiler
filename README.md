@@ -68,63 +68,91 @@ fn main() -> i64 {
 Every keyword above has alternate spellings — plain-English word forms
 for `->` / `let` / `return`, and full Devanagari for `// vani-lang:
 sanskrit` — so the same program reads however you speak. All three
-below type-check, run, and print the same value.
+below type-check, run, and print the same value (a different, smaller
+program than the feature showcase above, chosen so the Sanskrit
+version can be fully translated end to end — see the note after it).
+
+**Plain English**:
+
+```vani
+fn gcd(a: i64, b: i64) -> i64
+requires a >= 0 && b >= 0;
+{
+  if b == 0 {
+    return a;
+  }
+  return gcd(b, a % b);
+}
+
+fn main() -> i64 {
+  let g: i64 = gcd(48, 18);
+  assert g == 6;
+  print g;
+  return 0;
+}
+```
 
 **Verbose English** (`->` → `yields`, `let` → `assign`, `return` → `give_back`):
 
 ```vani
-fn add(a: i64, b: i64) yields i64
+fn gcd(a: i64, b: i64) yields i64
 requires a >= 0 && b >= 0;
-ensures _return == a + b;
 {
-  give_back a + b;
+  if b == 0 {
+    give_back a;
+  }
+  give_back gcd(b, a % b);
 }
 
 fn main() yields i64 {
-  assign xs: Vec<i64> = vec(3, 1, 4, 1, 5);
-  sort(mut ref xs);
-  assign k: i64 = vec_kth_smallest(ref xs, 2);   // 3
-  prove 2 + 2 == 4;
-  print k;
+  assign g: i64 = gcd(48, 18);
+  assert g == 6;
+  print g;
   give_back 0;
 }
 ```
 
 **Sanskrit** (`// vani-lang: sanskrit`) — keywords, types, the entry
-point, and every identifier translated, so only what's structurally
-unavoidable stays in English:
+point, every identifier, and even the numeral literals translated:
+**zero English words anywhere in the source**, not just the
+structure keywords:
 
 ```vani
 // vani-lang: sanskrit
 
-कार्य योग(क: i64, ख: i64) -> i64
-अपेक्षित क >= 0 && ख >= 0;
-सुनिश्चयित _return == क + ख;
+कार्य उभयभाजक(क: i64, ख: i64) -> i64
+अपेक्षित क >= ० && ख >= ०;
 {
-  पुनरागम क + ख;
+  ख == ० यदि {
+    क पुनरागम;
+  }
+  उभयभाजक(ख, क % ख) पुनरागम;
 }
 
 कार्य मुख्य() -> i64 {
-  माना सूचिः: सूची<i64> = vec(3, 1, 4, 1, 5);
-  sort(परिवर्तनीय दृष्ट्या सूचिः);
-  माना घ: i64 = vec_kth_smallest(दृष्ट्या सूचिः, 2);   // 3
-  प्रमाण 2 + 2 == 4;
-  लिख घ;
-  पुनरागम 0;
+  माना ग: i64 = उभयभाजक(४८, १८);
+  ग == ६ सिद्धम्;
+  लिख ग;
+  ० पुनरागम;
 }
 ```
 
-The Sanskrit version prints `३` — the same value `3`, rendered in
-Devanagari numerals to match the source script. The entry point can be
-spelled `मुख्य` (mukhya), `प्रमुख` (pramukh), `प्रधान` (pradhan), or
-`main` — the parser canonicalizes any of the four. `सूची<T>` above is
-the Devanagari alias for `Vec<T>` — both spellings compile identically,
-so a fully-Devanagari file need not carry a bare Latin `Vec`. What's
-left in English is structurally unavoidable in the current v1 surface:
-builtin function *names* (`vec`, `sort`, `vec_kth_smallest`) aren't
-translated (only language *keywords* and *type* names are), and
-`_return` — the identifier an `ensures` clause uses to refer to a
-function's own return value — has no dialect alias yet.
+All three print `6` (Devanagari `६` in the Sanskrit source, matching
+the script). The entry point can be spelled `मुख्य` (mukhya), `प्रमुख`
+(pramukh), `प्रधान` (pradhan), or `main` — the parser canonicalizes
+any of the four. `उभयभाजक` (ubhaya-bhājaka, "common divisor") is a new
+coinage for this example, computing the same GCD-via-Euclidean-
+algorithm as `gcd` above via recursion instead of `sort`/`Vec`, so the
+whole program stays inside what v1 can actually translate today:
+builtin function *names* like `vec`, `sort`, and `vec_kth_smallest`
+aren't translated yet (only language *keywords* and *type* names are),
+and `_return` — the identifier an `ensures` clause uses to refer to a
+function's own return value — has no dialect alias yet either, so a
+Sanskrit file calling into the stdlib or using `ensures` will still
+show a few English/Latin tokens for now. See
+[`examples/language/sanskrit/pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani)
+and [Advanced 7 -- Devanagari purity
+arc](tutorials/src/advanced/07_devanagari_purity.md) for a longer pure-Devanagari showcase.
 
 ---
 
