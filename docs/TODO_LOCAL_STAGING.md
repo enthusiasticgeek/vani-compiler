@@ -7090,3 +7090,50 @@ Repro: `tools/localfuzz/findings/20260813-173757-backend-divergence-4625e255d6/r
 Fix attempt: `tools/localfuzz/findings/20260813-173757-backend-divergence-4625e255d6/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-185903-backend-divergence-36c34d32d1
+
+Repro: `tools/localfuzz/findings/20260813-185903-backend-divergence-36c34d32d1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-185903-backend-divergence-36c34d32d1/fix_attempt.md`
+
+**Staging Entry**
+
+**Summary:**
+The `try_question_op.vani` file contains a program that attempts to use postfix increment on an enum with an early-return sugar. The program uses both LLVM and C backends and exhibits divergent behavior (integer overflow) when compiled with the C backend.
+
+**Mutant/Generated Source:**
+```vani
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/try_question_op.vani              # LLVM
+//   vanic run examples/language/vietnamese/try_question_op.vani --backend=c  # C
+
+mục_đích "Vietnamese postfix ? early-return sugar on payloaded enums";
+
+liệt_kê Opt { Some(i64), None }
+
+hàm nhân_đôi_q(o: Opt) -> Opt {
+  đặt v: i64 = o?;
+  trả_về Opt.Some(v * 2);
+}
+
+hàm mở_hoặc(o: Opt, mặc_định: i64) -> i64 {
+  trả_về khớp o {
+    Opt.Some(v) thì v,
+    Opt.None    thì mặc_định,
+  };
+}
+
+hàm main() -> i64 {
+  đặt a: Opt = nhân_đôi_q(Opt.Some(-9223372036854775808));
+  khẳng_định mở_hoặc(a, 0) == 10;
+
+  đặt b: Opt = nhân_đôi_q(Opt.None);
+  khẳng_định mở_hoặc(b, 99) == 99;
+
+  in_ra "Some(5)? nhân đôi =", mở_hoặc(a, 0);
+  in_ra "Some(5)? nhân đôi =", mở_hoặc(a, 0);
+  in_ra "None? mặc định", mở
