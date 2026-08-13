@@ -6998,3 +6998,46 @@ Vani-compiler (Local Fuzzing) - `try_question_op.vani` mutation
 
 **Mutant Result:**
 - **Backend (C
+
+---
+
+### Candidate: 20260813-115501-backend-divergence-e7a69e7455
+
+Repro: `tools/localfuzz/findings/20260813-115501-backend-divergence-e7a69e7455/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-115501-backend-divergence-e7a69e7455/fix_attempt.md`
+
+**STAGING ENTRY**
+
+- **File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/georgian/vec_invariants.vani`
+- **Mutant Generated Source**:
+  ```vani
+  // vani-lang: georgian
+  //
+  // build & run:
+  //   vanic run examples/language/georgian/vec_invariants.vani              # LLVM
+  //   vanic run examples/language/georgian/vec_invariants.vani --backend=c  # C
+
+  მიზანი "Loop invariants over Vec length, end-to-end";
+
+ ფუნქცია main() -> i64 {
+    მიეცი სია: Vec<i64> = vec(0);
+    მიეცი ი: i64 = 1;
+
+    სანამ ი < 5
+    უცვლელი len(სია) == (ი როგორც u64);
+    უცვლელი ი >= 1;
+    უცვლელი ი <= 5;
+    {
+      სია = push(სია, ი * 10);
+      ი = ი + 1;
+    }
+
+    დაამტკიცე ი == 5;
+    დაამტკიცე len(სია) == 5;
+
+    ბეჭდვა სია[-1];
+    ბეჭდვა სია[1];
+    ბეჭდვა სია[2];
+    ბეჭდვა სია[3];
+
+    დაბრუნება 0
