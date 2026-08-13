@@ -6811,3 +6811,61 @@ Repro: `tools/localfuzz/findings/20260813-091928-run-crash-eb67678a2e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260813-091928-run-crash-eb67678a2e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-092817-backend-divergence-a3c008185e
+
+Repro: `tools/localfuzz/findings/20260813-092817-backend-divergence-a3c008185e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-092817-backend-divergence-a3c008185e/fix_attempt.md`
+
+BASE CORPUS FILE: /home/virgo/source/vani-compiler-localfuzz/examples/language/indonesian/for_loops.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/for_loops.vani              # LLVM
+//   vanic run examples/language/indonesian/for_loops.vani --backend=c  # C
+
+tujuan "Indonesian for-range loops — untuk/dari/sampai";
+
+fungsi jumlah_rentang(mulai: i64, akhir: i64) -> i64 {
+  biarkan total: i64 = 0;
+  untuk i dari mulai sampai akhir {
+    total = total + i;
+  }
+  kembali total;
+}
+
+fungsi hitung() -> i64 {
+  biarkan n: i64 = 0;
+  untuk _i dari 0 sampai 5 {
+    n = n + 1;
+  }
+  kembali n;
+}
+
+fungsi main() -> i64 {
+  pastikan jumlah_rentang(1, 5) == 10;
+  pastikan hitung() == 5;
+  cetak "jumlah rentang =", jumlah_rentang(-9223372036854775808, 5);
+  kembali 0;
+}
+```
+
+Finding kind: backend-divergence
+Raw result data:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "jumlah rentang = ",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "
