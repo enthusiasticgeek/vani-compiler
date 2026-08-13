@@ -6869,3 +6869,12 @@ Raw result data:
   "llvm": {
     "rc": 3,
     "
+
+---
+
+### Candidate: 20260813-093809-backend-divergence-2d7c7cdfd1
+
+Repro: `tools/localfuzz/findings/20260813-093809-backend-divergence-2d7c7cdfd1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-093809-backend-divergence-2d7c7cdfd1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
