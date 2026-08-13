@@ -13226,7 +13226,68 @@ confirmed resolving in the built HTML.
 
 **Still open**: `step`/stride-N (e.g. `for i from 0 to 10 step 2`) --
 `while` remains the only way to stride by more than 1 in either
-direction. Rolling `downto` out to the other ~61 dialects (a
-keyword-parity sweep matching the BUG-170 precedent) is explicitly
-out of scope for now -- English-only was a deliberate user choice, not
-an oversight.
+direction, in both directions (see the follow-up entry below for a
+worked descending-step example added to the tutorial).
+
+**Update 2026-08-13**: rolled `downto` out to all 62 dialects the
+same day -- see the next entry.
+
+## Feature follow-up: `downto` rolled out to all 62 dialects (SHIPPED 2026-08-13)
+
+Direct follow-up to the English-only `downto` ship above, requested
+by the user right after. Every dialect that already has a native
+`to`/`until` spelling in `src/lexer.rs` (61 of them, plus the
+already-shipped Sanskrit/Hindi/Marathi trio) now has a matching
+`downto` spelling -- the same keyword-parity-sweep pattern as
+BUG-170, done in the same session rather than deferred.
+
+**Method**: each dialect's `downto` word is a new coinage compounding
+its existing (already-shipped, already-reviewed-at-whatever-
+confidence) `to`/`until` word with that dialect's word for
+"down"/"below"/"descend" -- following the same fused-compound
+convention the codebase already used for Italian's `finoa` ("until-to"
+fused) and the `EPrint` coinages. A few picks turned out to already be
+real, attested words/phrases (Swedish `nertill`, Czech `dolů`,
+Portuguese `até baixo`, Spanish `hasta abajo`, Russian `донизу`, all
+rated **High** confidence); most are engineering-grade best-effort
+(**Medium**); Persian, Pashto, Khmer, Amharic, Tibetan, Cherokee,
+Mongolian, Armenian, Arabic, Hebrew, Filipino, and Yoruba are flagged
+**Low** confidence pending native-speaker review -- the same
+languages/scripts BUG-171's native-speaker pass already flagged for
+human review. Full table with per-dialect confidence ratings:
+`docs/archive/grammar_review_queue.md`'s "downto keyword-parity
+sweep" section.
+
+**Touched**: `src/lexer.rs` (one new match arm per dialect function,
+inserted right after that dialect's existing `to` arm; also closed a
+real pre-existing gap where `TokenKind::DownTo` was missing from
+`is_structure_keyword_kind`, so the new keyword is now correctly
+subject to the script-purity gate like `To` already was), the
+Sanskrit/Hindi/Marathi dialect-purity table
+(`spelling_supports_dialect`), `tools/vani_translate.py`
+(`ALL_SYNONYMS` regenerated via
+`tools/regen_vani_translate_keywords.py` -- this step is required
+after any lexer keyword-table change or the "vani_translate.py
+regression suite" CI job fails, confirmed the hard way on the
+English-only commit's first CI run).
+
+Regression tests: a new mechanical parity test,
+`downto_keyword_parity_all_62_dialects` (`src/lib.rs`), reusing
+BUG-170's own `include_str!`-based extraction approach to assert
+every dialect with a `to` spelling also has a `downto` spelling
+(single-table and split native+ascii-table dialects both covered).
+Plus 4 full end-to-end compiles: Devanagari in both English and SOV
+word order, Japanese (3-script, SOV), and Russian (Cyrillic, SVO) --
+chosen to cover the grammatically/script-wise most different
+pipelines, not just a reachability check. Full suite: 2920/2920 lib
+tests pass (2915 pre-existing + 5 new, 0 regressions);
+`tools/test_vani_translate.py`'s full 4-step suite passes; 1043-file
+example corpus check matches the known 18-file non-ok baseline
+exactly; mdBook rebuilds clean.
+
+**Still open**: the Low-confidence dialects listed above need a
+native speaker before shipping with real confidence -- this sweep
+only proves lexer-level reachability (the word tokenizes to
+`TokenKind::DownTo` and round-trips through the translator), not
+linguistic correctness. `step`/stride-N remains unimplemented in any
+dialect.

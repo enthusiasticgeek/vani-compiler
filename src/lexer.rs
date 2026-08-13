@@ -382,6 +382,12 @@ pub(crate) fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "में" => TokenKind::In,             // meṁ (Hindi: "in")
         "से" => TokenKind::From,           // se (Hindi: "from")
         "तक" => TokenKind::To,             // tak (Hindi: "to/until")
+        // downto — descending counterpart of तक. New coinage
+        // (adhas/adho- "below/down" + tak), not yet
+        // native-speaker reviewed — see
+        // docs/archive/grammar_review_queue.md. Shared tatsama-
+        // style across Sanskrit/Hindi/Marathi, same as तक itself.
+        "अधोतक" => TokenKind::DownTo,      // adhotak (down-to)
         // reduce / with for `parallel for X reduce Y with op` —
         // `संक्षेप` / `सह` are tatsama and work in all three.
         "संक्षेप" => TokenKind::Reduce,    // saṁkṣepa (Sanskrit/Hindi/Marathi: "reduction")
@@ -495,6 +501,7 @@ fn bengali_keyword(text: &str) -> Option<TokenKind> {
         "মধ্যে" => TokenKind::In,              // madhye (in)
         "থেকে" => TokenKind::From,             // theke (from)
         "পর্যন্ত" => TokenKind::To,            // paryanta (to/until)
+        "নিম্নপর্যন্ত" => TokenKind::DownTo, // nimno+paryanta (down-to)
         "বিরাম" => TokenKind::Break,           // biram (pause; break)
         "এগিয়ে" => TokenKind::Continue,       // egiye (forward; continue)
         "তবে" => TokenKind::Then,              // tobe (then)
@@ -588,6 +595,7 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         "உள்" => TokenKind::In,                    // ul (in)
         "இருந்து" => TokenKind::From,             // irundhu (from)
         "வரைக்கும்" => TokenKind::To,             // varaikkum (to)
+        "கீழ்வரைக்கும்" => TokenKind::DownTo, // kīḻ+varaikkum (down-to)
         "நிறுத்து" => TokenKind::Break,           // niruthu (stop)
         "தொடர்" => TokenKind::Continue,           // thodar (continue)
         "அப்போது" => TokenKind::Then,              // appothu (then)
@@ -658,6 +666,7 @@ fn telugu_keyword(text: &str) -> Option<TokenKind> {
         "లో" => TokenKind::In,                     // lo (in)
         "నుండి" => TokenKind::From,                // nundi (from)
         "వరకూ" => TokenKind::To,                   // varakuu (to)
+        "దిగువవరకూ" => TokenKind::DownTo, // diguva+varakuu (down-to)
         "ఆపు" => TokenKind::Break,                 // aapu (stop)
         "కొనసాగించు" => TokenKind::Continue,       // konasaaginchu (continue)
         "అప్పుడు" => TokenKind::Then,              // appudu (then)
@@ -723,6 +732,7 @@ fn gujarati_keyword(text: &str) -> Option<TokenKind> {
         "માં" => TokenKind::In,                    // maan (in)
         "થી" => TokenKind::From,                   // thee (from)
         "સુધી" => TokenKind::To,                   // sudhee (to)
+        "નીચેસુધી" => TokenKind::DownTo, // niche+sudhee (down-to)
         "વિરામ" => TokenKind::Break,               // viraam (pause/break — tatsama)
         "ચાલુ" => TokenKind::Continue,             // chaaloo (continue)
         "પછી" => TokenKind::Then,                  // pachhee (then)
@@ -788,6 +798,7 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
         "ਵਿੱਚ" => TokenKind::In,                   // vich (in)
         "ਤੋਂ" => TokenKind::From,                  // ton (from)
         "ਤੱਕ" => TokenKind::To,                    // takk (to)
+        "ਹੇਠਤੱਕ" => TokenKind::DownTo, // heth+takk (down-to)
         "ਵਿਰਾਮ" => TokenKind::Break,               // viraam (pause — tatsama)
         "ਜਾਰੀ" => TokenKind::Continue,             // jaari (continue)
         "ਤਦ" => TokenKind::Then,                   // tad (then — tatsama)
@@ -853,6 +864,7 @@ fn kannada_keyword(text: &str) -> Option<TokenKind> {
         "ರಲ್ಲಿ" => TokenKind::In,                    // ralli (in)
         "ಇಂದ" => TokenKind::From,                    // inda (from)
         "ಗೆ" => TokenKind::To,                       // ge (to)
+        "ಕೆಳಗೆ" => TokenKind::DownTo, // kelage (down/below, already means "downto")
         "ನಿಲ್ಲಿ" => TokenKind::Break,                // nilli (stop)
         "ಮುಂದುವರಿಸಿ" => TokenKind::Continue,        // munduvarisi (continue)
         "ನಂತರ" => TokenKind::Then,                   // nantara (then)
@@ -918,6 +930,7 @@ fn malayalam_keyword(text: &str) -> Option<TokenKind> {
         "ഇൽ" => TokenKind::In,                       // il (in)
         "നിന്ന്" => TokenKind::From,                  // ninnu (from)
         "വരെക്കും" => TokenKind::To,                // varekkum (to)
+        "താഴെവരെക്കും" => TokenKind::DownTo, // thazhe+varekkum (down-to)
         "നിർത്തുക" => TokenKind::Break,             // nirthuka (stop)
         "തുടരുക" => TokenKind::Continue,            // thudaruka (continue)
         "പിന്നെ" => TokenKind::Then,                  // pinne (then)
@@ -983,6 +996,7 @@ fn odia_keyword(text: &str) -> Option<TokenKind> {
         "ରେ" => TokenKind::In,                       // re (in)
         "ରୁ" => TokenKind::From,                     // ru (from)
         "ପର୍ଯ୍ୟନ୍ତ" => TokenKind::To,                // paryanta (until)
+        "ନିମ୍ନପର୍ଯ୍ୟନ୍ତ" => TokenKind::DownTo, // nimna+paryanta (down-to)
         "ବନ୍ଦ" => TokenKind::Break,                  // banda (stop)
         "ଜାରି" => TokenKind::Continue,               // jaari (continue)
         "ତାହେଲେ" => TokenKind::Then,                  // tahele (then)
@@ -1046,6 +1060,7 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "තුළ" => TokenKind::In,                      // thula (in)
         "සිට" => TokenKind::From,                     // sita (from)
         "දක්වා" => TokenKind::To,                     // dakvaa (to)
+        "පහළදක්වා" => TokenKind::DownTo, // pahala+dakvaa (down-to)
         "නවත්වන්න" => TokenKind::Break,              // nawathwanna (stop)
         "ඉදිරියට" => TokenKind::Continue,             // idiriyata (forward)
         "පසු" => TokenKind::Then,                     // pasu (then)
@@ -1119,6 +1134,7 @@ fn urdu_keyword(text: &str) -> Option<TokenKind> {
         "میں" => TokenKind::In,                // mein (in)
         "سے" => TokenKind::From,               // se (from)
         "تک" => TokenKind::To,                 // tak (to)
+        "نیچےتک" => TokenKind::DownTo, // neeche+tak (down-to)
         "بند" => TokenKind::Break,             // band (closed/stop)
         "جاری" => TokenKind::Continue,         // jaari (continue)
         "تب" => TokenKind::Then,               // tab (then)
@@ -1226,6 +1242,7 @@ fn persian_keyword(text: &str) -> Option<TokenKind> {
         "وظیفه" => TokenKind::Task,            // vazife (task/duty)
         "پیوستن" => TokenKind::Join,           // peyvastan (join/connect)
         "به" => TokenKind::To,                 // be (to)
+        "فروبه" => TokenKind::DownTo, // foru+be (down-to) -- LOW CONFIDENCE
         "رابط" => TokenKind::Interface,        // rābet (interface/connector)
         "اجرا" => TokenKind::Implement,        // ejrā (execution/implement)
         "کجا" => TokenKind::Where,             // kojā (where)
@@ -1304,6 +1321,7 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
         "دنده" => TokenKind::Task,             // dandah (task/duty)
         "نښلول" => TokenKind::Join,            // nashlawul (to connect/join)
         "ته" => TokenKind::To,                 // ta (to)
+        "ښکتهته" => TokenKind::DownTo, // xkta+ta (down-to) -- LOW CONFIDENCE
         "اړیکه" => TokenKind::Interface,       // arraikeh (connection/interface)
         "پلي" => TokenKind::Implement,         // pali (practical/implement)
         "چیرته" => TokenKind::Where,           // cherta (where)
@@ -1332,6 +1350,7 @@ fn khmer_keyword(text: &str) -> Option<TokenKind> {
         "ក្នុង" => TokenKind::In,               // knong (inside)
         "ពី" => TokenKind::From,                // pi (from)
         "ដល់" => TokenKind::To,                 // dol (to)
+        "ក្រោមដល់" => TokenKind::DownTo, // kraom+dol (down-to) -- LOW CONFIDENCE
         "បំបាក់" => TokenKind::Break,           // bombak (break)
         "បន្ត" => TokenKind::Continue,          // bont (continue)
         "បន្ទាប់មក" => TokenKind::Then,         // bontoap mok (then)
@@ -1390,6 +1409,7 @@ fn burmese_keyword(text: &str) -> Option<TokenKind> {
         "ထဲမှာ" => TokenKind::In,               // htel hma (in)
         "မှ" => TokenKind::From,                // hma (from)
         "သို့" => TokenKind::To,                // sou (to)
+        "အောက်သို့" => TokenKind::DownTo, // auk+thou (downward/to-below, natural phrase)
         "ရပ်" => TokenKind::Break,              // yat (break)
         "ဆက်လုပ်" => TokenKind::Continue,       // set lout (continue)
         "ထို့နောက်" => TokenKind::Then,         // htou nout (then)
@@ -1479,6 +1499,7 @@ fn amharic_keyword(text: &str) -> Option<TokenKind> {
         "ጋር" => TokenKind::With,                // gar (with)
         "ጀምሮ" => TokenKind::From,               // jemro (starting from)
         "ድረስ" => TokenKind::To,                 // dress (until/to)
+        "ታችድረስ" => TokenKind::DownTo, // tachi+dress (down-until) -- LOW CONFIDENCE
         "ተግባራዊ" => TokenKind::Implement,       // tegbarawi (practical/implement)
         "ስህተትህትመት" => TokenKind::EPrint,       // shtet-htmet (error-print)
         "መዋቅር" => TokenKind::Struct,            // mewakr
@@ -1508,6 +1529,7 @@ fn tibetan_keyword(text: &str) -> Option<TokenKind> {
         "ནང" => TokenKind::In,                   // nang (in)
         "ནས" => TokenKind::From,                 // nas (from)
         "བར་དུ" => TokenKind::To,                // bar-du (until)
+        "མར་བར་དུ" => TokenKind::DownTo, // mar+bar-du (down-until) -- LOW CONFIDENCE
         "འགོག" => TokenKind::Break,              // gog (block)
         "མུ་མཐུད" => TokenKind::Continue,        // mu-thud (continue)
         "དེ་ནས" => TokenKind::Then,              // de-nas (then)
@@ -1587,6 +1609,7 @@ fn cherokee_keyword(text: &str) -> Option<TokenKind> {
         "ᏓᏂᎳᏫᏍᎦ" => TokenKind::Join,             // danilawisga (unite/join)
         "ᏓᏓᎴᏂᏍᎬ" => TokenKind::From,             // dadalenisgv (starting from)
         "ᎬᏛ" => TokenKind::To,                   // gvdv (to/until)
+        "ᎡᎳᏗᎬᏛ" => TokenKind::DownTo, // eladi+gvdv (down-to) -- LOW CONFIDENCE
         "ᎢᎦᏙᎯ" => TokenKind::Enum,               // igadohi (counting/listing)
         "ᎠᏍᏓᏩᏛᏍᎩ" => TokenKind::Match,          // asdawadvsgi (matching)
         "ᎣᏂ" => TokenKind::Then,                 // oni (then/after)
@@ -1625,6 +1648,7 @@ fn lao_keyword(text: &str) -> Option<TokenKind> {
         "ໃນ" => TokenKind::In,                    // nai (in)
         "ຈາກ" => TokenKind::From,                 // chak (from)
         "ເຖິງ" => TokenKind::To,                  // theung (to)
+        "ລົງເຖິງ" => TokenKind::DownTo, // long+theung (descend-to)
         "ຢຸດ" => TokenKind::Break,                // yut (stop)
         "ສືບຕໍ່" => TokenKind::Continue,          // sueb to (continue)
         "ແລ້ວ" => TokenKind::Then,                // laeo (then)
@@ -1683,6 +1707,7 @@ fn mongolian_keyword(text: &str) -> Option<TokenKind> {
         "ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ" => TokenKind::For,         // for
         "ᠠᠴᠠ" => TokenKind::From,                // atsa (from)
         "ᠬᠦᠷᠲᠡᠯᠡ" => TokenKind::To,              // kürtele (to)
+        "ᠳᠣᠣᠷᠠᠬᠦᠷᠲᠡᠯᠡ" => TokenKind::DownTo, // doora+kürtele (down-to) -- LOW CONFIDENCE
         "ᠵᠣᠭᠰᠣ" => TokenKind::Break,             // zogso (stop)
         "ᠦᠷᠭᠦᠯᠵᠢᠯᠡ" => TokenKind::Continue,     // urgelje (continue)
         "ᠳᠠᠷᠠᠭ᠎ᠠ" => TokenKind::Then,            // daraga (then)
@@ -1773,6 +1798,7 @@ fn slovak_keyword(text: &str) -> Option<TokenKind> {
         "pozri" => TokenKind::Ref,             // see
         "od" => TokenKind::From,               // from
         "do" => TokenKind::To,                 // to
+        "nadol" => TokenKind::DownTo, // real Slovak word: "downward"
         "výpočet" => TokenKind::Enum,          // enum
         "potom" => TokenKind::Then,            // then
         "implementuj" => TokenKind::Implement, // implement!
@@ -1803,6 +1829,7 @@ fn slovak_ascii_keyword(text: &str) -> Option<TokenKind> {
         "pre" => TokenKind::For,               // for
         "od" => TokenKind::From,               // from
         "do" => TokenKind::To,                 // to
+        "nadol" => TokenKind::DownTo, // real Slovak word: "downward" (ascii, no diacritics needed)
         "potom" => TokenKind::Then,            // then
         "pozri" => TokenKind::Ref,             // see
         "pravda" => TokenKind::True,           // true
@@ -1899,6 +1926,7 @@ fn finnish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "jokaiselle" => TokenKind::For,        // for each
         "sisalla" => TokenKind::In,            // inside (no ä alt)
         "asti" => TokenKind::To,               // until
+        "alasasti" => TokenKind::DownTo, // alas+asti (down-until)
         "katkaise" => TokenKind::Break,        // break!
         "jatka" => TokenKind::Continue,        // continue!
         "sitten" => TokenKind::Then,           // then
@@ -1984,6 +2012,7 @@ fn catalan_ascii_keyword(text: &str) -> Option<TokenKind> {
         "en" => TokenKind::In,                 // in
         "des" => TokenKind::From,              // from
         "fins" => TokenKind::To,               // to / until
+        "finsavall" => TokenKind::DownTo, // fins+avall (until-down)
         "trenca" => TokenKind::Break,          // break
         "continua" => TokenKind::Continue,     // continue
         "aleshores" => TokenKind::Then,        // then
@@ -2041,6 +2070,7 @@ fn yoruba_keyword(text: &str) -> Option<TokenKind> {
         "nínú" => TokenKind::In,               // inside
         "láti" => TokenKind::From,             // from
         "dé" => TokenKind::To,                 // to
+        "désílẹ̀" => TokenKind::DownTo, // dé+sílẹ̀ (to-down) -- LOW CONFIDENCE
         "tẹ̀síwájú" => TokenKind::Continue,    // continue
         "nígbànáà" => TokenKind::Then,         // then
         "wò" => TokenKind::Ref,                // look at
@@ -2130,6 +2160,7 @@ fn hausa_ascii_keyword(text: &str) -> Option<TokenKind> {
         "cikin" => TokenKind::In,              // inside
         "daga" => TokenKind::From,             // from
         "zuwa" => TokenKind::To,               // to / toward
+        "zuwakasa" => TokenKind::DownTo, // zuwa+kasa (toward-down, ascii)
         "dakatar" => TokenKind::Break,         // halt
         "ci_gaba" => TokenKind::Continue,      // go on
         "sannan" => TokenKind::Then,           // then / next
@@ -2204,6 +2235,7 @@ fn norwegian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "mens" => TokenKind::While,            // while
         "fra" => TokenKind::From,              // from
         "til" => TokenKind::To,                // to
+        "nedtil" => TokenKind::DownTo, // ned+til (down-to)
         "bryt" => TokenKind::Break,            // break
         "fortsett" => TokenKind::Continue,     // continue
         "da" => TokenKind::Then,               // then
@@ -2288,6 +2320,7 @@ fn danish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "mens" => TokenKind::While,            // while
         "fra" => TokenKind::From,              // from
         "til" => TokenKind::To,                // to
+        "nedtil" => TokenKind::DownTo, // ned+til (down-to)
         "bryd" => TokenKind::Break,            // break
         "fortsaet" => TokenKind::Continue,     // continue (no diacritic)
         "saa" => TokenKind::Then,              // then (no å)
@@ -2355,6 +2388,7 @@ fn armenian_keyword(text: &str) -> Option<TokenKind> {
         "մեջ" => TokenKind::In,                // mech (in)
         "ից" => TokenKind::From,               // its (from suffix)
         "մինչև" => TokenKind::To,              // minchev (until)
+        "ներքևմինչև" => TokenKind::DownTo, // nerqev+minchev (down-until) -- LOW CONFIDENCE
         "ընդհատել" => TokenKind::Break,        // yndhatel (interrupt)
         "շարունակել" => TokenKind::Continue,   // sharunakel (continue)
         "ապա" => TokenKind::Then,              // apa (then)
@@ -2415,6 +2449,7 @@ fn georgian_keyword(text: &str) -> Option<TokenKind> {
         "ში" => TokenKind::In,                 // shi (in)
         "დან" => TokenKind::From,              // dan (from suffix)
         "მდე" => TokenKind::To,                // mde (to suffix)
+        "ქვემოთმდე" => TokenKind::DownTo, // kvemot+mde (down-to)
         "შეჩერება" => TokenKind::Break,        // shechereba (halt)
         "გაგრძელება" => TokenKind::Continue,   // gagrdzeleba (continue)
         "მაშინ" => TokenKind::Then,            // mashin (then)
@@ -2495,6 +2530,7 @@ fn hungarian_keyword(text: &str) -> Option<TokenKind> {
         "belül" => TokenKind::In,              // inside/in
         "kezdve" => TokenKind::From,           // starting from
         "határig" => TokenKind::To,            // to the limit/until
+        "lehatárig" => TokenKind::DownTo, // le+határig (down-until, productive Hungarian prefix)
         "szerkezet" => TokenKind::Struct,      // structure
         "illeszkedik" => TokenKind::Match,     // match/fit
         "akkor" => TokenKind::Then,            // then
@@ -2547,6 +2583,7 @@ fn hungarian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "nezd" => TokenKind::Ref,              // look! (no diacritic)
         "kezdve" => TokenKind::From,           // starting from
         "hatarig" => TokenKind::To,            // to the limit/until
+        "lehatarig" => TokenKind::DownTo, // le+hatarig (down-until, ascii)
         "felsorolas" => TokenKind::Enum,       // enumeration (no diacritic)
         "felulet" => TokenKind::Interface,     // interface (no diacritic)
         "allando" => TokenKind::Const,         // constant (no diacritic)
@@ -2610,6 +2647,7 @@ fn czech_keyword(text: &str) -> Option<TokenKind> {
         "viz" => TokenKind::Ref,               // see
         "od" => TokenKind::From,               // from
         "do" => TokenKind::To,                 // to
+        "dolů" => TokenKind::DownTo, // real Czech word: "down/downward"
         "struktura" => TokenKind::Struct,      // structure
         "pak" => TokenKind::Then,              // then
         "implementuj" => TokenKind::Implement, // implement!
@@ -2642,6 +2680,7 @@ fn czech_ascii_keyword(text: &str) -> Option<TokenKind> {
         "pro" => TokenKind::For,               // for
         "od" => TokenKind::From,               // from
         "do" => TokenKind::To,                 // to
+        "dolu" => TokenKind::DownTo, // real Czech word: "down/downward" (ascii)
         "pak" => TokenKind::Then,              // then
         "viz" => TokenKind::Ref,               // see
         "pravda" => TokenKind::True,           // true
@@ -2729,6 +2768,7 @@ fn swedish_keyword(text: &str) -> Option<TokenKind> {
                                               // loop-counter variable name)
         "se" => TokenKind::Ref,                // see
         "till" => TokenKind::To,               // to
+        "nertill" => TokenKind::DownTo, // real Swedish word: "at/toward the bottom"
         "struktur" => TokenKind::Struct,       // structure
         "matcha" => TokenKind::Match,          // match
         "implementera" => TokenKind::Implement, // implement
@@ -2764,6 +2804,7 @@ fn swedish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "annars" => TokenKind::Else,           // otherwise
         "medan" => TokenKind::While,           // while
         "till" => TokenKind::To,               // to
+        "nertill" => TokenKind::DownTo, // real Swedish word: "at/toward the bottom"
         "bryt" => TokenKind::Break,            // break
         "se" => TokenKind::Ref,                // see
         "matcha" => TokenKind::Match,          // match
@@ -2833,6 +2874,7 @@ fn filipino_ascii_keyword(text: &str) -> Option<TokenKind> {
         "sa" => TokenKind::In,                 // in
         "mula" => TokenKind::From,             // from
         "hanggang" => TokenKind::To,           // until
+        "pababahanggang" => TokenKind::DownTo, // pababa+hanggang (downward-until) -- LOW CONFIDENCE
         "tumigil" => TokenKind::Break,         // stop
         "magpatuloy" => TokenKind::Continue,   // continue!
         "tingnan" => TokenKind::Ref,           // look at
@@ -2888,6 +2930,7 @@ fn vietnamese_keyword(text: &str) -> Option<TokenKind> {
         "với_mỗi" => TokenKind::For,          // (for each)
         "từ" => TokenKind::From,              // (from)
         "đến" => TokenKind::To,               // (to)
+        "xuốngđến" => TokenKind::DownTo, // xuống+đến (descend-to)
         "ngắt" => TokenKind::Break,           // (break)
         "tiếp_tục" => TokenKind::Continue,    // (continue)
         "thì" => TokenKind::Then,             // (then)
@@ -2962,6 +3005,7 @@ fn romanian_keyword(text: &str) -> Option<TokenKind> {
         "cât_timp" => TokenKind::While,       // (while; multi-word)
         "pentru" => TokenKind::For,           // (for) — ASCII, but listed
         "până" => TokenKind::To,              // (until)
+        "pânăjos" => TokenKind::DownTo, // până+jos (until-down)
         "rupe" => TokenKind::Break,           // (break) — ASCII
         "continuă" => TokenKind::Continue,    // (continue!)
         "atunci" => TokenKind::Then,          // (then) — ASCII
@@ -3027,6 +3071,7 @@ fn romanian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "cat_timp" => TokenKind::While,       // while (no diacritic)
         "pentru" => TokenKind::For,
         "pana" => TokenKind::To,              // until (no diacritic)
+        "panajos" => TokenKind::DownTo, // pana+jos (until-down, ascii)
         "rupe" => TokenKind::Break,
         "continua" => TokenKind::Continue,    // (no diacritic alt)
         "atunci" => TokenKind::Then,
@@ -3097,6 +3142,7 @@ fn dutch_ascii_keyword(text: &str) -> Option<TokenKind> {
         "in" => TokenKind::In,                // in (same as English)
         "van" => TokenKind::From,             // from
         "tot" => TokenKind::To,               // to / until
+        "totbeneden" => TokenKind::DownTo, // tot+beneden (to-below)
         "stop" => TokenKind::Break,           // stop
         "verder" => TokenKind::Continue,      // continue
         "dan" => TokenKind::Then,             // then
@@ -3159,6 +3205,7 @@ fn thai_keyword(text: &str) -> Option<TokenKind> {
         "ใน" => TokenKind::In,               // nai (in)
         "จาก" => TokenKind::From,            // chak (from)
         "ถึง" => TokenKind::To,              // thueng (to / until)
+        "ลงถึง" => TokenKind::DownTo, // long+thueng (descend-to)
         "หยุด" => TokenKind::Break,          // yut (stop)
         "ดำเนินต่อ" => TokenKind::Continue,  // damnoen to (continue)
         "แล้ว" => TokenKind::Then,           // laeo (then / already)
@@ -3292,6 +3339,7 @@ fn polish_ascii_keyword(text: &str) -> Option<TokenKind> {
                                               // was single-letter "z", collided
                                               // with common variable names)
         "do" => TokenKind::To,                // to/until
+        "dodolu" => TokenKind::DownTo, // do+dolu (to-the-bottom)
         "obszar" => TokenKind::RegionKw,      // area/region
         "bladdrukuj" => TokenKind::EPrint,    // blad-drukuj (error-print, no diacritic)
         _ => return None,
@@ -3341,6 +3389,7 @@ fn turkish_keyword(text: &str) -> Option<TokenKind> {
         "devam" => TokenKind::Continue,       // continue
         "den" => TokenKind::From,             // from
         "kadar" => TokenKind::To,             // until/to
+        "aşağıkadar" => TokenKind::DownTo, // aşağı+kadar (down-until)
         "sonra" => TokenKind::Then,           // then
         "uygula" => TokenKind::Implement,     // implement
         "nerede" => TokenKind::Where,         // where
@@ -3382,6 +3431,7 @@ fn turkish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "icin" => TokenKind::For,             // for (no diacritic)
         "den" => TokenKind::From,             // from
         "kadar" => TokenKind::To,             // until
+        "asagikadar" => TokenKind::DownTo, // asagi+kadar (down-until, ascii)
         "kir" => TokenKind::Break,            // break (no diacritic)
         "devam" => TokenKind::Continue,       // continue
         // === REFS / MUT ===
@@ -3459,6 +3509,7 @@ fn malay_ascii_keyword(text: &str) -> Option<TokenKind> {
         "dalam" => TokenKind::In,             // in
         "dari" => TokenKind::From,            // from
         "hingga" => TokenKind::To,            // until
+        "hinggabawah" => TokenKind::DownTo, // hingga+bawah (until-below)
         "berhenti" => TokenKind::Break,       // stop
         "teruskan" => TokenKind::Continue,    // continue (Malay)
         "maka" => TokenKind::Then,            // then
@@ -3534,6 +3585,7 @@ fn swahili_ascii_keyword(text: &str) -> Option<TokenKind> {
         "ndani" => TokenKind::In,             // inside
         "kutoka" => TokenKind::From,          // from
         "hadi" => TokenKind::To,              // to / until
+        "hadichini" => TokenKind::DownTo, // hadi+chini (until-below)
         "vunja" => TokenKind::Break,          // break!
         "endelea" => TokenKind::Continue,     // continue!
         "kisha" => TokenKind::Then,           // then
@@ -3612,6 +3664,7 @@ fn italian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "per" => TokenKind::For,              // for / "for each"
         "da" => TokenKind::From,              // from
         "finoa" => TokenKind::To,             // fino-a (until-to, fused) --
+        "finogiu" => TokenKind::DownTo, // fino+giu (until-down, same fused style as "finoa")
                                               // native-review fix: bare "fino"
                                               // is grammatically incomplete for
                                               // this meaning, Italian needs
@@ -3703,6 +3756,7 @@ fn arabic_keyword(text: &str) -> Option<TokenKind> {
         "في" => TokenKind::In,                // fī (in)
         "من" => TokenKind::From,              // min (from)
         "إلى" => TokenKind::To,               // ilā (to / until)
+        "إلىأسفل" => TokenKind::DownTo, // ilā+asfal (to-below) -- LOW CONFIDENCE
         "كسر" => TokenKind::Break,            // kasr (break)
         "استمر" => TokenKind::Continue,       // istamir (continue!)
         "ثم" => TokenKind::Then,              // thumma (then)
@@ -3780,6 +3834,7 @@ fn greek_keyword(text: &str) -> Option<TokenKind> {
         "σε" => TokenKind::In,                // se (in)
         "από" => TokenKind::From,             // apó (from)
         "μέχρι" => TokenKind::To,             // méhri (until / to)
+        "μέχρικάτω" => TokenKind::DownTo, // méhri+káto (until-down)
         "διακοπή" => TokenKind::Break,        // diakopí (interruption / break)
         "συνέχεια" => TokenKind::Continue,    // synéheia (continuation)
         "τότε" => TokenKind::Then,            // tóte (then)
@@ -3866,6 +3921,7 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "בתוך" => TokenKind::In,              // betoch (inside)
         "מתוך" => TokenKind::From,            // mitokh (from)
         "עד" => TokenKind::To,                // ad (until)
+        "עדלמטה" => TokenKind::DownTo, // ad+lemata (until-below) -- LOW CONFIDENCE
         "שבור" => TokenKind::Break,           // shvor (break!)
         "הפסק" => TokenKind::Break,           // hafsek (stop! — alt)
         "המשך" => TokenKind::Continue,        // hemshech (continue!)
@@ -3951,7 +4007,9 @@ fn indonesian_ascii_keyword(text: &str) -> Option<TokenKind> {
         "dalam" => TokenKind::In,             // inside
         "dari" => TokenKind::From,            // from
         "sampai" => TokenKind::To,            // until / to
+        "sampaibawah" => TokenKind::DownTo, // sampai+bawah (until-below)
         "hingga" => TokenKind::To,            // until (alt)
+        "hinggabawah" => TokenKind::DownTo, // hingga+bawah (until-below, alt)
         "berhenti" => TokenKind::Break,       // stop / break
         "lanjutkan" => TokenKind::Continue,   // continue
         "maka" => TokenKind::Then,            // then
@@ -4026,6 +4084,7 @@ fn portuguese_keyword(text: &str) -> Option<TokenKind> {
         "senão" => TokenKind::Else,           // else / otherwise
         "então" => TokenKind::Then,           // then
         "até" => TokenKind::To,               // to / until
+        "atébaixo" => TokenKind::DownTo, // real Portuguese phrase: "até baixo" (until down), fused
         // === REFS / MUT ===
         "referência" => TokenKind::Ref,       // reference
         "mutável" => TokenKind::Mut,          // mutable
@@ -4067,6 +4126,7 @@ fn portuguese_ascii_keyword(text: &str) -> Option<TokenKind> {
         "em" => TokenKind::In,                // in
         "desde" => TokenKind::From,           // from
         "ate" => TokenKind::To,               // until (sem acento)
+        "atebaixo" => TokenKind::DownTo, // real Portuguese phrase, ascii
         "parar" => TokenKind::Break,          // stop / break
         "interromper" => TokenKind::Break,    // interrupt (alt)
         "continuar" => TokenKind::Continue,   // continue
@@ -4156,6 +4216,7 @@ fn spanish_ascii_keyword(text: &str) -> Option<TokenKind> {
         "en" => TokenKind::In,                // in
         "desde" => TokenKind::From,           // from
         "hasta" => TokenKind::To,             // until / to
+        "hastaabajo" => TokenKind::DownTo, // real Spanish phrase: "hasta abajo" (until down), fused
         "romper" => TokenKind::Break,         // break
         "continuar" => TokenKind::Continue,   // continue
         "entonces" => TokenKind::Then,        // then
@@ -4234,6 +4295,7 @@ fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
         "dans" => TokenKind::In,              // in
         "depuis" => TokenKind::From,          // from
         "vers" => TokenKind::To,              // toward / to
+        "versbas" => TokenKind::DownTo, // vers+bas (toward-down)
         "interrompre" => TokenKind::Break,    // break
         "continuer" => TokenKind::Continue,   // continue
         "alors" => TokenKind::Then,           // then
@@ -4331,6 +4393,7 @@ fn german_ascii_keyword(text: &str) -> Option<TokenKind> {
                                               // keyword)
         "von" => TokenKind::From,             // from
         "bis" => TokenKind::To,               // to / until
+        "bisrunter" => TokenKind::DownTo, // bis+runter (until-down)
         "brechen" => TokenKind::Break,        // break
         "weiter" => TokenKind::Continue,      // continue
         "dann" => TokenKind::Then,            // then
@@ -4501,6 +4564,7 @@ fn korean_keyword(text: &str) -> Option<TokenKind> {
         "안에" => TokenKind::In,             // ane (in / inside)
         "에서" => TokenKind::From,           // eseo (from)
         "까지" => TokenKind::To,             // kkaji (until)
+        "아래까지" => TokenKind::DownTo, // arae+kkaji (down-until)
         "중단" => TokenKind::Break,          // jungdan (interruption)
         "계속" => TokenKind::Continue,       // gyesok (continue)
         "그러면" => TokenKind::Then,         // geureomyeon (then)
@@ -4583,6 +4647,7 @@ fn japanese_keyword(text: &str) -> Option<TokenKind> {
         "対象" => TokenKind::For,            // taishou (for each / target)
         "から" => TokenKind::From,           // kara (from — Hiragana)
         "まで" => TokenKind::To,             // made (to/until — Hiragana)
+        "下まで" => TokenKind::DownTo, // shita+made (down-until)
         // === REFS / MUT ===
         "参照" => TokenKind::Ref,            // sanshou (reference)
         "可変" => TokenKind::Mut,            // kahen (changeable / mutable)
@@ -4671,6 +4736,7 @@ fn mandarin_keyword(text: &str) -> Option<TokenKind> {
         "对于" => TokenKind::For,            // duìyú (for)
         "从" => TokenKind::From,             // cóng (from)
         "到" => TokenKind::To,               // dào (to)
+        "下到" => TokenKind::DownTo, // xià+dào (down-to)
         "中断" => TokenKind::Break,          // zhōngduàn (break / interrupt)
         "继续" => TokenKind::Continue,       // jìxù (continue)
         "那么" => TokenKind::Then,           // nàme (then)
@@ -4804,6 +4870,7 @@ fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
         "в" => TokenKind::In,                 // v (in)
         "от" => TokenKind::From,              // ot (from)
         "до" => TokenKind::To,                // do (to/until)
+        "донизу" => TokenKind::DownTo, // real Russian word: "down to the bottom"
         "прервать" => TokenKind::Break,       // prervat' (interrupt/break)
         "продолжить" => TokenKind::Continue,  // prodolzhit' (continue)
         "тогда" => TokenKind::Then,           // togda (then)
@@ -6104,6 +6171,7 @@ pub(crate) fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bo
         "में" => &[Sanskrit, Hindi, Marathi],
         "से" => &[Sanskrit, Hindi, Marathi],
         "तक" => &[Sanskrit, Hindi, Marathi],
+        "अधोतक" => &[Sanskrit, Hindi, Marathi],
         "तदा" => &[Sanskrit],
         "तो" => &[Hindi],
         "तर" => &[Marathi],
@@ -6238,6 +6306,7 @@ pub(crate) fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::Ref
             | TokenKind::From
             | TokenKind::To
+            | TokenKind::DownTo
             | TokenKind::Struct
             | TokenKind::Enum
             | TokenKind::Match

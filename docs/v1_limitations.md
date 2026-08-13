@@ -1672,12 +1672,22 @@ footgun as the half-open upper bound itself, just easier to trip on.
 **Fix (2026-08-13)**: added `downto` as the descending counterpart of
 `to`, step 1, same half-open convention (`for i from 5 downto 0`
 walks `5, 4, 3, 2, 1`, excluding `0`, mirroring how `to` excludes its
-own upper bound). English dialect only for now -- other dialects
-still only have their native `to`-equivalent; a keyword-parity sweep
-adding native `downto` words is a separate follow-up, matching the
-BUG-170-style rollout pattern. `parallel for` doesn't support
-`downto` yet either (rejected at parse time with a clear diagnostic)
--- only sequential `for`. The fix threads a new `descending: bool`
+own upper bound). Shipped English-only first, then extended to every
+dialect that already has a native `to`/`until` spelling -- all 62,
+via the same-day BUG-170-style keyword-parity sweep (each dialect's
+`downto` word is a new coinage compounding its existing `to` word
+with its word for "down"/"below"; see
+`docs/archive/grammar_review_queue.md`'s "downto keyword-parity
+sweep" section for the full per-dialect table and confidence ratings
+-- several are flagged **Low** confidence pending native-speaker
+review, same languages/scripts as the BUG-171 review queue). A
+mechanical parity test (`downto_keyword_parity_all_62_dialects` in
+`src/lib.rs`) asserts every dialect with a `to` spelling also has a
+`downto` spelling; full end-to-end compiles additionally cover
+Devanagari (both English and SOV word order), Japanese, and Russian.
+`parallel for` doesn't support `downto` yet either (rejected at parse
+time with a clear diagnostic) -- only sequential `for`. The fix
+threads a new `descending: bool`
 field through `Stmt::For`/`TypedStmt::For` (extending the existing
 node rather than a full while-loop desugaring, to keep the loop
 variable's existing dedicated scoping and avoid re-deriving label
