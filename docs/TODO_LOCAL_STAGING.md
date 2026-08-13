@@ -6628,3 +6628,16 @@ Repro: `tools/localfuzz/findings/20260813-014458-backend-divergence-65d8124e22/r
 Fix attempt: `tools/localfuzz/findings/20260813-014458-backend-divergence-65d8124e22/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260813-025707-backend-divergence-7562b3eeed
+
+Repro: `tools/localfuzz/findings/20260813-025707-backend-divergence-7562b3eeed/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-025707-backend-divergence-7562b3eeed/fix_attempt.md`
+
+`/home/virgo/source/vani-compiler-localfuzz/examples/language/punjabi_shahmukhi/iterate.vani`: `main()` failed with a backend-divergence error.
+
+Found in `/home/virgo/source/vani-compiler-localfuzz/test-results/backend-divergence/main.0.json`.
+
+STATUS: needs human/frontier root-cause review.
