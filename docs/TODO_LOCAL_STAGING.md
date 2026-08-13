@@ -6686,3 +6686,41 @@ Fix attempt: `tools/localfuzz/findings/20260813-035602-backend-divergence-bc67a2
 STATUS: needs human/frontier root-cause review.
 
 The vanic compiler was run with multiple backends, including LLVM and C, on the given mutant/generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/bounds_elision.vani`. The observed symptom was a backend-divergence where the C backend produced incorrect output (integer overflow) while the LLVM backend produced the expected result (`10\n30\n50\n`).
+
+---
+
+### Candidate: 20260813-062805-backend-divergence-7377ce7ca8
+
+Repro: `tools/localfuzz/findings/20260813-062805-backend-divergence-7377ce7ca8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-062805-backend-divergence-7377ce7ca8/fix_attempt.md`
+
+### Staging Entry
+
+**What Was Run:**
+The test case `iterate.vani` was run with both LLVM and C backends on the base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/khmer/iterate.vani`.
+
+**Exact Repro Source:**
+```vani
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/iterate.vani              # LLVM
+//   vanic run examples/language/khmer/iterate.vani --backend=c  # C
+
+គោលបំណង "Khmer Vec iteration smoke-test";
+
+មុខងារ main() -> i64 {
+  អោយ បញ្ជី: Vec<i64> = vec();
+  បញ្ជី = push(បញ្ជី, 10);
+  បញ្ជី = push(បញ្ជី, 20);
+  បញ្ជី = push(បញ្ជី, 30);
+  បញ្ជាក់ បញ្ជី[0] == 10;
+  បញ្ជាក់ បញ្ជី[-9223372036854775808] == 20;
+  បញ្ជាក់ បញ្ជី[2] == 30;
+  បោះពុម្ព "Khmer iterate OK";
+  ត្រលប់ 0;
+}
+```
+
+**Observed Symptom:**
+The test case experienced a backend divergence, specifically with both LLVM and C backends. The exact error message was `index out of bounds
