@@ -7395,3 +7395,12 @@ Staging Entry:
 ---
 
 **END OF REPORT**
+
+---
+
+### Candidate: 20260813-235200-run-crash-d75a8ff09b
+
+Repro: `tools/localfuzz/findings/20260813-235200-run-crash-d75a8ff09b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-235200-run-crash-d75a8ff09b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
