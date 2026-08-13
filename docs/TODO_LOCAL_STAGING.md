@@ -6662,3 +6662,16 @@ Test run:
 // Note: Amharic has no native match keyword; Option<T> tested via ? chaining.
 
 
+
+---
+
+### Candidate: 20260813-035150-backend-divergence-4ae0e51bf4
+
+Repro: `tools/localfuzz/findings/20260813-035150-backend-divergence-4ae0e51bf4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-035150-backend-divergence-4ae0e51bf4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The test case with input `/home/virgo/source/vani-compiler-localfuzz/examples/language/finnish/try_question_op.vani` and the generated source `kaksinkertaistettu_q(o: Opt) -> Opt { olkoon v: i64 = o?; palaa Opt.Some(v * -9223372036854775808); }` resulted in a backend-divergence error with integer overflow on the `mul` instruction. The LLVM version (`rc`: 3) crashed, while the C backend (`c: rc`: 134) produced an "integer overflow in i64 mul" error.
+
+The crash occurred during the execution of the `mul` operation in the `kaksinkertaistettu_q` function, which multiplies an `i64` value by `-9223372036854775808`. The overflow causes the program to terminate unexpectedly, leading to a backend-divergence issue.
