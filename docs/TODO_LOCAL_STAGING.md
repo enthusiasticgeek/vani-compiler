@@ -6802,3 +6802,12 @@ The program crashes with an index out of bounds error when run in the C backend,
 
 ### WHICH BACKEND(S) IT AFFECTS:
 This bug only affects the C backend (LLVM).
+
+---
+
+### Candidate: 20260813-091928-run-crash-eb67678a2e
+
+Repro: `tools/localfuzz/findings/20260813-091928-run-crash-eb67678a2e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-091928-run-crash-eb67678a2e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
