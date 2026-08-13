@@ -6542,3 +6542,12 @@ A vani compiler bug was encountered during local staging. The base corpus file `
     },
     "llvm": {
       "rc": 1
+
+---
+
+### Candidate: 20260813-000259-backend-divergence-53d6b21bbb
+
+Repro: `tools/localfuzz/findings/20260813-000259-backend-divergence-53d6b21bbb/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260813-000259-backend-divergence-53d6b21bbb/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
