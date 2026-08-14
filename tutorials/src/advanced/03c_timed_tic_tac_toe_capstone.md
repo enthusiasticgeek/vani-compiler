@@ -44,28 +44,37 @@ It has a real limitation for *this specific problem*, though, and
 it's not a workaround-able edge case:
 
 1. **There is no non-blocking or cancellable stdin read to give the
-   worker thread.** (There's no reason that thread *has* to be
-   permanently stuck -- if the read it's doing could itself be told
-   "give up after N ms," none of this would be a problem. That's
-   exactly what this file's fix provides -- see below.)
+   worker thread.** `cancel <name>;` shipped 2026-08-14 (see
+   [Advanced 3](03_concurrency.md#cancel)) and DOES make a thread
+   stuck in a blocking `tcp_accept`/`tcp_recv` genuinely
+   interruptible -- but `stdin_read_line`/`file_read_line` are
+   deliberately NOT cancel-aware (buffered stdio's `EINTR`
+   interaction is murkier than raw socket syscalls and needs its own
+   design pass). So for THIS specific file's problem -- a blocking
+   *stdin* read -- the limitation described below still holds today,
+   even with `cancel` in the language. (There's no reason that
+   thread *has* to be permanently stuck -- if the read it's doing
+   could itself be told "give up after N ms," none of this would be
+   a problem. That's exactly what this file's fix provides -- see
+   below.)
 2. **`Task<R>` is affine.** Every spawned task must be consumed
-   exactly once, by `join` OR (as of this session) `detach` -- see
+   exactly once, by `join` OR `detach` -- see
    [Advanced 3](03_concurrency.md#detach----fire-and-forget). At the
    time this file's design problem first came up, `detach` didn't
    exist yet, so a "fire and forget" worker genuinely wasn't
    possible at all -- the program couldn't exit without eventually
-   joining the stuck thread. `detach` now removes that specific
+   joining the stuck thread. `detach` removes that specific
    constraint (a caller COULD `detach` the blocking-read worker and
    let `main` exit immediately, leaving the orphaned thread to be
-   reclaimed at process exit) -- but it still doesn't make the
-   underlying `stdin_read_line()` call itself cancellable, and a
-   detached thread still holds stdin open and could still consume
-   the human's next keystroke at the wrong moment (e.g. bleeding
-   into a subsequent prompt). The real fix below is still the better
-   one: a genuinely non-blocking poll needs no thread, no `join`,
-   and no `detach` at all.
+   reclaimed at process exit) -- but (per point 1) `cancel` doesn't
+   reach `stdin_read_line`, and a detached thread still holds stdin
+   open and could still consume the human's next keystroke at the
+   wrong moment (e.g. bleeding into a subsequent prompt). The real
+   fix below is still the better one for THIS file: a genuinely
+   non-blocking poll needs no thread, no `join`, no `detach`, and no
+   `cancel` at all.
 
-Put together (as things stood before this session added `detach`):
+Put together (as things stood before `detach`/`cancel` existed):
 once the timer wins the race, the worker thread is still sitting
 inside a real, blocking `stdin_read_line()` call, it cannot be
 killed, and the program cannot exit without eventually joining it --
@@ -73,8 +82,11 @@ so the timed-out player's opponent, who already knows they won, has
 to sit and wait for that thread's pending read to actually return (a
 stray keystroke, Ctrl-D, or the process being killed) before the
 process can fully exit. Not a bug -- an honest consequence of "no
-cancellable blocking I/O" combined with (at the time) "no
-fire-and-forget tasks" -- but a real, user-visible annoyance.
+cancellable blocking stdin I/O" combined with (at the time) "no
+fire-and-forget tasks" -- but a real, user-visible annoyance. **This
+specific gap (stdin cancellation) is still open as of 2026-08-14**
+even though blocking-socket cancellation now exists -- see
+`docs/TODO_CURRENT.md`.
 
 **Would `async`/`await` have fixed it?** No, and it's worth being
 precise about why. v1's async surface still desugars synchronously
@@ -244,6 +256,82 @@ place.
 
 ---
 
+## A 2nd implementation: `task` + `cancel` over real TCP (Phase F, 2026-08-14)
+
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="task + cancel, applied to a domain that actually supports it"/>
+
+This page's whole point is that `task`/`Atomic<bool>`/`join` was the
+*wrong* tool for racing a blocking *stdin* read against a clock,
+because nothing could interrupt `stdin_read_line()` once a thread was
+stuck inside it -- not even after `cancel <name>;` shipped, since
+`cancel` deliberately doesn't reach stdio (point 1, above). That's
+still true. But it raises an obvious question: is there a *shape* of
+this same problem where `task` + `cancel` genuinely IS the right
+tool?
+
+Yes -- networked I/O.
+[`examples/language/english/tic_tac_toe_networked_timed.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/tic_tac_toe_networked_timed.vani)
+is a second, deliberately different implementation of the same "per-
+turn budget" idea: two players connect over real loopback TCP sockets
+(simulated by two `task`-spawned bot clients so the file stays
+self-contained), and when one of them goes silent, the server spawns
+a `task` to block in `tcp_recv` for the reply, polls a `Mutex<i64>`
+that task publishes into, and -- if the budget expires -- issues a
+real `cancel <name>;` to interrupt the still-blocked `tcp_recv`
+(`tcp_recv`/`tcp_accept` ARE cancel-aware, unlike stdio). The silent
+player forfeits, and the server never hangs waiting for a reply that
+was never coming.
+
+Building it surfaced three real, non-obvious lessons, each caught
+only by actually running the thing repeatedly rather than reading the
+code:
+
+1. **Don't race a budget against a reply you already expect to
+   arrive.** An early draft used the bounded-poll-plus-cancel dance
+   for *every* turn, not just the stalled one. Under real scheduling
+   load (this was found on a dev machine with a CPU-heavy background
+   process competing for cores), a perfectly healthy reply can miss
+   an aggressive budget purely from `pthread_create`/scheduling
+   latency -- a spurious forfeit with nothing wrong in the protocol
+   at all. The fix: only the turn that might genuinely never get a
+   reply needs the timeout machinery; every other turn just blocks
+   directly on `tcp_recv`, immune to this failure mode entirely.
+2. **A closed connection isn't a cancelled one.** The stalling bot
+   originally closed its socket right after going silent. That
+   unblocks the server's `tcp_recv` too -- but via a normal EOF (0
+   bytes), which happened to decode to the same `-1` sentinel this
+   file uses for "cancelled". The forfeit assertion kept passing for
+   the wrong reason, with `cancel`/`EINTR` never actually firing.
+   Confirmed via `strace`: the fixed version shows a real
+   `tgkill(..., SIGUSR1)` followed by the blocked `recvfrom` returning
+   `ERESTARTSYS` -- genuine interruption, not a coincidence. The
+   stalling bot now stays connected but silent, so there is nothing
+   *but* `cancel` that can unblock the server.
+3. **`tcp_recv`'s received bytes aren't inspectable from vani code.**
+   v1 has no `tcp_recv`-buffer byte-accessor (only `tcp_send_buf`, to
+   echo it back out) -- a real, previously-undocumented gap surfaced
+   by trying to send an actual move number over the wire. Worked
+   around by encoding each move as **message length** instead of
+   content (a player replies with a filler string of length `move +
+   1`), which stays within what v1 already supports. Flagged for a
+   future limitations pass rather than fixed here.
+
+Why not the `Pollable`/`Executor` pattern (see
+[Advanced 1](01_async.md#an-executor-not-a-hand-rolled-driver-pollable--executor) /
+`async_executor.vani`) for this file? Executor's value is driving
+several *concurrently in-flight* async tasks; this game is strictly
+turn-based, exactly one blocking call outstanding at a time, so there
+is nothing for an Executor to round-robin between. `task` + `cancel`
+-- bound one blocking call, interrupt it if it overruns -- is the
+right-shaped tool for a sequential per-turn timeout.
+
+```bash
+vanic run examples/language/english/tic_tac_toe_networked_timed.vani                # LLVM backend
+vanic run examples/language/english/tic_tac_toe_networked_timed.vani --backend=c    # C backend
+```
+
+---
+
 ## Try it yourself
 
 1. Shrink `turn_timeout_ms` to something short (2000-3000) for faster
@@ -260,7 +348,13 @@ place.
    computer opponent: only time the human's turns (the computer's
    `ai_move` is synchronous and instant, so it never needs a clock at
    all).
-4. *(Bigger)* Read [Advanced 3](03_concurrency.md) and rebuild this
+4. Read the 2nd implementation above
+   (`tic_tac_toe_networked_timed.vani`) and try shrinking ITS
+   `turn_timeout_ms` well below 3000ms on a busy machine -- you should
+   be able to reproduce lesson 1's spurious-forfeit failure mode
+   directly, then see why confining the timeout to only the turn that
+   needs it fixes it.
+5. *(Bigger)* Read [Advanced 3](03_concurrency.md) and rebuild this
    file's *original* `task`/`Atomic<bool>`/`join` design from
    scratch, to feel the difference directly -- then compare the two
    versions' behavior on a timeout with `time` (real wall-clock time
@@ -285,8 +379,13 @@ place.
 - The old design's real limitation -- `Task<R>` is affine (must
   always be `join`ed) and there was no cancellable blocking I/O, so a
   timed-out player's opponent had to wait for that player's eventual
-  keystroke before the process could exit -- is now gone completely,
-  not just documented as an accepted tradeoff.
+  keystroke before the process could exit -- is now gone completely
+  for THIS file, not just documented as an accepted tradeoff. (As of
+  2026-08-14, `cancel <name>;` also makes blocking `tcp_accept`/
+  `tcp_recv` interruptible in general -- see
+  [Advanced 3](03_concurrency.md#cancel) -- but not `stdin_
+  read_line`, so a `task`+`cancel` rewrite of THIS specific game
+  still couldn't fully replace the non-blocking-poll approach below.)
 - Two real, previously-unknown compiler bugs (BUG-185, BUG-186) were
   found and fixed building this file's original version -- a small,
   honest reminder that "the compiler has a bug in a construct you're
@@ -294,5 +393,5 @@ place.
 
 ---
 
-**Previous**: [Sec.3 -- `task` / `join` / `detach` + atomics / mutexes / channels ->](03_concurrency.md)
+**Previous**: [Sec.3 -- `task` / `join` / `detach` / `cancel` + atomics / mutexes / channels ->](03_concurrency.md)
 **Next**: [Sec.3d -- Capstone: a concurrent sensor-dashboard pipeline ->](03d_concurrent_pipeline_capstone.md)

@@ -1896,6 +1896,28 @@ pub enum Stmt {
         name: String,
         span: Span,
     },
+    /// `cancel <name>;` — signals a still-running `Task` (spawned,
+    /// not yet joined or detached) to stop. Sets a shared
+    /// cancellation flag the spawned thread's cancel-aware blocking
+    /// builtins (`tcp_accept`, `tcp_recv`) check on `EINTR`, and
+    /// sends a wakeup signal (POSIX `pthread_kill`, a reserved
+    /// signal with a no-op handler installed at runtime start) so a
+    /// syscall already blocked right now is interrupted promptly
+    /// rather than only being noticed on its NEXT call. Unlike
+    /// `join`/`detach`, `cancel` does NOT consume the `Task` handle
+    /// -- the checker still requires exactly one of `join`/`detach`
+    /// afterward; `cancel` just makes that eventual `join` return
+    /// sooner. Calling `cancel` more than once on the same task is
+    /// harmless (idempotent — the flag is simply set again). Windows
+    /// has no `pthread_kill` equivalent wired up yet: the flag is
+    /// still set (a CPU-bound thread that polls it cooperatively
+    /// still stops), but a thread blocked inside a real blocking
+    /// syscall is not forcibly interrupted there. English-only
+    /// keyword for now, matching `detach`'s own initial scope.
+    Cancel {
+        name: String,
+        span: Span,
+    },
     /// `unsafe(reason = "...") { <body> }` — lexically scoped
     /// block where raw-pointer / FFI primitives that the affine +
     /// Z3 surface can't verify are permitted. `reason` is
@@ -1977,6 +1999,7 @@ impl Stmt {
             | Stmt::TaskSpawn { span, .. }
             | Stmt::TaskJoin { span, .. }
             | Stmt::Detach { span, .. }
+            | Stmt::Cancel { span, .. }
             | Stmt::UnsafeBlock { span, .. }
             | Stmt::IfLet { span, .. }
             | Stmt::WhileLet { span, .. }

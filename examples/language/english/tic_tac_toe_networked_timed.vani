@@ -1,0 +1,331 @@
+// build & run:
+//   vanic run examples/language/english/tic_tac_toe_networked_timed.vani                # LLVM backend, JIT via lli
+//   vanic run examples/language/english/tic_tac_toe_networked_timed.vani --backend=c    # C backend, gcc
+//   vanic build examples/language/english/tic_tac_toe_networked_timed.vani -o /tmp/ttt_net && /tmp/ttt_net
+
+intent "Phase F -- a genuinely different timed tic-tac-toe: two players over real TCP sockets, per-turn budget enforced with task + cancel instead of stdin polling";
+
+// examples/language/english/tic_tac_toe_timed.vani's own header explains
+// why ITS timeout can't use `task` + `cancel`: the blocking call it needs
+// to interrupt is `stdin_read_line()`, and `cancel` (shipped 2026-08-14,
+// see cancel_blocking_task.vani) only makes `tcp_accept`/`tcp_recv`
+// interruptible -- buffered stdio's EINTR interaction stayed out of
+// scope. That's still true; this file does NOT change it.
+//
+// What this file demonstrates instead: the SAME per-turn-budget problem,
+// but for a domain `cancel` actually covers. Two players connect over
+// loopback TCP (simulated here by two `task`-spawned bot clients, so the
+// whole example is self-contained and deterministic, matching this
+// project's other tcp_*.vani examples). Most turns just block directly
+// on `tcp_recv` (see recv_move_direct) -- no timeout needed when the
+// reply is genuinely coming. Only the ONE turn this example deliberately
+// stalls (O's bot goes silent) spawns a `task` to receive the reply and
+// polls a `Mutex<i64>` the task publishes its result into, bounded by a
+// time budget. When that budget expires with nothing published, `cancel`
+// interrupts the still-blocked `tcp_recv` for real (not a timing guess
+// -- verified the same way cancel_blocking_task.vani was: strace showing
+// genuine EINTR, not a race against a sleep), the task returns promptly
+// instead of hanging, and that player forfeits.
+//
+// Wire protocol note: v1's `tcp_recv` fills an opaque thread-local
+// buffer with no builtin to inspect its bytes from vani code -- the only
+// way to observe received data today is to echo it back out via
+// `tcp_send_buf` (see tcp_echo.vani). There is no `tcp_recv`-buffer
+// byte-accessor. Rather than block Phase F on adding one, this example
+// encodes each move (0-8) as MESSAGE LENGTH: a player replies with a
+// filler string of length `move + 1`, and the server reads the move
+// back out of `tcp_recv`'s own byte-count return value. That's a real,
+// previously-undocumented v1 gap surfaced by actually building this
+// example -- flagged for the v1_limitations.md audit, not fixed here,
+// since a byte-accessor is compiler surface, not a Phase F concern.
+//
+// Why not the Pollable/Executor pattern (async_executor.vani) here:
+// Executor's value is driving several DIFFERENT async tasks that are
+// all in flight AT THE SAME TIME. This game is strictly turn-based --
+// exactly one blocking recv is ever outstanding at once -- so there is
+// nothing concurrent for an Executor to round-robin between. `task` +
+// `cancel` (bound a single blocking call, interrupt it if it overruns)
+// is the right-shaped tool for a sequential per-turn timeout; Executor
+// stays the right tool for the heterogeneous-concurrent case it already
+// covers. Forcing Executor in here would be the wrong fit, not a
+// stronger demonstration.
+
+fn ansi_red() -> Str { return "\x1b[31m"; }
+fn ansi_blue() -> Str { return "\x1b[34m"; }
+fn ansi_reset() -> Str { return "\x1b[0m"; }
+
+fn player_label(player: i64) -> OwnedStr {
+  if player == 1 {
+    return ansi_red() + "X" + ansi_reset();
+  }
+  return ansi_blue() + "O" + ansi_reset();
+}
+
+fn symbol_for(v: i64, pos: i64) -> OwnedStr {
+  if v == 1 {
+    return player_label(1);
+  }
+  if v == 2 {
+    return player_label(2);
+  }
+  return i64_to_str(pos);
+}
+
+fn print_board(board: ref Vec<i64>) -> i64 {
+  let row1: OwnedStr = " " + symbol_for(board[0], 1) + " | " + symbol_for(board[1], 2) + " | " + symbol_for(board[2], 3);
+  let row2: OwnedStr = " " + symbol_for(board[3], 4) + " | " + symbol_for(board[4], 5) + " | " + symbol_for(board[5], 6);
+  let row3: OwnedStr = " " + symbol_for(board[6], 7) + " | " + symbol_for(board[7], 8) + " | " + symbol_for(board[8], 9);
+  print row1;
+  print "---+---+---";
+  print row2;
+  print "---+---+---";
+  print row3;
+  return 0;
+}
+
+fn win_lines() -> Vec<i64> {
+  return vec(
+    0, 1, 2,  3, 4, 5,  6, 7, 8,
+    0, 3, 6,  1, 4, 7,  2, 5, 8,
+    0, 4, 8,  2, 4, 6
+  );
+}
+
+fn winner_of(board: ref Vec<i64>) -> i64 {
+  let lines: Vec<i64> = win_lines();
+  let li: u64 = 0;
+  while li < 8 as u64 {
+    let base: u64 = li * 3 as u64;
+    let a: i64 = board[lines[base] as u64];
+    let b: i64 = board[lines[base + 1 as u64] as u64];
+    let c: i64 = board[lines[base + 2 as u64] as u64];
+    if a != 0 {
+      if a == b {
+        if b == c {
+          return a;
+        }
+      }
+    }
+    li = li + 1 as u64;
+  }
+  return 0;
+}
+
+// A turn where the reply is known to be coming -- no task, no
+// timeout, just a direct blocking `tcp_recv` on the caller's own
+// thread (same shape as tcp_echo.vani's server side). Used for every
+// turn EXCEPT the one turn this example deliberately stalls (see
+// `take_turn` below): racing a wall-clock budget against a reply that
+// SHOULD arrive promptly only adds a way for the demo to flake under
+// real scheduling variance (this was a real design mistake in an
+// earlier draft of this file -- every turn used `take_turn`'s
+// bounded-poll-plus-cancel machinery, and a loaded CI/dev machine
+// could make a genuinely-on-time reply miss an aggressive budget
+// purely from pthread_create()/scheduling latency, not any bug in
+// the reply itself). `cancel` only has something to prove on the
+// turn where the peer truly never answers.
+fn recv_move_direct(fd: i64) -> i64 {
+  let _ = tcp_send_str(fd, "?");
+  let n: i64 = tcp_recv(fd, 9);
+  return n - 1;
+}
+
+// Runs on a `task` thread spawned per turn. Blocks in `tcp_recv` for
+// this player's reply; on a real reply, decodes the move from the
+// byte count and publishes it into `out`. On cancellation (`tcp_recv`
+// returning -2, see cancel_blocking_task.vani), publishes -2 instead
+// so a caller that inspects `out` after `cancel` sees the same
+// sentinel the syscall itself returned.
+fn recv_move_worker(fd: i64, out: ref Mutex<i64>) -> i64 {
+  let n: i64 = tcp_recv(fd, 9);
+  let mv: i64 = n - 1;
+  if n == 0 - 2 {
+    mv = 0 - 2;
+  }
+  let g = mutex_lock(out);
+  guard_set(ref g, mv);
+  return mv;
+}
+
+// Polls `result` in `poll_ms` slices without ever blocking on `join` --
+// that's the whole point: `join` would wait for the thread no matter
+// how long it takes, but this needs to notice "budget's up" WHILE the
+// task may still be blocked in tcp_recv, so it can go interrupt it.
+// Returns the published move, or -1 if the budget ran out with
+// nothing published yet.
+fn wait_for_move(result: ref Mutex<i64>, budget_ms: i64, poll_ms: i64) -> i64 {
+  let elapsed: i64 = 0;
+  while elapsed < budget_ms {
+    let g = mutex_lock(result);
+    let v: i64 = guard_get(ref g);
+    if v != 0 - 1 {
+      return v;
+    }
+    let _ = sleep_ms(poll_ms);
+    elapsed = elapsed + poll_ms;
+  }
+  return 0 - 1;
+}
+
+// A turn where the peer might genuinely never answer: prompt the
+// player, spawn a task to receive their reply, and bound the wait to
+// `turn_timeout_ms`. If the reply never comes in time, `cancel`
+// interrupts the task's blocked tcp_recv for real instead of leaving
+// `join` to wait indefinitely -- exactly the limitation the
+// stdin-based tic_tac_toe_timed.vani couldn't solve for its own
+// blocking call. Returns the 0-based move, or -1 on forfeit.
+fn take_turn(fd: i64, turn_timeout_ms: i64, poll_ms: i64) -> i64 {
+  let _ = tcp_send_str(fd, "?");
+  let result: Mutex<i64> = mutex_new(0 - 1);
+  let t: Task<i64> = task recv_move_worker(fd, ref result);
+  let mv: i64 = wait_for_move(ref result, turn_timeout_ms, poll_ms);
+  if mv == 0 - 1 {
+    // Budget expired -- the recv is (almost certainly) still blocked
+    // waiting on a reply that will never come. Force it to return
+    // instead of waiting on `join` forever. `join` still has to
+    // happen in the SAME block as the spawn above (v1 doesn't support
+    // cross-block join/detach), so it's unconditional below --
+    // `cancel` just makes that upcoming join return promptly instead
+    // of hanging.
+    cancel t;
+  }
+  let joined: i64 = join t;
+  if mv == 0 - 1 {
+    return 0 - 1;
+  }
+  return joined;
+}
+
+// Player X's bot: connects, sends a 1-byte identity handshake (so the
+// server can tell the two accepted connections apart -- `tcp_accept`
+// order is NOT guaranteed to match spawn order, an early version of
+// this example assumed it was and got a real, reproducible move
+// mismatch from it), then answers exactly two prompts (turns 1 and 3)
+// with fixed moves. Scripted rather than interactive so this example
+// is deterministic and self-checking via `assert`, matching this
+// project's other tcp_*.vani examples.
+fn player_x_bot(port: i64) -> i64 {
+  let fd: i64 = tcp_connect_local(port);
+  let _ = tcp_send_str(fd, "x");
+  let _ = tcp_recv(fd, 1);
+  let move1: OwnedStr = str_repeat("x", 0 + 1);
+  let _ = tcp_send_str(fd, move1);
+  let _ = tcp_recv(fd, 1);
+  let move3: OwnedStr = str_repeat("x", 4 + 1);
+  let _ = tcp_send_str(fd, move3);
+  let _ = tcp_close(fd);
+  return 0;
+}
+
+// Player O's bot: sends a 2-byte identity handshake (distinct length
+// from X's, so the server tells them apart by `tcp_recv`'s byte
+// count -- the same length-encodes-value trick this file already
+// uses for moves), answers turn 2 normally, then goes deliberately
+// silent on turn 4 -- simulating a stalled/unresponsive peer so the
+// server's `cancel` path fires for a REAL expired budget, not a timed
+// coincidence.
+fn player_o_bot(port: i64) -> i64 {
+  let fd: i64 = tcp_connect_local(port);
+  let _ = tcp_send_str(fd, "oo");
+  let _ = tcp_recv(fd, 1);
+  let move2: OwnedStr = str_repeat("x", 3 + 1);
+  let _ = tcp_send_str(fd, move2);
+  // Turn 4's prompt arrives here, but this bot never answers it --
+  // and, just as importantly, doesn't close the connection either.
+  // An earlier version of this file DID close right after receiving
+  // the prompt, and that was a real design bug, not just a stylistic
+  // choice: closing makes the server's tcp_recv unblock via a normal
+  // EOF (0 bytes read), which decodes to the same -1 sentinel this
+  // file uses for "cancelled" -- the assertion below would have kept
+  // passing for the WRONG reason, without `cancel`/EINTR ever firing
+  // at all. Staying connected but silent is what actually forces the
+  // server to sit genuinely blocked in tcp_recv, which is the only
+  // way `cancel` has anything real to interrupt. Outlives the
+  // server's own cancel budget before finally closing.
+  let _ = tcp_recv(fd, 1);
+  let _ = sleep_ms(4000);
+  let _ = tcp_close(fd);
+  return 0;
+}
+
+fn main() -> i64 {
+  print "vani tic-tac-toe -- networked timed edition (TCP, task + cancel per-turn budget)";
+  print "";
+
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  let bot_x: Task<i64> = task player_x_bot(port);
+  let bot_o: Task<i64> = task player_o_bot(port);
+
+  // `tcp_accept` order does NOT have to match the order the two bots
+  // were spawned in -- whichever connect() reaches the kernel first
+  // wins. Accept both, then classify each by its identity handshake's
+  // byte count (1 = X, 2 = O) rather than assuming accept order.
+  let fd_a: i64 = tcp_accept(server);
+  let fd_b: i64 = tcp_accept(server);
+  let ident_a: i64 = tcp_recv(fd_a, 4);
+  let ident_b: i64 = tcp_recv(fd_b, 4);
+  assert ident_a != ident_b;
+  let fd_x: i64 = fd_a;
+  let fd_o: i64 = fd_b;
+  if ident_a == 2 {
+    fd_x = fd_b;
+    fd_o = fd_a;
+  }
+
+  let board: Vec<i64> = vec_fill(9, 0);
+  // Only turn 4 (O's forced stall, below) ever needs to race a
+  // budget -- see recv_move_direct's comment for why the other three
+  // turns don't. This can afford to be generous: it only has to be
+  // "eventually reached" for a peer that will NEVER reply, so a large
+  // value costs a bit of wall-clock time on the one forfeit turn, not
+  // correctness, even on a heavily loaded machine.
+  let turn_timeout_ms: i64 = 3000;
+  let poll_ms: i64 = 100;
+
+  print_board(ref board);
+  print "";
+
+  // Turn 1 -- X plays cell 1 (index 0).
+  let m1: i64 = recv_move_direct(fd_x);
+  assert m1 == 0;
+  board[m1 as u64] = 1;
+  print_board(ref board);
+  print "";
+  assert winner_of(ref board) == 0;
+
+  // Turn 2 -- O plays cell 4 (index 3).
+  let m2: i64 = recv_move_direct(fd_o);
+  assert m2 == 3;
+  board[m2 as u64] = 2;
+  print_board(ref board);
+  print "";
+  assert winner_of(ref board) == 0;
+
+  // Turn 3 -- X plays cell 5 (index 4).
+  let m3: i64 = recv_move_direct(fd_x);
+  assert m3 == 4;
+  board[m3 as u64] = 1;
+  print_board(ref board);
+  print "";
+  assert winner_of(ref board) == 0;
+
+  // Turn 4 -- O never replies. The budget genuinely expires and
+  // `cancel` interrupts the server's still-blocked tcp_recv. This is
+  // the one turn in the whole game that actually needs `task` +
+  // `cancel` at all.
+  let m4: i64 = take_turn(fd_o, turn_timeout_ms, poll_ms);
+  assert m4 == 0 - 1;
+  let timeout_msg: OwnedStr = player_label(2) + "'s time ran out (connection never answered)!";
+  print timeout_msg;
+  let win_msg: OwnedStr = player_label(1) + " wins on forfeit!";
+  print win_msg;
+
+  let _ = tcp_close(fd_x);
+  let _ = tcp_close(fd_o);
+  let _ = join bot_x;
+  let _ = join bot_o;
+  let _ = tcp_close(server);
+  return 0;
+}

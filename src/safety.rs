@@ -1217,7 +1217,7 @@ fn wcet_stmt(
             }
         }
         S::TaskSpawn { .. } => None, // concurrent execution; can't model
-        S::TaskJoin { .. } | S::Detach { .. } => None,
+        S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => None,
         S::ForIterShallowFree { .. } => Some(1),
         S::UnsafeBlock { body, .. } => wcet_body(body, fn_map, visiting, recursion_bound),
         S::Break { .. } | S::Continue { .. } => Some(1),
@@ -3096,7 +3096,7 @@ fn build_lock_edges(
             }
             S::Drop { .. } | S::ForIterShallowFree { .. }
             | S::Break { .. } | S::Continue { .. }
-            | S::TaskJoin { .. } | S::Detach { .. } => {}
+            | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
         }
     }
 }
@@ -3336,6 +3336,7 @@ pub fn enforce_lock_order(
                         diagnostics.push(crate::diagnostic::Diagnostic {
                             span,
                             message: msg,
+                            severity: crate::diagnostic::Severity::Error,
                             related: vec![],
                             elaboration: vec![hint],
                         });
@@ -3430,7 +3431,7 @@ fn collect_locked_mutexes_stmts(
             }
             S::Drop { .. } | S::ForIterShallowFree { .. }
             | S::Break { .. } | S::Continue { .. }
-            | S::TaskJoin { .. } | S::Detach { .. } => {}
+            | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
         }
     }
 }
@@ -3593,6 +3594,7 @@ pub fn enforce_isr_preemption(
             diagnostics.push(crate::diagnostic::Diagnostic {
                 span: *high_span,
                 message: msg,
+                severity: crate::diagnostic::Severity::Error,
                 related: vec![],
                 elaboration: vec![hint],
             });
@@ -3709,7 +3711,7 @@ fn collect_mcdc_stmts(
             }
             S::Drop { .. } | S::ForIterShallowFree { .. }
             | S::Break { .. } | S::Continue { .. }
-            | S::TaskJoin { .. } | S::Detach { .. } => {}
+            | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
         }
     }
 }

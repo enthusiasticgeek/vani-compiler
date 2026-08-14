@@ -15233,3 +15233,359 @@ fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backend
         // guarantees no other thread is still mid-print.
     }
 }
+
+#[test]
+fn cancel_blocking_task_example_interrupts_real_blocking_accept_on_both_backends() {
+    // Phase D (2026-08-14): `cancel <name>;` -- forcibly interrupts
+    // a `task` thread blocked inside a REAL blocking syscall
+    // (`tcp_accept`), the capability `detach()` (2026-08-13)
+    // explicitly did NOT provide. Runs the real shipped example
+    // rather than a synthetic snippet so this test exercises the
+    // exact code path a user would hit, on both backends. If the
+    // signal-based interruption regresses (e.g. the SA_RESTART bug
+    // found via `strace` while building this feature -- a bare
+    // `signal()` on this glibc target installs the handler WITH
+    // SA_RESTART, silently turning every interrupted `accept()`
+    // into an infinite auto-retry loop instead of returning EINTR),
+    // this test HANGS rather than fails cleanly, so a tight overall
+    // timeout matters more here than in most e2e tests.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/cancel_blocking_task.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut child = Command::new(binary)
+            .args(&backend_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                break status;
+            }
+            if start.elapsed() > timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "intentc {:?} did not exit within {:?} -- cancel likely failed to \
+                     interrupt the blocked accept() (hung instead of returning EINTR)",
+                    backend_args, timeout
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let output = child.wait_with_output().expect("collect output");
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("cancelled thread returned -- no hang, no lingering client wait\n"),
+            "expected the cancellation success line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
+fn async_executor_example_drives_heterogeneous_and_cancelled_tasks_on_both_backends() {
+    // Arc 8 v3.2 (2026-08-14): the `Pollable`/`Executor` pattern that
+    // replaces a hand-rolled per-program driver loop. Exercises three
+    // things in one program: two DIFFERENT `Task__<fn>` shapes driven
+    // through the same `Vec<Box<dyn Pollable>>` (heterogeneous
+    // dispatch), a third task cancelled mid-flight via `CancelToken`
+    // AFTER being handed to the executor holding live heap state (buf
+    // in the real leak-audit repro; here just its saved locals), and
+    // the LLVM-backend fix for `emit_task_via_pthread`/
+    // `emit_parallel_for_via_gomp` discarding a `while` loop's
+    // vectorize-metadata definitions when the loop lives inside an
+    // outlined `task { ... }` body (the `peers` task's own `while`
+    // loop here is exactly that shape -- this test would have failed
+    // with "use of undefined metadata" on the LLVM backend before
+    // that fix).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/async_executor.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("tasks accounted for: 3\n"),
+            "expected all 3 tasks (2 completed + 1 cancelled) to be accounted for on {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
+fn tic_tac_toe_networked_timed_example_forfeits_via_real_cancel_on_both_backends() {
+    // Phase F (2026-08-14): a 2nd implementation of the timed
+    // tic-tac-toe idea, this time over real TCP sockets instead of
+    // stdin polling -- built specifically to stress `task` + `cancel`
+    // + `Mutex<i64>` together in a shape none of the other shipped
+    // examples exercise (a per-call-site Mutex created fresh on every
+    // loop iteration, raced against a task spawned from the same call
+    // site each time). Two earlier drafts of this example had real
+    // design bugs caught only by actually running it repeatedly and
+    // with strace, not by "it compiles": (1) every turn raced a
+    // wall-clock budget even for replies that were always going to
+    // arrive, which could spuriously forfeit under real scheduling
+    // load; (2) the stalling bot closed its socket right after going
+    // silent, which unblocks a server's blocked `tcp_recv` via a
+    // normal EOF (0 bytes) -- decoding to the same -1 sentinel this
+    // file uses for "cancelled", so the assertion kept passing
+    // without `cancel`/EINTR ever actually firing. Both fixed; see
+    // examples/language/english/tic_tac_toe_networked_timed.vani's
+    // own comments for the full explanation. Uses the same bounded
+    // try_wait() loop as cancel_blocking_task_example above rather
+    // than a plain `.output()` wait, for the same reason: a
+    // regression in the cancel path manifests as a HANG, not a clean
+    // failure.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/tic_tac_toe_networked_timed.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut child = Command::new(binary)
+            .args(&backend_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(15);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                break status;
+            }
+            if start.elapsed() > timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "intentc {:?} did not exit within {:?} -- cancel likely failed to \
+                     interrupt the server's blocked tcp_recv (hung instead of returning EINTR)",
+                    backend_args, timeout
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let output = child.wait_with_output().expect("collect output");
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("wins on forfeit!\n"),
+            "expected O to forfeit via a real cancel-driven timeout for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
+fn for_loop_backwards_to_range_warns_but_check_and_run_both_succeed() {
+    // End-to-end CLI test of the new Severity::Warning mechanism
+    // (2026-08-14): `vanic check` on a file with a `to`/`downto`
+    // for-loop whose constant bounds contradict the keyword's
+    // direction must exit 0 (NOT fail the build -- a backwards range
+    // is legal, silent, zero-iteration behavior, see
+    // examples/language/english/for_loop_downto.vani), but must
+    // still print a "warning:"-labeled diagnostic. `vanic run` must
+    // both print the same warning AND actually execute the program
+    // (proving the warning is genuinely non-fatal end-to-end, not
+    // just at the library API level already covered by
+    // src/lib.rs's unit tests).
+    let src = write_tmp_vani(
+        "for_loop_backwards_to_warns",
+        r#"
+fn main() -> i64 {
+  for i from 5 to 0 {
+    print "should never print";
+  }
+  print "after loop";
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let check_output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(
+        check_output.status.success(),
+        "a warning-only diagnostic must not fail 'check'; status {:?}, stderr: {}",
+        check_output.status,
+        String::from_utf8_lossy(&check_output.stderr)
+    );
+    let check_stderr = String::from_utf8_lossy(&check_output.stderr);
+    assert!(
+        check_stderr.contains("warning:") && check_stderr.contains("never executes"),
+        "expected a 'warning: ... never executes' line on stderr, got:\n{}",
+        check_stderr
+    );
+    let check_stdout = String::from_utf8_lossy(&check_output.stdout);
+    assert!(
+        check_stdout.contains("ok:"),
+        "expected 'check' to still report ok, got:\n{}",
+        check_stdout
+    );
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let run_output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            run_output.status.success(),
+            "a warning-only diagnostic must not fail 'run' for {:?}; status {:?}, stderr: {}",
+            backend_args,
+            run_output.status,
+            String::from_utf8_lossy(&run_output.stderr)
+        );
+        let run_stderr = String::from_utf8_lossy(&run_output.stderr);
+        assert!(
+            run_stderr.contains("warning:") && run_stderr.contains("never executes"),
+            "expected the warning on stderr for {:?}, got:\n{}",
+            backend_args,
+            run_stderr
+        );
+        let run_stdout = String::from_utf8_lossy(&run_output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            run_stdout, "after loop\n",
+            "expected the loop body to be genuinely skipped (0 iterations) and \
+             execution to continue normally for {:?}, got:\n{}",
+            backend_args, run_stdout
+        );
+    }
+}
+
+#[test]
+fn deny_warnings_flag_turns_a_warning_into_a_build_failure() {
+    // `--deny-warnings` (2026-08-14): a global pre-scan flag
+    // (removed from argv before any subcommand-specific parser sees
+    // it, sets VANIC_DENY_WARNINGS) that escalates any
+    // Severity::Warning diagnostic into a build failure, CI-style
+    // strictness akin to rustc's `-D warnings` / gcc's `-Werror`.
+    // Without the flag: warns but succeeds. With the flag: fails,
+    // and the rendered diagnostic says "error:", not "warning:".
+    let src = write_tmp_vani(
+        "deny_warnings_flag",
+        r#"
+fn main() -> i64 {
+  for i from 5 to 0 {
+    print "should never print";
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let without_flag = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(
+        without_flag.status.success(),
+        "without --deny-warnings, a warning-only diagnostic must not fail 'check'; \
+         status {:?}, stderr: {}",
+        without_flag.status,
+        String::from_utf8_lossy(&without_flag.stderr)
+    );
+
+    let with_flag = Command::new(binary)
+        .args(["check", "--deny-warnings", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check --deny-warnings should execute");
+    assert!(
+        !with_flag.status.success(),
+        "--deny-warnings must turn a warning-only diagnostic into a build failure; \
+         status {:?}, stdout: {}, stderr: {}",
+        with_flag.status,
+        String::from_utf8_lossy(&with_flag.stdout),
+        String::from_utf8_lossy(&with_flag.stderr)
+    );
+    let with_flag_stderr = String::from_utf8_lossy(&with_flag.stderr);
+    assert!(
+        with_flag_stderr.contains("error:") && with_flag_stderr.contains("never executes"),
+        "expected the escalated diagnostic to render with an 'error:' label, got:\n{}",
+        with_flag_stderr
+    );
+    assert!(
+        !with_flag_stderr.contains("warning:"),
+        "must not still say 'warning:' once escalated by --deny-warnings, got:\n{}",
+        with_flag_stderr
+    );
+
+    // The flag must also work for `run`, not just `check`, and must
+    // not affect a warning-free file at all.
+    let clean_src = write_tmp_vani(
+        "deny_warnings_flag_clean",
+        r#"
+fn main() -> i64 {
+  print "clean";
+  return 0;
+}
+"#,
+    );
+    let clean_run = Command::new(binary)
+        .args(["run", "--deny-warnings", clean_src.to_str().unwrap()])
+        .output()
+        .expect("intentc run --deny-warnings should execute");
+    assert!(
+        clean_run.status.success(),
+        "--deny-warnings on a warning-free file must still succeed; status {:?}, stderr: {}",
+        clean_run.status,
+        String::from_utf8_lossy(&clean_run.stderr)
+    );
+
+    let denied_run = Command::new(binary)
+        .args(["run", "--deny-warnings", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run --deny-warnings should execute");
+    assert!(
+        !denied_run.status.success(),
+        "--deny-warnings must also fail 'run' (not just 'check') on a warning-only file; \
+         status {:?}",
+        denied_run.status
+    );
+}

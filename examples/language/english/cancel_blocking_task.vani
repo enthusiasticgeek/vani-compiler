@@ -1,0 +1,66 @@
+// Phase D (2026-08-14) -- `cancel <name>;` support: a way to
+// interrupt a `task` thread that's stuck inside a REAL blocking
+// syscall, the exact wall the timed tic-tac-toe example's own
+// history (see async_executor.vani's header comment and docs/
+// TODO_CURRENT.md) hit and worked around by avoiding threads
+// entirely. `detach()` (shipped 2026-08-13) removed the "must
+// join" constraint but never made a blocking thread interruptible
+// -- this is the missing piece.
+//
+// Mechanism: `cancel <name>;` sets a shared flag AND (POSIX only)
+// sends a reserved signal (`pthread_kill`) that forces an in-flight
+// blocking syscall to return EINTR instead of auto-retrying. The
+// cancel-aware blocking builtins (`tcp_accept`, `tcp_recv`) check
+// that flag on EINTR and return -2 (a new, distinct "cancelled"
+// sentinel, never returned before this feature existed) instead of
+// retrying the call. `cancel` does NOT consume the task -- a
+// `join`/`detach` is still required afterward, same affine
+// discipline as always; `cancel` just makes that eventual `join`
+// return promptly instead of waiting for a connection that may
+// never come.
+//
+// Verified via `strace` (not just program exit codes) that the
+// installed signal handler does NOT carry `SA_RESTART` on either
+// backend -- confirming `accept()` genuinely returns EINTR rather
+// than the kernel silently re-driving it. ASan/UBSan-clean.
+//
+// Windows: the flag is still set (a CPU-bound thread that polls it
+// cooperatively still stops), and `cancel` additionally calls
+// `CancelSynchronousIo` on the task's thread handle to abort a
+// pending blocking Winsock call -- UNTESTED on real Windows
+// hardware (no host available), implemented from the documented
+// `CancelSynchronousIo` contract. macOS shares the POSIX signal
+// path unchanged (pthread/sigaction/pthread_kill are standard BSD
+// APIs there too) -- also untested on real hardware, but not a
+// separate code path from the Linux one this file verifies.
+//
+// build & run:
+//   vanic run examples/language/english/cancel_blocking_task.vani                # LLVM
+//   vanic run examples/language/english/cancel_blocking_task.vani --backend=c    # C
+
+intent "Phase D -- cancel a task thread blocked inside a real blocking tcp_accept()";
+
+fn main() -> i64 {
+  let server: i64 = tcp_listen(0);
+
+  task blocked {
+    let fd: i64 = tcp_accept(server);
+    // -2 is the new "cancelled while blocked" sentinel -- distinct
+    // from -1 (a real socket error) and any non-negative fd.
+    assert fd == 0 - 2;
+  }
+
+  // Give the spawned thread a moment to actually enter the
+  // blocking accept() call before cancelling it -- otherwise this
+  // would race cancellation against the thread even starting.
+  let _ = sleep_ms(100);
+  cancel blocked;
+  // `join` (not `detach`) here: cancel doesn't consume the task,
+  // so the usual affine discipline still applies. Returns almost
+  // immediately -- no client will ever connect to `server`.
+  join blocked;
+
+  print "cancelled thread returned -- no hang, no lingering client wait";
+  let _ = tcp_close(server);
+  return 0;
+}

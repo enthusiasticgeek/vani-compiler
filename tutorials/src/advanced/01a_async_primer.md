@@ -185,9 +185,12 @@ fn drive(ep: i64, t: mut ref Task__fetch) -> i64 {
 ```
 
 This is the "juggler" -- the event loop that drives the state
-machine forward. vāṇी doesn't ship a built-in runtime; users
-write small drivers like this. (A runtime built into the
-language is queued; the underlying capability already ships.)
+machine forward. vāṇी doesn't ship a compiler-BUILTIN runtime, but
+[Advanced 1](01_async.md) has a small, reusable `Pollable`/
+`Executor` pattern (2026-08-14) that generalizes this `drive(...)`
+shape to many DIFFERENT `Task__<fn>` types at once, so you don't
+hand-write a bespoke driver per program -- copy the ~15-line block
+in and reuse it.
 
 ## When async is the right tool
 
@@ -226,7 +229,18 @@ DON'T use async when:
 
 4. **Cancellation.** Stopping a task partway through requires
    careful design -- vāṇी's `CancelToken` + A4.4 auto-plumbing
-   handles the common case automatically.
+   handles the common case automatically for a non-blocking `async
+   fn`/`Task__<fn>` (ASan-verified leak-safe even when cancelled
+   mid-flight, holding real heap-owned locals). A BLOCKING `task`
+   thread used to be a different story -- nothing could interrupt a
+   thread stuck inside a real blocking syscall (`tcp_accept`,
+   `tcp_recv`), since `detach()` only removes the "must join"
+   requirement. **Shipped 2026-08-14**: `cancel <name>;` forces an
+   in-flight blocking `tcp_accept`/`tcp_recv` to return promptly
+   (signal-based on POSIX, `CancelSynchronousIo` on Windows -- see
+   [Advanced 3 -- Concurrency](03_concurrency.md#cancel)). `stdin_
+   read_line`/`file_read_line` cancellation is still open (buffered
+   stdio's EINTR interaction needs its own design pass).
 
 ## A summary you can carry
 

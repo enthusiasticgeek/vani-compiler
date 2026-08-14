@@ -280,8 +280,43 @@ vanic audit-safety src/lib.vani --format=json
 |------|-------------|
 | `--no-verify` | Skip SMT verification (type-checking still runs). Also: `VANIC_NO_VERIFY=1`. |
 | `--smt-debug` | Dump every Z3 query and response to stderr. Also: `VANIC_SMT_DEBUG=1`. |
+| `--deny-warnings` | Escalate every `Severity::Warning` diagnostic (unused variable/parameter, self-assignment, identical if/else branches, a constant-bounds `to`/`downto` mismatch, ...) into a build failure -- CI-style strictness, like rustc's `-D warnings` or gcc's `-Werror`. Works on `check`, `run`, `build`, and `emit`/`emit-c`. Also: `VANIC_DENY_WARNINGS=1`. |
 | `-V` / `--version` | Print version and exit. |
 | `-h` / `--help` | Print usage and exit. |
+
+---
+
+## Compiler warnings (as of 2026-08-14)
+
+Most vāṇी diagnostics are hard errors -- this is a "catch it at
+compile time" language by design. A small, growing set of
+diagnostics are genuine **warnings** instead: printed, but they
+don't fail the build (unless you pass `--deny-warnings`, above).
+Reach for a warning instead of an error when the pattern is *almost
+always* a mistake but has a real, legitimate use the compiler can't
+tell apart from the mistake at compile time.
+
+Current warnings:
+
+- **Unused variable** -- a `let` binding never referenced again.
+- **Unused parameter** -- a function parameter never referenced in
+  the body (exempt: `extern "C" fn` declarations, which have no
+  body).
+- **Self-assignment** -- `x = x;` (almost always a typo for a
+  different variable on one side).
+- **Identical `if`/`else` branches** -- both branches execute the
+  exact same code, so the condition has no effect on behavior.
+- **`to`/`downto` bounds direction** -- a `for` loop whose
+  compile-time-constant bounds contradict the keyword's direction
+  (see [Beginner 5 -- loops](05_loops.md)).
+
+**Silencing a false positive**: prefix the name with an underscore
+(`_name`) for the unused-variable/unused-parameter warnings -- e.g.
+a lock guard (`Guard<T>`/`ReadGuard<T>`/`WriteGuard<T>`) kept alive
+only for its scope-exit unlock, never read directly, should be named
+`let _g = mutex_lock(...);`. The other warnings have no suppression
+syntax; if the pattern is genuinely intentional, no action is
+needed -- it's a warning, not a requirement.
 
 ---
 
@@ -298,6 +333,7 @@ vanic audit-safety src/lib.vani --format=json
 | `QEMU_<ARCH>` | QEMU user-mode binary override (e.g. `QEMU_AARCH64`). |
 | `VANIC_NO_VERIFY=1` | Skip SMT; equivalent to `--no-verify`. |
 | `VANIC_SMT_DEBUG=1` | Dump Z3 queries; equivalent to `--smt-debug`. |
+| `VANIC_DENY_WARNINGS=1` | Treat every warning as a build failure; equivalent to `--deny-warnings`. |
 | `INTENT_TARGET_EMBEDDED=1` | Enable stack-protector hardening on the link line. |
 | `INTENT_LIBGOMP` | Non-standard libgomp path for LLVM JIT. |
 

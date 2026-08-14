@@ -13664,3 +13664,631 @@ regressions); 255/255 e2e tests pass (0 regressions); 1049-file
 example corpus check matches the known 18-file baseline exactly
 (identical file set to the pre-fix run); mdBook rebuilds clean (same
 7 known pre-existing warnings). Next free bug number is **BUG-192**.
+
+## New feature: real compiler warnings (`Severity::Warning`), first use is a `to`/`downto` bounds-direction check (2026-08-14)
+
+Requested directly: `for i from 5 to 0` (ascending `to`, but start >
+end) and `for i from 0 downto 5` (descending `downto`, but start <
+end) should produce a compiler warning when both bounds are
+compile-time constants -- the loop body can never execute a single
+iteration, and the direction contradicts the keyword.
+
+**The diagnostic model had no "warning" concept at all.** Every
+`Diagnostic` ever pushed into a checking pass's `Vec<Diagnostic>`
+was, unconditionally, a hard build-blocking error --
+`check_program`'s success gate was a bare `diagnostics.is_empty()`.
+Implementing the check as a hard error broke real things
+immediately: two existing regression tests
+(`for_loop_reverse_range_compiles`, `for_loop_downto_empty_when_
+start_le_end_compiles`) and the shipped example `for_loop_downto.
+vani`'s own `empty_when_backwards()` function all deliberately
+demonstrate that a backwards `to`/`downto` range is legal,
+documented, silent, zero-iteration behavior (useful in generic code
+where bounds can legitimately collapse to empty) -- rejecting it
+outright would have revoked a real, intentional language feature.
+Asked the user how to proceed; chose to build a real soft-warning
+mechanism rather than either breaking that feature or dropping the
+check.
+
+**New `Severity` enum** (`diagnostic.rs`): `Error` (default, via
+`Diagnostic::new` -- every existing call site is completely
+unaffected) or `Warning` (opt-in via the new chainable
+`.as_warning()`, mirroring `.with_elaboration(...)`'s builder
+style). `check_program`'s success gate (`checker.rs`) changed from
+`diagnostics.is_empty()` to `!diagnostics.iter().any(|d|
+d.is_error())` -- only errors fail the build now. `CheckedProgram`
+(the `Ok` payload, single construction site) gained a `pub warnings:
+Vec<Diagnostic>` field carrying whatever warnings survived to the
+`Ok` path, so `compile()`/`compile_path()`'s existing `Result<
+CheckedProgram, Vec<Diagnostic>>` signature needed ZERO changes --
+every one of the ~2900 existing tests that call `.expect(...)` on a
+`compile()` result is unaffected. `format_diagnostics`/
+`format_diagnostics_with_files` and both `--json` renderers
+(`diagnostic.rs`) now pick the rendered label ("warning"/"error")
+from each diagnostic's own severity instead of hardcoding "error"
+for everything.
+
+**CLI wiring**: `compile_path_or_report` (`main.rs`) -- the single
+choke point `build`/`run`/`emit`/`emit-c` and their cross-compile/
+QEMU variants all funnel through -- now prints any
+`checked.warnings` to stderr (non-fatal) right after a successful
+compile. The `check` command (a separate code path, doesn't use
+`compile_path_or_report`) got the same treatment directly, including
+folding warnings into the `--json` combined-diagnostics output
+(already severity-labeled) rather than only the text-mode stderr
+path.
+
+**Two existing diagnostics that were ALREADY commented "warning
+level" in the source but were, in fact, still hard errors** (S-19
+`enforce_lock_order`'s deadlock-cycle diagnostic, S-20 `enforce_isr_
+preemption`'s priority-inversion diagnostic, both in `safety.rs`) --
+left AS hard errors for now (their own struct-literal `Diagnostic {
+..., severity: Severity::Error, ... }` construction was updated only
+enough to compile against the new field) rather than silently
+changed to genuine warnings alongside this fix; whether they SHOULD
+become real warnings is exactly the kind of question the broader
+essential-warnings audit (below) should answer, not something to
+flip as a side effect of an unrelated feature.
+
+**The check itself**: added inside `Stmt::For`'s handling in
+`check_one_stmt` (`checker.rs`), right after the integer-bounds type
+check, using `start_checked.constant()`/`end_checked.constant()`
+(the checker's existing constant-folding, `TypedConst::Int(i128)`)
+-- only fires when BOTH bounds are compile-time constants; a
+runtime-computed bound is never flagged, since it can't be judged at
+compile time. Equal bounds (`for i from n to n`) are deliberately
+NOT flagged either -- a legitimate empty-range edge case (e.g.
+generic code where `n` happens to be 0), not a direction mismatch.
+
+Regression tests (`src/lib.rs`): positive cases for both `to` and
+`downto` assert `checked.warnings.len() == 1`,
+`.is_warning()`, and the message content; negative cases confirm
+correctly-directed ranges, equal bounds, and runtime-computed bounds
+all produce zero warnings; a direct test of the `Severity` mechanism
+itself confirms a warning-only compile still succeeds while a real
+type error still fails; a rendering test confirms the CLI text says
+"warning:" not "error:". Plus one full CLI-level e2e test
+(`tests/run_end_to_end.rs`) driving the actual `intentc` binary:
+`check` exits 0 with the warning on stderr and "ok:" on stdout;
+`run` (both backends) exits 0, prints the warning, and produces
+EXACTLY the expected stdout (proving the loop body was genuinely
+skipped and execution continued normally end-to-end, not just at
+the library API level).
+
+Docs: `tutorials/src/beginner/05_loops.md`'s "still doesn't count
+down" section (which used to explicitly say "no error, no warning")
+updated to describe the new warning and its two deliberate
+non-triggers (equal bounds, runtime bounds).
+`examples/language/english/for_loop_downto.vani`'s own comment on
+`empty_when_backwards()` updated to note it's the exact legitimate
+case the warning doesn't block.
+
+Verification: 2945/2945 lib tests pass (2939 + 6 new, 0
+regressions); 256/256 e2e tests pass (255 + 1 new, 0 regressions);
+1049-file example corpus check matches the known 18-file baseline
+exactly (identical file set); mdBook rebuilds clean (same 7 known
+pre-existing warnings).
+
+## Broader audit: other language features where a compiler warning is essential (CLOSED)
+
+Requested directly, as a follow-up to the to/downto warning above:
+survey the language for other places where code is syntactically
+valid but semantically almost-certainly-wrong, and no diagnostic
+(error OR warning) currently fires.
+
+Survey findings (tested against the real compiler, not guessed):
+already covered as hard errors -- constant literal overflow/cast
+mismatch, constant division-by-zero, `while false`/`if <const-
+false>` unreachable branches, code after an unconditional return/
+break/continue (S-10, MISRA-style). Genuine gaps found, all four
+implemented (below): self-assignment, unused variable, unused
+parameter, identical if/else branches. Lower-priority items noted
+but NOT implemented: redundant identity casts (`x as i64` where x is
+already i64) and `assert`-of-a-tautology -- both low value, no
+evidence of real user confusion.
+
+## Four new style warnings + `--deny-warnings` flag (2026-08-14)
+
+All four `Severity::Warning` (see the to/downto entry above for why
+this diagnostic model exists at all):
+
+- **Self-assignment** (`x = x;`) -- checked in `checker.rs`'s new
+  `check_style_warnings_in_block`, which recursively walks every
+  block-bearing `Stmt` in a function (mirroring `stmt_mentions_var`'s
+  own exhaustive match so a future new `Stmt` variant can't silently
+  skip the walk).
+- **Unused variable** -- same function, per `let`: fires unless the
+  name is referenced in ANY later statement in the same block (via
+  `stmt_mentions_var`) or starts with `_`. The load-bearing design
+  question was whether this would false-positive on this language's
+  own idiomatic RAII pattern (`let g = mutex_lock(x); ...` held only
+  for its scope-exit Drop) -- confirmed clean against the full
+  1049-file corpus: `stmt_mentions_var` already treats a `ref`/
+  `mut ref` call ARGUMENT as a "use", which covers `guard_set(ref g,
+  ...)` and similar.
+- **Unused parameter** -- same shape, per-function, in
+  `check_style_warnings` (the entry point). Exempts `extern "C" fn`
+  declarations entirely (no body at all -- every param would
+  otherwise be flagged; confirmed as a real false positive against
+  `ffi.vani`).
+- **Identical if/else branches** -- separate function in `lib.rs`
+  (`detect_identical_if_else_branches`), NOT `checker.rs`, since it
+  needs the raw source text (no pre-existing span-insensitive Stmt/
+  Expr equality existed to build a proper AST comparison on, and
+  building one just for this check wasn't worth it): compares each
+  branch's whitespace-normalized source slice.
+
+**Two real bugs found and fixed while validating against the
+corpus** (the same "implement -> run full corpus -> fix conflicts"
+workflow the to/downto warning used):
+1. `expr_mentions_var`'s `ExprKind::Call` arm only checked the
+   call's ARGS, never the callee NAME itself -- `let add3 = fn(x)
+   {...}; add3(5);` looked "unused" since only `add3(5)`'s argument
+   (`5`) was checked, not the fact that `add3` is the thing being
+   called. Fixed: `callee_name == name || args.iter().any(...)`.
+   Safe change -- strictly more conservative (adds true results,
+   never removes one), so `stmt_mentions_var`'s original "fusion
+   pass" caller (confirm a binding isn't referenced before eliding
+   it) can only become MORE correct, never less.
+2. Both new checks originally ran on the FULLY-desugared program
+   (after `flatten_modules_in_program`/`lambda_lift_program`), which
+   broke on any closure that CAPTURES an outer variable -- lambda-
+   lifting rewrites a captured closure's call site in a way that no
+   longer textually/structurally matches what the user wrote,
+   independent of bug 1 above (a capture-free closure was fixed by
+   bug 1's fix alone; a capturing one needed this second fix too).
+   Fixed by moving BOTH checks (the checker.rs ones AND lib.rs's
+   identical-branches, via a `program.clone()` snapshot taken before
+   `checker_fn` consumes the original) to run on the freshly-parsed,
+   pre-desugar AST instead -- module-flattening/lambda-lifting can't
+   affect a LOCAL variable/parameter's own self-reference anyway, so
+   checking the pre-desugar shape is strictly more correct.
+
+Found via a genuinely useful validation technique: ran `vanic check`
+across the full 1049-file example corpus, counted total warnings
+(283 initially), then SAMPLED a cross-section (not just the first
+few alphabetically) and manually verified each was a true positive.
+Both bugs above were caught this way -- neither would have been
+obvious from a hand-written unit test alone. Final count: 233
+warnings across the corpus (200 unused-variable, 23 identical-
+branches, 9 unused-parameter, 1 to/downto), all spot-checked true
+positives (mostly deliberate "prove this compiles/drops correctly"
+example snippets that were never meant to "use" their bindings
+beyond that) -- NOT fixed/underscore-prefixed as part of this work;
+that's a separate, optional example-corpus cleanup, not a
+requirement of shipping the warnings correctly.
+
+**`--deny-warnings` flag**: requested directly, mid-implementation.
+CI-style strictness (rustc `-D warnings` / gcc `-Werror` equivalent)
+-- any warning becomes a build failure, rendered with an "error:"
+label instead of "warning:". Implemented as a global pre-scan in
+`main.rs`'s `run()` (removed from `argv` before any subcommand-
+specific parser sees it, sets `VANIC_DENY_WARNINGS=1`) rather than
+threaded through every individual arg-parsing function -- matches
+this codebase's existing convention for `--no-verify`/`--smt-debug`.
+Consulted by `compile_path_or_report` (the shared choke point for
+`build`/`run`/`emit`/`emit-c`) and by `check`'s own warning-handling
+(a separate code path).
+
+Regression tests: 12 new `src/lib.rs` unit tests (positive + negative
+cases for all 4 warnings, both false-positive-fix regressions
+codified explicitly, the extern-fn exemption, the underscore-prefix
+suppression). 2 new `tests/run_end_to_end.rs` CLI-level e2e tests
+(the identical-branches/to-downto combination test from the to/downto
+entry above already covers some of this; a new dedicated
+`deny_warnings_flag_turns_a_warning_into_a_build_failure` test covers
+`check`/`run`, both with and without the flag, both a warning-only
+file and a clean file).
+
+Docs: `tutorials/src/beginner/00_cli_reference.md` gained a
+`--deny-warnings` row in the flags table, a `VANIC_DENY_WARNINGS=1`
+row in the env-var table, and a new "Compiler warnings" section
+listing all 4 categories + the underscore-prefix suppression
+convention.
+
+Verification: 2957/2957 lib tests pass (2945 + 12 new, 0
+regressions); 257/257 e2e tests pass (256 + 1 new, 0 regressions);
+1049-file example corpus check matches the known 18-file baseline
+exactly (identical file set -- these are warnings, not errors, so
+`vanic check`'s exit code is unaffected regardless of warning count);
+mdBook rebuilds clean (same 7 known pre-existing warnings).
+
+## Arc 8 v3.2 -- built-in-shaped async executor + leak audit (2026-08-14)
+
+User asked (after a question about whether the timed tic-tac-toe
+example uses a detached thread) to build "real async -- a Future
+that can suspend and resume, non-blocking I/O", make tasks
+cancellable (both blocking-thread `task` and non-blocking `async fn`
+kinds), with no leaks, and update tutorials for done vs. TODO work.
+
+**Correction to the initial framing**: vāṇी already had genuine
+suspend/resume async, not just synchronous `async fn`/`await` sugar
+-- the Arc 8 v3.1 compiler-driven state-machine transform (`Task__
+<fn>` + `__poll_<fn>`, triggered by `io_*_async` calls in an async
+fn body) is real, epoll-backed, non-blocking, and already handles
+control flow, non-i64/affine locals across suspend points, `ref
+Struct` params, and `CancelToken` + A4.4 auto-injected cancel guards
+(when the fn returns bare `i64`). What was actually missing, per the
+compiler's own tutorial (`01a_async_primer.md`): a built-in executor
+-- every async program hand-writes its own `while true { poll;
+epoll_wait_one; }` driver loop.
+
+### Phase A -- leak audit (no bugs found)
+
+Three ASan/LeakSanitizer-verified repros (C backend, `-fsanitize=
+address,undefined`), each asserting zero leaked bytes on exit:
+1. A `Task__<fn>` holding an owned `Vec<i64>` local, cancelled via
+   `CancelToken` at three points: before the first suspend (heap
+   allocated, then abandoned), after running to completion, and
+   MID-FLIGHT between two suspend points (state_tag already
+   advanced, the owned field already holds real heap data, THEN
+   cancelled).
+2. Same shape with an `OwnedStr` local instead of `Vec<i64>` --
+   `OwnedStr` specifically chosen since it already had 3 distinct
+   escape-vector bugs this project (BUG-153/157/159), a plausible
+   place for a 4th.
+3. `select`'s documented "losing branches are abandoned" caveat
+   (`01_async.md`'s own text) -- built a repro with a losing
+   Task-wrapped `select` arm holding a real heap-owning local;
+   confirmed the Task is still an ordinary owned local (normal
+   scope-exit drop applies regardless of which arm won) and the
+   caller retains direct access to the raw fd to close it itself.
+
+**Result: all three ASan-clean, zero leaks.** The existing v3.1
+Task-struct drop machinery + CancelToken auto-plumbing is already
+leak-safe for every shape tested. No fix needed here -- the finding
+itself (verified, not assumed) is the deliverable. Locked in as
+permanent regression coverage via the `fetch_c` cancellation path in
+`examples/language/english/async_executor.vani` (see Phase B below)
+and its e2e test.
+
+### Real bug found + fixed: LLVM `while`-loop metadata dropped inside outlined `task`/`parallel for` bodies
+
+Building the executor prototype on the LLVM backend hit "lli: error:
+use of undefined metadata '!6'" -- a real, pre-existing, previously
+undiscovered compiler bug, unrelated to the executor itself (traced
+via bisection to a plain `task NAME { while ... }` block combined
+with at least one other `while` loop elsewhere in the same program;
+minimal repros with only ONE such combination didn't reproduce it
+because those small programs happened to route through the SSA-LLVM
+path instead, which doesn't have this vectorize-metadata mechanism
+at all -- the executor's `interface`/`Box<dyn Iface>`/v3.1-Task
+shapes force the TREE-LLVM path, `backend_llvm.rs`, where the bug
+actually lives).
+
+Root cause: `backend_llvm.rs`'s `TypedStmt::While` handler
+unconditionally attaches an `!llvm.loop !N` back-edge annotation
+(the tree-LLVM auto-vectorize hint) to every non-terminated while
+loop, allocating IDs from a module-global `AtomicU32` counter and
+writing the corresponding `!N = ...` metadata DEFINITIONS into the
+current `FnCtx`'s `loop_meta_buf`. That buffer is only ever flushed
+once, in `emit_function`, right after a top-level function's closing
+`}`. `emit_task_via_pthread` (outlines a `task NAME { ... }` block's
+body into `@intent_task_<prefix>_<id>`) and `emit_parallel_for_via_
+gomp` (outlines a `parallel for` body) each construct a FRESH,
+separate `FnCtx` to emit that outlined body, and correctly propagate
+`deferred_functions` (the outlined fn's own text) and `next_outline`
+(the id counter) back to the parent -- but never propagated
+`loop_meta_buf`. A `while` loop inside the outlined body still wrote
+its `!llvm.loop !N` REFERENCE into the outlined fn's text (via the
+normal `emit_stmt` call), but the matching DEFINITION lived only in
+the now-discarded child `FnCtx`, producing a dangling metadata
+reference `lli`/`llc` reject outright. 100% reproducible on ANY
+program with a `while` loop inside a `task { ... }` block or a
+`parallel for` body, PROVIDED the program also contains at least one
+other while loop (id 0 alone parses leniently; id ≥ 3 with a gap
+does not) AND routes through tree-LLVM rather than SSA-LLVM.
+
+**Fixed**: both call sites now propagate `outlined_ctx.loop_meta_buf`
+into `ctx.loop_meta_buf`, right alongside the existing
+`deferred_functions`/`next_outline` propagation.
+
+Regression test: `task_block_while_loop_llvm_metadata_ids_are_all_
+defined` (`src/lib.rs`) -- a general structural invariant check
+(every `!llvm.loop !N` reference in the emitted IR has a matching
+`!N = ` definition line), not just a re-run of the one repro, so any
+FUTURE outlining call site that grows a similar per-`FnCtx` buffer
+without propagating it gets caught the same way.
+
+### Phase B -- `Pollable`/`Executor`: a copy-paste pattern, NOT a prelude injection
+
+First attempt: inject `interface Pollable { fn poll(self: mut ref
+Self) -> i64; }` + `struct Executor { ep: i64, tasks: Vec<Box<dyn
+Pollable>> }` + `executor_new`/`executor_spawn`/`executor_run_to_
+completion` into the compiler's universal PRELUDE (`src/lib.rs`),
+the same mechanism `CancelToken`/`Future`/`Poll` already use.
+**Reverted the same session** -- a full `cargo test --release
+--workspace` run caught dozens of SSA-C/SSA-LLVM unit-test failures,
+including on completely unrelated, trivial programs (`fn main() ->
+i64 { return 42; }`). Root cause: `Box<dyn Pollable>` is an
+SSA-unsupported shape, and the prelude is injected into EVERY
+compiled program unconditionally -- so every program now carried an
+unsupported shape even when it never referenced Executor at all.
+Several SSA-backend unit tests call `lower_program`/`ssa_backend_c::
+emit`/`ssa_backend_llvm::emit` directly (bypassing the real CLI's
+safe tree-backend fallback, `emit_c_via_ssa`/`emit_llvm_via_ssa` in
+`main.rs`) and `.expect()` success unconditionally.
+
+Shipped instead as `examples/language/english/async_executor.vani`,
+a complete, tested, ~15-line copy-paste-able `Pollable`/`Executor`
+pattern -- zero blast radius on any program that doesn't use it,
+since nothing is injected. Demonstrates:
+- Two DIFFERENT `Task__<fn>` shapes (`fetch_a`, `fetch_b`) driven
+  through the SAME executor via `Vec<Box<dyn Pollable>>` dynamic
+  dispatch (heterogeneous tasks, the actual reason a built-in-shaped
+  executor is worth having over a single-task driver loop).
+- A third task (`fetch_c`, with a `CancelToken` param) cancelled
+  mid-flight -- polled once by hand (guaranteed past its first
+  suspend), cancelled, THEN handed to the executor already carrying
+  live heap state, exercising the exact shape Phase A's leak audit
+  proved ASan-clean.
+- `executor_run_to_completion` returns a count (tasks accounted for,
+  completed or cancelled) rather than trying to collect per-task
+  typed results -- a heterogeneous `Vec<Box<dyn Pollable>>` can't
+  carry distinct result types back out through one uniform `i64`
+  return; each task's own `poll()` body is responsible for
+  surfacing its actual result (print it, write to a shared `Mutex`,
+  etc.), same as any other `dyn`-dispatched call in v1.
+
+Verified: `vanic check` ok, runs correctly on BOTH backends (C and
+LLVM, Linux), ASan/UBSan clean (0 leaks, ran under `-fsanitize=
+address,undefined`), new e2e test `async_executor_example_drives_
+heterogeneous_and_cancelled_tasks_on_both_backends`
+(`tests/run_end_to_end.rs`), 1050-file example corpus check (1049 +
+this new file) matches the known 18-file non-ok baseline exactly.
+
+**Still boilerplate, not fully automatic**: the user must write one
+`implement Pollable for Task__<fn> { fn poll(self: mut ref Task__
+<fn>) -> i64 { return __poll_<fn>(self); } }` block per async fn
+they want to run through the executor. Auto-generating this in the
+v3.1 synthesizer (mirroring how `Task__<fn>`/`__poll_<fn>` are
+already synthesized and queued for end-of-parse flush) is a small,
+well-scoped follow-up, not started this session.
+
+**Verification (whole session)**: 2958/2958 lib tests pass (2957 +
+`task_block_while_loop_llvm_metadata_ids_are_all_defined`, 0
+regressions); 258/258 e2e tests pass (257 +
+`async_executor_example_...`, 0 regressions); 1050-file example
+corpus check matches the known 18-file baseline exactly.
+
+### Still open, not started this session
+
+- **Phase C** (non-blocking task cancellation robustness beyond what
+  Phase A already proved clean) -- effectively closed by the leak
+  audit finding nothing to fix; `Executor` + `CancelToken` compose
+  correctly today per `async_executor.vani`'s `fetch_c`.
+- **Phase D -- cancellable BLOCKING `task` threads.** No mechanism
+  exists today, in any form. `detach()` (shipped 2026-08-13) removes
+  the "must `join`" constraint but explicitly does not make a thread
+  stuck in a blocking syscall (`tcp_accept`, `tcp_recv`, `stdin_
+  read_line`) interruptible. Design (not started): reuse the
+  existing `intent_task_handle { intent_thread_t thread; void* ctx;
+  }` (`backend_c.rs:8009`, already tracks the live `pthread_t` per
+  spawned task) to add a `.cancel()` call -- sets a shared
+  cancellation flag AND sends a reserved real-time signal (no-op
+  handler installed once at runtime init) via `pthread_kill` to
+  force an in-flight blocking syscall to return `EINTR`; blocking
+  builtins get an EINTR-aware wrapper that checks the cancellation
+  flag on EINTR and unwinds through the function's normal RAII exit
+  path instead of retrying. Deliberately NOT `pthread_cancel` (too
+  coarse -- leaks locks/heap held at the interruption point,
+  discouraged even in C). Windows needs a materially different
+  mechanism (`CancelSynchronousIo` or an overlapped-I/O rewrite) --
+  scope that out to a later pass, same precedent as L24/L25 in
+  `docs/v1_limitations.md`.
+- Auto-generating `implement Pollable for Task__<fn>` in the v3.1
+  synthesizer (see Phase B note above).
+- Tutorial updates for the Executor pattern + this session's
+  findings (in progress).
+
+## Phase D -- cancellable blocking `task` threads, SHIPPED (2026-08-14)
+
+The other half of the async/cancellation ask: no mechanism existed
+to interrupt a `task` thread stuck inside a REAL blocking syscall
+(`tcp_accept`, `tcp_recv`) -- `detach()` (2026-08-13) removed the
+"must join" constraint but explicitly did not make the thread
+itself interruptible. New `cancel <name>;` statement closes this
+gap, English-only keyword for now (matches `detach`'s own initial
+scope; no lexer-keyword-table-parity requirement since `TokenKind::
+Detach` itself has never had non-English spellings either).
+
+**Semantics**: unlike `join`/`detach`, `cancel` does NOT consume the
+affine `Task`/`Task<R>` handle -- a `join`/`detach` is still required
+afterward. Sets a shared flag AND (POSIX) sends a reserved signal
+(`pthread_kill`) to force an in-flight blocking syscall to return
+`EINTR` immediately rather than only being noticed on the thread's
+NEXT blocking call. Idempotent -- cancelling an already-cancelled
+live task is harmless. Rejected: cancelling an unknown name, a
+non-Task binding, an already-consumed task ("nothing left to
+cancel"), or inside a `pure fn`/`parallel for` body (same reasoning
+as `detach` -- signaling another thread is a side effect outside the
+pure call's sequential model).
+
+**Mechanism**: `intent_task_handle` gained a third field, a `cancel_
+flag` pointer (a separately malloc'd, zero-initialized byte/int).
+The spawned thread publishes its OWN flag pointer into a per-thread
+global (`__intent_tls_cancel_flag` in C, `@__intent_tls_cancel_flag`
+in LLVM) at the very top of its outlined trampoline -- any blocking
+builtin can then check "was MY thread cancelled?" from anywhere in
+that thread's call stack without a parameter threaded through every
+intermediate call, the same shape as `errno`. `intent_tcp_accept`/
+`intent_tcp_recv` (POSIX) now retry-loop on `EINTR` but check the
+flag first and return a new `-2` "cancelled" sentinel instead of
+retrying when it's set -- distinct from `-1` (real error) and any
+valid non-negative fd/byte-count, a convention entirely local to
+these two functions' own contract (matches the tic-tac-toe example's
+own precedent of function-local sentinel conventions).
+
+**A real bug found via `strace`, not assumed**: the LLVM backend's
+first implementation used plain `signal()` to install the handler.
+On this glibc/Linux target that installs it WITH `SA_RESTART` set
+(confirmed via `strace -f -e trace=rt_sigaction`, not read from
+documentation -- glibc's actual default behavior contradicted the
+assumption baked into the first comment), so the kernel silently
+auto-restarted every interrupted `accept()`/`recv()` forever instead
+of ever returning EINTR -- a 100% reproducible hang on the LLVM
+backend specifically (the C backend's `sigaction()` with explicit
+`sa_flags = 0` was correct from the start, also confirmed via
+`strace`, not assumed). Fixed by calling `siginterrupt(sig, 1)`
+right after `signal()` to explicitly clear `SA_RESTART` -- a POSIX
+function marked "obsolete" in favor of `sigaction`, chosen for its
+trivial 2-int-argument C ABI, avoiding hand-encoding `struct
+sigaction`'s platform-specific layout in raw LLVM IR.
+
+**A second real bug, found by the full test suite catching 5
+regressions**: `%intent_task_handle`'s new third field shifted the
+struct size on the LLVM side, and `emit_task_spawn_call` (the
+EXPRESSION-form `let t = task callee(args);` / `Task<R>` path,
+separate from the block-form `task NAME { .. }` path) both (a) never
+initialized the new field at all (uninitialized stack garbage read
+back and passed to `free()` -- a real crash, `cfree` inside `lli`'s
+ORC JIT) and (b) after being given a cancel-flag field appended to
+its OWN ctx struct (which can't be prepended like the block-form's
+is, since offset 0 there is load-bearing as the join site's result
+slot), `task_spawn_call_ctx_size`'s malloc-size formula was never
+updated for the extra field -- an 8-byte heap buffer overflow,
+manifesting as either the same crash or, nondeterministically, a
+plain hang depending on what the overflow happened to corrupt.
+Fixed: cancel-flag allocation + thread-local publish added to
+`emit_task_spawn_call` (LLVM) and its C-backend equivalent, `task_
+spawn_call_ctx_size` corrected, `TypedExprKind::TaskJoinExpr`
+(expression-form join) now also frees the cancel flag. Verified
+clean via `valgrind --leak-check=full` (0 errors, all heap blocks
+freed) on the LLVM AOT path and ASan on the C path, not just
+re-running the example.
+
+**Windows**: the flag is still set (a CPU-bound thread polling it
+cooperatively still stops), and `cancel` additionally calls
+`CancelSynchronousIo` on the task's thread HANDLE to abort a pending
+blocking Winsock call (`intent_tcp_accept`/`intent_tcp_recv`'s
+Windows arms check for `WSA_OPERATION_ABORTED`). **UNTESTED on real
+Windows hardware** -- no host available this session; implemented
+directly from the documented `CancelSynchronousIo` contract, same
+precedent as this project's existing "verification deferred" items
+(`docs/v1_limitations.md` L10 macOS). **macOS shares the POSIX
+signal path unchanged** -- pthread/sigaction/pthread_kill are
+standard BSD/POSIX APIs there too, not a separate code path from the
+Linux one this session verified; also untested on real hardware.
+
+Shipped: `examples/language/english/cancel_blocking_task.vani`
+(cancels a task genuinely blocked in `tcp_accept`, verified via
+`strace` that no `SA_RESTART` survives on either backend), 8 new
+`src/lib.rs` checker unit tests, 1 new `tests/run_end_to_end.rs` e2e
+test (with an explicit wall-clock timeout + kill, since a regression
+here manifests as a HANG, not a clean failure -- silence would
+otherwise look identical to "still running").
+
+**Verification**: 2966/2966 lib tests pass (2958 + 8 new, 0
+regressions); 259/259 e2e tests pass (258 + 1 new, 0 regressions);
+1051-file example corpus check (1050 + 1 new file) matches the known
+18-file baseline exactly; ASan/UBSan clean on the C backend;
+`valgrind --leak-check=full` clean (0 errors) on the LLVM AOT path.
+
+**Still open**: Windows/macOS unverified on real hardware (see
+above). `stdin_read_line`/`file_read_line` cancellation (the
+ORIGINAL tic-tac-toe motivating scenario) intentionally NOT wired up
+this pass -- buffered stdio's EINTR interaction is murkier than raw
+socket syscalls (unclear whether glibc's `fgetc` reliably surfaces
+EINTR at all, vs. silently retrying internally), and threading a
+"was this cancelled" signal back through `stdin_read_line`'s
+existing `OwnedStr`-return contract needs its own design pass rather
+than reusing the `-2`-sentinel convention `tcp_accept`/`tcp_recv`
+could adopt for free. `Pollable`/`Executor` (Phase B) integration
+with blocking-task cancellation not attempted -- they're
+orthogonal mechanisms (non-blocking `Task__<fn>` vs. blocking OS
+threads) with no natural composition point.
+
+## Phase F -- 2nd tic-tac-toe implementation over real TCP, SHIPPED (2026-08-14)
+
+Per the user's own follow-up plan ("we will revisit tic tac toe with
+different implementation if it helps with any changes to the
+compiler"): a second, deliberately different implementation of the
+timed tic-tac-toe idea, applying `task` + `cancel` to a domain
+`cancel` actually covers, since Advanced 3c's `stdin`-based game
+explicitly can't (see that file's own "Why not `task` + `cancel`
+here" section -- `cancel` doesn't reach `stdin_read_line`).
+
+Shipped: `examples/language/english/tic_tac_toe_networked_timed.vani`
+-- two players connect over real loopback TCP (two `task`-spawned
+bot clients keep the example self-contained). Most turns block
+directly on `tcp_recv` with no timeout at all; only the ONE turn
+this file deliberately stalls spawns a `task`, polls a `Mutex<i64>`
+the task publishes into, and issues a real `cancel <name>;` when the
+budget expires, interrupting the still-blocked `tcp_recv`. Verified
+via `strace` (not assumed): `tgkill(..., SIGUSR1)` followed by the
+blocked `recvfrom` returning `ERESTARTSYS` -- genuine EINTR-driven
+interruption, same verification standard as Phase D's own
+`cancel_blocking_task.vani`.
+
+**Two real design bugs found and fixed, both by actually running the
+example repeatedly rather than reading the code once:**
+
+1. An early draft raced a wall-clock budget against EVERY turn's
+   reply, not just the stalled one. Under real CPU contention on the
+   dev machine (a background `localfuzz` model-serving process
+   pinning most of a core), a perfectly healthy reply from a peer
+   that answered immediately could still miss an aggressive budget
+   purely from `pthread_create`/scheduling latency -- a spurious
+   forfeit with nothing actually wrong. Root-caused by tracing a
+   minimal repro (`Mutex<i64>` created fresh per loop iteration, task
+   spawned from the same call site each time, `worker`/`round`
+   lifecycle prints with real millisecond timestamps via a
+   `stdbuf -oL` + Perl `Time::HiRes` harness, since `vanic run`
+   buffers stdout until process exit) down to "this is thread-
+   scheduling variance under load, not a mutex or task-spawn bug" --
+   confirmed by reproducing the SAME 6+ second scheduling delay with
+   zero `Mutex` involvement at all (`t2` spawned while `t1` was still
+   running, joined immediately, no lock anywhere). Fixed at the
+   design level, not the compiler level: only the turn that might
+   genuinely never get a reply needs the bounded-poll-plus-cancel
+   machinery; every other turn just blocks normally, immune to this
+   failure mode entirely.
+2. The stalling bot originally closed its socket right after going
+   silent. That unblocks the server's `tcp_recv` too -- but via a
+   normal EOF (0 bytes read), which happened to decode to the same
+   `-1` sentinel this file uses for "cancelled". The forfeit
+   assertion kept passing for the WRONG reason, with `cancel`/EINTR
+   never actually firing -- caught only by adding the `strace` trace
+   in point 1 above and noticing the blocked `tcp_recv` returned via
+   plain EOF, not a signal. Fixed by having the stalling bot stay
+   connected but silent, so `cancel` is the only thing that can
+   unblock the server.
+
+**A real, previously-undocumented v1 gap surfaced (not fixed) building
+this**: `tcp_recv`'s received bytes are not inspectable from vani
+code at all -- no byte-accessor exists (`src/checker.rs`'s own doc
+comment for `tcp_recv` references a `tcp_buf_byte_at` builtin that
+was never actually implemented). Worked around by encoding the move
+as MESSAGE LENGTH (reply with a filler string of length `move + 1`)
+rather than content. Logged as `docs/v1_limitations.md` **L30**.
+
+Also confirmed NOT a fit for this file: the `Pollable`/`Executor`
+pattern (Arc 8 v3.2). Executor's value is driving several
+concurrently in-flight async tasks; this game is strictly turn-based
+-- exactly one blocking call outstanding at a time -- so there's
+nothing for an Executor to round-robin between. Documented directly
+in the example's own header comment rather than silently omitted, so
+a future reader doesn't wonder why it's missing.
+
+**Verification**: 2966/2966 lib tests pass (0 new -- no new checker/
+compiler surface, this is example + e2e-test work only); 260/260 e2e
+tests pass (259 + 1 new, 0 regressions); example corpus check
+(`vanic check examples`) shows the new file as `ok:` with the same
+pre-existing 17-file known-bad baseline (unrelated `xfail_*`/`mix_*`
+edge-case fixtures + one embedded-gated file) and no new failures;
+`valgrind --leak-check=full` clean (0 errors, 122 allocs / 122 frees,
+0 bytes leaked) on the LLVM AOT build; ASan/UBSan clean (3 repeated
+runs) on the C backend; 10/10 repeated runs clean on both backends
+after the fixes above (5/5 each), where the pre-fix version had
+failed roughly half the time under this session's load conditions.
+Tutorial coverage: new "A 2nd implementation: `task` + `cancel` over
+real TCP" section in Advanced 3c, cross-linking Advanced 1's
+Executor section for the "why not Executor" explanation.
+
+**Still open**: the ORIGINAL stdin-based tic-tac-toe problem
+(Advanced 3c's `tic_tac_toe_timed.vani`) is still unsolved by
+`cancel` and still correctly uses the non-blocking-poll
+(`stdin_ready_within_ms`) approach -- this phase deliberately did not
+attempt a 3rd stdin-cancellation-based implementation, since `cancel`
+still doesn't reach `stdin_read_line` (see L18/the Phase D writeup
+above). `tcp_buf_byte_at` (L30) not implemented.

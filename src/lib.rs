@@ -42,6 +42,21 @@ use diagnostic::Diagnostic;
 /// its signature in scope.
 const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\nenum Poll<T> { Ready(T), Pending }\nenum Future<T> { Ready(T), Pending }\nstruct CancelToken { cancelled: bool }\n";
 
+// 2026-08-14: `Pollable`/`Executor` (the built-in async runtime,
+// see docs/TODO_CURRENT.md) were tried here first and reverted the
+// same session -- injecting them UNCONDITIONALLY into every
+// compiled program (the way CancelToken/Future/Poll already are)
+// broke SSA-path lowering for EVERY program, not just ones using
+// Executor: `Box<dyn Pollable>` is an SSA-unsupported shape, and
+// several SSA-backend unit tests call `lower_program`/`ssa_backend_
+// c::emit`/`ssa_backend_llvm::emit` directly against the full
+// (prelude-augmented) program rather than through the tree-LLVM/
+// tree-C fallback `emit_llvm_via_ssa`/`emit_c_via_ssa` use at the
+// real CLI boundary -- so a shape present in the prelude but never
+// referenced by the user's own code still broke lowering. Shipped
+// instead as an includable library file (see `examples/language/
+// english/lib/executor.vani`) so it's fully opt-in: zero blast
+// radius on any program that doesn't `include` it.
 fn inject_prelude(program: &mut ast::Program) {
     let prelude_tokens = match lexer::lex(PRELUDE) {
         Ok(t) => t,
@@ -98,8 +113,32 @@ fn compile_with(
     if !kosh_boundary_names.is_empty() {
         mark_kosh_boundary_modules_pub(&mut program, kosh_boundary_names);
     }
+    // 2026-08-14: snapshot the program BEFORE `checker_fn` consumes
+    // it -- `check_impl` (inside `checker_fn`) runs `flatten_modules_
+    // in_program`/`lambda_lift_program`, which rewrite closure
+    // definitions and call sites in ways that broke this same
+    // identical-branches check when it read `checked.program` (the
+    // POST-desugar result) instead: a branch containing a captured-
+    // variable closure no longer textually matched its (identical,
+    // pre-desugar) sibling branch. Comparing the pre-desugar shape
+    // is both correct (matches what the user actually wrote) and
+    // matches `checker.rs`'s own style-warning checks, which for the
+    // identical reason now run before those same desugaring passes.
+    let pre_desugar_program = program.clone();
     match checker_fn(program, kosh_boundary_names) {
-        Ok(checked) if parse_errors.is_empty() => Ok(checked),
+        Ok(mut checked) if parse_errors.is_empty() => {
+            // Identical if/else branches. Text-based (not a full
+            // span-insensitive AST comparison) -- there's no
+            // pre-existing span-insensitive Stmt/Expr equality in
+            // this codebase, and building one just for this check
+            // wasn't worth it when the source text is already right
+            // here.
+            checked.warnings.extend(detect_identical_if_else_branches(
+                &pre_desugar_program,
+                source,
+            ));
+            Ok(checked)
+        }
         Ok(_) => Err(parse_errors),
         Err(mut check_errors) => {
             // Surface parse errors first (they likely caused some of the
@@ -109,6 +148,110 @@ fn compile_with(
             Err(all)
         }
     }
+}
+
+/// Warn (Severity::Warning) when an `if`'s `then` and `else` bodies
+/// are textually identical (whitespace-normalized) -- the condition
+/// has no effect on behavior either way. Recurses into every nested
+/// block. Skipped entirely for an `if` with no `else` (nothing to
+/// compare) or an empty `then` (nothing meaningful to flag).
+fn detect_identical_if_else_branches(program: &ast::Program, source: &str) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for function in &program.functions {
+        walk_block_for_identical_branches(&function.body, source, &mut out);
+    }
+    out
+}
+
+fn walk_block_for_identical_branches(
+    body: &[ast::Stmt],
+    source: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    use ast::Stmt as S;
+    for stmt in body {
+        match stmt {
+            S::If { then_body, else_body, span, .. } => {
+                if !then_body.is_empty() && !else_body.is_empty() {
+                    if let (Some(then_text), Some(else_text)) =
+                        (branch_text(then_body, source), branch_text(else_body, source))
+                    {
+                        if then_text == else_text {
+                            out.push(
+                                Diagnostic::new(
+                                    *span,
+                                    "this 'if' has identical 'then' and 'else' branches -- \
+                                     the condition has no effect on behavior"
+                                        .to_string(),
+                                )
+                                .with_elaboration(vec![
+                                    "Both branches execute the exact same code, so \
+                                     whichever way the condition evaluates, the outcome \
+                                     is identical."
+                                        .to_string(),
+                                    "This is often a copy-paste leftover, or a sign one \
+                                     branch was meant to diverge but didn't. If the \
+                                     duplication is intentional (e.g. a placeholder for \
+                                     future divergence), no fix is needed."
+                                        .to_string(),
+                                ])
+                                .as_warning(),
+                            );
+                        }
+                    }
+                }
+                walk_block_for_identical_branches(then_body, source, out);
+                walk_block_for_identical_branches(else_body, source, out);
+            }
+            S::While { body, .. }
+            | S::For { body, .. }
+            | S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. }
+            | S::WhileLet { body, .. } => {
+                walk_block_for_identical_branches(body, source, out);
+            }
+            S::IfLet { then_body, else_body, .. } => {
+                walk_block_for_identical_branches(then_body, source, out);
+                walk_block_for_identical_branches(else_body, source, out);
+            }
+            S::Select { arms, .. } => {
+                for arm in arms {
+                    walk_block_for_identical_branches(&arm.body, source, out);
+                }
+            }
+            S::LetTuple { .. }
+            | S::Let { .. }
+            | S::Return { .. }
+            | S::Assert { .. }
+            | S::Prove { .. }
+            | S::Print { .. }
+            | S::EPrint { .. }
+            | S::PrintBlock { .. }
+            | S::IndexAssign { .. }
+            | S::FieldAssign { .. }
+            | S::Assign { .. }
+            | S::Break { .. }
+            | S::Continue { .. }
+            | S::TaskJoin { .. }
+            | S::Detach { .. }
+            | S::Cancel { .. } => {}
+        }
+    }
+}
+
+/// Whitespace-normalized source text spanning a statement block, or
+/// `None` if the span doesn't land on valid UTF-8 char boundaries
+/// within `source` (defensive -- avoids a slicing panic; should
+/// only matter for a pathological edge case, not normal input).
+fn branch_text(stmts: &[ast::Stmt], source: &str) -> Option<String> {
+    let start = stmts.first()?.span().start;
+    let end = stmts.last()?.span().end;
+    if end <= start {
+        return None;
+    }
+    let slice = source.get(start..end)?;
+    Some(slice.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
 /// Kosh namespacing arc, Phase 3 (2026-07-21, see
@@ -4986,6 +5129,427 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_reverse_to_range_produces_a_warning_not_an_error() {
+        // 2026-08-14: added a diagnostic for `to`/`downto` bounds
+        // that contradict the keyword's direction when both bounds
+        // are compile-time constants. Must be Severity::Warning, NOT
+        // Severity::Error -- `for_loop_reverse_range_compiles` above
+        // (already an existing test) already established that a
+        // backwards `to` range is a LEGAL, silent, zero-iteration
+        // loop (real shipped code depends on this --
+        // `examples/language/english/for_loop_downto.vani`'s
+        // `empty_when_backwards()`), so this diagnostic must not
+        // fail the build.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 5 to 3 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("a backwards 'to' range must still compile (warning, not error)");
+        assert_eq!(
+            checked.warnings.len(),
+            1,
+            "expected exactly one warning, got: {:?}",
+            checked.warnings
+        );
+        assert!(
+            checked.warnings[0].is_warning(),
+            "the to/downto bounds diagnostic must be Severity::Warning, got: {:?}",
+            checked.warnings[0]
+        );
+        assert!(
+            checked.warnings[0].message.contains("never executes")
+                && checked.warnings[0].message.contains("'to' counts UP"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn for_loop_reverse_downto_range_produces_a_warning_not_an_error() {
+        // Companion to the `to` case above, for `downto`.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 downto 5 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("a backwards 'downto' range must still compile (warning, not error)");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("never executes")
+                && checked.warnings[0].message.contains("'downto' counts DOWN"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn for_loop_correct_direction_and_equal_bounds_produce_no_warning() {
+        // Negative cases: a correctly-directed `to`/`downto`, and
+        // equal bounds (a legitimate empty-range edge case, e.g. in
+        // generic code where a length parameter happens to be 0),
+        // must NOT produce a warning.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 5 { n = n + 1; }
+              for i from 5 downto 0 { n = n + 1; }
+              for i from 3 to 3 { n = n + 1; }
+              for i from 3 downto 3 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("correctly-directed / equal-bounds ranges compile");
+        assert!(
+            checked.warnings.is_empty(),
+            "expected no warnings, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn for_loop_runtime_bounds_produce_no_warning() {
+        // A non-constant (runtime-computed) bound can't be judged at
+        // compile time and must not be flagged at all, regardless of
+        // what value it happens to hold at runtime.
+        let source = r#"
+            fn f(lo: i64, hi: i64) -> i64 {
+              let n: i64 = 0;
+              for i from lo to hi { n = n + 1; }
+              return n;
+            }
+            fn main() -> i64 {
+              return f(5, 0);
+            }
+        "#;
+        let checked = compile(source).expect("runtime bounds compile");
+        assert!(
+            checked.warnings.is_empty(),
+            "runtime-computed bounds must not be flagged, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn diagnostic_severity_warning_does_not_fail_check_program_but_error_still_does() {
+        // Direct test of the new Severity mechanism itself (not tied
+        // to the to/downto feature): a Severity::Warning diagnostic
+        // must not appear in check_program's Err path, and a real
+        // Severity::Error (the overwhelming majority of existing
+        // diagnostics) must still fail compilation exactly as before.
+        let good = r#"
+            fn main() -> i64 {
+              for i from 5 to 3 { }
+              return 0;
+            }
+        "#;
+        assert!(compile(good).is_ok(), "warning-only diagnostics must not fail compilation");
+
+        let bad = r#"
+            fn main() -> i64 {
+              let x: i64 = "not an int";
+              return 0;
+            }
+        "#;
+        assert!(compile(bad).is_err(), "a real type error must still fail compilation");
+    }
+
+    #[test]
+    fn warning_diagnostic_renders_with_warning_label_not_error() {
+        // The rendered CLI text must say "warning:", not "error:",
+        // for a Severity::Warning diagnostic -- confirms
+        // format_diagnostics picks the label from the diagnostic's
+        // own severity rather than hardcoding "error" for everything.
+        let source = r#"
+            fn main() -> i64 {
+              for i from 5 to 3 { }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles with a warning");
+        assert_eq!(checked.warnings.len(), 1);
+        let rendered = crate::diagnostic::format_diagnostics(
+            "test.vani", source, &checked.warnings,
+        );
+        assert!(
+            rendered.contains(": warning: "),
+            "expected a 'warning:' label in the rendered output, got:\n{}",
+            rendered
+        );
+        assert!(
+            !rendered.contains(": error: "),
+            "must not render a Severity::Warning diagnostic with an 'error:' label, got:\n{}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn self_assignment_produces_a_warning() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              x = x;
+              return x;
+            }
+        "#;
+        let checked = compile(source).expect("self-assignment must still compile (warning, not error)");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("self-assignment") && checked.warnings[0].message.contains("has no effect"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn assignment_of_a_different_variable_produces_no_warning() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              let y: i64 = 6;
+              x = y;
+              return x;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(checked.warnings.is_empty(), "expected no warnings, got: {:?}", checked.warnings);
+    }
+
+    #[test]
+    fn self_referential_update_is_not_flagged_as_self_assignment() {
+        // `x = x + 1;` reads AND writes x -- not a no-op, must not
+        // be flagged (the self-assignment check only fires on a
+        // bare `x = x;`, not any expression that happens to mention
+        // x on both sides).
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              x = x + 1;
+              return x;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(checked.warnings.is_empty(), "expected no warnings, got: {:?}", checked.warnings);
+    }
+
+    #[test]
+    fn unused_variable_produces_a_warning_underscore_prefix_silences_it() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles with a warning");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("unused variable 'x'"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+
+        let silenced_source = r#"
+            fn main() -> i64 {
+              let _x: i64 = 5;
+              return 0;
+            }
+        "#;
+        let silenced = compile(silenced_source).expect("compiles");
+        assert!(
+            silenced.warnings.is_empty(),
+            "an underscore-prefixed name must silence the warning, got: {:?}",
+            silenced.warnings
+        );
+    }
+
+    #[test]
+    fn variable_used_only_as_a_ref_or_mut_ref_argument_is_not_flagged_unused() {
+        // The load-bearing RAII case this warning had to get right:
+        // a lock guard held only for its scope-exit Drop, but still
+        // passed BY REFERENCE to another call (guard_set), must
+        // count as "used" -- this is exactly the shape
+        // barrier_sensor_rendezvous.vani / concurrent_pipeline_
+        // dashboard.vani use throughout.
+        let source = r#"
+            struct Counter { value: i64 }
+            fn main() -> i64 {
+              let m: Mutex<Counter> = mutex_new(Counter { value: 0 });
+              let g: Guard<Counter> = mutex_lock(ref m);
+              guard_set(ref g, Counter { value: 1 });
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(
+            checked.warnings.is_empty(),
+            "a guard passed by ref to guard_set must not be flagged unused, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn closure_called_by_name_is_not_flagged_unused() {
+        // Regression for a real bug found while implementing this
+        // check: `expr_mentions_var`'s `ExprKind::Call` arm only
+        // checked the call's ARGS, not the callee name itself, so
+        // `let add3 = fn(x){...}; add3(5);` looked "unused" (the
+        // call site never registered as a reference to `add3`).
+        let source = r#"
+            fn main() -> i64 {
+              let add3 = fn(x: i64) -> i64 { return x + 3; };
+              return add3(5);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(
+            checked.warnings.is_empty(),
+            "a closure called by name must not be flagged unused, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn captured_closure_called_by_name_is_not_flagged_unused() {
+        // Companion to the above for a closure that CAPTURES an
+        // outer variable -- this shape is rewritten differently by
+        // lambda-lifting than a capture-free closure is, and was a
+        // SEPARATE false positive (fixed by running the style-
+        // warning checks before module-flattening/lambda-lifting
+        // instead of after).
+        let source = r#"
+            struct N { v: i64 }
+            fn main() -> i64 {
+              let n: N = N { v: 10 };
+              let base: i64 = n.v;
+              let f = fn(x: i64) -> i64 { return x + base; };
+              return f(5);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(
+            checked.warnings.is_empty(),
+            "a captured closure called by name must not be flagged unused, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn unused_parameter_produces_a_warning_underscore_prefix_silences_it() {
+        let source = r#"
+            fn f(x: i64) -> i64 {
+              return 0;
+            }
+            fn main() -> i64 {
+              return f(1);
+            }
+        "#;
+        let checked = compile(source).expect("compiles with a warning");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("unused parameter 'x'"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+
+        let silenced_source = r#"
+            fn f(_x: i64) -> i64 {
+              return 0;
+            }
+            fn main() -> i64 {
+              return f(1);
+            }
+        "#;
+        let silenced = compile(silenced_source).expect("compiles");
+        assert!(silenced.warnings.is_empty(), "expected no warnings, got: {:?}", silenced.warnings);
+    }
+
+    #[test]
+    fn extern_fn_parameters_are_never_flagged_unused() {
+        // `extern "C" fn` declarations have no body -- an empty body
+        // trivially "never mentions" any parameter, so without an
+        // explicit exemption every FFI declaration's params would
+        // be flagged. Confirmed as a real false positive against
+        // examples/language/english/ffi.vani.
+        let source = r#"
+            extern "C" fn atoi(x: Str) -> i32;
+            fn main() -> i64 {
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(
+            checked.warnings.is_empty(),
+            "extern fn params must never be flagged unused, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn identical_if_else_branches_produce_a_warning() {
+        let source = r#"
+            fn main() -> i64 {
+              let c: bool = true;
+              if c {
+                print "hello";
+                print "world";
+              } else {
+                print "hello";
+                print "world";
+              }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles with a warning");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("identical") && checked.warnings[0].message.contains("no effect"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn different_if_else_branches_produce_no_warning() {
+        let source = r#"
+            fn main() -> i64 {
+              let c: bool = true;
+              if c {
+                print "hello";
+              } else {
+                print "world";
+              }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(checked.warnings.is_empty(), "expected no warnings, got: {:?}", checked.warnings);
+    }
+
+    #[test]
+    fn if_with_no_else_produces_no_identical_branch_warning() {
+        let source = r#"
+            fn main() -> i64 {
+              let c: bool = true;
+              if c {
+                print "hello";
+              }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        assert!(checked.warnings.is_empty(), "expected no warnings, got: {:?}", checked.warnings);
+    }
+
+    #[test]
     fn for_loop_downto_rejected_on_parallel_for() {
         // `parallel for ... downto ...` is out of scope for now --
         // the parser rejects it with a clear message rather than
@@ -5538,6 +6102,158 @@ mod tests {
         assert!(
             err.iter().any(|d| d.message.contains("cannot use `detach`")),
             "expected a pure-context 'cannot use detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_does_not_consume_the_task_still_needs_join() {
+        // Phase D (2026-08-14): unlike `join`/`detach`, `cancel`
+        // does NOT satisfy the affine "every task is consumed
+        // exactly once" rule on its own -- a following `join` (or
+        // `detach`) is still required.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              let r: i64 = join t;
+              return r;
+            }
+        "#;
+        compile(source).expect("cancel followed by join should compile");
+    }
+
+    #[test]
+    fn cancel_alone_without_join_or_detach_still_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              return 0;
+            }
+        "#;
+        let err = compile(source)
+            .expect_err("cancel alone (no following join/detach) should still be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("never consumed by `join t` or `detach t`")),
+            "expected a 'never consumed by join or detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_after_join_rejected() {
+        // Nothing left to signal once the task has already been
+        // consumed.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              let r: i64 = join t;
+              cancel t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("cancel after join should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("nothing left to cancel")),
+            "expected a 'nothing left to cancel' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_after_detach_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              cancel t;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancel after detach should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("nothing left to cancel")),
+            "expected a 'nothing left to cancel' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_twice_on_same_still_live_task_is_allowed() {
+        // Unlike join/detach, cancel is idempotent at the checker
+        // level -- calling it more than once on a still-live task
+        // is harmless (the runtime flag is just set again).
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              cancel t;
+              join t;
+              return 0;
+            }
+        "#;
+        compile(source).expect("cancelling a still-live task twice should compile");
+    }
+
+    #[test]
+    fn cancel_unknown_name_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              cancel nonexistent;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancelling an unknown name should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("no task named")),
+            "expected a 'no task named' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_non_task_binding_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              cancel x;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancelling a non-Task binding should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("expected Task or Task<R>")),
+            "expected a type-mismatch rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_inside_pure_fn_rejected() {
+        // Same reasoning as `detach` -- signaling another thread is
+        // a side effect outside the pure call's own sequential model.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            pure fn spawn_and_cancel() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              detach t;
+              return 0;
+            }
+            fn main() -> i64 {
+              return spawn_and_cancel();
+            }
+        "#;
+        let err = compile(source).expect_err("cancel inside a pure fn should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("cannot use `cancel`")),
+            "expected a pure-context 'cannot use cancel' rejection, got: {:?}",
             err
         );
     }
@@ -30915,6 +31631,86 @@ fn main() -> i64 {
             "the two outlined functions must have DISTINCT names, not a duplicate definition:\n{}",
             outline_defines.join("\n")
         );
+    }
+
+    #[test]
+    fn task_block_while_loop_llvm_metadata_ids_are_all_defined() {
+        // Found auditing the async/executor work (2026-08-14): a
+        // `while` loop's back-edge branch always gets a
+        // `!llvm.loop !N` annotation (tree-LLVM's auto-vectorize
+        // hint, `TypedStmt::While`'s handler in backend_llvm.rs).
+        // When that loop lives inside a `task NAME { ... }` block's
+        // OUTLINED body, the reference is written into the outlined
+        // function's text via the parent `FnCtx`'s `deferred`
+        // buffer, but the matching `!N = ...` metadata DEFINITIONS
+        // were accumulating in a separate, throwaway `outlined_ctx`
+        // that nothing ever flushed -- `emit_task_via_pthread`
+        // propagated `outlined_ctx.deferred_functions` and
+        // `next_outline` to the parent but not `loop_meta_buf`. The
+        // result: 100% reproducible "use of undefined metadata '!N'"
+        // from `lli`/`llc` on any program with a `while` loop inside
+        // a `task { ... }` block, alongside at least one OTHER while
+        // loop anywhere else in the program (so the dangling ID
+        // isn't 0, which the LLVM parser tolerates as an implicit
+        // empty node in isolation -- see BUG note below). Same gap
+        // existed in `emit_parallel_for_via_gomp` for a `while` loop
+        // nested inside a `parallel for` body. Both fixed by
+        // propagating `outlined_ctx.loop_meta_buf` into the parent
+        // `ctx.loop_meta_buf` right alongside the existing
+        // `deferred_functions`/`next_outline` propagation, so the
+        // eventual top-level `emit_function` flush picks it up.
+        //
+        // This test asserts the general invariant directly against
+        // the LLVM IR text (every `!llvm.loop !N` reference has a
+        // matching `!N = ` definition line) rather than just
+        // re-running the one repro, so any FUTURE outlining call
+        // site that grows a similar per-`FnCtx` buffer without
+        // propagating it gets caught the same way.
+        let source = r#"
+            fn count_up(n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                i = i + 1;
+              }
+              return i;
+            }
+            fn main() -> i64 {
+              let a: i64 = count_up(3);
+              task worker {
+                let i: i64 = 0;
+                while i < 3 {
+                  i = i + 1;
+                }
+              }
+              join worker;
+              assert a == 3;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("task-block-with-while program must compile");
+        use std::collections::HashSet;
+        let referenced: HashSet<&str> = ll
+            .lines()
+            .filter_map(|l| l.split_once("!llvm.loop !"))
+            .map(|(_, id)| id.trim())
+            .collect();
+        let defined: HashSet<&str> = ll
+            .lines()
+            .filter_map(|l| l.strip_prefix('!'))
+            .filter_map(|l| l.split_once(" ="))
+            .map(|(id, _)| id.trim())
+            .collect();
+        assert!(
+            !referenced.is_empty(),
+            "expected at least one !llvm.loop metadata reference in the output:\n{ll}"
+        );
+        for id in &referenced {
+            assert!(
+                defined.contains(id),
+                "!llvm.loop !{id} is referenced but never defined (dangling metadata id) -- \
+                 `lli`/`llc` will reject this IR with \"use of undefined metadata\":\n{ll}"
+            );
+        }
     }
 
     #[test]

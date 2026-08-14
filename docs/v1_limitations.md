@@ -1723,3 +1723,37 @@ while i <= 20 {
 See [Beginner 5's "Counting down with `downto`, or stepping by more
 than 1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-with-downto-or-stepping-by-more-than-1)
 for the tutorial-side coverage.
+
+### L30 -- `tcp_recv`'s received bytes are not inspectable from vani code
+
+`tcp_recv(fd, max) -> i64` fills an opaque, thread-local 4KB scratch
+buffer and returns the byte count -- but there is no builtin to read
+the buffer's actual *contents* from vani source. The only documented
+follow-up is `tcp_send_buf`, which echoes the raw bytes back out over
+a socket (`tcp_recv` then `tcp_send_buf`, the pattern every existing
+`tcp_*.vani` example uses). There is no `tcp_buf_byte_at` or
+equivalent, despite `src/checker.rs`'s own doc comment for `tcp_recv`
+mentioning one ("Inspect via `tcp_buf_byte_at` follow-up builtins") --
+that builtin was never actually implemented; the comment is aspirational,
+not current behavior.
+
+Found while building
+[`examples/language/english/tic_tac_toe_networked_timed.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/tic_tac_toe_networked_timed.vani)
+(see [Advanced 3c](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/advanced/03c_timed_tic_tac_toe_capstone.md)),
+which needed to send an actual move number (0-8) over a TCP
+connection and read it back on the other side. Worked around by
+encoding the value as **message length** instead of content (send a
+filler string of length `value + 1`, decode via `tcp_recv`'s own
+byte-count return), which stays entirely within what v1 already
+supports -- but that's a workaround for a real gap, not a general
+solution (it can't carry more than one small integer per message,
+and doesn't scale to arbitrary payloads/text).
+
+**Still open**: no fix attempted this pass -- a byte-accessor
+(`tcp_buf_byte_at(i: i64) -> i64`, mirroring `str_byte_at`'s shape)
+would need the same treatment on both backends as the other `tcp_*`
+builtins (`src/checker.rs::check_tcp_builtin`, `src/backend_c.rs`,
+`src/backend_llvm.rs`'s native IR emission), plus deciding whether it
+should also work against `tcp_recv_nb`/`io_recv_async`'s buffer (Arc
+8 v2/v3 non-blocking paths) or only the blocking v1.6 `tcp_recv`
+family.

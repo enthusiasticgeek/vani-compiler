@@ -176,7 +176,9 @@ swap the bounds.** `for i from 5 to 0 { ... }` is not a countdown
 -- `to` is always ascending, so `5 to 0` is a range with nothing
 in it (`5 > 0`, so there's no valid `lo, lo+1, ...` sequence below
 the upper bound), and the loop body runs **zero times**, silently
--- no error, no warning:
+-- no error, and it still *compiles and runs*, but the compiler
+now flags it with a warning when both bounds are literal/constant
+(added 2026-08-14 -- see below):
 
 ```vani
 fn main() -> i64 {
@@ -194,6 +196,20 @@ to hi` means `lo, lo+1, ..., hi-1`) -- it just surprises people
 more when `lo > hi`, since "count from 5 to 0" reads like English
 for "count down." If you meant to count down, write `for i from 5
 downto 0` instead.
+
+**A constant-bounds mismatch like this now produces a compiler
+warning** (`'for i from 5 to 0' never executes -- 5 > 0, but 'to'
+counts UP (needs start <= end)`), printed by `vanic check`/`build`/
+`run` but -- deliberately -- **not** a build-blocking error: an
+empty range from constant bounds is usually a mistake (swapped
+operands, or the wrong keyword), but it's occasionally intentional
+(generic code where a length parameter happens to collapse the
+range to empty), so the compiler tells you and lets you decide.
+Equal bounds (`for i from 3 to 3`) are never flagged -- that's a
+completely ordinary empty-range edge case, not a direction mismatch.
+A runtime-computed bound (`for i from lo to hi` where `hi` comes
+from a function argument) can't be judged at compile time and is
+never flagged either, no matter what value it ends up holding.
 
 ### A closer look: don't forget to advance
 

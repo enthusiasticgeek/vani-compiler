@@ -1,9 +1,38 @@
 use crate::span::Span;
 
+/// 2026-08-14: the compiler's diagnostic model was previously
+/// binary -- every `Diagnostic` pushed into a checking pass's
+/// `Vec<Diagnostic>` blocked compilation (`check_program`'s success
+/// gate was a bare `diagnostics.is_empty()`). That's correct for
+/// most of this compiler's diagnostics (this is a "catch it at
+/// compile time" language by design), but it has no way to flag a
+/// pattern that's LIKELY a mistake without also rejecting a
+/// deliberate, legal use of the same pattern -- found trying to add
+/// a diagnostic for `for i from HIGH to LOW` / `for i from LOW downto
+/// HIGH` (bounds direction contradicts the keyword): the language
+/// already treats a "backwards" range as well-defined, silent,
+/// zero-iteration behavior (documented, and exercised by real
+/// shipped code -- see `examples/language/english/for_loop_downto.
+/// vani`'s `empty_when_backwards()`), so rejecting it outright would
+/// revoke a legal, sometimes-intentional pattern. `Severity::Warning`
+/// is the escape hatch: a diagnostic that's surfaced to the user but
+/// does NOT fail `check_program`. Every existing diagnostic keeps
+/// its old behavior unchanged -- `Diagnostic::new` still defaults to
+/// `Severity::Error`; a warning is opt-in via `.as_warning()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub span: Span,
     pub message: String,
+    /// Defaults to `Severity::Error` (see the `Severity` doc comment
+    /// above). Only `Severity::Warning` diagnostics let
+    /// `check_program` still return `Ok(...)`.
+    pub severity: Severity,
     /// Optional secondary spans with short notes that point to related
     /// source locations (e.g., the original move site, the prior binding,
     /// the ensures clause violated by a return). These are rendered after
@@ -1070,9 +1099,28 @@ impl Diagnostic {
         Self {
             span,
             message: message.into(),
+            severity: Severity::Error,
             related: Vec::new(),
             elaboration: Vec::new(),
         }
+    }
+
+    /// Downgrade this diagnostic to `Severity::Warning`: it's still
+    /// surfaced to the user (rendered the same way, labeled
+    /// "warning" instead of "error"), but does NOT fail
+    /// `check_program` -- see the `Severity` doc comment for why
+    /// this exists. Chainable, like `.with_elaboration(...)`.
+    pub fn as_warning(mut self) -> Self {
+        self.severity = Severity::Warning;
+        self
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.severity == Severity::Error
+    }
+
+    pub fn is_warning(&self) -> bool {
+        self.severity == Severity::Warning
     }
 
     pub fn with_related(mut self, span: Span, note: impl Into<String>) -> Self {
@@ -1106,7 +1154,8 @@ pub fn format_diagnostics(path: &str, source: &str, diagnostics: &[Diagnostic]) 
     let mut output = String::new();
     let lang = detect_diag_lang(source);
     for diagnostic in diagnostics {
-        let label = localize_label("error", lang);
+        let level = if diagnostic.is_warning() { "warning" } else { "error" };
+        let label = localize_label(level, lang);
         let msg = localize_message(&diagnostic.message, lang);
         render_one(&mut output, path, source, diagnostic.span, &label, &msg);
         for (span, note) in &diagnostic.related {
@@ -1274,7 +1323,8 @@ pub fn format_diagnostics_with_files(map: &FileMap, diagnostics: &[Diagnostic]) 
             .lookup(d.span.start)
             .map(|(entry, _)| detect_diag_lang(&entry.source))
             .unwrap_or(None);
-        let label = localize_label("error", lang);
+        let level = if d.is_warning() { "warning" } else { "error" };
+        let label = localize_label(level, lang);
         let msg = localize_message(&d.message, lang);
         render_with_filemap(&mut output, map, d.span, &label, &msg);
         for (span, note) in &d.related {
@@ -1349,7 +1399,10 @@ pub fn format_diagnostics_json_with_files(map: &FileMap, diagnostics: &[Diagnost
 }
 
 fn emit_diagnostic_json_with_map(out: &mut String, map: &FileMap, d: &Diagnostic) {
-    out.push_str("{\"level\":\"error\",\"message\":");
+    let level = if d.is_warning() { "warning" } else { "error" };
+    out.push_str("{\"level\":\"");
+    out.push_str(level);
+    out.push_str("\",\"message\":");
     push_json_string(out, &d.message);
     out.push_str(",\"primary\":");
     emit_span_json_with_map(out, map, d.span);
@@ -1432,7 +1485,10 @@ pub fn format_diagnostics_json(path: &str, source: &str, diagnostics: &[Diagnost
 }
 
 fn emit_diagnostic_json(out: &mut String, path: &str, source: &str, d: &Diagnostic) {
-    out.push_str("{\"level\":\"error\",\"message\":");
+    let level = if d.is_warning() { "warning" } else { "error" };
+    out.push_str("{\"level\":\"");
+    out.push_str(level);
+    out.push_str("\",\"message\":");
     push_json_string(out, &d.message);
     out.push_str(",\"primary\":");
     emit_span_json(out, path, source, d.span);

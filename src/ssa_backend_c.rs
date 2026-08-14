@@ -248,6 +248,7 @@ fn preamble(out: &mut String) {
     // `intent_task_handle` typedef. Shared with tree-C so
     // both backends emit the same wrapper definitions.
     crate::backend_c::emit_intent_thread_wrappers_c(out);
+    crate::backend_c::emit_intent_cancel_infra_c(out);
     // Phase 1.1: Devanagari-numeral print helper. Emits only
     // when the user file's `// vani-lang:` pragma selected a
     // Devanagari dialect (Sanskrit/Hindi/Marathi). Otherwise

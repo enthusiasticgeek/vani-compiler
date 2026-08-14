@@ -50,6 +50,9 @@ pub enum TokenKind {
     /// Alternative to `join` for satisfying the affine
     /// "every task is consumed exactly once" rule.
     Detach,
+    /// `cancel <name>;` — signals a still-running `Task` to stop
+    /// without consuming it. See `ast::Stmt::Cancel`.
+    Cancel,
     Let,
     Return,
     If,
@@ -6299,6 +6302,7 @@ pub(crate) fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::Task
             | TokenKind::Join
             | TokenKind::Detach
+            | TokenKind::Cancel
             | TokenKind::Let
             | TokenKind::Return
             | TokenKind::If
@@ -7063,6 +7067,7 @@ impl<'a> Lexer<'a> {
             "task" => TokenKind::Task,
             "join" => TokenKind::Join,
             "detach" => TokenKind::Detach,
+            "cancel" => TokenKind::Cancel,
             // Note: `min` / `max` are NOT global reserved
             // keywords — they're context-sensitive
             // identifiers used by `reduce X with min;`

@@ -957,6 +957,16 @@ fn lower_stmt(
                 span: Span::default(),
             })
         }
+        TypedStmt::Cancel { .. } => {
+            // Same shape as `Detach` just above -- no SSA-backend
+            // lowering yet; `main.rs::stmt_ssa_supported` routes any
+            // function containing `cancel` through the tree
+            // backends instead.
+            Err(LowerError {
+                message: "cancel reached the SSA lowerer -- should have been routed to a tree backend".into(),
+                span: Span::default(),
+            })
+        }
         TypedStmt::UnsafeBlock { reason, body } => {
             b.emit(
                 Type::I64,
@@ -1497,6 +1507,7 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::TaskSpawn { .. } => "TaskSpawn",
         TypedStmt::TaskJoin { .. } => "TaskJoin",
         TypedStmt::Detach { .. } => "Detach",
+        TypedStmt::Cancel { .. } => "Cancel",
         TypedStmt::UnsafeBlock { .. } => "UnsafeBlock",
         TypedStmt::ForIterShallowFree { .. } => "ForIterShallowFree",
     }

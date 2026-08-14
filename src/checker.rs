@@ -327,6 +327,17 @@ impl Env {
 pub struct CheckedProgram {
     pub program: Program,
     pub ir: TypedProgram,
+    /// `Severity::Warning` diagnostics collected during checking --
+    /// see `diagnostic::Severity`'s doc comment. Empty on the vast
+    /// majority of successful compiles (most diagnostics are still
+    /// hard errors); non-empty only when a checking pass found
+    /// something LIKELY wrong but not definitely wrong enough to
+    /// reject (e.g. a `to`/`downto` for-loop whose constant bounds
+    /// contradict the keyword's direction). Callers that care
+    /// (the CLI) render and print these without failing the build;
+    /// callers that don't (most tests) simply never look at this
+    /// field.
+    pub warnings: Vec<crate::diagnostic::Diagnostic>,
 }
 
 #[derive(Clone, Debug)]
@@ -751,6 +762,27 @@ fn check_impl(
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut program = program;
+
+    // 2026-08-14: style warnings (self-assignment, unused variable,
+    // unused parameter). All Severity::Warning -- see the
+    // `to`/`downto` bounds check inside `check_one_stmt`'s
+    // `Stmt::For` arm for why these default to non-fatal: an
+    // "unused variable" in particular has a real, common, LEGITIMATE
+    // shape in this language (a `Guard`/`ReadGuard`/`WriteGuard`
+    // binding kept alive purely for its scope-exit Drop, never
+    // otherwise read) that a hard-error version would have broken
+    // across the example corpus. MUST run here, on the freshly-
+    // parsed program, BEFORE `flatten_modules_in_program`/
+    // `lambda_lift_program` (below) rewrite it -- lambda-lifting in
+    // particular hoists `let f = fn(x){...}; f(5);`'s closure body
+    // into a synthetic top-level fn and rewrites the call site in a
+    // way `stmt_mentions_var`/`expr_mentions_var` don't reliably
+    // recognize as still referencing `f` (confirmed false-positive:
+    // a captured-variable closure called by name looked "unused").
+    // Neither module-flattening nor lambda-lifting can affect a
+    // LOCAL variable/parameter name's own self-reference, so
+    // checking the pre-desugar shape is both correct and safer.
+    check_style_warnings(&program, &mut diagnostics);
 
     // Closure #242: flatten modules into the global program
     // before anything else runs. Items inside a module
@@ -1910,7 +1942,13 @@ fn check_impl(
         crate::safety::enforce_complexity(&typed_program_view, &mut diagnostics);
     }
 
-    if diagnostics.is_empty() {
+    // 2026-08-14: only ERROR-severity diagnostics fail the build now
+    // -- see `diagnostic::Severity`'s doc comment. `diagnostics` may
+    // still contain warnings on the `Ok` path; they ride along in
+    // `CheckedProgram::warnings` instead of being silently dropped.
+    let has_errors = diagnostics.iter().any(|d| d.is_error());
+    if !has_errors {
+        let warnings = diagnostics;
         let intents = program
             .intents
             .iter()
@@ -1945,6 +1983,7 @@ fn check_impl(
         Ok(CheckedProgram {
             program,
             ir: TypedProgram { intents, functions, structs, enums },
+            warnings,
         })
     } else {
         Err(diagnostics)
@@ -2170,7 +2209,7 @@ fn compute_indirect_locks(
                     walk_stmts(&arm.body, param_names, signatures, out);
                 }
             }
-            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
         }
     }
     fn walk_expr(
@@ -3406,7 +3445,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
             expr_mentions_var(&arm.poll_call, name)
                 || arm.body.iter().any(|s| stmt_mentions_var(s, name))
         }),
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => false,
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => false,
     }
 }
 
@@ -3420,7 +3459,17 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         ExprKind::Binary { left, right, .. } => {
             expr_mentions_var(left, name) || expr_mentions_var(right, name)
         }
-        ExprKind::Call { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
+        // 2026-08-14 fix: the callee position matters too, not just
+        // the args -- `ExprKind::Call { name: "add3", args: [5] }`
+        // is how `add3(5)` parses whether `add3` is a top-level fn
+        // OR a local closure-valued variable (that distinction isn't
+        // resolved until type-checking); missing this made the new
+        // unused-variable warning false-positive on every closure
+        // called by name (`let add3 = fn(x){...}; add3(5);` looked
+        // "unused" since only the call's ARGS were checked).
+        ExprKind::Call { name: callee_name, args, .. } => {
+            callee_name == name || args.iter().any(|a| expr_mentions_var(a, name))
+        }
         ExprKind::MethodCall { receiver, args, .. } => {
             expr_mentions_var(receiver, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }
@@ -3465,6 +3514,158 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         }
         ExprKind::TaskSpawnCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::TaskJoinExpr { name: n, .. } => n == name,
+    }
+}
+
+/// 2026-08-14: entry point for the new style-warning checks --
+/// unused parameter (per function), then per-statement checks
+/// (self-assignment, unused variable) recursively over every
+/// function body via `check_style_warnings_in_block`. All pushed
+/// diagnostics are `.as_warning()`.
+fn check_style_warnings(program: &Program, diagnostics: &mut Vec<Diagnostic>) {
+    for function in &program.functions {
+        // `extern "C" fn foo(x: Str) -> i32;` (an FFI declaration)
+        // has no body at all -- every parameter would otherwise be
+        // flagged "unused" (an empty body trivially never mentions
+        // any name), which is nonsensical for a signature-only
+        // declaration whose params exist to describe the C symbol's
+        // calling convention, not to be referenced by vāṇी code.
+        // Confirmed as a real false positive against `ffi.vani`.
+        if function.is_extern {
+            continue;
+        }
+        for param in &function.params {
+            if param.name.starts_with('_') {
+                continue;
+            }
+            if !function.body.iter().any(|s| stmt_mentions_var(s, &param.name)) {
+                diagnostics.push(
+                    Diagnostic::new(
+                        param.span,
+                        format!(
+                            "unused parameter '{}' -- never referenced in the body of '{}'",
+                            param.name, function.name,
+                        ),
+                    )
+                    .with_elaboration(vec![
+                        format!(
+                            "'{}' is declared as a parameter but never appears anywhere \
+                             in '{}'s body.",
+                            param.name, function.name,
+                        ),
+                        "If this is intentional (e.g. matching a required call signature, \
+                         or a callback parameter the implementation doesn't need), prefix \
+                         the name with an underscore ('_name') to silence this warning."
+                            .to_string(),
+                    ])
+                    .as_warning(),
+                );
+            }
+        }
+        check_style_warnings_in_block(&function.body, diagnostics);
+    }
+}
+
+/// Recursively walks one block (a function body, or the body of any
+/// nested `if`/`while`/`for`/etc.), checking each statement for
+/// self-assignment and each `let` for being unused for the REST of
+/// this same block (a `let` in a nested block only needs checking
+/// against its own block's remaining statements -- once the block
+/// ends, the binding is out of scope regardless). Mirrors
+/// `stmt_mentions_var`'s own match arms exhaustively so a future new
+/// `Stmt` variant with a nested body can't silently skip this walk.
+fn check_style_warnings_in_block(body: &[Stmt], diagnostics: &mut Vec<Diagnostic>) {
+    use crate::ast::Stmt as S;
+    for (i, stmt) in body.iter().enumerate() {
+        match stmt {
+            S::Assign { name, expr, span } => {
+                if let ExprKind::Var(rhs_name) = &expr.kind {
+                    if rhs_name == name {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                *span,
+                                format!(
+                                    "self-assignment '{name} = {name}' has no effect",
+                                ),
+                            )
+                            .with_elaboration(vec![
+                                format!(
+                                    "'{name}' is assigned its own current value -- this \
+                                     statement changes nothing."
+                                ),
+                                "This is usually a typo (meant a different variable on \
+                                 one side, e.g. `x = y;`), or a leftover from a refactor \
+                                 that should be deleted."
+                                    .to_string(),
+                            ])
+                            .as_warning(),
+                        );
+                    }
+                }
+            }
+            S::Let { name, span, .. } => {
+                if !name.starts_with('_')
+                    && !body[i + 1..].iter().any(|s| stmt_mentions_var(s, name))
+                {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "unused variable '{name}' -- never referenced after its \
+                                 declaration",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "'{name}' is declared here but never read or otherwise \
+                                 referenced again in this scope."
+                            ),
+                            "If this is intentional -- e.g. a lock guard (Guard<T>/\
+                             ReadGuard<T>/WriteGuard<T>) kept alive only for its \
+                             scope-exit unlock, never read directly -- prefix the name \
+                             with an underscore ('_name') to silence this warning."
+                                .to_string(),
+                        ])
+                        .as_warning(),
+                    );
+                }
+            }
+            S::If { then_body, else_body, .. } => {
+                check_style_warnings_in_block(then_body, diagnostics);
+                check_style_warnings_in_block(else_body, diagnostics);
+            }
+            S::While { body, .. }
+            | S::For { body, .. }
+            | S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. }
+            | S::WhileLet { body, .. } => {
+                check_style_warnings_in_block(body, diagnostics);
+            }
+            S::IfLet { then_body, else_body, .. } => {
+                check_style_warnings_in_block(then_body, diagnostics);
+                check_style_warnings_in_block(else_body, diagnostics);
+            }
+            S::Select { arms, .. } => {
+                for arm in arms {
+                    check_style_warnings_in_block(&arm.body, diagnostics);
+                }
+            }
+            S::LetTuple { .. }
+            | S::Return { .. }
+            | S::Assert { .. }
+            | S::Prove { .. }
+            | S::Print { .. }
+            | S::EPrint { .. }
+            | S::PrintBlock { .. }
+            | S::IndexAssign { .. }
+            | S::FieldAssign { .. }
+            | S::Break { .. }
+            | S::Continue { .. }
+            | S::TaskJoin { .. }
+            | S::Detach { .. }
+            | S::Cancel { .. } => {}
+        }
     }
 }
 
@@ -3596,7 +3797,7 @@ fn walk_stmt_for_captures(
                 for s in &arm.body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -3833,7 +4034,7 @@ fn rename_vars_in_stmt(
                 for s in &mut arm.body { rename_vars_in_stmt(s, rename); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -4037,7 +4238,7 @@ fn rewrite_closure_calls_in_stmt(
                 for s in &mut arm.body { rewrite_closure_calls_in_stmt(s, closures); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
     }
 }
 
@@ -4260,7 +4461,7 @@ fn lift_stmt_anon_fn(
                 for s in &mut arm.body { lift_stmt_anon_fn(s, counter, hoisted); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
     }
 }
 
@@ -5726,7 +5927,7 @@ fn resolve_enum_types_in_stmt(
                 for s in &mut arm.body { resolve_enum_types_in_stmt(s, enums); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -6155,7 +6356,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                 for s in &mut arm.body { sub_aliases_in_stmt(s, aliases); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -7795,7 +7996,7 @@ fn collect_generic_calls_in_stmt(
             }
         }
         // `Continue` and `TaskJoin` carry no expression to scan.
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -8323,7 +8524,7 @@ fn rewrite_generic_calls_in_stmt(
                 }
             }
         }
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -15388,6 +15589,87 @@ fn check_one_stmt(
                 return false;
             }
 
+            // 2026-08-14: `to`/`downto` bounds-direction check. `to`
+            // is ascending and half-open on the end (`for i from LO
+            // to HI` walks LO..HI, excluding HI); `downto` is
+            // descending and half-open on the (lower) end (`for i
+            // from HI downto LO` walks HI down to LO+1, excluding
+            // LO). When BOTH bounds are compile-time constants
+            // (literals or const-folded expressions), a `to` with
+            // start > end, or a `downto` with start < end, can never
+            // execute a single iteration -- the loop direction
+            // contradicts the keyword. Equal bounds are deliberately
+            // NOT flagged: `for i from n to n` / `n downto n` is a
+            // legitimate (if unusual) empty-range edge case, e.g. in
+            // generic code where `n` happens to be 0. Only checked
+            // for CONSTANT bounds -- a runtime-computed bound
+            // (`for i from lo to hi` where `hi` comes from user
+            // input) can't be judged at compile time and isn't
+            // flagged here at all.
+            if let (Some(TypedConst::Int(s)), Some(TypedConst::Int(e))) =
+                (start_checked.constant(), end_checked.constant())
+            {
+                if !descending && s > e {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "'for {var} from {s} to {e}' never executes -- \
+                                 {s} > {e}, but 'to' counts UP (needs start <= end)",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "The loop variable '{var}' starts at {s} and 'to' \
+                                 increments toward {e} -- since {s} is already past \
+                                 {e}, the loop body never runs."
+                            ),
+                            "'to' is ascending-only (like 'downto' is descending-only) \
+                             -- neither keyword infers direction from the bounds; you \
+                             pick the keyword that matches which way you're counting."
+                                .to_string(),
+                            format!(
+                                "If you meant to count DOWN from {s} to {e}, use \
+                                 'downto': 'for {var} from {s} downto {e}'. If the \
+                                 bounds are correct and an empty loop is intentional, \
+                                 no fix is needed -- this is a warning, not a hard \
+                                 requirement to change anything."
+                            ),
+                        ])
+                        .as_warning(),
+                    );
+                } else if *descending && s < e {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "'for {var} from {s} downto {e}' never executes -- \
+                                 {s} < {e}, but 'downto' counts DOWN (needs start >= end)",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "The loop variable '{var}' starts at {s} and 'downto' \
+                                 decrements toward {e} -- since {s} is already below \
+                                 {e}, the loop body never runs."
+                            ),
+                            "'downto' is descending-only (like 'to' is ascending-only) \
+                             -- neither keyword infers direction from the bounds; you \
+                             pick the keyword that matches which way you're counting."
+                                .to_string(),
+                            format!(
+                                "If you meant to count UP from {s} to {e}, use 'to': \
+                                 'for {var} from {s} to {e}'. If the bounds are correct \
+                                 and an empty loop is intentional, no fix is needed -- \
+                                 this is a warning, not a hard requirement to change \
+                                 anything."
+                            ),
+                        ])
+                        .as_warning(),
+                    );
+                }
+            }
+
             let Some(loop_ty) = promoted_integer_type(&start_checked, &end_checked, diagnostics)
             else {
                 return false;
@@ -16382,6 +16664,47 @@ fn check_one_stmt(
                 info_mut.moved = Some(*span);
             }
             body.push(TypedStmt::Detach { name: name.clone() });
+            false
+        }
+        Stmt::Cancel { name, span } => {
+            // Unlike `join`/`detach`, `cancel` does NOT set
+            // `info.moved` -- it signals the thread to stop without
+            // consuming the affine `Task` handle. The checker still
+            // requires exactly one `join`/`detach` afterward; this
+            // just makes that eventual `join` return sooner. Still
+            // rejects a task that's ALREADY been joined/detached
+            // (nothing left to signal) and, unlike join/detach,
+            // permits being called more than once on the same live
+            // task (idempotent at the runtime level -- the flag is
+            // just set again).
+            let Some(info) = env.lookup(name) else {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!("cancel: no task named '{}' in scope", name),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            };
+            if !matches!(info.ty, Type::Task | Type::TaskR(_)) {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "cancel: '{}' has type {}, expected Task or Task<R>",
+                        name, info.ty
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(prev) = info.moved {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "cancel: task '{}' was already joined or detached at byte {}..{}, nothing left to cancel",
+                        name, prev.start, prev.end
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            body.push(TypedStmt::Cancel { name: name.clone() });
             false
         }
         Stmt::UnsafeBlock {
@@ -26607,7 +26930,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                         walk(&arm.body, param_names, locks);
                     }
                 }
-                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
             }
         }
     }
@@ -38103,6 +38426,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::TaskSpawn { .. }
         | TypedStmt::TaskJoin { .. }
         | TypedStmt::Detach { .. }
+        | TypedStmt::Cancel { .. }
         | TypedStmt::UnsafeBlock { .. }
         | TypedStmt::ForIterShallowFree { .. } => vec![],
     }
@@ -38276,6 +38600,24 @@ fn verify_pure_body(
                             crate::span::Span::default(),
                             format!(
                                 "{} cannot use `detach` -- a detached task's side effects can outlive the pure call, unlike `join` which waits for them to finish first",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
+                        ),
+                    );
+                }
+                TypedStmt::Cancel { .. } => {
+                    // Same reasoning as `detach` just above: sending
+                    // a cancellation signal to another thread is a
+                    // side effect on state outside this pure call's
+                    // own sequential model. Reject unconditionally.
+                    diagnostics.push(
+                        Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "{} cannot use `cancel` -- signaling another thread is a side effect outside this pure call's sequential model",
                                 context
                             ),
                         )
