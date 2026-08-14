@@ -23748,6 +23748,103 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn assert_eq_all_four_variants_typecheck_and_compile() {
+        // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/str.
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(2 + 2, 4);
+              let _ = assert_eq_f64(1.5 + 1.5, 3.0);
+              let _ = assert_eq_bool(1 == 1, true);
+              let _ = assert_eq_str("hello", "hel" + "lo");
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("assert_eq_* must type-check for C");
+        compile_to_llvm(source).expect("assert_eq_* must compile to LLVM");
+    }
+
+    #[test]
+    fn assert_eq_wrong_arity_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(1);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("1-arg assert_eq_i64 must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("assert_eq_i64")
+                && e.message.contains("2 argument")),
+            "expected an arity diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn assert_eq_i64_emits_dprintf_and_exit3_on_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(1, 2);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("assert_eq_i64 must compile to C");
+        assert!(
+            c.contains("assertion failed: left != right") && c.contains("exit(3)"),
+            "expected the assert_eq trap message + exit(3) in C, got:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("assert_eq_i64 must compile to LLVM");
+        assert!(
+            ll.contains("call void @exit(i32 3)") && ll.contains(".msg.assert_eq.i64"),
+            "expected the assert_eq trap message global + exit(3) in LLVM, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn assert_eq_str_frees_fresh_arg_but_not_var_bound_arg() {
+        // Same leak/double-free class BUG-193 fixed for the general
+        // call-argument path -- assert_eq_str is its own dedicated
+        // codegen arm, not that path, so it needed its own fix.
+        let fresh_source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_str(i64_to_str(1), "1");
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(fresh_source).expect("fresh-arg assert_eq_str must compile");
+        assert!(
+            c.contains("free((void*)_l)"),
+            "expected the fresh left arg to be freed, got:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(fresh_source).expect("fresh-arg assert_eq_str must compile to LLVM");
+        assert!(
+            ll.contains("call void @free(i8*"),
+            "expected a free call for the fresh left arg, got:\n{}",
+            ll
+        );
+
+        let var_source = r#"
+            fn main() -> i64 {
+              let a: OwnedStr = i64_to_str(1);
+              let b: OwnedStr = i64_to_str(1);
+              let _ = assert_eq_str(a, b);
+              return 0;
+            }
+        "#;
+        let c2 = compile_to_c(var_source).expect("var-bound assert_eq_str must compile");
+        assert!(
+            !c2.contains("free((void*)_l)") && !c2.contains("free((void*)_r)"),
+            "a Var-sourced argument must not go through the fresh-arg \
+             free path (that would double-free the binding's own \
+             scope-exit drop):\n{}",
+            c2
+        );
+    }
+
+    #[test]
     fn hash_pair_triple_typecheck_and_compile() {
         // Closures #499/#500: hash_pair / hash_triple — i64 tuple sugar.
         let source = r#"

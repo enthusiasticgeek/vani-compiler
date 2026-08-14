@@ -11051,6 +11051,110 @@ fn main() -> i64 {
     }
 }
 
+#[test]
+fn assert_eq_builtins_print_both_sides_and_match_across_backends() {
+    // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/str print
+    // both the actual left and right values on mismatch (unlike
+    // plain `assert a == b;`, which shows neither unless the caller
+    // wrote a custom message by hand), then exit(3) -- same
+    // convention as every other runtime trap. Also confirms the
+    // happy path (all four types, values equal) exits 0 cleanly.
+    let passing = write_tmp_vani(
+        "assert_eq_passing",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_i64(2 + 2, 4);
+  let _ = assert_eq_f64(1.5 + 1.5, 3.0);
+  let _ = assert_eq_bool(1 == 1, true);
+  let _ = assert_eq_str("hello", "hel" + "lo");
+  print "all passed";
+  return 0;
+}
+"#,
+    );
+    let failing_i64 = write_tmp_vani(
+        "assert_eq_failing_i64",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_i64(2 + 2, 5);
+  return 0;
+}
+"#,
+    );
+    let failing_str = write_tmp_vani(
+        "assert_eq_failing_str",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_str("hello", "world");
+  return 0;
+}
+"#,
+    );
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", passing.to_str().unwrap()],
+        vec!["run", passing.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?} should pass, got status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("all passed"),
+            "{:?}: expected the happy-path print, got:\n{}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    for (src, expect_lines) in [
+        (&failing_i64, vec!["left: 4", "right: 5"]),
+        (&failing_str, vec!["left: hello", "right: world"]),
+    ] {
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{:?}: assert_eq mismatch must exit 3 on both backends, got {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+            assert!(
+                stderr.contains("assertion failed: left != right"),
+                "{:?}: got:\n{}",
+                backend_args,
+                stderr
+            );
+            for line in &expect_lines {
+                assert!(
+                    stderr.contains(line),
+                    "{:?}: expected stderr to contain {:?}, got:\n{}",
+                    backend_args,
+                    line,
+                    stderr
+                );
+            }
+        }
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.

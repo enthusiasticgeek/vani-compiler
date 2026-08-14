@@ -21731,6 +21731,56 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // unchanged (memcpy semantics).
             c_element_deep_clone(&slot, element_ty)
         }
+        "assert_eq_i64" | "assert_eq_f64" | "assert_eq_bool" | "assert_eq_str" => {
+            // Test-fw Phase F (2026-08-14): print both sides on
+            // mismatch, then the exact same exit(3) trap convention
+            // every other runtime guard already uses. Inline GCC
+            // statement-expression (not a separate static helper) --
+            // matches the trie_insert/hashmap_insert shape above.
+            // `assert_eq_str` compares by CONTENT (`strcmp`), not
+            // pointer identity -- two distinct `Str`/`OwnedStr`
+            // values with the same text (e.g. two string literals,
+            // or a literal vs. a freshly concatenated OwnedStr) are
+            // different pointers but must still compare equal; a
+            // naive `_l != _r` would almost always report a false
+            // mismatch.
+            let l = emit_expr(&args[0]);
+            let r = emit_expr(&args[1]);
+            match name {
+                "assert_eq_i64" => format!(
+                    "({{ int64_t _l = ({l}); int64_t _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %lld\\n right: %lld\\n\", (long long)_l, (long long)_r); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_f64" => format!(
+                    "({{ double _l = ({l}); double _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %g\\n right: %g\\n\", _l, _r); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_bool" => format!(
+                    "({{ int64_t _l = ({l}); int64_t _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %s\\n right: %s\\n\", _l ? \"true\" : \"false\", _r ? \"true\" : \"false\"); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_str" => {
+                    // Same fresh-OwnedStr-argument leak class BUG-193
+                    // fixed for the ordinary-call default path -- this
+                    // arm bypasses that path entirely (it's its own
+                    // match arm, not the `_ =>` fallback), so it needs
+                    // its own free-after-use. Only frees on the
+                    // no-mismatch path: the mismatch path calls
+                    // exit(3) unconditionally and never returns, so
+                    // there's nothing to free there (the process is
+                    // terminating regardless -- matches every other
+                    // trap site in this file, none of which bother
+                    // freeing locals right before exit()).
+                    let l_fresh = crate::ir::is_fresh_owned_str(&args[0])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[0]);
+                    let r_fresh = crate::ir::is_fresh_owned_str(&args[1])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[1]);
+                    let free_l = if l_fresh { "free((void*)_l); " } else { "" };
+                    let free_r = if r_fresh { "free((void*)_r); " } else { "" };
+                    format!(
+                        "({{ const char* _l = ({l}); const char* _r = ({r}); if (strcmp(_l, _r) != 0) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %s\\n right: %s\\n\", _l, _r); fflush(stdout); exit(3); }} {free_l}{free_r}(int64_t)0; }})"
+                    )
+                }
+                _ => unreachable!(),
+            }
+        }
         _ => {
             // Closure #269: extern "C" fns emit a bare C-ABI
             // call (no `fn_` prefix). The C_EXTERN_FN_REGISTRY

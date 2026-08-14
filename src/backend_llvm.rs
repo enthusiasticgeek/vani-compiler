@@ -1025,6 +1025,22 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         ".msg.shift",
         "shift amount out of range\n",
     ));
+    // Test-fw Phase F (2026-08-14): assert_eq_* trap messages.
+    // `.msg.assert_eq.str` is shared by assert_eq_bool (each side
+    // resolved to a "true"/"false" i8* before formatting) and
+    // assert_eq_str (already an i8*) -- same two-%s shape either way.
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.i64",
+        "assertion failed: left != right\n  left: %lld\n right: %lld\n",
+    ));
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.f64",
+        "assertion failed: left != right\n  left: %g\n right: %g\n",
+    ));
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.str",
+        "assertion failed: left != right\n  left: %s\n right: %s\n",
+    ));
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -6236,6 +6252,142 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             //   err: tag = 1 (Err); no payload; load result;
             //        br merge
             //   merge: phi
+            // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/
+            // str -- print both sides on mismatch (unlike plain
+            // `assert a == b;`, which never shows what `a`/`b`
+            // actually were), then the same `exit(3)` trap
+            // convention every other runtime guard already uses.
+            // Tree-LLVM only (see `expr_ssa_supported`'s matching
+            // exclusion in main.rs). Every path either falls through
+            // to `ok` (values equal, no divergence -- no phi needed)
+            // or calls `exit(3)` + `unreachable` in `fail` (never
+            // returns), so the whole expression's value is just the
+            // constant `0` once past this block.
+            if name == "assert_eq_i64" || name == "assert_eq_f64"
+                || name == "assert_eq_bool" || name == "assert_eq_str"
+            {
+                let l = emit_expr(&args[0], ctx, out);
+                let r = emit_expr(&args[1], ctx, out);
+                let ok = ctx.fresh_label("assert_eq_ok");
+                let fail = ctx.fresh_label("assert_eq_fail");
+                match name.as_str() {
+                    "assert_eq_i64" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {}, i64 {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.i64",
+                                "assertion failed: left != right\n  left: %lld\n right: %lld\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    "assert_eq_f64" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = fcmp oeq double {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {}, double {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.f64",
+                                "assertion failed: left != right\n  left: %g\n right: %g\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    "assert_eq_bool" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i1 {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        // Reuse the print/eprint `@.fmt.true`/
+                        // `@.fmt.false` globals (already unconditionally
+                        // emitted) as i8* string values, not as whole
+                        // format strings -- `select` picks the right
+                        // one per side, then both feed %s placeholders
+                        // in `.msg.assert_eq.str`.
+                        let l_t = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.true, i64 0, i64 0\n", l_t
+                        ));
+                        let l_f = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [6 x i8], [6 x i8]* @.fmt.false, i64 0, i64 0\n", l_f
+                        ));
+                        let l_str = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = select i1 {}, i8* {}, i8* {}\n", l_str, l, l_t, l_f));
+                        let r_t = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.true, i64 0, i64 0\n", r_t
+                        ));
+                        let r_f = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [6 x i8], [6 x i8]* @.fmt.false, i64 0, i64 0\n", r_f
+                        ));
+                        let r_str = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = select i1 {}, i8* {}, i8* {}\n", r_str, r, r_t, r_f));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {}, i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.str",
+                                "assertion failed: left != right\n  left: %s\n right: %s\n"
+                            ),
+                            l_str, r_str
+                        ));
+                    }
+                    "assert_eq_str" => {
+                        // strcmp, not pointer equality -- two distinct
+                        // Str/OwnedStr values with the same text (e.g.
+                        // a literal vs. a freshly concatenated
+                        // OwnedStr) are different pointers but must
+                        // still compare equal.
+                        let sc = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = call i32 @strcmp(i8* {}, i8* {})\n", sc, l, r
+                        ));
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, sc));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {}, i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.str",
+                                "assertion failed: left != right\n  left: %s\n right: %s\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+                out.push_str("  call void @exit(i32 3)\n");
+                out.push_str("  unreachable\n");
+                out.push_str(&format!("{}:\n", ok));
+                ctx.current_block = ok;
+                // Same fresh-OwnedStr-argument leak class BUG-193
+                // fixed for the ordinary-call default path -- this
+                // is its own dedicated `if name ==` branch, not that
+                // path, so it needs its own free-after-use. Only on
+                // the ok path: the fail path calls exit(3) and never
+                // returns.
+                if name == "assert_eq_str" {
+                    if crate::ir::is_fresh_owned_str(&args[0])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[0])
+                    {
+                        out.push_str(&format!("  call void @free(i8* {})\n", l));
+                    }
+                    if crate::ir::is_fresh_owned_str(&args[1])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[1])
+                    {
+                        out.push_str(&format!("  call void @free(i8* {})\n", r));
+                    }
+                }
+                return "0".to_string();
+            }
             if name == "try_vec" {
                 let n_v = emit_expr(&args[0], ctx, out);
                 let result_enum = match &expr.ty {

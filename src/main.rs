@@ -1029,6 +1029,16 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 // stdin_ready_within_ms_does_not_wait_past_its_timeout
                 // in tests/run_end_to_end.rs.
                 || name == "stdin_ready_within_ms"
+                // Test-fw Phase F (2026-08-14): same gap the
+                // `stdin_ready_within_ms` comment above already
+                // documents -- no SSA-backend lowering for these,
+                // tree-C/tree-LLVM only (see backend_c.rs's
+                // `emit_call`/backend_llvm.rs's `TypedExprKind::Call`
+                // arm). Without this exclusion these would silently
+                // fall through to the SSA backend's "unrecognized
+                // builtin -> treat as a user fn" path.
+                || name == "assert_eq_i64" || name == "assert_eq_f64"
+                || name == "assert_eq_bool" || name == "assert_eq_str"
             {
                 return false;
             }
