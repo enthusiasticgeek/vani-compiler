@@ -14471,3 +14471,52 @@ repro and the stress test.
 action needed -- already-triaged non-fixes / fully resolved).
 `docs/BUG_PATTERN_AUDIT_TODO_13.md`'s Priorities 3-4 (localfuzz
 tooling improvements) remain optional, not acted on.
+
+## Test framework redesign, Phase G -- docs/examples (2026-08-14, #189/#198 DONE)
+
+Closes out #188/#189 (the `#[test]`/`vanic test` "full audit +
+redesign" the user chose, see the approved plan at
+`/home/virgo/.claude/plans/synchronous-leaping-puffin.md`). Phases
+A-F (in prior commits this session) fixed `#[test]`+`fn main`
+coexistence, added `--filter`, `#[should_panic]`, parallel test
+execution + `--test-threads`, package-level default discovery (no
+path args -> `vani.toml` root via `manifest::find_manifest`), and
+`assert_eq_i64`/`_f64`/`_bool`/`_str` builtins (BUG-192, BUG-193
+found and fixed along the way). Phase G shipped the missing
+discoverability/docs layer the audit itself flagged (zero example
+files used `#[test]` despite the core feature existing since
+2026-07-28):
+
+- `examples/language/english/testing_primer.vani` (new): 5 `#[test]`
+  fns covering `assert_eq_bool`, `#[should_panic]`, `assert_eq_str`'s
+  content-not-pointer comparison, `assert_eq_f64` -- deliberately no
+  top-level `fn main`, live-verified all pass, `--filter=div`
+  correctly narrows to 2 of 5.
+- `tutorials/src/intermediate/16a_testing_primer.md` (new): full
+  tutorial chapter, worked examples for every Phase A-F piece, a
+  "Try it yourself" section, wired into `SUMMARY.md` and the
+  `16_packages.md`/`17_tic_tac_toe_capstone.md` nav footers.
+- `tutorials/src/beginner/00_cli_reference.md`'s `vanic test` section
+  rewritten -- it still described the PRE-Phase-A behavior (claimed a
+  file with `fn main` always fell back to legacy mode, i.e. exactly
+  what Phase A fixed) and was missing `--filter`, `#[should_panic]`,
+  `--test-threads`, and the no-args package-default-discovery
+  behavior entirely.
+
+**Verification**: full `cargo test --release --workspace`: 2979 lib
+(+7 vs. the pre-Phase-A 2972 baseline, matching the new Phase A/C/F
+unit tests) / 268 e2e (+8, matching new e2e tests), 0 failed, exit
+code 0 (captured directly, not through a `tail` pipe, to avoid
+masking `cargo test`'s own exit code). `vanic check examples`
+file-set diff: the known 17-file bad baseline plus
+`testing_primer.vani` itself (intentionally has no `fn main` by
+design, as a `#[test]`-only file) -- 18 total, exactly the expected
+delta, no regressions. Pushed as `8a74d66a`; all 3 CI workflows green
+(`CI`, `CodeQL`, `Deploy Tutorials to GitHub Pages`).
+
+#188 and #189 are now both fully DONE. Next up per
+`docs/TODO_NEXT_SESSIONS.md`: #191 (internal compiler-testing tooling
+-- property-based testing / codegen snapshot diffing, explicitly
+distinct from and sequenced after the vani-language framework), then
+#190 (final documentation/tutorial consistency sweep, blocked on
+#185/#187/#189/#191 -- #185/#187/#189 are done, only #191 remains).
