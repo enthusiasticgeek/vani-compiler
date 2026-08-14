@@ -10978,6 +10978,31 @@ pub(crate) fn element_tag(element: &Type) -> String {
         Type::Channel(element, capacity) => {
             format!("channel_{}_{}", element_tag(element), capacity)
         }
+        // 2026-08-14 fix: same collapse bug the Atomic/Channel arms
+        // just above were already fixed for (Closure #211), found by
+        // asking whether Box's dedicated `element_tag` protection
+        // extended to the other RAII/sync wrapper types -- it
+        // didn't. `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+        // `WriteGuard<T>` are all genuinely parametric over T (see
+        // `03_concurrency.md`'s `Mutex<SharedCounter>` /
+        // `RwLock<T>` examples), but had no arm here, so they fell
+        // through to `c_leaf_type`'s FIXED `"intent_mutex_i64"` /
+        // etc. spelling regardless of the actual T. A program with
+        // both `Vec<Mutex<i64>>` and `Vec<Mutex<SomeStruct>>`
+        // collapsed both onto the same `intent_vec_intent_mutex_i64`
+        // typedef -- confirmed via a minimal repro, `cc` rejected it
+        // with "passing argument ... from incompatible pointer type"
+        // (the second Vec's `__from` helper still expected the
+        // FIRST Vec's element type). `c_element_storage` (the actual
+        // data-buffer storage type) already correctly threads
+        // `element_tag` through `c_mutex_storage`/`c_guard_storage`/
+        // etc. recursively -- only the per-shape TYPEDEF NAME
+        // (built here) was collapsing.
+        Type::Mutex(element) => format!("mutex_{}", element_tag(element)),
+        Type::Guard(element) => format!("guard_{}", element_tag(element)),
+        Type::RwLock(element) => format!("rwlock_{}", element_tag(element)),
+        Type::ReadGuard(element) => format!("readguard_{}", element_tag(element)),
+        Type::WriteGuard(element) => format!("writeguard_{}", element_tag(element)),
         // Closure #214: `fn(T1, T2) -> R` falls through to
         // `c_leaf_type(FnPtr) = "void*"`, and the `*` in the
         // typedef name (`intent_vec_void*`) breaks C parsing.

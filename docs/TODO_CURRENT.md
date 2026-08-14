@@ -13615,5 +13615,52 @@ removing the per-worker line assertions entirely, keeping only the
 Barrier or `main`'s own single-threaded sequencing rules out any
 other thread being mid-print at that moment), and all four appeared
 intact even in the CI failure's own captured output. Re-verified 20x
-locally after the fix; pushed as a follow-up commit.
-Corpus check and CI to follow before this batch is pushed.
+locally after the fix; pushed as a follow-up commit (`120500e3`),
+CI green.
+
+## BUG-191 FIXED: Vec<Mutex<T>>/Guard/RwLock/ReadGuard/WriteGuard collapsed across distinct T shapes (2026-08-14)
+
+Found by asking directly: "will Box and other RAII suffer the same
+issue as BUG-188-190?" Checked rather than guessed. `Box<T>` was
+already safe (dedicated `element_tag`/`vec_struct_tag` arm, fixed
+2026-06-09). `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+`WriteGuard<T>` were NOT -- all five are genuinely parametric over T
+(`Mutex<SharedCounter>` is a real, documented pattern), but had no
+arm in either backend's per-shape Vec-element-tag function, so each
+fell through to a fallback returning a FIXED spelling regardless of
+T (`"intent_mutex_i64"` / `%intent_mutex_i64` no matter what T is).
+Same collapse-bug SHAPE as the `Atomic<T>`/`Channel<T,N>` fix
+(Closure #211) -- just never extended to this type family.
+
+Confirmed directly: a program with both `Vec<Mutex<i64>>` and
+`Vec<Mutex<SomeStruct>>` in the same source collapsed both onto the
+same `intent_vec_intent_mutex_i64` typedef; `cc` rejected the
+generated C with "passing argument ... from incompatible pointer
+type" (the second Vec's `__from` helper still expected the FIRST
+Vec's element type). `c_element_storage`/`llvm_type_string` (the
+actual data-buffer storage types) already correctly threaded the
+element type through recursively -- only the per-shape NAME
+(`element_tag` in backend_c.rs, `vec_struct_tag` in backend_llvm.rs)
+was collapsing. Fixed with one dedicated arm per type in both
+functions, mirroring the pre-existing Atomic/Channel/Box arms.
+`Condvar`/`Barrier` don't need the same fix -- neither is generic
+over any `T`, so there's only ever one shape, same reasoning that
+already exempted `Handle`/`Pool`/`ArenaRef` (v1-fixed-to-i64).
+
+Regression test `bug191_two_distinct_mutex_shapes_as_vec_elements_
+no_longer_collapse` added (compiles the two-shape repro on both
+backends, asserts a DISTINCT per-shape C typedef name, and reads
+back the actual struct field values through the lock to confirm no
+silent data corruption, not just "doesn't crash"). One PRE-EXISTING
+test (`scope_exit_drops_run_in_reverse_declaration_order_not_
+alphabetical`, BUG-154) hardcoded the OLD collapsed typedef name
+(`intent_vec_intent_rwlock_i64`) in its own assertion; updated to
+the new, correct, per-shape name (`intent_vec_rwlock_int64_t`) --
+the actual behavior under test (unlock-before-free ordering) was
+unaffected by this fix, only the name changed.
+
+Verification: 2939/2939 lib tests pass (2938 + 1 new, 0
+regressions); 255/255 e2e tests pass (0 regressions); 1049-file
+example corpus check matches the known 18-file baseline exactly
+(identical file set to the pre-fix run); mdBook rebuilds clean (same
+7 known pre-existing warnings). Next free bug number is **BUG-192**.

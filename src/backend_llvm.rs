@@ -45636,6 +45636,24 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // arm `llvm_type(Object)` panics ("use llvm_type_string
         // for aggregate type").
         Type::Object(name) => format!("intent_dyn_{}", name),
+        // 2026-08-14 fix: sibling of the C backend's identical fix
+        // (see `element_tag` in backend_c.rs for the full
+        // rationale/repro). `Mutex<T>`/`Guard<T>`/`RwLock<T>`/
+        // `ReadGuard<T>`/`WriteGuard<T>` are genuinely parametric
+        // over T, but had no arm here, so they fell through to the
+        // `_` branch's `llvm_type(element)` call -- which for these
+        // five types returns a FIXED `%intent_mutex_i64`/etc.
+        // string regardless of T (see `llvm_type`'s own comment,
+        // itself stale -- "Mutex/Guard are still i64-only" hasn't
+        // been true since `Mutex<SharedCounter>` shipped). Two
+        // different `Mutex<T>` shapes as Vec elements in the same
+        // program collapsed onto the same per-shape LLVM struct
+        // name.
+        Type::Mutex(inner) => format!("mutex_{}", vec_struct_tag(inner)),
+        Type::Guard(inner) => format!("guard_{}", vec_struct_tag(inner)),
+        Type::RwLock(inner) => format!("rwlock_{}", vec_struct_tag(inner)),
+        Type::ReadGuard(inner) => format!("readguard_{}", vec_struct_tag(inner)),
+        Type::WriteGuard(inner) => format!("writeguard_{}", vec_struct_tag(inner)),
         // ARC 3d: `Vec<Tuple<T1, T2, ...>>` element tag is a
         // recursive composition. Without this arm
         // `llvm_type(Tuple)` panics ("use llvm_type_string for

@@ -12318,8 +12318,16 @@ mod tests {
         let unlock_pos = c
             .find("intent_read_guard_int64_t_unlock(&v_rg)")
             .expect("expected rg to be unlocked at scope exit");
+        // BUG-191 (2026-08-14) fix note: this Vec<RwLock<i64>>
+        // typedef used to be named `intent_vec_intent_rwlock_i64`
+        // (the collapsed, T-blind fallback spelling every `RwLock<T>`
+        // shape shared). It's now `intent_vec_rwlock_int64_t`,
+        // correctly threading the element type through -- this
+        // BUG-154 test's own hardcoded name needed updating
+        // alongside the fix; the actual behavior under test (unlock-
+        // before-free ordering) is unaffected.
         let free_pos = c
-            .find("intent_vec_intent_rwlock_i64__free(v_locks)")
+            .find("intent_vec_rwlock_int64_t__free(v_locks)")
             .expect("expected locks to be freed at scope exit");
         assert!(
             unlock_pos < free_pos,
@@ -53459,6 +53467,66 @@ função main() -> i64 {
         compile_to_llvm(source)
             .expect("vec_fill inside if-true block compiles to LLVM without a malformed PHI");
         compile_to_c(source).expect("vec_fill inside if-true block compiles to C");
+    }
+
+    #[test]
+    fn bug191_two_distinct_mutex_shapes_as_vec_elements_no_longer_collapse() {
+        // BUG-191 (2026-08-14): found by asking whether Box<T>'s
+        // dedicated `element_tag`/`vec_struct_tag` protection (fixed
+        // 2026-06-09, same session as BUG-188/189/190's fixes)
+        // extended to the other RAII/sync wrapper types -- it
+        // didn't. `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+        // `WriteGuard<T>` are all genuinely parametric over T (see
+        // `Mutex<SharedCounter>` in the shared-ownership tutorial),
+        // but had no arm in either backend's per-shape Vec-element
+        // tag function, so they fell through to a fallback that
+        // returns a FIXED spelling regardless of T
+        // (`"intent_mutex_i64"` / `%intent_mutex_i64` no matter what
+        // T actually is -- same collapse-bug SHAPE as the Atomic/
+        // Channel fix from Closure #211, just never applied to this
+        // type family). A program with both `Vec<Mutex<i64>>` and
+        // `Vec<Mutex<SomeStruct>>` collapsed both onto the same
+        // per-shape typedef/struct name -- confirmed directly: `cc`
+        // rejected the generated C with "passing argument ... from
+        // incompatible pointer type" (the second Vec's `__from`
+        // helper still expected the FIRST Vec's element type).
+        // `c_element_storage`/`llvm_type_string` (the actual data-
+        // buffer storage types) already correctly threaded the
+        // element type through recursively -- only the per-shape
+        // NAME was collapsing. Fixed with a dedicated arm per type
+        // in both `element_tag` (backend_c.rs) and `vec_struct_tag`
+        // (backend_llvm.rs), mirroring the pre-existing Atomic/
+        // Channel/Box arms.
+        let source = r#"
+            struct Big { a: i64, b: i64, c: i64 }
+            fn main() -> i64 {
+              let m1: Mutex<i64> = mutex_new(42);
+              let m2: Mutex<Big> = mutex_new(Big { a: 1, b: 2, c: 3 });
+              let v1: Vec<Mutex<i64>> = vec(m1);
+              let v2: Vec<Mutex<Big>> = vec(m2);
+
+              let g1 = mutex_lock(mut ref v1[0]);
+              print "v1[0]:", guard_get(ref g1);
+
+              let g2 = mutex_lock(mut ref v2[0]);
+              let big: Big = guard_get(ref g2);
+              print "v2[0].a:", big.a;
+              assert big.a == 1;
+              assert big.b == 2;
+              assert big.c == 3;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("two distinct Vec<Mutex<T>> shapes compile to C without collapsing");
+        assert!(
+            c.contains("intent_vec_mutex_Struct_Big"),
+            "expected a DISTINCT per-shape typedef for Vec<Mutex<Big>>, not a collapse \
+             onto Vec<Mutex<i64>>'s typedef; got:\n{}",
+            c
+        );
+        compile_to_llvm(source)
+            .expect("two distinct Vec<Mutex<T>> shapes compile to LLVM without collapsing");
     }
 
     #[test]
