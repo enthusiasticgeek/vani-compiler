@@ -3870,6 +3870,170 @@ fn intentc_test_legacy_mode_unaffected_by_harness_detection() {
 }
 
 #[test]
+fn intentc_test_harness_mode_runs_alongside_a_real_fn_main() {
+    // Test-fw Phase A (2026-08-14): a file with BOTH a real `fn main`
+    // AND `#[test]` fns must run harness mode for `vanic test` (the
+    // `#[test]` fns), not silently fall back to legacy single-test
+    // mode and skip them -- mirrors Rust's `#[cfg(test)] mod tests`
+    // coexisting with a binary crate's `fn main`. `vanic run` on the
+    // SAME file must still use the real `fn main`, unaffected.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_coexist_with_main_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"fn double(x: i64) -> i64 { return x * 2; }\n\n\
+          #[test]\n\
+          fn double_works() -> i64 {\n  assert double(21) == 42;\n  return 0;\n}\n\n\
+          fn main() -> i64 {\n  print \"real output:\", double(10);\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let test_run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <file with main + #[test]>");
+    let test_stdout = String::from_utf8_lossy(&test_run.stdout);
+    assert!(
+        test_run.status.success(),
+        "expected the #[test] fn to pass, got:\n{test_stdout}\n{}",
+        String::from_utf8_lossy(&test_run.stderr)
+    );
+    assert!(
+        test_stdout.contains("running 1 test"),
+        "expected harness mode to trigger despite fn main being present, got:\n{test_stdout}"
+    );
+    assert!(
+        test_stdout.contains("test double_works ... ok"),
+        "got:\n{test_stdout}"
+    );
+
+    let run_run = Command::new(binary)
+        .args(["run", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic run <same file>");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(run_run.status.success());
+    let run_stdout = String::from_utf8_lossy(&run_run.stdout);
+    assert!(
+        run_stdout.contains("real output: 20"),
+        "vanic run must still use the real fn main, got:\n{run_stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_filter_runs_only_matching_tests() {
+    // Test-fw Phase B (2026-08-14): --filter=<substring> matches
+    // `cargo test <substring>`'s own default filter semantics -- a
+    // plain substring match against each test's `path::name` label,
+    // skipping the rest without printing them.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_filter_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn addition_works() -> i64 {\n  assert 2 + 2 == 4;\n  return 0;\n}\n\n\
+          #[test]\nfn subtraction_works() -> i64 {\n  assert 10 - 3 == 7;\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let filtered = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--filter=addition"])
+        .output()
+        .expect("vanic test --filter=addition");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(filtered.status.success());
+    let stdout = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        stdout.contains("running 1 test") && stdout.contains("test addition_works ... ok"),
+        "got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("subtraction_works"),
+        "filtered-out test must not appear, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_should_panic_inverts_pass_fail() {
+    // Test-fw Phase C (2026-08-14): #[should_panic] passes iff the
+    // test process exits non-zero, fails with "did not panic as
+    // expected" if it exits 0 -- mirrors Rust's own "any panic
+    // counts" semantics.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_should_panic_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\n#[should_panic]\nfn panics_as_expected() -> i64 {\n  assert false;\n  return 0;\n}\n\n\
+          #[test]\n#[should_panic]\nfn does_not_panic_but_should() -> i64 {\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <should_panic file>");
+    let _ = std::fs::remove_file(&tmp);
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        !run.status.success(),
+        "expected overall failure (one test didn't panic), got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("test panics_as_expected ... ok"),
+        "got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("test does_not_panic_but_should ... FAILED (did not panic as expected"),
+        "got:\n{stdout}"
+    );
+    assert!(stdout.contains("1 passed; 1 failed"), "got:\n{stdout}");
+}
+
+#[test]
 #[ignore = "echo_with_timeout.vani LLVM IR has undefined value for async TCP locals; lli rejects it"]
 fn intentc_test_passes_for_all_examples_and_fails_on_violated_assertion() {
     // Two-part check:
@@ -4079,6 +4243,129 @@ fn intentc_test_json_emits_machine_readable_results() {
     assert!(
         stdout.contains("\"passed\":1") && stdout.contains("\"failed\":1"),
         "summary counts off, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_multi_file_output_grouped_and_ordered_by_file() {
+    // Test-fw Phase D (2026-08-14): every discovered test/file across
+    // every path now runs concurrently, but the PRINTED output must
+    // still be grouped and ordered by file exactly as if run
+    // serially (a separate, sequential printing pass over
+    // pre-computed results) -- this pins that structural guarantee
+    // with 3 files passed in a specific order: a harness file, a
+    // legacy file, then another harness file.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let pid = std::process::id();
+    let dir = std::env::temp_dir();
+    let a = dir.join(format!("intentc_test_order_a_{pid}.vani"));
+    let b = dir.join(format!("intentc_test_order_b_{pid}.vani"));
+    let c = dir.join(format!("intentc_test_order_c_{pid}.vani"));
+    std::fs::write(
+        &a,
+        b"#[test]\nfn a_one() -> i64 {\n  assert 1 == 1;\n  return 0;\n}\n\
+          #[test]\nfn a_two() -> i64 {\n  assert 2 == 2;\n  return 0;\n}\n",
+    )
+    .expect("write a");
+    std::fs::write(&b, b"fn main() -> i64 {\n  return 0;\n}\n").expect("write b");
+    std::fs::write(
+        &c,
+        b"#[test]\nfn c_one() -> i64 {\n  assert 3 == 3;\n  return 0;\n}\n",
+    )
+    .expect("write c");
+
+    let run = Command::new(binary)
+        .args([
+            "test",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("vanic test <a> <b> <c>");
+    let _ = std::fs::remove_file(&a);
+    let _ = std::fs::remove_file(&b);
+    let _ = std::fs::remove_file(&c);
+
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    // Every file's block must appear, and file A's block (both of
+    // its tests) must appear entirely before file B's line, which
+    // must appear entirely before file C's block -- pins ordering
+    // even though execution itself was concurrent.
+    let pos_a_header = stdout.find("running 2 tests").expect("file a header");
+    let pos_a_two = stdout.find("test a_two").expect("a_two line");
+    let pos_b = stdout.find(": ok (").expect("file b legacy line");
+    let pos_c_header = stdout.find("running 1 test (").expect("file c header");
+    assert!(pos_a_header < pos_a_two, "got:\n{stdout}");
+    assert!(pos_a_two < pos_b, "file a must fully precede file b, got:\n{stdout}");
+    assert!(pos_b < pos_c_header, "file b must precede file c, got:\n{stdout}");
+    // 2 tests from file a + 1 legacy pass from file b + 1 test from
+    // file c = 4 total pass units.
+    assert!(stdout.contains("4 passed; 0 failed"), "got:\n{stdout}");
+}
+
+#[test]
+fn intentc_test_threads_flag_accepts_one_and_rejects_zero() {
+    // Test-fw Phase D: --test-threads=1 forces fully serial
+    // execution (still correct, just not concurrent);
+    // --test-threads=0 is rejected with a clear error rather than
+    // silently spawning zero workers.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_threads_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn works() -> i64 {\n  assert 1 == 1;\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let serial = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--test-threads=1"])
+        .output()
+        .expect("vanic test --test-threads=1");
+    assert!(
+        serial.status.success(),
+        "got:\n{}",
+        String::from_utf8_lossy(&serial.stdout)
+    );
+
+    let zero = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--test-threads=0"])
+        .output()
+        .expect("vanic test --test-threads=0");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(!zero.status.success(), "--test-threads=0 must be rejected");
+    let stderr = String::from_utf8_lossy(&zero.stderr);
+    assert!(
+        stderr.contains("--test-threads must be at least 1"),
+        "got:\n{stderr}"
     );
 }
 

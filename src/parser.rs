@@ -1719,6 +1719,7 @@ impl Parser {
             vectorize: false,
             recursion_bound: None,
             is_test: false,
+            is_should_panic: false,
         })
     }
 
@@ -1758,6 +1759,7 @@ impl Parser {
         let mut deterministic_timing = false;
         let mut safety_standard: Option<String> = None;
         let mut is_test = false;
+        let mut is_should_panic = false;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
             self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
@@ -1834,6 +1836,7 @@ impl Parser {
                 "no_mangle" => no_mangle = true,
                 "vectorize" => vectorize = true,
                 "test" => is_test = true,
+                "should_panic" => is_should_panic = true,
                 "link_section" => {
                     self.expect_keyword(
                         "'=' after `link_section`",
@@ -2060,6 +2063,7 @@ impl Parser {
         f.bounded_stack = bounded_stack;
         f.wcet_cycles = wcet_cycles;
         f.is_test = is_test;
+        f.is_should_panic = is_should_panic;
         Ok(f)
     }
 
@@ -2137,6 +2141,7 @@ impl Parser {
             is_extern: true,
             recursion_bound: None,
             is_test: false,
+            is_should_panic: false,
         })
     }
 
@@ -10091,6 +10096,7 @@ pub(crate) fn try_v31_transform(
         vectorize: false,
         recursion_bound: None,
         is_test: false,
+            is_should_panic: false,
     };
 
     // Build the constructor body: `return __TaskFor_<name> { state_tag: 0, <params>, <locals>: 0 };`

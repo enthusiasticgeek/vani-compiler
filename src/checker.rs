@@ -2703,6 +2703,7 @@ fn lift_closures_in_block(
             vectorize: false,
                         recursion_bound: None,
                         is_test: false,
+            is_should_panic: false,
                     });
                     // Arc 5c: synthesize env-struct + register
                     // closure-make magic-call entry so Var(bind_name)
@@ -4508,6 +4509,7 @@ fn lift_expr_anon_fn(
                 is_extern: false,
                 recursion_bound: None,
                 is_test: false,
+            is_should_panic: false,
             });
             // Replace the AnonFn expression with a Var that
             // resolves against the lifted fn's signature.
@@ -7061,6 +7063,7 @@ fn hoist_impls_into_functions(
             vectorize: false,
                         is_extern: false,
                         is_test: false,
+            is_should_panic: false,
                     });
                 }
             } else {
@@ -11661,6 +11664,22 @@ fn check_function(
     consts: &BTreeMap<String, (Type, TypedConst, Span)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> TypedFunction {
+    // Test-fw Phase C (2026-08-14): `#[should_panic]` only means
+    // anything alongside `#[test]` -- it inverts `vanic test`'s
+    // pass/fail rule for a harness test fn, so it's meaningless (and
+    // presumably a mistake) on an ordinary function.
+    if function.is_should_panic && !function.is_test {
+        diagnostics.push(Diagnostic::new(
+            function.span,
+            format!(
+                "'{}' is annotated `#[should_panic]` without `#[test]` -- \
+                 `#[should_panic]` only has meaning on a test function \
+                 (it inverts `vanic test`'s pass/fail rule); add `#[test]` \
+                 or remove `#[should_panic]`",
+                function.name
+            ),
+        ));
+    }
     // T1.4 phase 2: monomorphization is now wired up as a
     // pre-pass (`monomorphize_generics_in_program`). Any
     // remaining generic function arriving here was unused
@@ -11700,6 +11719,7 @@ fn check_function(
             deterministic_timing: function.deterministic_timing,
             vectorize: function.vectorize,
             is_test: function.is_test,
+            is_should_panic: function.is_should_panic,
             span: function.span,
         };
     }
@@ -11770,6 +11790,7 @@ fn check_function(
             deterministic_timing: false,
             vectorize: false,
             is_test: false,
+            is_should_panic: false,
             span: function.span,
         };
     }
@@ -12063,6 +12084,7 @@ fn check_function(
             deterministic_timing: function.deterministic_timing,
             vectorize: function.vectorize,
             is_test: function.is_test,
+            is_should_panic: function.is_should_panic,
         span: function.span,
     }
 }

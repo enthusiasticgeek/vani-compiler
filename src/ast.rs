@@ -802,6 +802,17 @@ pub struct Function {
     /// a test-runner main, and compiles+runs the combined program.
     /// Test fns must take no parameters and return `i64` (0 = pass).
     pub is_test: bool,
+    /// Test-fw Phase C (2026-08-14): set when the function is
+    /// annotated `#[should_panic]`, stacked alongside `#[test]`
+    /// (`#[should_panic]` alone, without `#[test]`, is a checker
+    /// error -- meaningless on its own). Inverts `vanic test`'s
+    /// pass/fail rule for this one test: PASS iff the synthesized
+    /// process exits non-zero (any `assert`/runtime-trap counts, not
+    /// a specific exit code -- mirrors Rust's own "any panic counts"
+    /// `#[should_panic]` semantics rather than requiring the test
+    /// author to know this project's internal exit-code taxonomy),
+    /// FAIL with "test did not panic as expected" if it exits 0.
+    pub is_should_panic: bool,
     /// T2.4 of the safety-standard alignment arc: set by the
     /// parser when the function declaration is annotated
     /// `#[no_nan]`. Rejects builtins DEFINED to produce IEEE-754

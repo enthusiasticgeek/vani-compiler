@@ -62312,6 +62312,59 @@ fn main() -> i64 { return leak_check(); }
         assert!(f.no_heap, "no_heap must be true");
     }
 
+    /// Test-fw Phase C (2026-08-14): #[should_panic] parses and sets
+    /// is_should_panic = true when stacked with #[test].
+    #[test]
+    fn should_panic_attribute_sets_is_should_panic_flag() {
+        let source = r#"
+            #[test]
+            #[should_panic]
+            fn expects_a_panic() -> i64 {
+              assert false;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] + #[should_panic] must compile");
+        let f = checked.ir.functions.iter().find(|f| f.name == "expects_a_panic").unwrap();
+        assert!(f.is_test, "is_test must be true");
+        assert!(f.is_should_panic, "is_should_panic must be true");
+    }
+
+    /// Test-fw Phase C: #[should_panic] without #[test] is a checker
+    /// error -- the attribute is meaningless on its own.
+    #[test]
+    fn should_panic_without_test_is_rejected() {
+        let source = r#"
+            #[should_panic]
+            fn ordinary_fn() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("#[should_panic] without #[test] must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("should_panic")
+                && e.message.contains("without")
+                && e.message.contains("test")),
+            "expected a should_panic-without-test diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    /// Test-fw Phase C: a plain #[test] fn (no #[should_panic]) is
+    /// completely unaffected -- is_should_panic defaults to false.
+    #[test]
+    fn plain_test_attribute_leaves_should_panic_false() {
+        let source = r#"
+            #[test]
+            fn ordinary_test() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] alone must compile");
+        let f = checked.ir.functions.iter().find(|f| f.name == "ordinary_test").unwrap();
+        assert!(f.is_test, "is_test must be true");
+        assert!(!f.is_should_panic, "is_should_panic must default to false");
+    }
+
     /// XL2: resolve_combined_source returns the source text for a single file.
     #[test]
     fn resolve_combined_source_returns_source() {
