@@ -1175,6 +1175,61 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("  store i8 0, i8* %_isrl_endslot\n");
     out.push_str("  ret i8* %_isrl_finbuf\n");
     out.push_str("}\n");
+    // 2026-08-13 -- `stdin_ready_within_ms(timeout_ms) -> bool`, a
+    // genuinely non-blocking readiness poll on stdin (see the
+    // checker.rs dispatch-site comment for why this exists).
+    // Split by HOST target, same as the printf/snprintf/dprintf
+    // MinGW shims above -- Windows has no `poll()`, so it uses
+    // `WaitForSingleObject` on the console input handle instead
+    // (VERIFICATION DEFERRED, no Windows host access; works for
+    // interactive console input, less certain for redirected/
+    // piped stdin -- same caveat as the C backend's own version).
+    #[cfg(target_os = "windows")]
+    {
+        out.push_str("declare i8* @GetStdHandle(i32)\n");
+        out.push_str("declare i32 @WaitForSingleObject(i8*, i32)\n");
+        out.push_str("define i1 @intent_stdin_ready_within_ms(i64 %_sr_ms) {\n");
+        out.push_str("  %_sr_h = call i8* @GetStdHandle(i32 -10)\n");
+        out.push_str("  %_sr_hnull = icmp eq i8* %_sr_h, null\n");
+        out.push_str("  %_sr_hinv = icmp eq i8* %_sr_h, inttoptr (i64 -1 to i8*)\n");
+        out.push_str("  %_sr_hbad = or i1 %_sr_hnull, %_sr_hinv\n");
+        out.push_str("  br i1 %_sr_hbad, label %_sr_bad, label %_sr_wait\n");
+        out.push_str("_sr_wait:\n");
+        out.push_str("  %_sr_tmo32 = trunc i64 %_sr_ms to i32\n");
+        out.push_str("  %_sr_neg = icmp slt i64 %_sr_ms, 0\n");
+        out.push_str("  %_sr_tmo = select i1 %_sr_neg, i32 -1, i32 %_sr_tmo32\n");
+        out.push_str("  %_sr_rc = call i32 @WaitForSingleObject(i8* %_sr_h, i32 %_sr_tmo)\n");
+        out.push_str("  %_sr_ready = icmp eq i32 %_sr_rc, 0\n");
+        out.push_str("  ret i1 %_sr_ready\n");
+        out.push_str("_sr_bad:\n");
+        out.push_str("  ret i1 false\n");
+        out.push_str("}\n");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        out.push_str("declare i32 @poll(i8*, i64, i32)\n");
+        out.push_str("define i1 @intent_stdin_ready_within_ms(i64 %_sr_ms) {\n");
+        out.push_str("  %_sr_pfd = alloca { i32, i16, i16 }\n");
+        out.push_str("  %_sr_fdp = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 0\n");
+        out.push_str("  store i32 0, i32* %_sr_fdp\n");
+        out.push_str("  %_sr_evp = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 1\n");
+        out.push_str("  store i16 1, i16* %_sr_evp\n");
+        out.push_str("  %_sr_rep = getelementptr { i32, i16, i16 }, { i32, i16, i16 }* %_sr_pfd, i32 0, i32 2\n");
+        out.push_str("  store i16 0, i16* %_sr_rep\n");
+        out.push_str("  %_sr_pfdi8 = bitcast { i32, i16, i16 }* %_sr_pfd to i8*\n");
+        out.push_str("  %_sr_tmo32 = trunc i64 %_sr_ms to i32\n");
+        out.push_str("  %_sr_rc = call i32 @poll(i8* %_sr_pfdi8, i64 1, i32 %_sr_tmo32)\n");
+        out.push_str("  %_sr_rcpos = icmp sgt i32 %_sr_rc, 0\n");
+        out.push_str("  br i1 %_sr_rcpos, label %_sr_check, label %_sr_notready\n");
+        out.push_str("_sr_check:\n");
+        out.push_str("  %_sr_revents = load i16, i16* %_sr_rep\n");
+        out.push_str("  %_sr_masked = and i16 %_sr_revents, 17\n");
+        out.push_str("  %_sr_ready = icmp ne i16 %_sr_masked, 0\n");
+        out.push_str("  ret i1 %_sr_ready\n");
+        out.push_str("_sr_notready:\n");
+        out.push_str("  ret i1 false\n");
+        out.push_str("}\n");
+    }
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memset(i8*, i32, i64)\n");
@@ -1314,6 +1369,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         // `unsigned long` in glibc.
         out.push_str("declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)\n");
         out.push_str("declare i32 @pthread_join(i64, i8**)\n");
+        out.push_str("declare i32 @pthread_detach(i64)\n");
         // Linux futex syscall used by `mutex_lock`/
         // `Drop(Guard)` for real kernel-wait parking.
         // `@syscall` is libc's generic syscall(2)
@@ -3102,6 +3158,22 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", then_lbl));
+            // BUG-190 (2026-08-14): `ctx.current_block` must track
+            // `then_lbl` WHILE emitting `then_body`'s own statements,
+            // not just once the whole `if` is done (the `cont_lbl`
+            // assignment at the bottom, from BUG-69, only fixed the
+            // AFTER-the-if case). Any PHI-based codegen inside the
+            // then-branch (e.g. `vec_fill`'s hand-rolled SSA loop,
+            // which reads `ctx.current_block` to name its entry-edge
+            // predecessor) otherwise wired its phi to whatever block
+            // was current BEFORE the `if` -- reproduced by `region
+            // NAME { ... }` (which desugars to `if true { ... }`,
+            // see parse_region_block_stmt) containing a `vec_fill`:
+            // the phi declared `%entry` as a predecessor but the real
+            // CFG predecessor was `%then0`, so the LLVM verifier
+            // rejected the module ("PHI node entries do not match
+            // predecessors!").
+            ctx.current_block = then_lbl.clone();
             let then_terminated_before = ctx.terminated;
             ctx.terminated = false;
             for s in then_body {
@@ -3113,6 +3185,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             }
 
             out.push_str(&format!("{}:\n", else_lbl));
+            ctx.current_block = else_lbl.clone();
             ctx.terminated = then_terminated_before;
             for s in else_body {
                 emit_stmt(s, ctx, out);
@@ -4256,6 +4329,18 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str("  call void @exit(i32 3)\n");
             out.push_str("  unreachable\n");
             out.push_str(&format!("{}:\n", ok));
+            // 2026-08-13: same "phi predecessor tracking" class of
+            // bug as BUG-185 (print<bool>'s missing update) -- this
+            // was a latent gap until the new &&/|| short-circuit
+            // codegen (see the Binary And/Or arm in emit_expr) became
+            // the first thing to actually read `ctx.current_block`
+            // right after an `assert`, exposing it: a malformed
+            // "PHI node entries do not match predecessors!" when an
+            // assert is immediately followed by a short-circuit
+            // expression, because the phi's edge claimed whatever
+            // stale block was current BEFORE the assert instead of
+            // this `ok` block.
+            ctx.current_block = ok;
         }
         TypedStmt::Print { items } => emit_print_items(items, ctx, out),
         TypedStmt::EPrint { items } => emit_eprint_items_llvm(items, ctx, out),
@@ -5146,6 +5231,52 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
             out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
         }
+        TypedStmt::Detach { name } => {
+            // Real-thread detach: read the handle and release it
+            // (pthread_detach on POSIX; CloseHandle without waiting
+            // on Win32) WITHOUT freeing `.ctx` -- see the matching
+            // comment on backend_c.rs's Detach arm for why: the
+            // thread may still be reading (or, for `Task<R>`,
+            // writing a result into) `.ctx`, and nobody will ever
+            // `join` to learn when it's safe to free. A deliberate,
+            // bounded, one-time-per-`detach`-call leak, same
+            // documented v1 tradeoff as the C backend.
+            let addr = match ctx.locals.get(name) {
+                Some((_, a)) => a.clone(),
+                None => unreachable!(
+                    "checker: detach '{}' is in scope when we get here",
+                    name
+                ),
+            };
+            let handle_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 0\n",
+                handle_p, addr
+            ));
+            let handle_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i64, i64* {}\n",
+                handle_v, handle_p
+            ));
+            if host_uses_win32_threading() {
+                let h = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    h, handle_v
+                ));
+                let _close = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @CloseHandle(i8* {})\n",
+                    _close, h
+                ));
+            } else {
+                let _ret = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @pthread_detach(i64 {})\n",
+                    _ret, handle_v
+                ));
+            }
+        }
         TypedStmt::UnsafeBlock { reason, body } => {
             // Layer 1.1 of unsafe.md. Emit the reason string
             // as an inline LLVM comment on a single line ahead
@@ -5448,6 +5579,70 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ),
             };
             out.push_str(&format!("  {} = {} {} {}, {}\n", dest, mnemonic, ty, l, r));
+            dest
+        }
+        TypedExprKind::Binary { op: op @ (BinaryOp::And | BinaryOp::Or), left, right, .. }
+            if is_int_or_bool(&left.ty) =>
+        {
+            // 2026-08-13: short-circuit evaluation for `&&`/`||`.
+            // The generic eager-binary-op arm below (shared with
+            // bitwise `&`/`|`, which correctly always evaluate both
+            // operands) unconditionally emits BOTH operands before
+            // looking at the actual operator -- correct for BitAnd/
+            // BitOr, wrong for logical And/Or, whose right operand
+            // must never be evaluated once the left side alone
+            // already decides the result (`a == 0 || b / a > 0` must
+            // not evaluate `b / a` when `a == 0`; same for a
+            // bounds-guard idiom like `i < len(xs) && xs[i] > 0`).
+            // ssa.rs's lowering already special-cases this (see its
+            // "short-circuit lowering for `&&` and `||`" comment,
+            // 2026-06-09) -- this tree-LLVM path apparently never got
+            // the equivalent fix, so any function routed through the
+            // tree backend (anything calling a non-SSA-eligible
+            // builtin, e.g. `i64_max_value()`) kept the eager,
+            // unsound behavior. Mirrors ssa.rs's structure: branch on
+            // the left value, only evaluate `right` on the taken
+            // path, phi-merge the short-circuit constant with the
+            // right's value on the other path.
+            let l = emit_expr(left, ctx, out);
+            let left_block = ctx.current_block.clone();
+            let eval_rhs = ctx.fresh_label("sc_rhs");
+            let merge = ctx.fresh_label("sc_merge");
+            let is_or = matches!(op, BinaryOp::Or);
+            let (then_target, else_target) = if is_or {
+                (merge.clone(), eval_rhs.clone())
+            } else {
+                (eval_rhs.clone(), merge.clone())
+            };
+            out.push_str(&format!(
+                "  br i1 {}, label %{}, label %{}\n",
+                l, then_target, else_target
+            ));
+            out.push_str(&format!("{}:\n", eval_rhs));
+            // BUG-185-class fix: the codegen context's "current
+            // block" must be updated the moment a new block is
+            // opened, BEFORE emitting anything inside it -- otherwise
+            // a `right` that doesn't itself branch leaves
+            // `ctx.current_block` stuck at whatever it was before
+            // (`left_block`), so `rhs_end_block` below would
+            // wrongly equal `left_block` and the phi's two edges
+            // would collide onto the same predecessor label instead
+            // of the correct `left_block`/`eval_rhs` pair -- exactly
+            // the "PHI node entries do not match predecessors!"
+            // failure this comment's sibling call sites in this file
+            // already guard against.
+            ctx.current_block = eval_rhs.clone();
+            let r = emit_expr(right, ctx, out);
+            let rhs_end_block = ctx.current_block.clone();
+            out.push_str(&format!("  br label %{}\n", merge));
+            out.push_str(&format!("{}:\n", merge));
+            let dest = ctx.fresh_tmp();
+            let short_circuit_value = if is_or { "true" } else { "false" };
+            out.push_str(&format!(
+                "  {} = phi i1 [ {}, %{} ], [ {}, %{} ]\n",
+                dest, short_circuit_value, left_block, r, rhs_end_block
+            ));
+            ctx.current_block = merge;
             dest
         }
         TypedExprKind::Binary { op, left, right, checked } if is_int_or_bool(&left.ty) => {
@@ -7542,6 +7737,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i8* @intent_stdin_read_line()\n",
                     result
+                ));
+                return result;
+            }
+            if name == "stdin_ready_within_ms" {
+                // stdin_ready_within_ms(timeout_ms) -> bool
+                let ms = emit_expr(&args[0], ctx, out);
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i1 @intent_stdin_ready_within_ms(i64 {})\n",
+                    result, ms
                 ));
                 return result;
             }
@@ -17501,11 +17706,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             ));
             p
         }
-        TypedExprKind::RefMutIndex { vec, index, element_ty } => {
+        TypedExprKind::RefMutIndex { vec, index, element_ty, .. } => {
             // `mut ref vec[i]` → GEP into the Vec's heap data
             // buffer. The local at `vec` holds a Vec struct
             // value (`{T*, i64, i64}`); extract its data
             // pointer, then GEP at the element index.
+            //
+            // 2026-08-14: no change needed here for `vec` naming a
+            // `mut ref Vec<T>` parameter rather than an owned local
+            // Vec -- `ctx.locals` already records a ref parameter's
+            // OWN incoming pointer as its "address" (see the param-
+            // binding prologue's `is_any_ref` branch), and `vec_ty.
+            // deref()` two lines below already strips the RefMut
+            // wrapper to get the right struct type string. The IR's
+            // new `vec_ty` field (added alongside the checker fix
+            // that now accepts this case) isn't needed on this
+            // backend at all; only `backend_c.rs`'s codegen needed
+            // it, to choose between `.`/`->` for its by-value-vs-
+            // by-pointer C parameter representation.
             let (vec_ty, vec_addr) = ctx
                 .locals
                 .get(vec)
@@ -45418,6 +45636,24 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // arm `llvm_type(Object)` panics ("use llvm_type_string
         // for aggregate type").
         Type::Object(name) => format!("intent_dyn_{}", name),
+        // 2026-08-14 fix: sibling of the C backend's identical fix
+        // (see `element_tag` in backend_c.rs for the full
+        // rationale/repro). `Mutex<T>`/`Guard<T>`/`RwLock<T>`/
+        // `ReadGuard<T>`/`WriteGuard<T>` are genuinely parametric
+        // over T, but had no arm here, so they fell through to the
+        // `_` branch's `llvm_type(element)` call -- which for these
+        // five types returns a FIXED `%intent_mutex_i64`/etc.
+        // string regardless of T (see `llvm_type`'s own comment,
+        // itself stale -- "Mutex/Guard are still i64-only" hasn't
+        // been true since `Mutex<SharedCounter>` shipped). Two
+        // different `Mutex<T>` shapes as Vec elements in the same
+        // program collapsed onto the same per-shape LLVM struct
+        // name.
+        Type::Mutex(inner) => format!("mutex_{}", vec_struct_tag(inner)),
+        Type::Guard(inner) => format!("guard_{}", vec_struct_tag(inner)),
+        Type::RwLock(inner) => format!("rwlock_{}", vec_struct_tag(inner)),
+        Type::ReadGuard(inner) => format!("readguard_{}", vec_struct_tag(inner)),
+        Type::WriteGuard(inner) => format!("writeguard_{}", vec_struct_tag(inner)),
         // ARC 3d: `Vec<Tuple<T1, T2, ...>>` element tag is a
         // recursive composition. Without this arm
         // `llvm_type(Tuple)` panics ("use llvm_type_string for
@@ -46030,6 +46266,10 @@ pub(crate) fn walk_body(
                 // this same block; treat it like a read of the
                 // local binding so capture analysis sees nothing
                 // crossing the parallel-for boundary.
+                let _ = name;
+            }
+            TypedStmt::Detach { name } => {
+                // Mirrors the TaskJoin arm just above.
                 let _ = name;
             }
             TypedStmt::UnsafeBlock { body, .. } => {

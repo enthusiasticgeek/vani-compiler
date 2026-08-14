@@ -1458,6 +1458,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !array_return_seen.is_empty() {
         body.push('\n');
     }
+    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> helpers.
+    // The bundle's `pool_get` returns `Enum_Option__i64`; the
+    // `Option__i64` monomorph is auto-registered by the
+    // pool_get-uses-Option pre-pass in checker.rs, so the
+    // typedef is already in `program.enums` -- and the enum-decl
+    // pass above (which runs well before this point) has already
+    // emitted `Enum_Option__i64`'s typedef into `body`.
+    //
+    // BUG-189 (2026-08-14): this used to run much later (after the
+    // `element_types` Vec-bundle loop just below), so a program
+    // that formed `Vec<Handle<i64>>` -- e.g. `vec(h1, h2)` -- had
+    // its Vec bundle reference `intent_handle_i64` BEFORE that
+    // typedef existed anywhere in the generated C file ("unknown
+    // type name 'intent_handle_i64'"). Moving this block ahead of
+    // the Vec-bundle loop (but still after the enum-decl pass it
+    // depends on) fixes the ordering without touching either pass.
+    if program_uses_i64_pool(program) {
+        emit_intent_pool_helpers_c_body(&mut body);
+    }
     for element in &element_types {
         // Skip Vec bundles already emitted in the pre-struct
         // pass for fields like `struct Bag { contents: Vec<i64> }`.
@@ -1577,14 +1596,6 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // but keep alongside deque for consistency).
     if program_uses_i64_hashset(program) {
         emit_intent_hashset_helpers_c_body(&mut body);
-    }
-    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> helpers.
-    // The bundle's `pool_get` returns `Enum_Option__i64`; the
-    // `Option__i64` monomorph is auto-registered by the
-    // pool_get-uses-Option pre-pass in checker.rs, so the
-    // typedef is in scope by the time this bundle is emitted.
-    if program_uses_i64_pool(program) {
-        emit_intent_pool_helpers_c_body(&mut body);
     }
     // Layer 3.1 of `unsafe.md` — canary-protected heap
     // allocator. Gated on program usage. Always-on canaries
@@ -1960,6 +1971,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
     emit_intent_file_io_helpers_c(&mut out, &body);
+    emit_intent_stdin_ready_helpers_c(&mut out, &body);
     // Force TCP helpers to emit when epoll helpers do so the
     // `accept()` / `recv()` declares + the thread-local buffer
     // are available to the nb variants AND `read()` lands for
@@ -2612,6 +2624,42 @@ fn emit_intent_file_io_helpers_c(out: &mut String, body: &str) {
          static char* intent_stdin_read_line(void) {\n\
          \x20 return intent_file_read_line(stdin);\n\
          }\n\n",
+    );
+}
+
+/// 2026-08-13 -- `stdin_ready_within_ms(timeout_ms) -> bool`, a
+/// genuinely non-blocking readiness poll on stdin. POSIX: `poll()`
+/// on fd 0. Windows: `WaitForSingleObject` on the console input
+/// handle (works for interactive console input; less reliable for
+/// redirected/piped stdin, where a pipe handle's signaled state
+/// doesn't as cleanly mean "a full line is ready" -- VERIFICATION
+/// DEFERRED, no Windows host access to confirm the piped case).
+fn emit_intent_stdin_ready_helpers_c(out: &mut String, body: &str) {
+    if !body.contains("intent_stdin_ready_within_ms") {
+        return;
+    }
+    out.push_str(
+        "#if defined(_WIN32)\n\
+         #include <windows.h>\n\
+         static INTENT_UNUSED bool intent_stdin_ready_within_ms(int64_t timeout_ms) {\n\
+         \x20 HANDLE h = GetStdHandle(STD_INPUT_HANDLE);\n\
+         \x20 if (h == INVALID_HANDLE_VALUE || h == NULL) return false;\n\
+         \x20 DWORD tmo = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;\n\
+         \x20 return WaitForSingleObject(h, tmo) == WAIT_OBJECT_0;\n\
+         }\n\
+         #else\n\
+         #include <poll.h>\n\
+         static INTENT_UNUSED bool intent_stdin_ready_within_ms(int64_t timeout_ms) {\n\
+         \x20 struct pollfd pfd;\n\
+         \x20 pfd.fd = 0;\n\
+         \x20 pfd.events = POLLIN;\n\
+         \x20 pfd.revents = 0;\n\
+         \x20 int tmo = (timeout_ms < 0) ? -1 : (int)timeout_ms;\n\
+         \x20 int rc = poll(&pfd, 1, tmo);\n\
+         \x20 if (rc <= 0) return false;\n\
+         \x20 return (pfd.revents & (POLLIN | POLLHUP)) != 0;\n\
+         }\n\
+         #endif\n\n",
     );
 }
 
@@ -8521,7 +8569,7 @@ fn collect_vec_elements_in_stmt(
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } => {}
         TypedStmt::ForIterShallowFree { element_ty, .. } => {
             collect_vec_elements(element_ty, seen, out);
         }
@@ -8794,6 +8842,8 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("}\n");
     out.push_str("static void intent_thread_yield(void) INTENT_UNUSED;\n");
     out.push_str("static void intent_thread_yield(void) { SwitchToThread(); }\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) INTENT_UNUSED;\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) { CloseHandle(th); }\n");
     out.push_str("#else\n");
     out.push_str("# include <pthread.h>\n");
     out.push_str("# include <sched.h>\n");
@@ -8808,6 +8858,8 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("}\n");
     out.push_str("static void intent_thread_yield(void) INTENT_UNUSED;\n");
     out.push_str("static void intent_thread_yield(void) { sched_yield(); }\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) INTENT_UNUSED;\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) { pthread_detach(th); }\n");
     out.push_str("#endif\n\n");
 }
 
@@ -10926,6 +10978,31 @@ pub(crate) fn element_tag(element: &Type) -> String {
         Type::Channel(element, capacity) => {
             format!("channel_{}_{}", element_tag(element), capacity)
         }
+        // 2026-08-14 fix: same collapse bug the Atomic/Channel arms
+        // just above were already fixed for (Closure #211), found by
+        // asking whether Box's dedicated `element_tag` protection
+        // extended to the other RAII/sync wrapper types -- it
+        // didn't. `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+        // `WriteGuard<T>` are all genuinely parametric over T (see
+        // `03_concurrency.md`'s `Mutex<SharedCounter>` /
+        // `RwLock<T>` examples), but had no arm here, so they fell
+        // through to `c_leaf_type`'s FIXED `"intent_mutex_i64"` /
+        // etc. spelling regardless of the actual T. A program with
+        // both `Vec<Mutex<i64>>` and `Vec<Mutex<SomeStruct>>`
+        // collapsed both onto the same `intent_vec_intent_mutex_i64`
+        // typedef -- confirmed via a minimal repro, `cc` rejected it
+        // with "passing argument ... from incompatible pointer type"
+        // (the second Vec's `__from` helper still expected the
+        // FIRST Vec's element type). `c_element_storage` (the actual
+        // data-buffer storage type) already correctly threads
+        // `element_tag` through `c_mutex_storage`/`c_guard_storage`/
+        // etc. recursively -- only the per-shape TYPEDEF NAME
+        // (built here) was collapsing.
+        Type::Mutex(element) => format!("mutex_{}", element_tag(element)),
+        Type::Guard(element) => format!("guard_{}", element_tag(element)),
+        Type::RwLock(element) => format!("rwlock_{}", element_tag(element)),
+        Type::ReadGuard(element) => format!("readguard_{}", element_tag(element)),
+        Type::WriteGuard(element) => format!("writeguard_{}", element_tag(element)),
         // Closure #214: `fn(T1, T2) -> R` falls through to
         // `c_leaf_type(FnPtr) = "void*"`, and the `*` in the
         // typedef name (`intent_vec_void*`) breaks C parsing.
@@ -10979,6 +11056,16 @@ pub(crate) fn element_tag(element: &Type) -> String {
         Type::Vec128(inner) => format!("vec128_{}", element_tag(inner)),
         Type::Vec256(inner) => format!("vec256_{}", element_tag(inner)),
         Type::Vec512(inner) => format!("vec512_{}", element_tag(inner)),
+        // BUG-188 (2026-08-14): `ArenaRef<T>` (v1: T is always i64,
+        // same restriction as Pool/Handle above) falls through to
+        // the `_` arm below, whose `c_leaf_type(element)` spelling
+        // is the raw pointer type `"int64_t*"` -- the `*` survives
+        // `.replace(' ', "_")` unescaped, so `Vec<ArenaRef<i64>>`
+        // produced the invalid C identifier `intent_vec_int64_t*`
+        // ("expected '=', ',', ';'..." from cc, one per corrupted
+        // occurrence). Give it its own identifier-safe tag, mirroring
+        // the `Handle`/`Pool` arms' fixed v1-i64 spelling.
+        Type::ArenaRef(_) => "arena_ref_int64_t".to_string(),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
@@ -11173,7 +11260,7 @@ pub(crate) fn collect_rwlock_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11347,7 +11434,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11469,7 +11556,7 @@ pub(crate) fn collect_mutex_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -15132,6 +15219,31 @@ return __intent_ret; }}\n",
             ));
             out.push_str(&format!("  free({}.ctx);\n", local_name(name)));
         }
+        TypedStmt::Detach { name } => {
+            // Real-thread detach: the OS keeps the thread running
+            // independently, so `.ctx` (the heap-allocated capture
+            // struct the thread's outline function reads from --
+            // and, for `Task<R>`, writes its result into) cannot be
+            // freed here: the thread may still be using it, and
+            // nobody will ever `join` to learn when it's finished.
+            // A self-freeing outline (the thread frees its own ctx
+            // right before returning) isn't safe either without
+            // more coordination, since the SAME outline function is
+            // shared by whichever consumption (join or detach) a
+            // task ends up getting -- join's own codegen still
+            // needs ctx alive after the thread exits, to read a
+            // `Task<R>` result out of it. So this is a deliberate,
+            // bounded, one-time-per-`detach`-call leak of
+            // `sizeof(ctx)` bytes -- documented as a known v1
+            // tradeoff, not swept under the rug. `.thread` itself
+            // has no such issue: `intent_thread_detach` releases
+            // our reference to the OS thread handle without
+            // leaking it.
+            out.push_str(&format!(
+                "  intent_thread_detach({}.thread);\n",
+                local_name(name)
+            ));
+        }
         TypedStmt::UnsafeBlock { reason, body } => {
             // Layer 1.1 of unsafe.md. The reason string is the
             // user-facing justification, escaped here for C
@@ -16195,15 +16307,23 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 _ => format!("&{}", local_name(name)),
             }
         }
-        TypedExprKind::RefMutIndex { vec, index, .. } => {
+        TypedExprKind::RefMutIndex { vec, index, vec_ty, .. } => {
             // `mut ref vec[i]` → `&v_vec.data[idx]`. The Vec's
             // `.data` heap buffer is a contiguous array of
             // element-sized slots; the resulting pointer is
             // valid until the surrounding code resizes the Vec
             // (the user is responsible for that discipline —
             // same as `mut ref Var` semantics today).
+            //
+            // 2026-08-14: when `vec` names a `mut ref Vec<T>`
+            // parameter (not an owned local Vec), its C parameter
+            // spelling is a POINTER to the Vec struct, so the
+            // field access needs `->` instead of `.` — same
+            // `vec_ty.is_any_ref()` test `RefField`/`RefMutField`
+            // already use just below for the same reason.
             let idx_expr = emit_expr(index);
-            format!("(&{}.data[{}])", local_name(vec), idx_expr)
+            let sep = if vec_ty.is_any_ref() { "->" } else { "." };
+            format!("(&{}{}data[{}])", local_name(vec), sep, idx_expr)
         }
         TypedExprKind::RefField { object, field, object_ty, .. }
         | TypedExprKind::RefMutField { object, field, object_ty, .. } => {
@@ -20007,6 +20127,15 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "sleep_ms" => {
             format!("intent_sleep_ms(({}))", emit_expr(&args[0]))
         }
+        // 2026-08-13 — `stdin_ready_within_ms(timeout_ms) -> bool`.
+        // Wraps `intent_stdin_ready_within_ms`, emitted by
+        // `emit_intent_stdin_ready_helpers_c` when referenced.
+        "stdin_ready_within_ms" => {
+            format!(
+                "intent_stdin_ready_within_ms(({}))",
+                emit_expr(&args[0])
+            )
+        }
         // Arc 8 step 8e proper — TCP networking primitives.
         // All resolve to runtime helpers emitted by
         // emit_intent_tcp_helpers_c when any tcp_* builtin
@@ -23032,6 +23161,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
             TypedStmt::TaskJoin { .. }
+            | TypedStmt::Detach { .. }
             | TypedStmt::Break { .. }
             | TypedStmt::Continue { .. } => {}
             TypedStmt::ForIterShallowFree { element_ty, .. } => walk_type(element_ty, set),

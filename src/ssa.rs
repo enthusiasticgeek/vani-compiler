@@ -944,6 +944,19 @@ fn lower_stmt(
             );
             Ok(())
         }
+        TypedStmt::Detach { .. } => {
+            // No SSA-backend lowering yet -- `main.rs::stmt_ssa_
+            // supported` routes any function containing `detach`
+            // through the tree backends instead, which fully
+            // support it (see backend_c.rs / backend_llvm.rs). This
+            // arm should never actually run; it exists only so the
+            // match stays exhaustive, and returns a real error
+            // (rather than panicking) if that gate is ever bypassed.
+            Err(LowerError {
+                message: "detach reached the SSA lowerer -- should have been routed to a tree backend".into(),
+                span: Span::default(),
+            })
+        }
         TypedStmt::UnsafeBlock { reason, body } => {
             b.emit(
                 Type::I64,
@@ -1483,6 +1496,7 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::ForIter { .. } => "ForIter",
         TypedStmt::TaskSpawn { .. } => "TaskSpawn",
         TypedStmt::TaskJoin { .. } => "TaskJoin",
+        TypedStmt::Detach { .. } => "Detach",
         TypedStmt::UnsafeBlock { .. } => "UnsafeBlock",
         TypedStmt::ForIterShallowFree { .. } => "ForIterShallowFree",
     }

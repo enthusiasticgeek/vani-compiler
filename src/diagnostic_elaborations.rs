@@ -1375,14 +1375,19 @@ pub fn task_affine(task_name: &str) -> Vec<String> {
             task_name,
         ),
         "Every `task` handle spawned in a block must be consumed by exactly one \
-         `join` in the same block, after the spawn. Spawning twice, joining without \
-         spawning, joining twice, or leaving a handle unjoined all break the affine \
-         discipline that ensures every task completes before the enclosing scope exits."
+         `join` OR `detach` in the same block, after the spawn — not both, and not \
+         neither. `join` waits for the thread and (for `Task<R>`) returns its result; \
+         `detach` lets it keep running independently without waiting. Spawning twice, \
+         consuming without spawning, consuming twice (join-then-join, detach-then-\
+         detach, or join-then-detach in either order), or leaving a handle unconsumed \
+         all break the affine discipline that ensures every task is accounted for \
+         before the enclosing scope exits."
             .to_string(),
         format!(
-            "Ensure '{}' is spawned exactly once and joined exactly once, in block order. \
-             Cross-block joins are not supported in v1 — the spawn and join must appear \
-             in the same statement list. Remove duplicate spawns or joins as appropriate.",
+            "Ensure '{}' is spawned exactly once and then either joined or detached \
+             exactly once, in block order. Cross-block join/detach isn't supported in \
+             v1 — the spawn and its consumer must appear in the same statement list. \
+             Remove duplicate spawns/joins/detaches as appropriate.",
             task_name,
         ),
     ]

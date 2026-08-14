@@ -14756,3 +14756,480 @@ fn tic_tac_toe_timed_example_exits_immediately_on_closed_stdin() {
         );
     }
 }
+
+// Regression coverage for stdin_ready_within_ms itself: a genuinely
+// non-blocking readiness poll on stdin (see checker.rs's dispatch
+// comment for why this exists -- it's what let
+// tic_tac_toe_timed.vani drop task/Atomic/join entirely). This test
+// is the whole point of that builtin: input that arrives AFTER the
+// poll's timeout must not be waited for -- the process should exit
+// promptly on the timeout, not block until the late input shows up.
+#[test]
+fn stdin_ready_within_ms_does_not_wait_past_its_timeout() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_stdin_ready_nb_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src_path = dir.join("stdin_ready_nb.vani");
+    fs::write(
+        &src_path,
+        "intent \"stdin_ready_within_ms must not wait past its timeout\";\n\
+         fn main() -> i64 {\n  \
+           let ready: bool = stdin_ready_within_ms(300);\n  \
+           if ready {\n    \
+             print \"ready\";\n  \
+           } else {\n    \
+             print \"timed_out\";\n  \
+           }\n  \
+           return 0;\n\
+         }\n",
+    )
+    .expect("write stdin_ready_nb.vani");
+
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let mut cmd = Command::new(binary);
+        cmd.args(&backend_args);
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        // Deliberately never write to child.stdin, and keep it alive
+        // in `_stdin_keepalive` (NOT dropped) for as long as we're
+        // waiting on the child -- `Child::wait_with_output` closes
+        // stdin as one of its first steps (by design, to avoid
+        // deadlocking a child that's blocked reading it), which would
+        // deliver an immediate EOF and make stdin_ready_within_ms
+        // report "ready" right away instead of genuinely timing out.
+        // Using `wait()` (which doesn't touch stdin) plus manual
+        // stdout/stderr reads keeps the pipe open with no data for
+        // the whole run, the scenario this test actually needs.
+        let _stdin_keepalive = child.stdin.take();
+        let mut stdout_handle = child.stdout.take().expect("child stdout");
+        let mut stderr_handle = child.stderr.take().expect("child stderr");
+        let start = std::time::Instant::now();
+        let status = child.wait().expect("wait for intentc");
+        let elapsed = start.elapsed();
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+        {
+            use std::io::Read;
+            let _ = stdout_handle.read_to_string(&mut stdout_buf);
+            let _ = stderr_handle.read_to_string(&mut stderr_buf);
+        }
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            stdout_buf,
+            stderr_buf
+        );
+        assert!(
+            elapsed.as_secs() < 10,
+            "expected stdin_ready_within_ms(300) to return well under 10s for {:?}, took {:?}",
+            backend_args,
+            elapsed
+        );
+        assert_eq!(
+            stdout_buf.replace("\r\n", "\n"),
+            "timed_out\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// 2026-08-13: `&&` / `||` must short-circuit on BOTH backends -- the
+// right operand must not be evaluated (no side effects, no traps)
+// once the left operand already decides the result. The C backend
+// gets this for free from native C's own && / || semantics; the
+// tree-LLVM backend did NOT (a real bug: it eagerly evaluated both
+// operands via a plain `and`/`or` instruction, identical to how it
+// -- correctly -- handles bitwise `&`/`|`). Found via a
+// `false && overflowing_call()` repro that spuriously trapped with
+// "integer overflow in i64 add" on `vanic run` but not `--backend=c`.
+// Fixed by lowering And/Or to a branch + phi merge in backend_llvm.rs
+// (mirroring ssa.rs's own short-circuit lowering, in place since
+// 2026-06-09) -- but this specific repro requires a call routed
+// through the TREE backend specifically (i64_max_value() isn't
+// SSA-eligible), since the SSA path was already correct.
+#[test]
+fn short_circuit_and_or_do_not_evaluate_right_operand_when_left_decides() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_short_circuit_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src_path = dir.join("short_circuit.vani");
+    fs::write(
+        &src_path,
+        "intent \"short-circuit && / || must not evaluate the right operand when the left decides\";\n\
+         fn would_overflow() -> bool {\n  \
+           let x: i64 = i64_max_value();\n  \
+           let y: i64 = x + 1;\n  \
+           return y > 0;\n\
+         }\n\
+         fn main() -> i64 {\n  \
+           let a: bool = false && would_overflow();\n  \
+           print \"a =\", a;\n  \
+           let b: bool = true || would_overflow();\n  \
+           print \"b =\", b;\n  \
+           return 0;\n\
+         }\n",
+    )
+    .expect("write short_circuit.vani");
+
+    for backend_args in [
+        vec!["run", src_path.to_str().unwrap()],
+        vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?} (short-circuit should prevent the overflow trap)\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "a = false\nb = true\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Companion control case: when the left operand does NOT decide the
+// result (`true && ...` / `false || ...`), the right operand MUST
+// still be evaluated -- confirming the fix didn't overshoot into
+// never evaluating the right side at all.
+#[test]
+fn short_circuit_and_or_still_evaluate_right_operand_when_left_does_not_decide() {
+    use std::fs;
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir = std::env::temp_dir().join(format!(
+        "intentc_short_circuit_control_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+
+    let cases = [
+        (
+            "and_control.vani",
+            "let a: bool = true && would_overflow();\n  print \"unreachable:\", a;\n",
+        ),
+        (
+            "or_control.vani",
+            "let a: bool = false || would_overflow();\n  print \"unreachable:\", a;\n",
+        ),
+    ];
+    for (filename, body) in cases {
+        let src_path = dir.join(filename);
+        fs::write(
+            &src_path,
+            format!(
+                "intent \"control case: right operand must still be evaluated\";\n\
+                 fn would_overflow() -> bool {{\n  \
+                   let x: i64 = i64_max_value();\n  \
+                   let y: i64 = x + 1;\n  \
+                   return y > 0;\n\
+                 }}\n\
+                 fn main() -> i64 {{\n  \
+                   {}\
+                   return 0;\n\
+                 }}\n",
+                body
+            ),
+        )
+        .expect("write control case");
+
+        for backend_args in [
+            vec!["run", src_path.to_str().unwrap()],
+            vec!["run", src_path.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert!(
+                !output.status.success(),
+                "intentc {:?} for {} should trap (right operand must still be evaluated), but succeeded\nstdout: {}",
+                backend_args,
+                filename,
+                String::from_utf8_lossy(&output.stdout)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("integer overflow"),
+                "intentc {:?} for {} should trap with an overflow message, got stderr:\n{}",
+                backend_args,
+                filename,
+                stderr
+            );
+        }
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// 2026-08-13: real-world (not toy) example programs for Barrier,
+// Handle<T>/Pool<T>, Region<T>/ArenaRef<T>, and Task<R>/join, plus
+// detach() itself via detach_heartbeat.vani. Each one's output is
+// fully deterministic except detach_heartbeat's background ticks
+// (a genuine race against main's own exit -- that test only checks
+// the deterministic part).
+#[test]
+fn barrier_sensor_rendezvous_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/barrier_sensor_rendezvous.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "all readings collected\nworker 0 share: 10\nworker 1 share: 20\nworker 2 share: 30\nworker 3 share: 40\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn handle_job_queue_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/handle_job_queue.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "jobs run: 3\njobs skipped (cancelled): 2\ntotal priority of jobs that ran: 90\ndouble-cancel of j2 was a safe no-op\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn arena_batch_parse_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/arena_batch_parse.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "batch size: 6\nsum: 232\nmax: 89\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn task_parallel_chunk_sum_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/task_parallel_chunk_sum.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "chunk sums: 31 49 35 40\ngrand total: 155\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn detach_heartbeat_example_succeeds_and_prints_the_deterministic_result_on_both_backends() {
+    // The heartbeat's own ticks are a genuine race against main's
+    // exit (that's the whole point of `detach`) -- only assert the
+    // deterministic part (main's own computation result), and that
+    // IF heartbeat lines appear at all, they're well-formed.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/detach_heartbeat.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // Only assert the deterministic part. The heartbeat's own
+        // `print` calls run on a real, un-joined, un-synchronized
+        // thread (that's the whole point of `detach`), so their
+        // output can interleave BYTE-for-byte with main's own
+        // prints -- e.g. a heartbeat line can appear truncated
+        // mid-line if main's print interjects before the
+        // heartbeat's trailing tick number lands. Asserting
+        // anything about the heartbeat lines' exact shape would be
+        // asserting a race outcome, not a semantic guarantee.
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("main computation result: 332833500\n"),
+            "expected the deterministic result line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
+fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends() {
+    // Combination-features capstone: Pool<i64>/Handle<i64> (a
+    // Vec<Handle<i64>> registry -- BUG-189's fix), Region/
+    // ArenaRef<i64> (a Vec<ArenaRef<i64>> per worker -- BUG-188/190's
+    // fix), Mutex<i64> (shared running total), Barrier (checkpoint
+    // rendezvous), task+join (3 workers + main as the 4th), and
+    // task+detach (a fire-and-forget heartbeat). All non-deterministic
+    // output (worker print ordering, heartbeat ticks) is filtered out
+    // before comparing -- only the deterministic checkpoint/total
+    // lines, which the Barrier + Mutex combination guarantees are
+    // correct regardless of thread scheduling, are asserted exactly.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/concurrent_pipeline_dashboard.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("registered 4 sensors\n"),
+            "expected sensor-registration line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("checkpoint reached, running total: 204\n"),
+            "expected the checkpoint total line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("grand total: 204\n"),
+            "expected the grand-total line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("mutex total confirms: 204\n"),
+            "expected the mutex-confirmation line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        // Deliberately NOT asserting anything about the individual
+        // worker "derived ... from raw reading ..." lines' exact
+        // shape: caught on real CI (not locally, after 10 repeated
+        // runs) -- multiple worker threads' `print` calls run fully
+        // concurrently and unsynchronized BEFORE any of them reaches
+        // the barrier, so their multi-argument prints can interleave
+        // byte-for-byte with each other (worker 1's line split mid-
+        // print by worker 3's own print call, in the observed CI
+        // failure). Same race class as `detach_heartbeat_example`'s
+        // heartbeat lines. The checkpoint/grand-total/mutex-confirms
+        // lines above are NOT subject to this -- by the time any
+        // thread reaches them, the Barrier (for the first three) or
+        // sequential single-threaded `main` execution (for the last)
+        // guarantees no other thread is still mid-print.
+    }
+}

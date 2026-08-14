@@ -1883,6 +1883,19 @@ pub enum Stmt {
         name: String,
         span: Span,
     },
+    /// `detach <name>;` — consumes the `Task` handle named by
+    /// `<name>` WITHOUT waiting for it or retrieving its result:
+    /// the spawned thread keeps running independently, and the
+    /// process can still exit (or the enclosing function return)
+    /// without blocking on it. The checker accepts this as an
+    /// alternative to `join <name>;` for satisfying the "every
+    /// spawned task must be consumed exactly once" affine rule —
+    /// `detach`/`join` are mutually exclusive per task, and each
+    /// still applies at most once.
+    Detach {
+        name: String,
+        span: Span,
+    },
     /// `unsafe(reason = "...") { <body> }` — lexically scoped
     /// block where raw-pointer / FFI primitives that the affine +
     /// Z3 surface can't verify are permitted. `reason` is
@@ -1963,6 +1976,7 @@ impl Stmt {
             | Stmt::ForIter { span, .. }
             | Stmt::TaskSpawn { span, .. }
             | Stmt::TaskJoin { span, .. }
+            | Stmt::Detach { span, .. }
             | Stmt::UnsafeBlock { span, .. }
             | Stmt::IfLet { span, .. }
             | Stmt::WhileLet { span, .. }

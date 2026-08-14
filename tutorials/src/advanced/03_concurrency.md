@@ -1,4 +1,4 @@
-# Advanced 3 -- `task` / `join` + atomics / mutexes / channels / barriers / rwlocks
+# Advanced 3 -- `task` / `join` / `detach` + atomics / mutexes / channels / barriers / rwlocks
 
 > **Learning goal**: spawn an explicit OS thread with `task`,
 > join it back, and pick the right concurrency primitive
@@ -26,7 +26,11 @@ are the rules that prevent chaos:
   is reading.
 
 `task` spawns the second chef; `join` waits for them to finish
-cleaning up before you leave.
+cleaning up before you leave. `detach` is the third option: send
+the chef off to run their own errand and don't wait around for
+them at all -- useful for background work (a heartbeat, a log
+flusher) that should keep running independently of whatever the
+caller does next.
 
 ## The `task` / `join` shape
 
@@ -71,6 +75,57 @@ fn main() -> i64 {
   function. It has no return-value payload (`Task`, not
   `Task<R>`) and its body must be pure-with-Copy-captures, since
   it implicitly captures the enclosing function's bindings.
+
+## `detach` -- fire-and-forget
+
+```vani
+fn heartbeat() -> i64 {
+  let i: i64 = 0;
+  while i < 5 {
+    print "[heartbeat] tick", i;
+    sleep_ms(50);
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let hb: Task<i64> = task heartbeat();
+  detach hb;              // don't wait -- keep going immediately
+  // ...main's own work runs concurrently with the heartbeat...
+  print "main is done";
+  return 0;
+}
+```
+
+- **`detach <name>;`** is the other way to consume a `Task`/
+  `Task<R>` handle -- instead of blocking until the thread exits
+  (`join`), it lets the thread keep running independently and
+  returns immediately. There's no result to retrieve (a detached
+  `Task<R>`'s return value is simply discarded whenever the
+  thread does finish).
+- **Mutually exclusive with `join`, and exactly-once**: a spawned
+  handle must be consumed by exactly one of `join <name>;` or
+  `detach <name>;` -- never both, never neither, never twice. The
+  compiler's affine checker enforces this the same way it already
+  enforced join-exactly-once.
+- **`detach` is rejected inside `pure fn` bodies.** `join` waits
+  for the spawned work to finish before the caller proceeds, so a
+  pure caller can still reason about "no observable side effects
+  outlive this call." `detach` explicitly gives up that guarantee
+  -- the detached thread's side effects (prints, mutex writes,
+  ...) can keep happening after the pure function has already
+  returned, so it isn't allowed there.
+- Why not just `join` and throw away the result? Because `join`
+  *blocks the caller* until the thread exits -- for background
+  work with no natural end point relative to the caller (a
+  heartbeat, a periodic flush) that defeats the purpose of
+  spawning it in the first place. `detach` is the "actually don't
+  wait" primitive.
+- See `examples/language/english/detach_heartbeat.vani` for a
+  fuller worked example (a background heartbeat detached while
+  `main` runs an independent, deterministic computation and
+  checks the result once it's done).
 
 ## The six concurrency primitives
 
@@ -244,6 +299,18 @@ For runnable end-to-end programs, see:
   without capturing the result.
 - `examples/language/english/condvar.vani` -- `Condvar` waiting
   on a `Mutex<i64>` payload.
+- `examples/language/english/task_parallel_chunk_sum.vani` -- a
+  real-world (not toy) parallel-reduce: a dataset is split into
+  chunks, each summed on its own thread (3 background tasks +
+  main as the 4th "worker"), then joined and combined.
+- `examples/language/english/detach_heartbeat.vani` -- a
+  real-world `detach` example: a background heartbeat runs
+  detached while `main` performs an independent, deterministic
+  computation and checks its result.
+- `examples/language/english/barrier_sensor_rendezvous.vani` --
+  a real-world `Barrier` example; see [Advanced 2b -- Barrier
+  primer](02b_barrier_primer.md#a-real-world-example) for the
+  walkthrough.
 
 ## Picking the right primitive
 
@@ -255,7 +322,7 @@ For runnable end-to-end programs, see:
 | Producer-consumer queue | `Channel<T, N>` |
 | Wait until a non-trivial condition | `Condvar` + `Mutex` |
 | All N threads reach a checkpoint before proceeding | `Barrier` |
-| Spawn-and-forget threads | `task` + immediate drop |
+| Spawn-and-forget background work | `task` + `detach` |
 | Spawn-and-collect-result | `task` + `join` |
 
 If your design needs a primitive that's not in the list, look
@@ -272,4 +339,4 @@ final total. Use `Atomic<i64>` for the running total.
 ---
 
 **Previous**: [Sec.2 -- `parallel for` + reductions + race-freedom ->](02_parallel.md)
-**Next**: [Sec.3c -- Capstone: timed tic-tac-toe (task/join/Atomic) ->](03c_timed_tic_tac_toe_capstone.md)
+**Next**: [Sec.3c -- Capstone: timed tic-tac-toe (stdin_ready_within_ms) ->](03c_timed_tic_tac_toe_capstone.md)

@@ -1,0 +1,125 @@
+// build & run:
+//   vanic run examples/language/english/concurrent_pipeline_dashboard.vani                          # LLVM backend
+//   vanic run examples/language/english/concurrent_pipeline_dashboard.vani --backend=c              # C backend
+//   vanic build examples/language/english/concurrent_pipeline_dashboard.vani -o /tmp/concurrent_pipeline_dashboard && /tmp/concurrent_pipeline_dashboard
+
+intent "A small sensor-dashboard pipeline combining every advanced-features primitive at once: Pool<i64>/Handle<i64> (a Vec<Handle<i64>> sensor registry -- BUG-189's fix), Region/ArenaRef<i64> (per-worker batch processing -- BUG-188/190's fix), Mutex<i64> (a shared running total), Barrier (a checkpoint rendezvous), task+join (worker threads), and task+detach (a fire-and-forget background heartbeat) -- not a toy, a shape a real telemetry aggregator actually has.";
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
+
+// Fire-and-forget background logger -- detached below, never joined.
+// Demonstrates why `detach` exists: the caller has no reason to
+// wait on a periodic log line that has no result to report back.
+fn heartbeat_log(ticks: i64) -> i64 {
+  let i: i64 = 0;
+  while i < ticks {
+    print "[dashboard] still processing...";
+    sleep_ms(15);
+    i = i + 1;
+  }
+  return 0;
+}
+
+// One sensor worker. `id` is the reporting slot; `h` is this
+// worker's OWN handle into the shared registry (looked up via a
+// `ref Pool<i64>`, safe to share read-only across threads);
+// `total` is the shared running-total accumulator; `b` is the
+// checkpoint barrier every worker rendezvouses at.
+fn worker(
+  id: i64,
+  h: Handle<i64>,
+  pool: ref Pool<i64>,
+  total: ref Mutex<i64>,
+  b: mut ref Barrier
+) -> i64 {
+  let raw: i64 = unwrap_or(pool_get(pool, h), 0);
+  let processed: i64 = 0;
+
+  // Per-worker scratch arena: derive two values from the raw
+  // reading, arena-allocate both, collect them into a
+  // Vec<ArenaRef<i64>> (this collection used to be a real C-backend
+  // bug -- BUG-188/190 -- now fixed), and combine them. In a real
+  // pipeline this is where a worker would build up a small AST/
+  // record of derived readings before folding them into one number.
+  region scratch {
+    let doubled: ArenaRef<i64> = region_borrow_i64(mut ref scratch, raw * 2);
+    let doubled_plus_one: ArenaRef<i64> = region_borrow_i64(mut ref scratch, raw * 2 + 1);
+    let derived: Vec<ArenaRef<i64>> = vec(doubled, doubled_plus_one);
+    print "worker", id, "derived", len(ref derived), "arena values from raw reading", raw;
+    processed = aref_load(doubled) + aref_load(doubled_plus_one);
+  }
+  // `scratch` drops here -- both ArenaRefs freed together, O(1).
+
+  // Publish this worker's contribution into the shared total.
+  // Scoped so the guard (and the lock on `total`) drops BEFORE
+  // the checkpoint's own `mutex_lock(total)` below -- same
+  // self-deadlock hazard `barrier_sensor_rendezvous.vani` documents:
+  // mutex_lock is non-reentrant, and the "last to arrive" worker
+  // would otherwise try to re-lock a mutex it's still holding.
+  {
+    let g = mutex_lock(total);
+    let cur: i64 = guard_get(ref g);
+    guard_set(ref g, cur + processed);
+  }
+
+  // Rendezvous: every worker must have published before anyone
+  // reads the combined total. `join`ing each worker individually
+  // can't give this guarantee -- by the time worker 0 could safely
+  // read worker 3's contribution, worker 3 might already have
+  // exited.
+  let is_last: bool = barrier_wait(b);
+  if is_last {
+    let g2 = mutex_lock(total);
+    print "checkpoint reached, running total:", guard_get(ref g2);
+  }
+
+  return processed;
+}
+
+fn main() -> i64 {
+  // Register 4 raw sensor readings and collect their handles into
+  // a Vec<Handle<i64>> -- this used to hit a real C-backend gap
+  // (BUG-189), fixed this session; see handle_job_queue.vani for
+  // the workaround this example no longer needs.
+  let pool: Pool<i64> = pool_new();
+  let h0: Handle<i64> = pool_alloc(mut ref pool, 5);
+  let h1: Handle<i64> = pool_alloc(mut ref pool, 10);
+  let h2: Handle<i64> = pool_alloc(mut ref pool, 15);
+  let h3: Handle<i64> = pool_alloc(mut ref pool, 20);
+  let handles: Vec<Handle<i64>> = vec(h0, h1, h2, h3);
+  print "registered", len(ref handles), "sensors";
+
+  let total: Mutex<i64> = mutex_new(0);
+  let b: Barrier = barrier_new(4);
+
+  // Fire-and-forget: a background heartbeat that logs while the
+  // real work happens, with no result the caller needs back.
+  let hb: Task<i64> = task heartbeat_log(6);
+  detach hb;
+
+  // 3 background workers + main itself as the 4th participant.
+  let t1: Task<i64> = task worker(1, handles[1], ref pool, ref total, mut ref b);
+  let t2: Task<i64> = task worker(2, handles[2], ref pool, ref total, mut ref b);
+  let t3: Task<i64> = task worker(3, handles[3], ref pool, ref total, mut ref b);
+  let p0: i64 = worker(0, handles[0], ref pool, ref total, mut ref b);
+
+  let p1: i64 = join t1;
+  let p2: i64 = join t2;
+  let p3: i64 = join t3;
+
+  let grand_total: i64 = p0 + p1 + p2 + p3;
+  print "grand total:", grand_total;
+  assert grand_total == 204;
+
+  let g = mutex_lock(ref total);
+  let mutex_total: i64 = guard_get(ref g);
+  print "mutex total confirms:", mutex_total;
+  assert mutex_total == 204;
+
+  return 0;
+}

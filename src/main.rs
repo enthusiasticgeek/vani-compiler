@@ -631,6 +631,12 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         }
         TypedStmt::TaskSpawn { body, .. } => stmts_ssa_supported(body, extra_reject),
         TypedStmt::TaskJoin { .. } => true,
+        // No SSA-backend lowering yet -- routes through the tree
+        // backends, which fully support it (see backend_c.rs /
+        // backend_llvm.rs). Matches ssa.rs::lower_stmt's own
+        // defensive error arm for `Detach`, which should never
+        // actually run because of this gate.
+        TypedStmt::Detach { .. } => false,
         TypedStmt::ForIterShallowFree { .. } => true,
         // `unsafe(reason = "...")` blocks route through the tree
         // backends in v1 of Layer 1.1 — the tree backends emit the
@@ -1008,6 +1014,17 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "skiplist_len"
                 || name == "skiplist_min" || name == "skiplist_max"
                 || name == "skiplist_clear"
+                // 2026-08-13: no SSA-backend lowering for the new
+                // non-blocking stdin readiness poll yet -- tree-LLVM
+                // and tree-C both have it (see backend_llvm.rs /
+                // backend_c.rs). Without this exclusion, calls to it
+                // silently fell through to the SSA backend's
+                // "unrecognized builtin -> treat as a user fn" path,
+                // emitting an uncallable `@fn_stdin_ready_within_ms`
+                // reference -- caught by
+                // stdin_ready_within_ms_does_not_wait_past_its_timeout
+                // in tests/run_end_to_end.rs.
+                || name == "stdin_ready_within_ms"
             {
                 return false;
             }

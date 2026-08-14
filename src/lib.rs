@@ -5008,6 +5008,541 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_to_downto_invariant_near_i64_extremes_provable() {
+        // 2026-08-13: prompted by a question about whether `to`/
+        // `downto` are sound at i64::MIN/MAX. Runtime is sound
+        // (verified separately via manual `vanic run` testing at
+        // those exact boundaries -- half-open semantics mean the
+        // loop variable itself never needs to step past the type's
+        // range, regardless of how close start/end are to the
+        // extremes). This test covers the SMT side, using
+        // i64_min_value()/i64_max_value() for the extreme bounds --
+        // a raw i64::MIN integer literal doesn't parse (its positive
+        // magnitude, 9223372036854775808, is one past i64::MAX so
+        // the lexer types the bare literal as u64, and `0 -
+        // <u64 literal>` is rejected by the no-silent-promotion
+        // rule; i64_min_value()/i64_max_value() are the actual
+        // idiomatic way to spell these bounds, used throughout the
+        // example corpus).
+        let source = r#"
+            fn descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from i64_min_value() + 5 downto i64_min_value()
+                invariant i >= i64_min_value();
+                invariant i <= i64_min_value() + 5;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+            fn ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from i64_max_value() - 5 to i64_max_value()
+                invariant i <= i64_max_value();
+                invariant i >= i64_max_value() - 5;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+            fn main() -> i64 {
+              let a: i64 = descend_near_min();
+              assert a == 5;
+              let b: i64 = ascend_near_max();
+              assert b == 5;
+              return 0;
+            }
+        "#;
+        compile(source).expect("invariants near i64::MIN/MAX with literal bounds should be SMT-provable");
+    }
+
+    #[test]
+    fn for_loop_downto_false_invariant_with_literal_bounds_rejected() {
+        // Companion to the ascending-direction check that already
+        // existed: a false invariant on a DESCENDING for-loop with
+        // literal (SMT-decidable) bounds must be statically rejected
+        // with a counterexample, exactly like the ascending case --
+        // confirming invariant verification isn't silently skipped
+        // for `descending` loops.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 10 downto 0
+                invariant i > 100;
+              {
+                n = n + 1;
+              }
+              return n;
+            }
+        "#;
+        let err = compile(source).expect_err("false invariant on downto loop should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("does not hold at the for-loop's first iteration")),
+            "expected a loop-invariant-entry-check failure, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn for_loop_to_downto_compiles_at_narrow_integer_type_extremes() {
+        // 2026-08-13 follow-up to the i64::MIN/MAX check above: `for`
+        // accepts any integer type for the loop variable
+        // (promoted_integer_type only requires both bounds be
+        // integers), not just i64/u64 -- confirm `to`/`downto` are
+        // correct at EACH type's own extremes too, both directions.
+        // Manually verified via `vanic run` on both backends before
+        // adding this as a permanent compile-only regression guard
+        // (u8/i8/u16/i32/u64 -- a representative spread of widths
+        // and signedness, not literally all 8 integer types).
+        let source = r#"
+            fn u8_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 252 as u8 to 255 as u8 { n = n + 1; }
+              return n;
+            }
+            fn u8_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from 3 as u8 downto 0 as u8 { n = n + 1; }
+              return n;
+            }
+            fn i8_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 124 as i8 to 127 as i8 { n = n + 1; }
+              return n;
+            }
+            fn i8_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from (0 - 125) as i8 downto (0 - 128) as i8 { n = n + 1; }
+              return n;
+            }
+            fn u16_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 65532 as u16 to 65535 as u16 { n = n + 1; }
+              return n;
+            }
+            fn i32_descend_near_min() -> i64 {
+              let n: i64 = 0;
+              for i from (0 - 2147483645) as i32 downto (0 - 2147483648) as i32 { n = n + 1; }
+              return n;
+            }
+            fn u64_ascend_near_max() -> i64 {
+              let n: i64 = 0;
+              for i from 18446744073709551612 as u64 to 18446744073709551615 as u64 { n = n + 1; }
+              return n;
+            }
+            fn main() -> i64 {
+              assert u8_ascend_near_max() == 3;
+              assert u8_descend_near_min() == 3;
+              assert i8_ascend_near_max() == 3;
+              assert i8_descend_near_min() == 3;
+              assert u16_ascend_near_max() == 3;
+              assert i32_descend_near_min() == 3;
+              assert u64_ascend_near_max() == 3;
+              return 0;
+            }
+        "#;
+        compile(source).expect("to/downto should compile correctly at narrow integer type extremes");
+    }
+
+    #[test]
+    fn while_loop_conditions_correct_at_i64_extreme_bounds() {
+        // 2026-08-13 extensive-testing sweep: `while` conditions
+        // comparing against i64::MIN/MAX, both ascending and
+        // descending, plus an exact-equality (!=) stop condition
+        // right at the boundary. Manually verified via `vanic run`
+        // on both backends (all four return 3) before locking in as
+        // a permanent compile-only regression guard. A companion
+        // manual check (not a permanent test, since it deliberately
+        // triggers a real overflow) confirmed a `while` condition
+        // that itself computes past i64::MAX correctly traps with
+        // "integer overflow in i64 add" on both backends rather than
+        // silently wrapping -- checked arithmetic applies inside
+        // loop conditions exactly like anywhere else.
+        let source = r#"
+            fn while_ascend_near_max() -> i64 {
+              let i: i64 = i64_max_value() - 3;
+              let n: i64 = 0;
+              while i < i64_max_value() {
+                i = i + 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn while_descend_near_min() -> i64 {
+              let i: i64 = i64_min_value() + 3;
+              let n: i64 = 0;
+              while i > i64_min_value() {
+                i = i - 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn while_stop_exactly_at_max() -> i64 {
+              let i: i64 = i64_max_value() - 3;
+              let n: i64 = 0;
+              while i != i64_max_value() {
+                i = i + 1;
+                n = n + 1;
+              }
+              return n;
+            }
+            fn main() -> i64 {
+              assert while_ascend_near_max() == 3;
+              assert while_descend_near_min() == 3;
+              assert while_stop_exactly_at_max() == 3;
+              return 0;
+            }
+        "#;
+        compile(source).expect("while conditions should be correct at i64::MIN/MAX boundaries");
+    }
+
+    #[test]
+    fn break_continue_positional_and_boundary_iteration_edge_cases() {
+        // 2026-08-13 extensive-testing sweep: named-label break out
+        // of triple-nested loops, positional `break middle;` (per
+        // BUG-176's depth-based resolution -- see
+        // bug176_positional_break_inner_outer_middle_resolve_by_depth
+        // above for the original coverage this extends), `continue`
+        // on the very first iteration, `break` on the very last
+        // valid iteration, `continue` inside a `downto` loop, and
+        // 4-deep positional `break outer`. All six were manually
+        // verified via `vanic run` on both backends against the
+        // exact expected values asserted here before being locked in.
+        let source = r#"
+            fn labeled_break_outer() -> i64 {
+              let hits: i64 = 0;
+              outer: for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break outer; }
+                    hits = hits + 1;
+                  }
+                }
+              }
+              return hits;
+            }
+            fn positional_break_middle() -> i64 {
+              let hits: i64 = 0;
+              for i from 0 to 3 {
+                for j from 0 to 3 {
+                  for k from 0 to 3 {
+                    if k == 1 { break middle; }
+                    hits = hits + 1;
+                  }
+                }
+              }
+              return hits;
+            }
+            fn continue_on_first_iteration() -> i64 {
+              let sum: i64 = 0;
+              for i from 0 to 5 {
+                if i == 0 { continue; }
+                sum = sum + i;
+              }
+              return sum;
+            }
+            fn break_on_last_iteration() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 5 {
+                if i == 4 { break; }
+                n = n + 1;
+              }
+              return n;
+            }
+            fn continue_in_downto() -> i64 {
+              let sum: i64 = 0;
+              for i from 10 downto 0 {
+                if i % 2 == 0 { continue; }
+                sum = sum + i;
+              }
+              return sum;
+            }
+            fn deep_positional_break_outer() -> i64 {
+              let hits: i64 = 0;
+              for a from 0 to 2 {
+                for b from 0 to 2 {
+                  for c from 0 to 2 {
+                    for d from 0 to 2 {
+                      if d == 1 { break outer; }
+                      hits = hits + 1;
+                    }
+                  }
+                }
+              }
+              return hits;
+            }
+            fn main() -> i64 {
+              assert labeled_break_outer() == 1;
+              assert positional_break_middle() == 3;
+              assert continue_on_first_iteration() == 10;
+              assert break_on_last_iteration() == 4;
+              assert continue_in_downto() == 25;
+              assert deep_positional_break_outer() == 1;
+              return 0;
+            }
+        "#;
+        compile(source).expect("break/continue positional and boundary-iteration edge cases should compile correctly");
+    }
+
+    #[test]
+    fn if_if_let_while_let_match_correct_at_extreme_payload_bounds() {
+        // 2026-08-13 extensive-testing sweep: deeply nested if/else
+        // comparing i64::MIN/MAX, if-let with an extreme Option
+        // payload, while-let counting down from an extreme starting
+        // value, and match with extreme payload arms. Manually
+        // verified via `vanic run` on both backends against the
+        // exact expected values before being locked in.
+        let source = r#"
+            fn classify(x: i64) -> i64 {
+              if x == i64_min_value() {
+                return 1;
+              } else {
+                if x == i64_max_value() {
+                  return 2;
+                } else {
+                  return 3;
+                }
+              }
+            }
+            fn if_let_extreme_payload(opt: Option<i64>) -> i64 {
+              if let Option.Some(v) = opt {
+                if v == i64_min_value() {
+                  return 100;
+                }
+                return v;
+              }
+              return 0 - 999;
+            }
+            fn step_down(n: i64, floor: i64) -> Option<i64> {
+              if n > floor {
+                return Option.Some(n - 1);
+              }
+              return Option.None;
+            }
+            fn while_let_from_extreme() -> i64 {
+              let n: i64 = i64_min_value() + 5;
+              let steps: i64 = 0;
+              while let Option.Some(next) = step_down(n, i64_min_value()) {
+                n = next;
+                steps = steps + 1;
+              }
+              return steps;
+            }
+            fn classify_extreme(v: i64) -> i64 {
+              if v == i64_max_value() {
+                return 1;
+              }
+              if v == i64_min_value() {
+                return 2;
+              }
+              return 3;
+            }
+            fn match_extreme(opt: Option<i64>) -> i64 {
+              return match opt {
+                Option.Some(v) then classify_extreme(v),
+                Option.None then 0,
+              };
+            }
+            fn main() -> i64 {
+              assert classify(i64_min_value()) == 1;
+              assert classify(i64_max_value()) == 2;
+              assert classify(0) == 3;
+              assert if_let_extreme_payload(Option.Some(i64_min_value())) == 100;
+              assert if_let_extreme_payload(Option.Some(42)) == 42;
+              assert if_let_extreme_payload(Option.None) == 0 - 999;
+              assert while_let_from_extreme() == 5;
+              assert match_extreme(Option.Some(i64_max_value())) == 1;
+              assert match_extreme(Option.Some(i64_min_value())) == 2;
+              assert match_extreme(Option.Some(7)) == 3;
+              assert match_extreme(Option.None) == 0;
+              return 0;
+            }
+        "#;
+        compile(source).expect("if/if-let/while-let/match should be correct at extreme payload bounds");
+    }
+
+    #[test]
+    fn for_in_iterator_empty_single_and_extreme_value_edge_cases() {
+        // 2026-08-13 extensive-testing sweep: `for x in ref xs`
+        // (ForIter) over an empty Vec, a single-element Vec, a Vec
+        // containing i64::MIN/MAX (summing to exactly -1, not an
+        // overflow -- MIN + MAX is always representable), break on
+        // the very first element, and continue skipping extreme
+        // values mid-iteration. Manually verified via `vanic run` on
+        // both backends against the exact expected values.
+        let source = r#"
+            fn sum_empty() -> i64 {
+              let xs: Vec<i64> = vec_fill(0, 0);
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn sum_single() -> i64 {
+              let xs: Vec<i64> = vec(42);
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn sum_extreme_values() -> i64 {
+              let xs: Vec<i64> = vec(i64_min_value(), 0, i64_max_value());
+              let sum: i64 = 0;
+              for x in ref xs { sum = sum + x; }
+              return sum;
+            }
+            fn break_on_first_element() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let n: i64 = 0;
+              for x in ref xs {
+                if x == 1 { break; }
+                n = n + 1;
+              }
+              return n;
+            }
+            fn continue_skips_extreme_value() -> i64 {
+              let xs: Vec<i64> = vec(1, i64_min_value(), 2, i64_max_value(), 3);
+              let sum: i64 = 0;
+              for x in ref xs {
+                if x == i64_min_value() { continue; }
+                if x == i64_max_value() { continue; }
+                sum = sum + x;
+              }
+              return sum;
+            }
+            fn main() -> i64 {
+              assert sum_empty() == 0;
+              assert sum_single() == 42;
+              assert sum_extreme_values() == 0 - 1;
+              assert break_on_first_element() == 0;
+              assert continue_skips_extreme_value() == 6;
+              return 0;
+            }
+        "#;
+        compile(source).expect("for-in should be correct on empty/single/extreme-value Vecs");
+    }
+
+    #[test]
+    fn detach_consumes_a_spawned_task_like_join_does() {
+        // 2026-08-13: `detach` is a second way (alongside `join`) to
+        // satisfy the affine "every task is consumed exactly once"
+        // rule -- the thread keeps running independently instead of
+        // being waited on.
+        let source = r#"
+            fn worker() -> i64 { return 1 + 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              return 0;
+            }
+        "#;
+        compile(source).expect("detach should satisfy the affine task-consumption rule");
+    }
+
+    #[test]
+    fn detach_then_join_same_task_rejected() {
+        // A task can be consumed by join OR detach, never both.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              let r: i64 = join t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("detach then join should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn join_then_detach_same_task_rejected() {
+        // Same rule, opposite order.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              let r: i64 = join t;
+              detach t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("join then detach should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn detach_twice_on_same_task_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              detach t;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("detaching the same task twice should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn spawned_task_never_consumed_still_rejected_with_detach_mentioned() {
+        // A spawned-but-never-joined-or-detached task must still be
+        // rejected (same underlying affine rule as before detach
+        // existed) -- and the message should now mention BOTH ways
+        // to consume it.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("spawned-but-unconsumed task should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("never consumed by `join t` or `detach t`")),
+            "expected a 'never consumed by join or detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn detach_inside_pure_fn_rejected() {
+        // Unlike `join` (side-effect-free in v1's sequential
+        // lowering), `detach` leaves a thread running past the pure
+        // call's own return, so its side effects aren't bounded by
+        // the call the way `join`'s are -- rejected in pure contexts.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            pure fn spawn_and_detach() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              return 0;
+            }
+            fn main() -> i64 {
+              return spawn_and_detach();
+            }
+        "#;
+        let err = compile(source).expect_err("detach inside a pure fn should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("cannot use `detach`")),
+            "expected a pure-context 'cannot use detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn cast_bool_to_int_rejected() {
         // bool ↔ int casts are rejected — different semantic
         // domains. Forces explicit if/else conversion.
@@ -11783,8 +12318,16 @@ mod tests {
         let unlock_pos = c
             .find("intent_read_guard_int64_t_unlock(&v_rg)")
             .expect("expected rg to be unlocked at scope exit");
+        // BUG-191 (2026-08-14) fix note: this Vec<RwLock<i64>>
+        // typedef used to be named `intent_vec_intent_rwlock_i64`
+        // (the collapsed, T-blind fallback spelling every `RwLock<T>`
+        // shape shared). It's now `intent_vec_rwlock_int64_t`,
+        // correctly threading the element type through -- this
+        // BUG-154 test's own hardcoded name needed updating
+        // alongside the fix; the actual behavior under test (unlock-
+        // before-free ordering) is unaffected.
         let free_pos = c
-            .find("intent_vec_intent_rwlock_i64__free(v_locks)")
+            .find("intent_vec_rwlock_int64_t__free(v_locks)")
             .expect("expected locks to be freed at scope exit");
         assert!(
             unlock_pos < free_pos,
@@ -41208,6 +41751,68 @@ função main() -> i64 {
     }
 
     #[test]
+    fn mut_ref_vec_index_through_mut_ref_param_now_accepted() {
+        // 2026-08-14 fix: `mut ref PARAM[i]` used to be rejected
+        // whenever PARAM was already typed `ref Vec<T>` / `mut ref
+        // Vec<T>` (only an owned local Vec worked), forcing every
+        // real-world example needing this shape (found writing the
+        // barrier/handle/task examples) to route through individually-
+        // named parameters instead of `Vec<Mutex<T>>` + indexing.
+        // `check_ref_mut`'s Index arm now `.deref()`s the source
+        // type first, mirroring the `mut ref t.field` arm just above
+        // it, which already did this for struct field-borrows.
+        let source = r#"
+            fn modify(slot: mut ref i64) -> i64 {
+              return 0;
+            }
+            fn call_modify(xs: mut ref Vec<i64>) -> i64 {
+              let _ = modify(mut ref xs[1]);
+              return 0;
+            }
+            fn main() -> i64 {
+              let ys: Vec<i64> = vec(1, 2, 3);
+              let _ = call_modify(mut ref ys);
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("mut ref PARAM[i] compiles");
+        let c = crate::compile_to_c(source).expect("C backend accepts mut ref PARAM[i]");
+        // The C codegen must follow the incoming pointer with `->`,
+        // not `.` (PARAM's C parameter type is `intent_vec_int64_t*`,
+        // not a by-value struct) -- assert the generated GEP-equivalent
+        // uses arrow syntax so a future regression that flips this
+        // back to `.` fails loudly instead of silently miscompiling.
+        assert!(
+            c.contains("xs->data["),
+            "expected `xs->data[...]` (pointer deref) in generated C; got:\n{}",
+            c
+        );
+        crate::compile_to_llvm(source).expect("LLVM backend accepts mut ref PARAM[i]");
+    }
+
+    #[test]
+    fn mut_ref_vec_index_through_shared_ref_param_still_rejected() {
+        // The companion rejection: `ref Vec<T>` (shared/read-only) must
+        // still be refused for `mut ref xs[i]` -- you can't get an
+        // exclusive mutable borrow of an element through a shared
+        // reference to the whole Vec. Mirrors the equivalent
+        // `mut ref t.field` rejection for `ref T` struct bases.
+        let source = r#"
+            fn bad(xs: ref Vec<i64>) -> i64 {
+              let slot: mut ref i64 = mut ref xs[0];
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = crate::compile(source).expect_err("mut ref through &Vec must be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("borrowed immutably")),
+            "expected a 'borrowed immutably' diagnostic; got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn mut_ref_vec_index_rejects_non_vec_source() {
         // The new arm requires the indexed binding to be a
         // Vec<T>. Indexing a non-Vec via `mut ref` surfaces a
@@ -52717,6 +53322,211 @@ função main() -> i64 {
             c2.contains("intent_bptr_i64_get"),
             "expected intent_bptr_i64_get helper when bptr_get is called"
         );
+    }
+
+    #[test]
+    fn bug188_vec_of_arena_ref_compiles_on_both_backends() {
+        // BUG-188 (2026-08-14): found writing arena_batch_parse.vani.
+        // `Vec<ArenaRef<i64>>`'s per-shape C identifier was built by
+        // naive string concatenation of `element_tag`'s fallback,
+        // which spelled `ArenaRef<i64>` as the raw C pointer type
+        // `"int64_t*"` -- the unescaped `*` produced the invalid C
+        // identifier `intent_vec_int64_t*` ("expected '=', ',', ';'
+        // ..." from cc, one per corrupted occurrence). Fixed by
+        // giving `ArenaRef<_>` its own identifier-safe `element_tag`
+        // arm (`"arena_ref_int64_t"`, mirroring Handle/Pool's fixed
+        // v1-i64 spelling) instead of falling through to the raw
+        // `c_leaf_type` spelling.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              region scratch {
+                let a: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 10);
+                let b: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 32);
+                let refs: Vec<ArenaRef<i64>> = vec(a, b);
+                print "len:", len(ref refs);
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<ArenaRef<i64>> compiles to C");
+        assert!(
+            !c.contains("intent_vec_int64_t*"),
+            "the invalid identifier must not appear in generated C:\n{}",
+            c
+        );
+        compile_to_llvm(source).expect("Vec<ArenaRef<i64>> compiles to LLVM");
+    }
+
+    #[test]
+    fn bug189_pool_handle_used_without_calling_pool_get_compiles_on_both_backends() {
+        // BUG-189 (2026-08-14): found writing handle_job_queue.vani.
+        // Two related gaps, both stemming from the same root cause --
+        // `Enum_Option__i64` only got registered when the PROGRAM
+        // ITSELF called `pool_get` (`walk_expr_for_search_builtins`),
+        // but the C backend's Pool/Handle bundle
+        // (`emit_intent_pool_helpers_c_body`) unconditionally defines
+        // `pool_get` (and thus always references `Enum_Option__i64`)
+        // as soon as `Pool<i64>`/`Handle<i64>` appears ANYWHERE
+        // (`program_uses_i64_pool`) -- independent of whether
+        // `pool_get` is ever called. A program using only
+        // `pool_alloc`/`pool_free` (this test's repro) hit "unknown
+        // type name 'Enum_Option__i64'" from cc regardless of whether
+        // a Vec was involved. Separately, `Vec<Handle<i64>>`
+        // specifically (formed via a `vec(...)` literal) ALSO failed
+        // even when `pool_get` WAS called elsewhere, because the
+        // C backend emitted the `Vec<Handle<i64>>` bundle (which
+        // references `intent_handle_i64`) BEFORE
+        // `emit_intent_pool_helpers_c_body` (which typedefs
+        // `intent_handle_i64`) ran. Fixed both: (1) two sibling
+        // `collect_apply_in_ty`-family walkers in checker.rs now
+        // force-register `Option<i64>` whenever `Pool<i64>`/
+        // `Handle<i64>` appears in a type position at all (mirroring
+        // the pre-existing HashMap/BTreeMap-forces-Option<V> arm) --
+        // deliberately NOT extended to `BoundedPtr<i64>`, which
+        // BUG-179 already fixed the opposite way (gating emission
+        // instead of forcing registration); (2) backend_c.rs's
+        // `emit_c` now emits the Pool/Handle bundle before the
+        // `element_types` Vec-bundle loop instead of after it.
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h1: Handle<i64> = pool_alloc(mut ref p, 1);
+              let h2: Handle<i64> = pool_alloc(mut ref p, 2);
+              let hs: Vec<Handle<i64>> = vec(h1, h2);
+              print "len:", len(ref hs);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Pool/Handle without pool_get compiles to C");
+        compile_to_llvm(source).expect("Pool/Handle without pool_get compiles to LLVM");
+
+        // Companion no-Vec repro: just pool_alloc, no Vec, no
+        // pool_get at all -- isolates the ordering-independent half
+        // of the fix (checker-side forced Option<i64> registration).
+        let source_no_vec = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let _h1: Handle<i64> = pool_alloc(mut ref p, 1);
+              print "ok";
+              return 0;
+            }
+        "#;
+        compile_to_c(source_no_vec).expect("Pool/Handle (no Vec, no pool_get) compiles to C");
+
+        // BUG-179 must still hold: BoundedPtr without bptr_get still
+        // must NOT reference Enum_Option__i64 (this fix was
+        // deliberately NOT extended to BoundedPtr).
+        let bptr_source = r#"
+            fn make(p: *mut i64, n: i64) -> i64 {
+              let bp: BoundedPtr<i64> = bptr_new(p, n, n);
+              return bptr_len(ref bp);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _bptr_guard = EmbeddedTargetGuard::embedded();
+        let bptr_c = compile_to_c(bptr_source)
+            .expect("BoundedPtr without bptr_get still compiles to C");
+        assert!(
+            !bptr_c.contains("Enum_Option__i64"),
+            "BUG-179's fix must still hold -- BoundedPtr alone must not \
+             force Option__i64 registration:\n{}",
+            bptr_c
+        );
+    }
+
+    #[test]
+    fn bug190_vec_fill_inside_if_true_block_no_malformed_phi_on_llvm() {
+        // BUG-190 (2026-08-14): found writing arena_batch_parse.vani
+        // via the same Vec<ArenaRef<i64>> shape as BUG-188, but this
+        // repro isolates it with plain i64 (no ArenaRef/region
+        // needed) -- the real bug is in `TypedStmt::If`'s tree-LLVM
+        // codegen, not in vec_fill or region/ArenaRef at all.
+        // `region NAME { ... }` desugars to `if true { ... }`
+        // (`parse_region_block_stmt`); `TypedStmt::If`'s LLVM codegen
+        // opened the `then0:`/`else1:` labels but never set
+        // `ctx.current_block` to track them WHILE emitting each
+        // branch's own statements (only the post-if `cont_lbl`
+        // assignment, from BUG-69, was there). Any PHI-based codegen
+        // inside the then-branch -- `vec_fill`'s hand-rolled SSA loop
+        // is the load-bearing example -- read the stale pre-if
+        // `ctx.current_block` when naming its entry-edge predecessor,
+        // so the emitted phi's declared predecessor didn't match the
+        // real CFG ("PHI node entries do not match predecessors!" at
+        // the LLVM verifier). Fixed by setting `ctx.current_block =
+        // then_lbl` / `else_lbl` right after opening each label.
+        let source = r#"
+            fn main() -> i64 {
+              if true {
+                let xs: Vec<i64> = vec_fill(4, 7);
+                print "len:", len(ref xs);
+              }
+              return 0;
+            }
+        "#;
+        compile_to_llvm(source)
+            .expect("vec_fill inside if-true block compiles to LLVM without a malformed PHI");
+        compile_to_c(source).expect("vec_fill inside if-true block compiles to C");
+    }
+
+    #[test]
+    fn bug191_two_distinct_mutex_shapes_as_vec_elements_no_longer_collapse() {
+        // BUG-191 (2026-08-14): found by asking whether Box<T>'s
+        // dedicated `element_tag`/`vec_struct_tag` protection (fixed
+        // 2026-06-09, same session as BUG-188/189/190's fixes)
+        // extended to the other RAII/sync wrapper types -- it
+        // didn't. `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+        // `WriteGuard<T>` are all genuinely parametric over T (see
+        // `Mutex<SharedCounter>` in the shared-ownership tutorial),
+        // but had no arm in either backend's per-shape Vec-element
+        // tag function, so they fell through to a fallback that
+        // returns a FIXED spelling regardless of T
+        // (`"intent_mutex_i64"` / `%intent_mutex_i64` no matter what
+        // T actually is -- same collapse-bug SHAPE as the Atomic/
+        // Channel fix from Closure #211, just never applied to this
+        // type family). A program with both `Vec<Mutex<i64>>` and
+        // `Vec<Mutex<SomeStruct>>` collapsed both onto the same
+        // per-shape typedef/struct name -- confirmed directly: `cc`
+        // rejected the generated C with "passing argument ... from
+        // incompatible pointer type" (the second Vec's `__from`
+        // helper still expected the FIRST Vec's element type).
+        // `c_element_storage`/`llvm_type_string` (the actual data-
+        // buffer storage types) already correctly threaded the
+        // element type through recursively -- only the per-shape
+        // NAME was collapsing. Fixed with a dedicated arm per type
+        // in both `element_tag` (backend_c.rs) and `vec_struct_tag`
+        // (backend_llvm.rs), mirroring the pre-existing Atomic/
+        // Channel/Box arms.
+        let source = r#"
+            struct Big { a: i64, b: i64, c: i64 }
+            fn main() -> i64 {
+              let m1: Mutex<i64> = mutex_new(42);
+              let m2: Mutex<Big> = mutex_new(Big { a: 1, b: 2, c: 3 });
+              let v1: Vec<Mutex<i64>> = vec(m1);
+              let v2: Vec<Mutex<Big>> = vec(m2);
+
+              let g1 = mutex_lock(mut ref v1[0]);
+              print "v1[0]:", guard_get(ref g1);
+
+              let g2 = mutex_lock(mut ref v2[0]);
+              let big: Big = guard_get(ref g2);
+              print "v2[0].a:", big.a;
+              assert big.a == 1;
+              assert big.b == 2;
+              assert big.c == 3;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source)
+            .expect("two distinct Vec<Mutex<T>> shapes compile to C without collapsing");
+        assert!(
+            c.contains("intent_vec_mutex_Struct_Big"),
+            "expected a DISTINCT per-shape typedef for Vec<Mutex<Big>>, not a collapse \
+             onto Vec<Mutex<i64>>'s typedef; got:\n{}",
+            c
+        );
+        compile_to_llvm(source)
+            .expect("two distinct Vec<Mutex<T>> shapes compile to LLVM without collapsing");
     }
 
     #[test]

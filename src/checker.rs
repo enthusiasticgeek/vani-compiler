@@ -64,6 +64,7 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // File I/O primitives â€” POSIX FILE* wrapped as i64 FileHandle.
     "file_open", "file_is_ok", "file_read_line", "file_write",
     "file_close", "file_flush", "stdin_read_line", "flush_stdout",
+    "stdin_ready_within_ms",
     // Arc 8 step 8e proper â€” TCP networking primitives. Real
     // sockets via libc; thread-local 4KB recv/send buffer.
     "tcp_listen", "tcp_socket_port", "tcp_accept",
@@ -2169,7 +2170,7 @@ fn compute_indirect_locks(
                     walk_stmts(&arm.body, param_names, signatures, out);
                 }
             }
-            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
         }
     }
     fn walk_expr(
@@ -3405,7 +3406,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
             expr_mentions_var(&arm.poll_call, name)
                 || arm.body.iter().any(|s| stmt_mentions_var(s, name))
         }),
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => false,
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => false,
     }
 }
 
@@ -3595,7 +3596,7 @@ fn walk_stmt_for_captures(
                 for s in &arm.body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -3832,7 +3833,7 @@ fn rename_vars_in_stmt(
                 for s in &mut arm.body { rename_vars_in_stmt(s, rename); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -4036,7 +4037,7 @@ fn rewrite_closure_calls_in_stmt(
                 for s in &mut arm.body { rewrite_closure_calls_in_stmt(s, closures); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
     }
 }
 
@@ -4259,7 +4260,7 @@ fn lift_stmt_anon_fn(
                 for s in &mut arm.body { lift_stmt_anon_fn(s, counter, hoisted); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
     }
 }
 
@@ -5725,7 +5726,7 @@ fn resolve_enum_types_in_stmt(
                 for s in &mut arm.body { resolve_enum_types_in_stmt(s, enums); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -6154,7 +6155,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                 for s in &mut arm.body { sub_aliases_in_stmt(s, aliases); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -7794,7 +7795,7 @@ fn collect_generic_calls_in_stmt(
             }
         }
         // `Continue` and `TaskJoin` carry no expression to scan.
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -8322,7 +8323,7 @@ fn rewrite_generic_calls_in_stmt(
                 }
             }
         }
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -8651,6 +8652,46 @@ fn monomorphize_type_decls_in_program(
                     {
                         needed_enums.push(key);
                     }
+                }
+            }
+            // BUG-189 (2026-08-14): `Pool<i64>` / `Handle<i64>` (v1:
+            // element is always i64) have a `pool_get` builtin
+            // returning `Option<i64>`, but that builtin's return type
+            // only forced `Option<i64>` to be registered (see
+            // `walk_expr_for_search_builtins` above) when the PROGRAM
+            // ACTUALLY CALLS `pool_get`. The C backend's Pool/Handle
+            // bundle (`emit_intent_pool_helpers_c_body`) always
+            // defines `pool_get` -- and thus always references
+            // `Enum_Option__i64` -- as soon as `Pool<i64>`/`Handle<
+            // i64>` appears ANYWHERE in the program
+            // (`program_uses_i64_pool`), independent of whether the
+            // user's own code calls `pool_get`. A program that only
+            // calls `pool_alloc`/`pool_free` (or forms a `Vec<Handle<
+            // i64>>` without ever calling `pool_get`) hit "unknown
+            // type name 'Enum_Option__i64'" from `cc` because the
+            // typedef was never registered. Registering `Option<i64>`
+            // here -- triggered by the mere presence of the type, like
+            // the HashMap/BTreeMap arm above -- closes that gap
+            // regardless of which Pool/Handle operations the program
+            // actually calls.
+            //
+            // Deliberately NOT `Type::BoundedPtr(_)`: BUG-179 already
+            // fixed the analogous `bptr_new`-without-`bptr_get` gap
+            // the OPPOSITE way -- gating `intent_bptr_i64_get`'s
+            // EMISSION on whether `Option__i64` is already registered,
+            // rather than force-registering `Option__i64` whenever
+            // `BoundedPtr<i64>` appears. Doing both would force
+            // `Option<i64>` (and its C/LLVM typedef) into every
+            // BoundedPtr-using program even when `bptr_get` is never
+            // called -- confirmed by `bug179_bptr_new_without_bptr_
+            // get_does_not_reference_undeclared_option_enum` failing
+            // when BoundedPtr was first added to this arm.
+            Type::Pool(_) | Type::Handle(_) => {
+                let key = ("Option".to_string(), vec![Type::I64]);
+                if enum_templates.contains_key("Option")
+                    && !needed_enums.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                {
+                    needed_enums.push(key);
                 }
             }
             Type::Tuple(elements) => {
@@ -10317,6 +10358,23 @@ fn collect_apply_in_stmt(
                         {
                             ne.push(key);
                         }
+                    }
+                }
+                // BUG-189 (2026-08-14): sibling copy of the same fix in
+                // the prologue `collect_apply_in_ty` -- see its comment
+                // for the full rationale, including why `BoundedPtr`
+                // is deliberately excluded. `Pool<i64>`/`Handle<i64>`
+                // appearing in a `let`'s type annotation (this
+                // walker's whole purpose) must also force `Option<
+                // i64>` registration, or a `Vec<Handle<i64>>` local
+                // never gets it since this is the walker that
+                // actually sees `Stmt::Let` type annotations.
+                Type::Pool(_) | Type::Handle(_) => {
+                    let key = ("Option".to_string(), vec![Type::I64]);
+                    if en.contains_key("Option")
+                        && !ne.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                    {
+                        ne.push(key);
                     }
                 }
                 Type::Tuple(elements) => {
@@ -12608,6 +12666,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
         use std::collections::HashSet;
         let mut spawned: HashSet<String> = HashSet::new();
         let mut joined: HashSet<String> = HashSet::new();
+        let mut detached: HashSet<String> = HashSet::new();
         for stmt in stmts {
             match stmt {
                 TypedStmt::TaskSpawn { name, body, .. } => {
@@ -12645,6 +12704,32 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                             crate::span::Span::default(),
                             format!(
                                 "join: task '{}' was joined twice in the same block",
+                                name
+                            ),
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                    }
+                }
+                TypedStmt::Detach { name } => {
+                    // Mirrors the TaskJoin arm just above -- same
+                    // same-block-spawn requirement, same "twice"
+                    // check, but against `detached` instead of
+                    // `joined`. Both sets count as valid consumption
+                    // in the final spawned-but-unconsumed sweep
+                    // below.
+                    if !spawned.contains(name) {
+                        diagnostics.push(Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "detach: task '{}' was not spawned in this block (cross-block detach isn't supported in v1)",
+                                name
+                            ),
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                    }
+                    if !detached.insert(name.clone()) {
+                        diagnostics.push(Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "detach: task '{}' was detached twice in the same block",
                                 name
                             ),
                         ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
@@ -12728,14 +12813,16 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                 _ => {}
             }
         }
-        // Any name in `spawned` but not in `joined` is unjoined.
-        for name in spawned.difference(&joined) {
+        // Any name in `spawned` but in neither `joined` nor
+        // `detached` is unconsumed.
+        let consumed: HashSet<String> = joined.union(&detached).cloned().collect();
+        for name in spawned.difference(&consumed) {
             diagnostics.push(Diagnostic::new(
                 crate::span::Span::default(),
                 format!(
-                    "task '{}' was never consumed by `join {}`; \
-                     each `task` handle must be joined exactly once",
-                    name, name
+                    "task '{}' was never consumed by `join {}` or `detach {}`; \
+                     each `task` handle must be joined or detached exactly once",
+                    name, name, name
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
         }
@@ -16239,7 +16326,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     format!(
-                        "join: task '{}' was already joined at byte {}..{}",
+                        "join: task '{}' was already joined or detached at byte {}..{}",
                         name, prev.start, prev.end
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
@@ -16249,6 +16336,52 @@ fn check_one_stmt(
                 info_mut.moved = Some(*span);
             }
             body.push(TypedStmt::TaskJoin { name: name.clone() });
+            false
+        }
+        Stmt::Detach { name, span } => {
+            // Mirrors `Stmt::TaskJoin` above -- `detach` is the
+            // other way to satisfy the affine "every spawned task
+            // is consumed exactly once" rule, but without waiting
+            // for the thread or retrieving its result. Same
+            // same-block-only restriction as `join` (see the
+            // "cross-block joins aren't supported in v1" comment
+            // on `verify_loop_invariants`'s callers / the spawn/
+            // join block-locality walk) -- `info.moved` is the
+            // shared mechanism both `join` and `detach` use to mark
+            // a task consumed, so joining an already-detached task
+            // (or detaching an already-joined one) is caught by the
+            // same "already joined at byte N..M" check below.
+            let Some(info) = env.lookup(name) else {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!("detach: no task named '{}' in scope", name),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            };
+            if !matches!(info.ty, Type::Task | Type::TaskR(_)) {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "detach: '{}' has type {}, expected Task or Task<R>",
+                        name, info.ty
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(prev) = info.moved {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "detach: task '{}' was already joined or detached at byte {}..{}",
+                        name, prev.start, prev.end
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(info_mut) = env.lookup_mut(name) {
+                info_mut.moved = Some(*span);
+            }
+            body.push(TypedStmt::Detach { name: name.clone() });
             false
         }
         Stmt::UnsafeBlock {
@@ -22335,7 +22468,15 @@ fn check_ref_mut(
                     return CheckedExpr::fallback_integer(span);
                 }
             };
-            let element_ty = match &info.ty {
+            // 2026-08-14 fix: `.deref()` peels off a `Ref`/`RefMut`
+            // wrapper so `mut ref PARAM[i]` also works when PARAM is
+            // itself a `ref Vec<T>` / `mut ref Vec<T>` parameter, not
+            // just an owned local Vec -- mirrors the `mut ref t.field`
+            // arm above, which already used `.deref()` for the same
+            // reason. Whether the wrapper was `Ref` (shared) or
+            // `RefMut` is checked separately below (mutation through
+            // a shared `ref` is still rejected).
+            let element_ty = match info.ty.deref() {
                 Type::Vec(elem) => (**elem).clone(),
                 _ => {
                     // Not a Vec â€” fall through to the regular
@@ -22357,6 +22498,22 @@ fn check_ref_mut(
                     return CheckedExpr::fallback_integer(span);
                 }
             };
+            if info.ty.is_ref() {
+                diagnostics.push(
+                    Diagnostic::new(
+                        array.span,
+                        format!(
+                            "cannot take 'mut ref' on an element of '{}' because it's \
+                             borrowed immutably (&Vec<_>)",
+                            vec_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::alias_mut_with_shared(vec_name),
+                    ),
+                );
+                return CheckedExpr::fallback_integer(span);
+            }
             if info.moved.is_some() {
                 diagnostics.push(
                     Diagnostic::new(
@@ -22395,6 +22552,7 @@ fn check_ref_mut(
                     vec: vec_name.clone(),
                     index: Box::new(checked_idx.expr),
                     element_ty,
+                    vec_ty: info.ty.clone(),
                 },
                 ref_ty,
                 None,
@@ -24814,6 +24972,25 @@ fn check_call(
                 args, env, signatures, span, diagnostics,
             );
         }
+        // 2026-08-13 -- `stdin_ready_within_ms(timeout_ms: i64) ->
+        // bool`. A genuinely non-blocking readiness poll on stdin
+        // (POSIX `poll()` on fd 0 / Windows `WaitForSingleObject`
+        // on the console input handle), mirroring the
+        // `tcp_set_nonblocking`/`tcp_recv_nb` precedent below but
+        // for stdin, which previously had none (a gap called out
+        // explicitly in examples/language/english/
+        // tic_tac_toe_timed.vani's "KNOWN LIMITATION" comment: no
+        // way to find out whether `stdin_read_line()` would block
+        // without just calling it and blocking). Lets a caller
+        // race a countdown against user input WITHOUT spawning a
+        // `task`/thread at all -- only call the blocking
+        // `stdin_read_line()` once this returns `true`, so a
+        // timeout never leaves anything blocked waiting.
+        "stdin_ready_within_ms" => {
+            return check_stdin_ready_within_ms_builtin(
+                args, env, signatures, span, diagnostics,
+            );
+        }
         // Arc 8 step 8e proper â€” TCP networking. All wrap
         // libc socket / bind / listen / accept / connect /
         // read / write / close via per-backend runtime
@@ -25393,7 +25570,7 @@ fn check_task_join_expr(
             Diagnostic::new(
                 span,
                 format!(
-                    "join: task '{}' was already joined at byte {}..{}",
+                    "join: task '{}' was already joined or detached at byte {}..{}",
                     name, prev.start, prev.end
                 ),
             )
@@ -26430,7 +26607,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                         walk(&arm.body, param_names, locks);
                     }
                 }
-                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
             }
         }
     }
@@ -34127,6 +34304,45 @@ fn check_sleep_ms_builtin(
     )
 }
 
+/// `stdin_ready_within_ms(timeout_ms: i64) -> bool`. See the
+/// dispatch-site comment above for why this exists.
+fn check_stdin_ready_within_ms_builtin(
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if args.len() != 1 {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "stdin_ready_within_ms() expects 1 argument, got {}",
+                args.len()
+            ),
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+        return CheckedExpr::fallback(Type::Bool, span);
+    }
+    let ms_raw = check_expr(&args[0], env, signatures, diagnostics);
+    let ms = coerce_checked(
+        ms_raw,
+        &Type::I64,
+        args[0].span,
+        "stdin_ready_within_ms timeout_ms",
+        diagnostics,
+    );
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "stdin_ready_within_ms".to_string(),
+            name_span: span,
+            args: vec![ms.expr],
+        },
+        Type::Bool,
+        None,
+        span,
+    )
+}
+
 /// Arc 8 step 8e proper â€” TCP networking primitives.
 ///
 ///   tcp_listen(port: i64) -> i64
@@ -37886,6 +38102,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::ForIter { .. }
         | TypedStmt::TaskSpawn { .. }
         | TypedStmt::TaskJoin { .. }
+        | TypedStmt::Detach { .. }
         | TypedStmt::UnsafeBlock { .. }
         | TypedStmt::ForIterShallowFree { .. } => vec![],
     }
@@ -38045,6 +38262,27 @@ fn verify_pure_body(
                     // Consuming a Task handle in a pure context
                     // is OK â€” join itself is side-effect-free in
                     // v1's sequential lowering.
+                }
+                TypedStmt::Detach { .. } => {
+                    // Unlike `join`, `detach` deliberately does NOT
+                    // wait for the spawned thread -- its side
+                    // effects (whatever the task body does) can
+                    // still be in flight after the pure function
+                    // returns, which `join`'s "finished by the time
+                    // we return" reasoning above doesn't cover.
+                    // Reject unconditionally.
+                    diagnostics.push(
+                        Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "{} cannot use `detach` -- a detached task's side effects can outlive the pure call, unlike `join` which waits for them to finish first",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
+                        ),
+                    );
                 }
                 TypedStmt::Break { .. } => {
                     // OpenMP parallel-for rejects `break` â€”

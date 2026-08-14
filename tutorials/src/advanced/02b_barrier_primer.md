@@ -159,6 +159,43 @@ individual lines can even interleave mid-line, since `print` calls
 from different threads aren't synchronized against each other --
 only `barrier_wait` itself is.)
 
+## A real-world example
+
+The worked example above is deliberately small. For a fuller,
+non-toy use of `Barrier`, see
+`examples/language/english/barrier_sensor_rendezvous.vani`: four
+"sensor" workers each take an independent reading, publish it into
+their own `Mutex<i64>` slot, then rendezvous at a `Barrier`. AFTER
+the barrier, every worker reads all four slots (its own and every
+other worker's) and computes its own percentage share of the
+combined total.
+
+This is the shape that actually needs `Barrier` rather than `join`:
+every worker keeps doing real, worker-specific computation *after*
+the synchronization point, using data that every OTHER worker only
+just finished writing. `join`ing each task individually wouldn't
+work here -- by the time worker 0 could safely read worker 3's
+reading, worker 3 would already have exited (there's no thread left
+running phase 2 in parallel).
+
+Two non-obvious things the example works around, worth knowing if
+you write something similar:
+
+- **Avoid per-worker branching in the lock-acquisition order.** An
+  earlier draft branched on `id` to decide which mutex was "mine";
+  vāṇी's static deadlock detector (S-19) rejected it because
+  different branches acquired the same set of locks in different
+  orders (even though no runtime cycle was actually possible). The
+  fix: pass which mutex is "mine" as a uniform `own` parameter, so
+  every call takes the identical code path with a fixed
+  `m0 -> m1 -> m2 -> m3` lock order.
+- **Scope a lock that will be re-acquired later in the same
+  function.** `Guard<T>`'s RAII unlock fires at scope exit, not
+  last-use. Worker 0's phase-1 guard on its own mutex needs to be
+  dropped (via an explicit `{ }` block) before phase 2 re-locks
+  that same mutex through `m0` -- otherwise worker 0 deadlocks
+  against itself (`mutex_lock` isn't reentrant).
+
 ## When to use Barrier vs alternatives
 
 | Need | Use |
