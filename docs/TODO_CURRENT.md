@@ -14292,3 +14292,40 @@ Executor section for the "why not Executor" explanation.
 attempt a 3rd stdin-cancellation-based implementation, since `cancel`
 still doesn't reach `stdin_read_line` (see L18/the Phase D writeup
 above). `tcp_buf_byte_at` (L30) not implemented.
+
+## Task #186 -- localfuzz refresh + combined bug/limitations audit (2026-08-14)
+
+Refreshed the localfuzz worktree (7 commits merged, rebuilt), ran a
+full `digest.py --all` re-scan (341 findings, 41 signatures), and
+re-verified a representative sample from EVERY signature directly
+against the fresh binary rather than trusting the digest's keyword-
+match heuristics. Combined with a re-check of
+`docs/BUG_PATTERN_AUDIT_TODO_9.md`'s leftover candidate and
+`docs/v1_limitations.md`'s open items into one prioritized document:
+**`docs/BUG_PATTERN_AUDIT_TODO_13.md`**.
+
+Headline result: found one genuinely new, previously-undocumented,
+isolated-to-a-minimal-repro bug -- **the LLVM backend silently drops
+a runtime-trap's diagnostic message (exit code still correct, but
+stdout/stderr both empty) in at least two outlined/transformed
+codegen contexts: after an `await(...)` call, and inside `parallel
+for`'s reduction-worker body.** Candidate bug number **BUG-192**,
+handed to #187 with a working hypothesis (likely the same
+`ctx.current_block`-not-propagated shape this project has hit 3
+times already this month in unrelated features) and two ready-to-use
+minimal repros. See the audit doc for both.
+
+Everything else investigated turned out to be either already fixed
+(stale repros predating recent landed fixes -- BUG-76, BUG-88, and
+one unlabeled cluster), an already-EXPLICITLY-accepted design
+decision from BUG-177's own 2026-08-11 triage (the `abort()`-vs-
+`exit(3)` divergence between the C and LLVM backends' overflow/
+bounds/division traps -- ~103 of the 341 findings, roughly a third,
+all the same accepted pattern), or a fuzzer-mutator quality artifact
+(83 of 341 findings are "both backends time out" on a fuzzer-injected
+`i64::MIN`/`i64::MAX` literal sitting in a `sleep_ms` argument or loop
+bound -- genuinely, correctly very slow, not broken). Two cheap
+`tools/localfuzz` tooling improvements suggested (a persistent
+accepted-non-bug allow-list in `digest.py`; biasing the mutator away
+from extreme literals in timing/loop-bound positions) but not acted
+on -- optional, doesn't touch the compiler.
