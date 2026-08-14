@@ -7989,3 +7989,31 @@ Fix attempt: `tools/localfuzz/findings/20260814-184433-backend-divergence-ae3ce9
 
   লেখ xs[0];
   লে
+
+---
+
+### Candidate: 20260814-192118-backend-divergence-437722e8bd
+
+Repro: `tools/localfuzz/findings/20260814-192118-backend-divergence-437722e8bd/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-192118-backend-divergence-437722e8bd/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "index out of bounds\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "index out of bounds\n",
+    "timed_out": false
+  }
+}
+```
+
