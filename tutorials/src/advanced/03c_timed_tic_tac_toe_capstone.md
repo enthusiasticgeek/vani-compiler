@@ -44,28 +44,37 @@ It has a real limitation for *this specific problem*, though, and
 it's not a workaround-able edge case:
 
 1. **There is no non-blocking or cancellable stdin read to give the
-   worker thread.** (There's no reason that thread *has* to be
-   permanently stuck -- if the read it's doing could itself be told
-   "give up after N ms," none of this would be a problem. That's
-   exactly what this file's fix provides -- see below.)
+   worker thread.** `cancel <name>;` shipped 2026-08-14 (see
+   [Advanced 3](03_concurrency.md#cancel)) and DOES make a thread
+   stuck in a blocking `tcp_accept`/`tcp_recv` genuinely
+   interruptible -- but `stdin_read_line`/`file_read_line` are
+   deliberately NOT cancel-aware (buffered stdio's `EINTR`
+   interaction is murkier than raw socket syscalls and needs its own
+   design pass). So for THIS specific file's problem -- a blocking
+   *stdin* read -- the limitation described below still holds today,
+   even with `cancel` in the language. (There's no reason that
+   thread *has* to be permanently stuck -- if the read it's doing
+   could itself be told "give up after N ms," none of this would be
+   a problem. That's exactly what this file's fix provides -- see
+   below.)
 2. **`Task<R>` is affine.** Every spawned task must be consumed
-   exactly once, by `join` OR (as of this session) `detach` -- see
+   exactly once, by `join` OR `detach` -- see
    [Advanced 3](03_concurrency.md#detach----fire-and-forget). At the
    time this file's design problem first came up, `detach` didn't
    exist yet, so a "fire and forget" worker genuinely wasn't
    possible at all -- the program couldn't exit without eventually
-   joining the stuck thread. `detach` now removes that specific
+   joining the stuck thread. `detach` removes that specific
    constraint (a caller COULD `detach` the blocking-read worker and
    let `main` exit immediately, leaving the orphaned thread to be
-   reclaimed at process exit) -- but it still doesn't make the
-   underlying `stdin_read_line()` call itself cancellable, and a
-   detached thread still holds stdin open and could still consume
-   the human's next keystroke at the wrong moment (e.g. bleeding
-   into a subsequent prompt). The real fix below is still the better
-   one: a genuinely non-blocking poll needs no thread, no `join`,
-   and no `detach` at all.
+   reclaimed at process exit) -- but (per point 1) `cancel` doesn't
+   reach `stdin_read_line`, and a detached thread still holds stdin
+   open and could still consume the human's next keystroke at the
+   wrong moment (e.g. bleeding into a subsequent prompt). The real
+   fix below is still the better one for THIS file: a genuinely
+   non-blocking poll needs no thread, no `join`, no `detach`, and no
+   `cancel` at all.
 
-Put together (as things stood before this session added `detach`):
+Put together (as things stood before `detach`/`cancel` existed):
 once the timer wins the race, the worker thread is still sitting
 inside a real, blocking `stdin_read_line()` call, it cannot be
 killed, and the program cannot exit without eventually joining it --
@@ -73,8 +82,11 @@ so the timed-out player's opponent, who already knows they won, has
 to sit and wait for that thread's pending read to actually return (a
 stray keystroke, Ctrl-D, or the process being killed) before the
 process can fully exit. Not a bug -- an honest consequence of "no
-cancellable blocking I/O" combined with (at the time) "no
-fire-and-forget tasks" -- but a real, user-visible annoyance.
+cancellable blocking stdin I/O" combined with (at the time) "no
+fire-and-forget tasks" -- but a real, user-visible annoyance. **This
+specific gap (stdin cancellation) is still open as of 2026-08-14**
+even though blocking-socket cancellation now exists -- see
+`docs/TODO_CURRENT.md`.
 
 **Would `async`/`await` have fixed it?** No, and it's worth being
 precise about why. v1's async surface still desugars synchronously
@@ -285,8 +297,13 @@ place.
 - The old design's real limitation -- `Task<R>` is affine (must
   always be `join`ed) and there was no cancellable blocking I/O, so a
   timed-out player's opponent had to wait for that player's eventual
-  keystroke before the process could exit -- is now gone completely,
-  not just documented as an accepted tradeoff.
+  keystroke before the process could exit -- is now gone completely
+  for THIS file, not just documented as an accepted tradeoff. (As of
+  2026-08-14, `cancel <name>;` also makes blocking `tcp_accept`/
+  `tcp_recv` interruptible in general -- see
+  [Advanced 3](03_concurrency.md#cancel) -- but not `stdin_
+  read_line`, so a `task`+`cancel` rewrite of THIS specific game
+  still couldn't fully replace the non-blocking-poll approach below.)
 - Two real, previously-unknown compiler bugs (BUG-185, BUG-186) were
   found and fixed building this file's original version -- a small,
   honest reminder that "the compiler has a bug in a construct you're
@@ -294,5 +311,5 @@ place.
 
 ---
 
-**Previous**: [Sec.3 -- `task` / `join` / `detach` + atomics / mutexes / channels ->](03_concurrency.md)
+**Previous**: [Sec.3 -- `task` / `join` / `detach` / `cancel` + atomics / mutexes / channels ->](03_concurrency.md)
 **Next**: [Sec.3d -- Capstone: a concurrent sensor-dashboard pipeline ->](03d_concurrent_pipeline_capstone.md)
