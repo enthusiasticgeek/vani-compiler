@@ -7597,3 +7597,12 @@ The base corpus file provided is `/home/virgo/source/vani-compiler-localfuzz/exa
   यावत् क < 5
   अपरिवर्तनीय len(सूचिः) == (क यथा u64);
   अपरिवर
+
+---
+
+### Candidate: 20260814-045047-backend-divergence-e07e7d823c
+
+Repro: `tools/localfuzz/findings/20260814-045047-backend-divergence-e07e7d823c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-045047-backend-divergence-e07e7d823c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
