@@ -7472,3 +7472,65 @@ Fix attempt: `tools/localfuzz/findings/20260814-012303-backend-divergence-e22681
 }
 ```
 
+
+---
+
+### Candidate: 20260814-015322-backend-divergence-f1d21b27e0
+
+Repro: `tools/localfuzz/findings/20260814-015322-backend-divergence-f1d21b27e0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-015322-backend-divergence-f1d21b27e0/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Run:**
+The local staging log demonstrates a regression in the vani-compiler's behavior when running on different backends.
+
+**Mutant/generated source:**
+```vani
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/for_loops.vani              # LLVM
+//   vanic run examples/language/filipino/for_loops.vani --backend=c  # C
+
+layunin "Filipino for-range loops";
+
+gawain kabuuan(n: i64) -> i64 {
+  hayaan s: i64 = 0;
+  for i mula 0 hanggang n {
+    s = s + i;
+  }
+  ibalik s;
+}
+
+gawain main() -> i64 {
+  patunayan kabuuan(9223372036854775807) == 10;
+  patunayan kabuuan(10) == 45;
+  isulat "kabuuan(5) =", kabuuan(5);
+  isulat "kabuuan(10) =", kabuuan(10);
+  ibalik 0;
+}
+```
+
+**Finding kind:** backend-divergence
+
+**Raw result data:**
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  }
+}
+```
+
+**STATUS: needs
