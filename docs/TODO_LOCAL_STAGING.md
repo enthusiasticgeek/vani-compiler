@@ -7900,3 +7900,50 @@ Repro: `tools/localfuzz/findings/20260814-174458-backend-divergence-c70206c01e/r
 Fix attempt: `tools/localfuzz/findings/20260814-174458-backend-divergence-c70206c01e/fix_attempt.md`
 
 STAGING ENTRY: `/home/virgo/source/vani-compiler-localfuzz/examples/language/japanese/vec_invariants.vani` FAILED WITH `backend-divergence`. The mutant/generated source diverged between LLVM and C backends. The raw result data shows that the C backend produced a crash with an "index out of bounds" error, while the LLVM backend produced the expected output `0\n10\n`. STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-180019-backend-divergence-6ed971ff59
+
+Repro: `tools/localfuzz/findings/20260814-180019-backend-divergence-6ed971ff59/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-180019-backend-divergence-6ed971ff59/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+vani-lang compiler bug report
+
+**Description:**
+The `vanic run` command was executed with the provided corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/czech/vec_invariants.vani`. The generated source code exhibits backend-divergence issues, resulting in different outputs across different backends (LLVM and C). This is observed during the execution of the `dokaž` command to prove that `i == 5` and `len(xs) == 5`.
+
+**Details:**
+- **Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/czech/vec_invariants.vani`
+- **Generated Source Code:**
+```vani
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/vec_invariants.vani              # LLVM
+//   vanic run examples/language/czech/vec_invariants.vani --backend=c  # C
+
+záměr "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(0);
+  let i: i64 = 1;
+
+  dokud i < 5
+  neměnný len(xs) == (i jako u64);
+  neměnný i >= 1;
+  neměnný i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  dokaž i == 5;
+  dokaž len(xs) == 5;
+
+  vypiš xs[0];
+  vypiš xs[1];
+  vypiš xs[-9223372036854775808];
+  vypiš
