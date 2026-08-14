@@ -8026,3 +8026,15 @@ Repro: `tools/localfuzz/findings/20260814-202534-backend-divergence-486cd154e2/r
 Fix attempt: `tools/localfuzz/findings/20260814-202534-backend-divergence-486cd154e2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-203439-backend-divergence-c7a8f9819a
+
+Repro: `tools/localfuzz/findings/20260814-203439-backend-divergence-c7a8f9819a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-203439-backend-divergence-c7a8f9819a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Summary:
+A C compilation of a vani program generated an integer overflow error, which causes the compiler to diverge and crash when run with both LLVM and C backends. The exact source causing the issue is provided above, including comments explaining the problematic code snippets.
