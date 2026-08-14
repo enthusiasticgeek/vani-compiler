@@ -7703,3 +7703,12 @@ A vanic runtime error occurred during execution of the Mongolian Vani iterate ex
 
 
 
+
+---
+
+### Candidate: 20260814-075332-backend-divergence-2aa22b7cb1
+
+Repro: `tools/localfuzz/findings/20260814-075332-backend-divergence-2aa22b7cb1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-075332-backend-divergence-2aa22b7cb1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
