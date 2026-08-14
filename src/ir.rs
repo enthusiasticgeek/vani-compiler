@@ -329,6 +329,12 @@ pub enum TypedStmt {
     Detach {
         name: String,
     },
+    /// `cancel <name>;` — signals a still-running `Task` to stop
+    /// without consuming it. See `ast::Stmt::Cancel` for the full
+    /// semantics.
+    Cancel {
+        name: String,
+    },
     /// `unsafe(reason = "...") { <body> }` — lexically scoped
     /// block. The `reason` string is mandatory at parse time
     /// and is emitted as machine-readable debug metadata in

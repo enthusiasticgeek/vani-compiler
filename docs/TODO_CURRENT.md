@@ -14080,3 +14080,120 @@ corpus check matches the known 18-file baseline exactly.
   synthesizer (see Phase B note above).
 - Tutorial updates for the Executor pattern + this session's
   findings (in progress).
+
+## Phase D -- cancellable blocking `task` threads, SHIPPED (2026-08-14)
+
+The other half of the async/cancellation ask: no mechanism existed
+to interrupt a `task` thread stuck inside a REAL blocking syscall
+(`tcp_accept`, `tcp_recv`) -- `detach()` (2026-08-13) removed the
+"must join" constraint but explicitly did not make the thread
+itself interruptible. New `cancel <name>;` statement closes this
+gap, English-only keyword for now (matches `detach`'s own initial
+scope; no lexer-keyword-table-parity requirement since `TokenKind::
+Detach` itself has never had non-English spellings either).
+
+**Semantics**: unlike `join`/`detach`, `cancel` does NOT consume the
+affine `Task`/`Task<R>` handle -- a `join`/`detach` is still required
+afterward. Sets a shared flag AND (POSIX) sends a reserved signal
+(`pthread_kill`) to force an in-flight blocking syscall to return
+`EINTR` immediately rather than only being noticed on the thread's
+NEXT blocking call. Idempotent -- cancelling an already-cancelled
+live task is harmless. Rejected: cancelling an unknown name, a
+non-Task binding, an already-consumed task ("nothing left to
+cancel"), or inside a `pure fn`/`parallel for` body (same reasoning
+as `detach` -- signaling another thread is a side effect outside the
+pure call's sequential model).
+
+**Mechanism**: `intent_task_handle` gained a third field, a `cancel_
+flag` pointer (a separately malloc'd, zero-initialized byte/int).
+The spawned thread publishes its OWN flag pointer into a per-thread
+global (`__intent_tls_cancel_flag` in C, `@__intent_tls_cancel_flag`
+in LLVM) at the very top of its outlined trampoline -- any blocking
+builtin can then check "was MY thread cancelled?" from anywhere in
+that thread's call stack without a parameter threaded through every
+intermediate call, the same shape as `errno`. `intent_tcp_accept`/
+`intent_tcp_recv` (POSIX) now retry-loop on `EINTR` but check the
+flag first and return a new `-2` "cancelled" sentinel instead of
+retrying when it's set -- distinct from `-1` (real error) and any
+valid non-negative fd/byte-count, a convention entirely local to
+these two functions' own contract (matches the tic-tac-toe example's
+own precedent of function-local sentinel conventions).
+
+**A real bug found via `strace`, not assumed**: the LLVM backend's
+first implementation used plain `signal()` to install the handler.
+On this glibc/Linux target that installs it WITH `SA_RESTART` set
+(confirmed via `strace -f -e trace=rt_sigaction`, not read from
+documentation -- glibc's actual default behavior contradicted the
+assumption baked into the first comment), so the kernel silently
+auto-restarted every interrupted `accept()`/`recv()` forever instead
+of ever returning EINTR -- a 100% reproducible hang on the LLVM
+backend specifically (the C backend's `sigaction()` with explicit
+`sa_flags = 0` was correct from the start, also confirmed via
+`strace`, not assumed). Fixed by calling `siginterrupt(sig, 1)`
+right after `signal()` to explicitly clear `SA_RESTART` -- a POSIX
+function marked "obsolete" in favor of `sigaction`, chosen for its
+trivial 2-int-argument C ABI, avoiding hand-encoding `struct
+sigaction`'s platform-specific layout in raw LLVM IR.
+
+**A second real bug, found by the full test suite catching 5
+regressions**: `%intent_task_handle`'s new third field shifted the
+struct size on the LLVM side, and `emit_task_spawn_call` (the
+EXPRESSION-form `let t = task callee(args);` / `Task<R>` path,
+separate from the block-form `task NAME { .. }` path) both (a) never
+initialized the new field at all (uninitialized stack garbage read
+back and passed to `free()` -- a real crash, `cfree` inside `lli`'s
+ORC JIT) and (b) after being given a cancel-flag field appended to
+its OWN ctx struct (which can't be prepended like the block-form's
+is, since offset 0 there is load-bearing as the join site's result
+slot), `task_spawn_call_ctx_size`'s malloc-size formula was never
+updated for the extra field -- an 8-byte heap buffer overflow,
+manifesting as either the same crash or, nondeterministically, a
+plain hang depending on what the overflow happened to corrupt.
+Fixed: cancel-flag allocation + thread-local publish added to
+`emit_task_spawn_call` (LLVM) and its C-backend equivalent, `task_
+spawn_call_ctx_size` corrected, `TypedExprKind::TaskJoinExpr`
+(expression-form join) now also frees the cancel flag. Verified
+clean via `valgrind --leak-check=full` (0 errors, all heap blocks
+freed) on the LLVM AOT path and ASan on the C path, not just
+re-running the example.
+
+**Windows**: the flag is still set (a CPU-bound thread polling it
+cooperatively still stops), and `cancel` additionally calls
+`CancelSynchronousIo` on the task's thread HANDLE to abort a pending
+blocking Winsock call (`intent_tcp_accept`/`intent_tcp_recv`'s
+Windows arms check for `WSA_OPERATION_ABORTED`). **UNTESTED on real
+Windows hardware** -- no host available this session; implemented
+directly from the documented `CancelSynchronousIo` contract, same
+precedent as this project's existing "verification deferred" items
+(`docs/v1_limitations.md` L10 macOS). **macOS shares the POSIX
+signal path unchanged** -- pthread/sigaction/pthread_kill are
+standard BSD/POSIX APIs there too, not a separate code path from the
+Linux one this session verified; also untested on real hardware.
+
+Shipped: `examples/language/english/cancel_blocking_task.vani`
+(cancels a task genuinely blocked in `tcp_accept`, verified via
+`strace` that no `SA_RESTART` survives on either backend), 8 new
+`src/lib.rs` checker unit tests, 1 new `tests/run_end_to_end.rs` e2e
+test (with an explicit wall-clock timeout + kill, since a regression
+here manifests as a HANG, not a clean failure -- silence would
+otherwise look identical to "still running").
+
+**Verification**: 2966/2966 lib tests pass (2958 + 8 new, 0
+regressions); 259/259 e2e tests pass (258 + 1 new, 0 regressions);
+1051-file example corpus check (1050 + 1 new file) matches the known
+18-file baseline exactly; ASan/UBSan clean on the C backend;
+`valgrind --leak-check=full` clean (0 errors) on the LLVM AOT path.
+
+**Still open**: Windows/macOS unverified on real hardware (see
+above). `stdin_read_line`/`file_read_line` cancellation (the
+ORIGINAL tic-tac-toe motivating scenario) intentionally NOT wired up
+this pass -- buffered stdio's EINTR interaction is murkier than raw
+socket syscalls (unclear whether glibc's `fgetc` reliably surfaces
+EINTR at all, vs. silently retrying internally), and threading a
+"was this cancelled" signal back through `stdin_read_line`'s
+existing `OwnedStr`-return contract needs its own design pass rather
+than reusing the `-2`-sentinel convention `tcp_accept`/`tcp_recv`
+could adopt for free. `Pollable`/`Executor` (Phase B) integration
+with blocking-task cancellation not attempted -- they're
+orthogonal mechanisms (non-blocking `Task__<fn>` vs. blocking OS
+threads) with no natural composition point.

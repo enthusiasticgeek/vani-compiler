@@ -2209,7 +2209,7 @@ fn compute_indirect_locks(
                     walk_stmts(&arm.body, param_names, signatures, out);
                 }
             }
-            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
         }
     }
     fn walk_expr(
@@ -3445,7 +3445,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
             expr_mentions_var(&arm.poll_call, name)
                 || arm.body.iter().any(|s| stmt_mentions_var(s, name))
         }),
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => false,
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => false,
     }
 }
 
@@ -3663,7 +3663,8 @@ fn check_style_warnings_in_block(body: &[Stmt], diagnostics: &mut Vec<Diagnostic
             | S::Break { .. }
             | S::Continue { .. }
             | S::TaskJoin { .. }
-            | S::Detach { .. } => {}
+            | S::Detach { .. }
+            | S::Cancel { .. } => {}
         }
     }
 }
@@ -3796,7 +3797,7 @@ fn walk_stmt_for_captures(
                 for s in &arm.body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -4033,7 +4034,7 @@ fn rename_vars_in_stmt(
                 for s in &mut arm.body { rename_vars_in_stmt(s, rename); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -4237,7 +4238,7 @@ fn rewrite_closure_calls_in_stmt(
                 for s in &mut arm.body { rewrite_closure_calls_in_stmt(s, closures); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
     }
 }
 
@@ -4460,7 +4461,7 @@ fn lift_stmt_anon_fn(
                 for s in &mut arm.body { lift_stmt_anon_fn(s, counter, hoisted); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::Cancel { .. } => {}
     }
 }
 
@@ -5926,7 +5927,7 @@ fn resolve_enum_types_in_stmt(
                 for s in &mut arm.body { resolve_enum_types_in_stmt(s, enums); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -6355,7 +6356,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                 for s in &mut arm.body { sub_aliases_in_stmt(s, aliases); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -7995,7 +7996,7 @@ fn collect_generic_calls_in_stmt(
             }
         }
         // `Continue` and `TaskJoin` carry no expression to scan.
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -8523,7 +8524,7 @@ fn rewrite_generic_calls_in_stmt(
                 }
             }
         }
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
     }
 }
 
@@ -16663,6 +16664,47 @@ fn check_one_stmt(
                 info_mut.moved = Some(*span);
             }
             body.push(TypedStmt::Detach { name: name.clone() });
+            false
+        }
+        Stmt::Cancel { name, span } => {
+            // Unlike `join`/`detach`, `cancel` does NOT set
+            // `info.moved` -- it signals the thread to stop without
+            // consuming the affine `Task` handle. The checker still
+            // requires exactly one `join`/`detach` afterward; this
+            // just makes that eventual `join` return sooner. Still
+            // rejects a task that's ALREADY been joined/detached
+            // (nothing left to signal) and, unlike join/detach,
+            // permits being called more than once on the same live
+            // task (idempotent at the runtime level -- the flag is
+            // just set again).
+            let Some(info) = env.lookup(name) else {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!("cancel: no task named '{}' in scope", name),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            };
+            if !matches!(info.ty, Type::Task | Type::TaskR(_)) {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "cancel: '{}' has type {}, expected Task or Task<R>",
+                        name, info.ty
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(prev) = info.moved {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "cancel: task '{}' was already joined or detached at byte {}..{}, nothing left to cancel",
+                        name, prev.start, prev.end
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            body.push(TypedStmt::Cancel { name: name.clone() });
             false
         }
         Stmt::UnsafeBlock {
@@ -26888,7 +26930,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                         walk(&arm.body, param_names, locks);
                     }
                 }
-                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
+                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } | Stmt::Cancel { .. } => {}
             }
         }
     }
@@ -38384,6 +38426,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::TaskSpawn { .. }
         | TypedStmt::TaskJoin { .. }
         | TypedStmt::Detach { .. }
+        | TypedStmt::Cancel { .. }
         | TypedStmt::UnsafeBlock { .. }
         | TypedStmt::ForIterShallowFree { .. } => vec![],
     }
@@ -38557,6 +38600,24 @@ fn verify_pure_body(
                             crate::span::Span::default(),
                             format!(
                                 "{} cannot use `detach` -- a detached task's side effects can outlive the pure call, unlike `join` which waits for them to finish first",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
+                        ),
+                    );
+                }
+                TypedStmt::Cancel { .. } => {
+                    // Same reasoning as `detach` just above: sending
+                    // a cancellation signal to another thread is a
+                    // side effect on state outside this pure call's
+                    // own sequential model. Reject unconditionally.
+                    diagnostics.push(
+                        Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "{} cannot use `cancel` -- signaling another thread is a side effect outside this pure call's sequential model",
                                 context
                             ),
                         )

@@ -1356,6 +1356,12 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         // Sleep is used by both the IOCP async-timer helper and the
         // sleep_ms builtin; declare it once here to avoid redefinition.
         out.push_str("declare void @Sleep(i32)\n");
+        // Phase D (2026-08-14): `cancel <name>;` support --
+        // CancelSynchronousIo(threadHandle) fails a pending
+        // synchronous I/O call (including blocking Winsock calls)
+        // on that thread with WSA_OPERATION_ABORTED. Untested on
+        // real Windows hardware this session.
+        out.push_str("declare i32 @CancelSynchronousIo(i8*)\n");
     } else {
         // sched_yield(): POSIX system call that returns the
         // current thread's time slice to the scheduler. Kept
@@ -1370,6 +1376,33 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         out.push_str("declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)\n");
         out.push_str("declare i32 @pthread_join(i64, i8**)\n");
         out.push_str("declare i32 @pthread_detach(i64)\n");
+        // Phase D (2026-08-14): `cancel <name>;` support.
+        // `pthread_kill` wakes a thread blocked in a syscall so it
+        // returns EINTR promptly; `signal` installs a no-op handler
+        // for that wakeup. CONFIRMED VIA STRACE (not assumed): on
+        // this glibc/Linux target, bare `signal()` installs the
+        // handler WITH `SA_RESTART` set (`rt_sigaction` showed
+        // `sa_flags=SA_RESTORER|SA_RESTART`), which made the kernel
+        // auto-restart the interrupted `accept()` forever instead of
+        // ever returning EINTR -- a 100% reproducible hang, caught
+        // by actually running the cancel-a-blocked-thread example,
+        // not just reading the emitted IR. `siginterrupt(sig, 1)`
+        // explicitly clears SA_RESTART for that one signal after
+        // `signal()` installs it -- a POSIX function marked
+        // "obsolete" in favor of `sigaction`, but with a trivial
+        // 2-int-argument C ABI that avoids hand-encoding `struct
+        // sigaction`'s platform-specific layout in raw LLVM IR (the
+        // C backend uses real `sigaction` instead, since the C
+        // compiler resolves the struct layout automatically). SIGUSR1
+        // = 10 on both Linux and BSD/macOS; this whole mechanism is
+        // POSIX-only regardless (guarded by `host_uses_win32_
+        // threading()` at every call site), so no other platform's
+        // signal numbering applies.
+        out.push_str("declare i32 @pthread_kill(i64, i32)\n");
+        out.push_str("declare i8* @signal(i32, i8*)\n");
+        out.push_str("declare i32 @siginterrupt(i32, i32)\n");
+        out.push_str("@__intent_tls_cancel_flag = thread_local global i8* null\n");
+        out.push_str("define internal void @__intent_cancel_sig_noop(i32 %sig) {\n  ret void\n}\n");
         // Linux futex syscall used by `mutex_lock`/
         // `Drop(Guard)` for real kernel-wait parking.
         // `@syscall` is libc's generic syscall(2)
@@ -1456,10 +1489,12 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         }
     }
     // `intent_task_handle`: pthread handle + ctx pointer so
-    // join can free the ctx after pthread_join returns.
-    // Mirrors the C-backend struct so cross-backend parity
-    // holds at the IR level.
-    out.push_str("%intent_task_handle = type { i64, i8* }\n");
+    // join can free the ctx after pthread_join returns. Field
+    // 2 (i8*) is Phase D's cancel flag pointer (a malloc'd
+    // `int`, same as the C backend's `.cancel_flag`). Mirrors
+    // the C-backend struct so cross-backend parity holds at
+    // the IR level.
+    out.push_str("%intent_task_handle = type { i64, i8*, i8* }\n");
     // BUG-19 fix (2026-07-27): one `%intent_mutex_<T>` /
     // `%intent_guard_<T>` struct pair per DISTINCT element type T
     // used in the program, mirroring the Channel<T,N> scan just
@@ -2423,8 +2458,23 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
 
     // C-style `main` entry trampolines into fn_main and truncates the
-    // i64 result to i32 for the OS exit code.
+    // i64 result to i32 for the OS exit code. Phase D: install the
+    // cancel-signal handler here, guaranteed to run exactly once,
+    // before any vani code (including any task spawn) -- this is
+    // the LLVM backend's equivalent of the C backend's
+    // `__attribute__((constructor))` installer, without needing
+    // `@llvm.global_ctors`.
     out.push_str("define i32 @main() {\n");
+    if !host_uses_win32_threading() {
+        out.push_str(
+            "  %_sig_r = call i8* @signal(i32 10, i8* bitcast (void (i32)* @__intent_cancel_sig_noop to i8*))\n",
+        );
+        // See the declaration-site comment: without this, `signal()`
+        // installs the handler WITH SA_RESTART on this glibc target,
+        // so a signaled `accept()`/`recv()` auto-restarts forever
+        // instead of ever returning EINTR.
+        out.push_str("  %_sigint_r = call i32 @siginterrupt(i32 10, i32 1)\n");
+    }
     out.push_str("  %r = call i64 @fn_main()\n");
     out.push_str("  %t = trunc i64 %r to i32\n");
     out.push_str("  ret i32 %t\n");
@@ -5230,6 +5280,19 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx_v, ctx_p
             ));
             out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
+            // Phase D: the thread is definitely done by the time
+            // join returns, so its cancel flag is safe to free too.
+            let cancel_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 2\n",
+                cancel_p, addr
+            ));
+            let cancel_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i8*, i8** {}\n",
+                cancel_v, cancel_p
+            ));
+            out.push_str(&format!("  call void @free(i8* {})\n", cancel_v));
         }
         TypedStmt::Detach { name } => {
             // Real-thread detach: read the handle and release it
@@ -5274,6 +5337,72 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str(&format!(
                     "  {} = call i32 @pthread_detach(i64 {})\n",
                     _ret, handle_v
+                ));
+            }
+            // Same bounded-leak reasoning as `.ctx`: `.cancel_flag`
+            // is left unfreed here too, since a detached thread may
+            // still be reading it from inside a blocking call.
+        }
+        TypedStmt::Cancel { name } => {
+            // Phase D (2026-08-14): signal a still-running task to
+            // stop. Setting the flag works on every platform. The
+            // forced wakeup for an in-flight blocking syscall is
+            // platform-specific: POSIX sends a reserved signal via
+            // `pthread_kill` (mirrors the C backend exactly; macOS
+            // shares this branch unchanged -- pthread_kill/SIGUSR1
+            // are standard BSD/POSIX there too). Windows calls
+            // `CancelSynchronousIo` on the task's thread HANDLE --
+            // UNTESTED on real Windows hardware this session (no
+            // host available), implemented from the documented
+            // `CancelSynchronousIo` contract, matching the C
+            // backend's identical Windows arm. Does NOT free
+            // `.cancel_flag`/`.ctx` -- `cancel` doesn't consume the
+            // task; the checker still requires a following
+            // `join`/`detach`.
+            let addr = match ctx.locals.get(name) {
+                Some((_, a)) => a.clone(),
+                None => unreachable!(
+                    "checker: cancel '{}' is in scope when we get here",
+                    name
+                ),
+            };
+            let cancel_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 2\n",
+                cancel_p, addr
+            ));
+            let cancel_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i8*, i8** {}\n",
+                cancel_v, cancel_p
+            ));
+            out.push_str(&format!("  store i8 1, i8* {}\n", cancel_v));
+            let handle_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 0\n",
+                handle_p, addr
+            ));
+            let handle_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i64, i64* {}\n",
+                handle_v, handle_p
+            ));
+            if host_uses_win32_threading() {
+                let h = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    h, handle_v
+                ));
+                let _cancel_ret = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @CancelSynchronousIo(i8* {})\n",
+                    _cancel_ret, h
+                ));
+            } else {
+                let _kill_ret = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @pthread_kill(i64 {}, i32 10)\n",
+                    _kill_ret, handle_v
                 ));
             }
         }
@@ -18736,6 +18865,21 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 result_v, result_lty, result_lty, result_ptr
             ));
             out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
+            // Phase D: the thread is definitely done by the time
+            // join returns, so its cancel flag is safe to free too
+            // (same reasoning as `TypedStmt::TaskJoin`'s statement
+            // form).
+            let cancel_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 2\n",
+                cancel_p, addr
+            ));
+            let cancel_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i8*, i8** {}\n",
+                cancel_v, cancel_p
+            ));
+            out.push_str(&format!("  call void @free(i8* {})\n", cancel_v));
             result_v
         }
         kind => unreachable!(
@@ -27462,12 +27606,49 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String, uses_epoll: bool) {
          ret_neg1:\n\
          \x20 ret i64 -1\n\
          }\n\
+        ",
+    );
+    // Phase D's cancel-aware accept/recv (below) need `@__errno_
+    // location`. `emit_intent_epoll_helpers_llvm` ALSO declares it
+    // unconditionally whenever `uses_epoll` -- LLVM's textual IR
+    // parser rejects a duplicate `declare` of the same function
+    // (confirmed via a real "invalid redefinition" `lli` failure on
+    // every epoll-using example, caught by the full test suite, not
+    // assumed), so only declare it here when the epoll helpers
+    // won't ALSO declare it.
+    if !uses_epoll {
+        out.push_str("declare i32* @__errno_location()\n");
+    }
+    out.push_str(
+        "\
          define i64 @intent_tcp_accept(i64 %fd) {\n\
          entry:\n\
+         \x20 br label %try\n\
+         try:\n\
          \x20 %fd_i32 = trunc i64 %fd to i32\n\
          \x20 %cfd_i32 = call i32 @accept(i32 %fd_i32, i8* null, i32* null)\n\
+         \x20 %ok = icmp sge i32 %cfd_i32, 0\n\
+         \x20 br i1 %ok, label %ret_ok, label %check_eintr\n\
+         ret_ok:\n\
          \x20 %cfd_i64 = sext i32 %cfd_i32 to i64\n\
          \x20 ret i64 %cfd_i64\n\
+         check_eintr:\n\
+         \x20 %errno_p = call i32* @__errno_location()\n\
+         \x20 %err_v = load i32, i32* %errno_p\n\
+         \x20 %is_eintr = icmp eq i32 %err_v, 4\n\
+         \x20 br i1 %is_eintr, label %check_cancel, label %ret_neg1\n\
+         check_cancel:\n\
+         \x20 %flag_p = load i8*, i8** @__intent_tls_cancel_flag\n\
+         \x20 %flag_null = icmp eq i8* %flag_p, null\n\
+         \x20 br i1 %flag_null, label %try, label %load_flag\n\
+         load_flag:\n\
+         \x20 %flag_v = load i8, i8* %flag_p\n\
+         \x20 %cancelled = icmp ne i8 %flag_v, 0\n\
+         \x20 br i1 %cancelled, label %ret_neg2, label %try\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         ret_neg2:\n\
+         \x20 ret i64 -2\n\
          }\n\
          define i64 @intent_tcp_connect_local(i64 %port) {\n\
          entry:\n\
@@ -27526,8 +27707,28 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String, uses_epoll: bool) {
          \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
          \x20 %fd_i32 = trunc i64 %fd to i32\n\
          \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 br label %try\n\
+         try:\n\
          \x20 %n = call i64 @recv(i32 %fd_i32, i8* %buf_ptr, i64 %want, i32 0)\n\
+         \x20 %ok = icmp sge i64 %n, 0\n\
+         \x20 br i1 %ok, label %ret_n, label %check_eintr\n\
+         ret_n:\n\
          \x20 ret i64 %n\n\
+         check_eintr:\n\
+         \x20 %errno_p2 = call i32* @__errno_location()\n\
+         \x20 %err_v2 = load i32, i32* %errno_p2\n\
+         \x20 %is_eintr2 = icmp eq i32 %err_v2, 4\n\
+         \x20 br i1 %is_eintr2, label %check_cancel2, label %ret_neg1\n\
+         check_cancel2:\n\
+         \x20 %flag_p2 = load i8*, i8** @__intent_tls_cancel_flag\n\
+         \x20 %flag_null2 = icmp eq i8* %flag_p2, null\n\
+         \x20 br i1 %flag_null2, label %try, label %load_flag2\n\
+         load_flag2:\n\
+         \x20 %flag_v2 = load i8, i8* %flag_p2\n\
+         \x20 %cancelled2 = icmp ne i8 %flag_v2, 0\n\
+         \x20 br i1 %cancelled2, label %ret_neg2, label %try\n\
+         ret_neg2:\n\
+         \x20 ret i64 -2\n\
          ret_neg1:\n\
          \x20 ret i64 -1\n\
          }\n\
@@ -27711,7 +27912,19 @@ fn emit_intent_tcp_helpers_llvm_windows(out: &mut String, uses_epoll: bool) {
          entry:\n\
          \x20 %cfd = call i64 @accept(i64 %fd, i8* null, i32* null)\n\
          \x20 %inv = icmp eq i64 %cfd, -1\n\
-         \x20 %res = select i1 %inv, i64 -1, i64 %cfd\n\
+         \x20 br i1 %inv, label %check_abort, label %ret_ok\n\
+         ret_ok:\n\
+         \x20 ret i64 %cfd\n\
+         check_abort:\n\
+         \x20 ; Phase D (2026-08-14): `cancel <name>;` calls\n\
+         \x20 ; CancelSynchronousIo on this socket's owning thread --\n\
+         \x20 ; a cancelled blocking accept() fails with this specific\n\
+         \x20 ; error (995 = WSA_OPERATION_ABORTED). Untested on real\n\
+         \x20 ; Windows hardware this session; mirrors the documented\n\
+         \x20 ; CancelSynchronousIo contract.\n\
+         \x20 %le = call i32 @WSAGetLastError()\n\
+         \x20 %is_abort = icmp eq i32 %le, 995\n\
+         \x20 %res = select i1 %is_abort, i64 -2, i64 -1\n\
          \x20 ret i64 %res\n\
          }\n\
          define i64 @intent_tcp_connect_local(i64 %port) {\n\
@@ -27775,9 +27988,15 @@ fn emit_intent_tcp_helpers_llvm_windows(out: &mut String, uses_epoll: bool) {
          \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
          \x20 %n = call i32 @recv(i64 %fd, i8* %buf_ptr, i32 %want_i32, i32 0)\n\
          \x20 %err = icmp eq i32 %n, -1\n\
+         \x20 br i1 %err, label %check_abort, label %ret_ok\n\
+         ret_ok:\n\
          \x20 %n_i64 = sext i32 %n to i64\n\
-         \x20 %res = select i1 %err, i64 -1, i64 %n_i64\n\
-         \x20 ret i64 %res\n\
+         \x20 ret i64 %n_i64\n\
+         check_abort:\n\
+         \x20 %le = call i32 @WSAGetLastError()\n\
+         \x20 %is_abort = icmp eq i32 %le, 995\n\
+         \x20 %abort_res = select i1 %is_abort, i64 -2, i64 -1\n\
+         \x20 ret i64 %abort_res\n\
          ret_neg1:\n\
          \x20 ret i64 -1\n\
          }\n\
@@ -46272,6 +46491,12 @@ pub(crate) fn walk_body(
                 // Mirrors the TaskJoin arm just above.
                 let _ = name;
             }
+            TypedStmt::Cancel { name } => {
+                // Mirrors the TaskJoin/Detach arms just above --
+                // cancel references a handle declared in this same
+                // block, not a captured outer binding.
+                let _ = name;
+            }
             TypedStmt::UnsafeBlock { body, .. } => {
                 let saved = declared.clone();
                 walk_body(body, declared, order, seen);
@@ -46439,14 +46664,14 @@ fn emit_task_via_pthread(
     ctx.next_outline += 1;
     let fn_name = format!("intent_task_{}_{}", ctx.outline_prefix, id);
 
-    // Anonymous ctx struct: one field per capture, by-value.
+    // Anonymous ctx struct: field 0 is always the Phase D cancel-
+    // flag pointer (i8*, prepended so its index is stable regardless
+    // of capture count), followed by one field per capture, by-value.
     let field_tys: Vec<String> =
         captures.iter().map(|(_, t)| llvm_type_string(t)).collect();
-    let ctx_ty = if field_tys.is_empty() {
-        "{}".to_string()
-    } else {
-        format!("{{ {} }}", field_tys.join(", "))
-    };
+    let mut all_field_tys: Vec<String> = vec!["i8*".to_string()];
+    all_field_tys.extend(field_tys);
+    let ctx_ty = format!("{{ {} }}", all_field_tys.join(", "));
 
     // --- Spawn-site code in the parent function. ---
     // The task handle alloca lives in the parent's locals map
@@ -46475,9 +46700,23 @@ fn emit_task_via_pthread(
         "  {} = bitcast i8* {} to {}*\n",
         ctx_typed, ctx_raw, ctx_ty
     ));
+    // Phase D: allocate this task's cancel flag (a single byte, 0 =
+    // not cancelled) BEFORE the thread starts, and store its pointer
+    // into ctx field 0 -- the outlined prologue reads it back to
+    // publish into the thread-local `@__intent_tls_cancel_flag`.
+    let flag_raw = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = call i8* @malloc(i64 1)\n", flag_raw));
+    out.push_str(&format!("  store i8 0, i8* {}\n", flag_raw));
+    let flag_slot = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+        flag_slot, ctx_ty, ctx_ty, ctx_typed
+    ));
+    out.push_str(&format!("  store i8* {}, i8** {}\n", flag_raw, flag_slot));
     for (i, (cap_name, cap_ty)) in captures.iter().enumerate() {
         // Look up the parent's alloca for this capture; load
-        // its value; store into the ctx field.
+        // its value; store into the ctx field. Field index is
+        // i+1 -- field 0 is the cancel-flag pointer above.
         let parent_addr = match ctx.locals.get(cap_name) {
             Some((_, a)) => a.clone(),
             None => unreachable!(
@@ -46501,7 +46740,7 @@ fn emit_task_via_pthread(
         let slot_p = ctx.fresh_tmp();
         out.push_str(&format!(
             "  {} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
-            slot_p, ctx_ty, ctx_ty, ctx_typed, i
+            slot_p, ctx_ty, ctx_ty, ctx_typed, i + 1
         ));
         out.push_str(&format!(
             "  store {} {}, {}* {}\n",
@@ -46550,6 +46789,17 @@ fn emit_task_via_pthread(
         "  store i8* {}, i8** {}\n",
         ctx_raw, ctx_field
     ));
+    // Stash the cancel-flag pointer in the handle too, so `cancel
+    // <name>;` can set it directly without re-deriving it from ctx.
+    let cancel_field = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 2\n",
+        cancel_field, handle_addr
+    ));
+    out.push_str(&format!(
+        "  store i8* {}, i8** {}\n",
+        flag_raw, cancel_field
+    ));
 
     // --- Outlined function body, deferred. ---
     let mut deferred = String::new();
@@ -46562,6 +46812,24 @@ fn emit_task_via_pthread(
         "  %ctx_p = bitcast i8* %_ctx_raw to {}*\n",
         ctx_ty
     ));
+    // Phase D: publish this task's cancel flag into the
+    // thread-local so any blocking builtin called from anywhere in
+    // THIS thread's call stack can check "was I cancelled?" without
+    // a parameter threaded through every intermediate call -- the
+    // same shape as errno. POSIX only; `@__intent_tls_cancel_flag`
+    // isn't declared on the Win32 codegen path at all.
+    if !host_uses_win32_threading() {
+        deferred.push_str(&format!(
+            "  %cancel_flag_slot = getelementptr {}, {}* %ctx_p, i32 0, i32 0\n",
+            ctx_ty, ctx_ty
+        ));
+        deferred.push_str(
+            "  %cancel_flag_p = load i8*, i8** %cancel_flag_slot\n",
+        );
+        deferred.push_str(
+            "  store i8* %cancel_flag_p, i8** @__intent_tls_cancel_flag\n",
+        );
+    }
     // For each capture, allocate a local alloca and copy the
     // ctx-loaded value into it so the body's emit (which uses
     // `%<name>.addr` for variable reads) finds the binding
@@ -46590,7 +46858,7 @@ fn emit_task_via_pthread(
         let slot_p = format!("%cap_slot_{}", i);
         deferred.push_str(&format!(
             "  {} = getelementptr {}, {}* %ctx_p, i32 0, i32 {}\n",
-            slot_p, ctx_ty, ctx_ty, i
+            slot_p, ctx_ty, ctx_ty, i + 1
         ));
         if cap_ty.is_any_ref() {
             // Refs come through the ctx as their pointer
@@ -46697,6 +46965,14 @@ fn emit_task_spawn_call(
     let result_ll_ty = llvm_type_string(result_ty);
     let mut field_tys = vec![result_ll_ty.clone()];
     field_tys.extend(arg_ll_tys.iter().cloned());
+    // Phase D: cancel-flag pointer, APPENDED as the last field
+    // (not prepended, unlike the block-form `task { .. }`'s ctx in
+    // `emit_task_via_pthread`) -- field 0 here is load-bearing as
+    // the RESULT slot: `TypedExprKind::TaskJoinExpr`'s codegen
+    // bitcasts the opaque ctx pointer straight to `result_ty*` and
+    // reads offset 0, so nothing can be inserted before it.
+    let cancel_flag_field_idx = field_tys.len();
+    field_tys.push("i8*".to_string());
     let ctx_ty = format!("{{ {} }}", field_tys.join(", "));
 
     // --- Spawn-site code in the parent function. ---
@@ -46728,6 +47004,18 @@ fn emit_task_spawn_call(
             lty, v, lty, slot_p
         ));
     }
+    // Phase D: allocate this task's cancel flag BEFORE the thread
+    // starts, same shape as the block-form `task { .. }` in
+    // `emit_task_via_pthread`.
+    let flag_raw = ctx.fresh_tmp();
+    out.push_str(&format!("  {} = call i8* @malloc(i64 1)\n", flag_raw));
+    out.push_str(&format!("  store i8 0, i8* {}\n", flag_raw));
+    let flag_slot = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+        flag_slot, ctx_ty, ctx_ty, ctx_typed, cancel_flag_field_idx
+    ));
+    out.push_str(&format!("  store i8* {}, i8** {}\n", flag_raw, flag_slot));
 
     // Fire the platform spawn (same handle shape/convention as
     // the block-form `task { .. }`).
@@ -46772,6 +47060,17 @@ fn emit_task_spawn_call(
         "  store i8* {}, i8** {}\n",
         ctx_raw, ctx_field
     ));
+    // Stash the cancel-flag pointer in the handle too (field 2),
+    // same as the block-form `task { .. }`.
+    let cancel_field = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 2\n",
+        cancel_field, handle_addr
+    ));
+    out.push_str(&format!(
+        "  store i8* {}, i8** {}\n",
+        flag_raw, cancel_field
+    ));
     let handle_val = ctx.fresh_tmp();
     out.push_str(&format!(
         "  {} = load %intent_task_handle, %intent_task_handle* {}\n",
@@ -46789,6 +47088,20 @@ fn emit_task_spawn_call(
         "  %ctx_p = bitcast i8* %_ctx_raw to {}*\n",
         ctx_ty
     ));
+    // Phase D: publish this task's cancel flag into the thread-local
+    // -- same reasoning as `emit_task_via_pthread`'s identical block.
+    if !host_uses_win32_threading() {
+        deferred.push_str(&format!(
+            "  %cancel_flag_slot = getelementptr {}, {}* %ctx_p, i32 0, i32 {}\n",
+            ctx_ty, ctx_ty, cancel_flag_field_idx
+        ));
+        deferred.push_str(
+            "  %cancel_flag_p = load i8*, i8** %cancel_flag_slot\n",
+        );
+        deferred.push_str(
+            "  store i8* %cancel_flag_p, i8** @__intent_tls_cancel_flag\n",
+        );
+    }
     let mut call_arg_strs: Vec<String> = Vec::with_capacity(arg_ll_tys.len());
     for (i, lty) in arg_ll_tys.iter().enumerate() {
         let slot_p = format!("%arg_slot_{}", i);
@@ -46855,6 +47168,19 @@ fn task_spawn_call_ctx_size(arg_types: &[Type], result_ty: &Type) -> u64 {
     for t in arg_types {
         total += (llvm_byte_size(t) + 7) & !7;
     }
+    // Phase D: the cancel-flag pointer (i8*, 8 bytes) is APPENDED
+    // as the ctx struct's last field (see `emit_task_spawn_call`).
+    // Missing this was a real, confirmed bug: malloc'd exactly
+    // `result + args` bytes while the struct itself had one more
+    // 8-byte field past the end -- a heap buffer overflow (the
+    // cancel-flag pointer store landed past the allocation), caught
+    // by the full test suite as a `cfree` crash inside `lli`'s ORC
+    // JIT on one run and a plain hang on another (heap-corruption
+    // symptoms are inherently nondeterministic -- this was NOT
+    // assumed from the crash alone, it's the direct, obvious
+    // consequence of the size formula never being updated after
+    // `emit_task_spawn_call` grew the extra field).
+    total += 8;
     total.max(8)
 }
 
@@ -46868,7 +47194,10 @@ fn task_spawn_call_ctx_size(arg_types: &[Type], result_ty: &Type) -> u64 {
 /// wider than 8 bytes (struct / tuple / array / payloaded enum /
 /// closure) and could heap-overflow the malloc'd ctx.
 fn compute_ctx_size(captures: &[(String, Type)]) -> u64 {
-    let mut total: u64 = 0;
+    // Phase D: field 0 is always the cancel-flag pointer (i8*, 8
+    // bytes on every target this backend supports), prepended
+    // before the user's own captures -- see `emit_task_via_pthread`.
+    let mut total: u64 = 8;
     for (_, t) in captures {
         let n = llvm_byte_size(t);
         total += (n + 7) & !7;

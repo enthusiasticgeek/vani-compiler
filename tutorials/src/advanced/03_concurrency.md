@@ -1,4 +1,4 @@
-# Advanced 3 -- `task` / `join` / `detach` + atomics / mutexes / channels / barriers / rwlocks
+# Advanced 3 -- `task` / `join` / `detach` / `cancel` + atomics / mutexes / channels / barriers / rwlocks
 
 > **Learning goal**: spawn an explicit OS thread with `task`,
 > join it back, and pick the right concurrency primitive
@@ -126,6 +126,63 @@ fn main() -> i64 {
   fuller worked example (a background heartbeat detached while
   `main` runs an independent, deterministic computation and
   checks the result once it's done).
+
+## `cancel` -- interrupting a thread stuck in a blocking call {#cancel}
+
+`detach` solves "I don't want to wait for this thread." It does
+NOT solve a different problem: a thread genuinely stuck inside a
+blocking syscall (`tcp_accept`, `tcp_recv`) with no data ever
+coming. `cancel <name>;` (shipped 2026-08-14) forces that call to
+return promptly instead of waiting forever.
+
+```vani
+fn main() -> i64 {
+  let server: i64 = tcp_listen(0);
+
+  task blocked {
+    let fd: i64 = tcp_accept(server);
+    // -2 is the "cancelled while blocked" sentinel -- distinct
+    // from -1 (a real socket error) and any valid fd.
+    assert fd == 0 - 2;
+  }
+
+  let _ = sleep_ms(100);  // let the thread actually enter accept()
+  cancel blocked;
+  join blocked;           // returns almost immediately
+
+  print "cancelled thread returned -- no hang";
+  let _ = tcp_close(server);
+  return 0;
+}
+```
+
+- **`cancel <name>;` does NOT consume the handle.** Unlike
+  `join`/`detach`, it's not one of the two ways to satisfy the
+  affine "every spawned task is consumed exactly once" rule -- a
+  `join` or `detach` is still required afterward. Think of `cancel`
+  as "please stop soon," not "I'm done with this task."
+- **Cancelling is idempotent.** Calling `cancel` more than once on
+  the same still-live task is harmless. Cancelling an
+  already-`join`ed or already-`detach`ed task is rejected
+  ("nothing left to cancel").
+- **Only `tcp_accept`/`tcp_recv` are cancel-aware today.**
+  `stdin_read_line`/`file_read_line` cancellation is still open
+  (buffered stdio's `EINTR` interaction needs its own design pass).
+  A CPU-bound task (no blocking call at all) still sees the
+  cancellation if it cooperatively checks -- but nothing forces a
+  tight compute loop to notice on its own.
+- **`cancel` is rejected inside `pure fn` bodies**, same reasoning
+  as `detach`: signaling another thread is a side effect outside
+  the pure call's own sequential model.
+- **Platform coverage**: verified via `strace` on Linux (both
+  backends) that the interrupted syscall genuinely returns `EINTR`
+  rather than silently auto-restarting. macOS shares the same POSIX
+  signal path (untested on real hardware). Windows uses
+  `CancelSynchronousIo` on the task's thread handle instead
+  (untested on real hardware -- no Windows host available when this
+  shipped).
+- See `examples/language/english/cancel_blocking_task.vani` for the
+  full worked example above, runnable on both backends.
 
 ## The six concurrency primitives
 
@@ -307,6 +364,10 @@ For runnable end-to-end programs, see:
   real-world `detach` example: a background heartbeat runs
   detached while `main` performs an independent, deterministic
   computation and checks its result.
+- `examples/language/english/cancel_blocking_task.vani` -- a
+  real-world `cancel` example: interrupts a thread genuinely
+  blocked inside `tcp_accept()`, verified via `strace` that the
+  syscall returns `EINTR` rather than auto-restarting.
 - `examples/language/english/barrier_sensor_rendezvous.vani` --
   a real-world `Barrier` example; see [Advanced 2b -- Barrier
   primer](02b_barrier_primer.md#a-real-world-example) for the
@@ -324,6 +385,7 @@ For runnable end-to-end programs, see:
 | All N threads reach a checkpoint before proceeding | `Barrier` |
 | Spawn-and-forget background work | `task` + `detach` |
 | Spawn-and-collect-result | `task` + `join` |
+| Interrupt a thread stuck in a blocking `tcp_accept`/`tcp_recv` | `task` + `cancel` + `join` |
 
 If your design needs a primitive that's not in the list, look
 in `examples/language/english/parallel.vani` -- `parallel for`

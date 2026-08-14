@@ -2212,7 +2212,7 @@ fn walk_stmt(
         }
         TypedStmt::Drop { .. } | TypedStmt::Prove { .. } => {}
         TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
-        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::Cancel { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 

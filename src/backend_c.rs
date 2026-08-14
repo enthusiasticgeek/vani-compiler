@@ -1952,6 +1952,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_print_int_urd_c(&mut out);
     emit_intent_print_int_per_c(&mut out);
     emit_intent_thread_wrappers_c(&mut out);
+    emit_intent_cancel_infra_c(&mut out);
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
     emit_intent_str_trim_c(&mut out);
@@ -2409,7 +2410,16 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str, uses_epoll: bool) {
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_accept(int64_t server_fd) {\n\
          \x20 SOCKET cfd = accept((SOCKET)server_fd, NULL, NULL);\n\
-         \x20 return (cfd == INVALID_SOCKET) ? -1 : (int64_t)cfd;\n\
+         \x20 if (cfd != INVALID_SOCKET) return (int64_t)cfd;\n\
+         \x20 /* Phase D (2026-08-14): `cancel <name>;` calls\n\
+         \x20  * CancelSynchronousIo(thread) on this socket's owning\n\
+         \x20  * thread -- a cancelled blocking accept() fails with\n\
+         \x20  * this specific error, distinct from a real socket\n\
+         \x20  * error. Untested on real Windows hardware (no host\n\
+         \x20  * available this session); mirrors the documented\n\
+         \x20  * CancelSynchronousIo contract. */\n\
+         \x20 if (WSAGetLastError() == WSA_OPERATION_ABORTED) return -2;\n\
+         \x20 return -1;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_connect_local(int64_t port) {\n\
          \x20 __intent_winsock_startup();\n\
@@ -2440,7 +2450,9 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str, uses_epoll: bool) {
          \x20 size_t want = (size_t)max;\n\
          \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
          \x20 int n = recv((SOCKET)fd, (char*)intent_tcp_buf, (int)want, 0);\n\
-         \x20 return (n == SOCKET_ERROR) ? -1 : (int64_t)n;\n\
+         \x20 if (n != SOCKET_ERROR) return (int64_t)n;\n\
+         \x20 if (WSAGetLastError() == WSA_OPERATION_ABORTED) return -2;\n\
+         \x20 return -1;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_send_buf(int64_t fd, int64_t n) {\n\
          \x20 if (n < 0 || (size_t)n > sizeof(intent_tcp_buf)) return -1;\n\
@@ -2491,8 +2503,11 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str, uses_epoll: bool) {
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_accept(int64_t server_fd) {\n\
          \x20 int cfd;\n\
-         \x20 do { cfd = accept((int)server_fd, NULL, NULL); }\n\
-         \x20 while (cfd < 0 && errno == EINTR);\n\
+         \x20 for (;;) {\n\
+         \x20   cfd = accept((int)server_fd, NULL, NULL);\n\
+         \x20   if (cfd >= 0 || errno != EINTR) break;\n\
+         \x20   if (__intent_tls_cancel_flag && *__intent_tls_cancel_flag) return -2;\n\
+         \x20 }\n\
          \x20 return (int64_t)cfd;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_connect_local(int64_t port) {\n\
@@ -2526,8 +2541,11 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str, uses_epoll: bool) {
          \x20 size_t want = (size_t)max;\n\
          \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
          \x20 ssize_t n;\n\
-         \x20 do { n = recv((int)fd, intent_tcp_buf, want, 0); }\n\
-         \x20 while (n < 0 && errno == EINTR);\n\
+         \x20 for (;;) {\n\
+         \x20   n = recv((int)fd, intent_tcp_buf, want, 0);\n\
+         \x20   if (n >= 0 || errno != EINTR) break;\n\
+         \x20   if (__intent_tls_cancel_flag && *__intent_tls_cancel_flag) return -2;\n\
+         \x20 }\n\
          \x20 return (int64_t)n;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_send_buf(int64_t fd, int64_t n) {\n\
@@ -8006,7 +8024,7 @@ fn emit_concurrency_runtime_extras(
     let needs_tasks = body.contains("intent_task_handle");
     if needs_tasks {
         out.push_str(
-            "typedef struct { intent_thread_t thread; void* ctx; } intent_task_handle;\n\n",
+            "typedef struct { intent_thread_t thread; void* ctx; int* cancel_flag; } intent_task_handle;\n\n",
         );
     }
     let needs_barrier = body.contains("intent_barrier");
@@ -8569,7 +8587,7 @@ fn collect_vec_elements_in_stmt(
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::Cancel { .. } => {}
         TypedStmt::ForIterShallowFree { element_ty, .. } => {
             collect_vec_elements(element_ty, seen, out);
         }
@@ -8861,6 +8879,46 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("static void intent_thread_detach(intent_thread_t th) INTENT_UNUSED;\n");
     out.push_str("static void intent_thread_detach(intent_thread_t th) { pthread_detach(th); }\n");
     out.push_str("#endif\n\n");
+}
+
+/// Phase D (2026-08-14): `cancel <name>;` support -- a reserved
+/// signal + no-op handler, installed once before `main` runs
+/// (GCC/Clang constructor attribute, POSIX only), plus a per-thread
+/// pointer to the CURRENTLY RUNNING task's own cancel flag.
+/// Deliberately NOT `SA_RESTART`: a blocking syscall interrupted by
+/// this signal must return `EINTR` so the cancel-aware wrappers
+/// (`intent_tcp_accept` / `intent_tcp_recv`) can observe it, not
+/// silently auto-retry. `__intent_tls_cancel_flag` lets any blocking
+/// builtin check "was MY thread cancelled?" from deep inside a call
+/// stack without threading a parameter through every intermediate
+/// call, the same way `errno` works -- set once at the top of a
+/// task's outlined trampoline (see `TypedStmt::TaskSpawn` codegen).
+///
+/// Always emitted (same "small footprint, unconditional" choice as
+/// `emit_intent_thread_wrappers_c` right above): `intent_tcp_accept`/
+/// `intent_tcp_recv` reference `__intent_tls_cancel_flag`
+/// unconditionally whenever TCP is used, independent of whether the
+/// SAME program also spawns any `task` -- gating this declaration on
+/// `needs_tasks` would leave it undeclared (a compile error) for any
+/// TCP-using, task-free program.
+pub(crate) fn emit_intent_cancel_infra_c(out: &mut String) {
+    out.push_str(
+        "#if !defined(_WIN32)\n\
+         #include <signal.h>\n\
+         #define INTENT_CANCEL_SIG SIGUSR1\n\
+         static void __intent_cancel_sig_noop(int sig) { (void)sig; }\n\
+         __attribute__((constructor))\n\
+         static void __intent_install_cancel_handler(void) {\n\
+         \x20 struct sigaction sa;\n\
+         \x20 memset(&sa, 0, sizeof(sa));\n\
+         \x20 sa.sa_handler = __intent_cancel_sig_noop;\n\
+         \x20 sigemptyset(&sa.sa_mask);\n\
+         \x20 sa.sa_flags = 0;\n\
+         \x20 sigaction(INTENT_CANCEL_SIG, &sa, NULL);\n\
+         }\n\
+         static _Thread_local volatile int* __intent_tls_cancel_flag = 0;\n\
+         #endif\n\n",
+    );
 }
 
 /// Phase 6 + 12 (2026-06-07): parameterized numeral-print
@@ -11260,7 +11318,7 @@ pub(crate) fn collect_rwlock_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::Cancel { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11434,7 +11492,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::Cancel { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11556,7 +11614,7 @@ pub(crate) fn collect_mutex_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::Cancel { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -15147,6 +15205,12 @@ return __intent_ret; }}\n",
             // buffer.
             let mut outline = String::new();
             outline.push_str(&format!("typedef struct {} {{\n", struct_name));
+            // Phase D: hidden field, not a user capture -- carries
+            // this task's cancel flag into the outline so its
+            // prologue can publish it to `__intent_tls_cancel_flag`
+            // (POSIX only; harmless to populate on Windows too,
+            // just never read from there).
+            outline.push_str("  int* __cancel_flag_ptr;\n");
             for (cap_name, cap_ty) in captures {
                 outline.push_str(&format!(
                     "  {};\n",
@@ -15162,6 +15226,11 @@ return __intent_ret; }}\n",
                 "  {}* ctx = ({}*)_ctx_raw;\n",
                 struct_name, struct_name
             ));
+            outline.push_str(
+                "#if !defined(_WIN32)\n\
+                 \x20 __intent_tls_cancel_flag = ctx->__cancel_flag_ptr;\n\
+                 #endif\n",
+            );
             // Locals re-aliasing the ctx fields so the body's
             // emit (which uses local_name(...) for variables)
             // sees the captures as ordinary locals.
@@ -15190,6 +15259,21 @@ return __intent_ret; }}\n",
                 "  {}* _intent_ctx_{} = ({}*)malloc(sizeof({}));\n",
                 struct_name, id, struct_name, struct_name
             ));
+            // Phase D: allocate this task's cancel flag BEFORE the
+            // thread starts, so it's already reachable through the
+            // ctx the moment the outline's prologue reads it. Zero
+            // = not cancelled. Small (`sizeof(int)`), unconditional
+            // on both platforms -- Windows just never reads it back
+            // from inside a blocking call.
+            out.push_str(&format!(
+                "  int* _intent_cancel_flag_{} = (int*)malloc(sizeof(int));\n",
+                id
+            ));
+            out.push_str(&format!("  *_intent_cancel_flag_{} = 0;\n", id));
+            out.push_str(&format!(
+                "  _intent_ctx_{}->__cancel_flag_ptr = _intent_cancel_flag_{};\n",
+                id, id
+            ));
             for (cap_name, _) in captures {
                 out.push_str(&format!(
                     "  _intent_ctx_{}->cap_{} = {};\n",
@@ -15209,15 +15293,23 @@ return __intent_ret; }}\n",
                 local_name(name),
                 id
             ));
+            out.push_str(&format!(
+                "  {}.cancel_flag = _intent_cancel_flag_{};\n",
+                local_name(name),
+                id
+            ));
         }
         TypedStmt::TaskJoin { name } => {
             // Real-thread join: block until the worker
-            // exits and free the heap-allocated ctx struct.
+            // exits and free the heap-allocated ctx struct
+            // + cancel flag (the thread is definitely done
+            // reading either by the time join returns).
             out.push_str(&format!(
                 "  intent_thread_join({}.thread);\n",
                 local_name(name)
             ));
             out.push_str(&format!("  free({}.ctx);\n", local_name(name)));
+            out.push_str(&format!("  free({}.cancel_flag);\n", local_name(name)));
         }
         TypedStmt::Detach { name } => {
             // Real-thread detach: the OS keeps the thread running
@@ -15243,6 +15335,48 @@ return __intent_ret; }}\n",
                 "  intent_thread_detach({}.thread);\n",
                 local_name(name)
             ));
+            // Same bounded-leak reasoning as `.ctx` above applies to
+            // `.cancel_flag`: a detached thread may still be running
+            // and could still read it from inside a blocking call
+            // (that's the entire point of `cancel` composing with
+            // `detach`), so freeing it here would be a use-after-
+            // free race, not a fix. Left unfreed -- `sizeof(int)`,
+            // the same one-time-per-detach-call tradeoff.
+        }
+        TypedStmt::Cancel { name } => {
+            // Phase D (2026-08-14): signal a still-running task to
+            // stop. Setting the flag works on every platform (a
+            // CPU-bound thread that polls it cooperatively still
+            // sees it). The forced wakeup that interrupts an
+            // in-flight blocking syscall is platform-specific:
+            // POSIX sends a reserved signal via `pthread_kill`
+            // (the cancel-aware wrappers below check `errno ==
+            // EINTR` + the flag); Windows calls `CancelSynchronousIo`
+            // on the task's thread HANDLE, which fails a pending
+            // blocking Winsock call with `WSA_OPERATION_ABORTED`
+            // (`intent_tcp_accept`/`intent_tcp_recv`'s Windows arms
+            // check for that specific error). The Windows path is
+            // UNTESTED on real hardware (no Windows host available
+            // this session) -- implemented from the documented
+            // `CancelSynchronousIo` contract, not verified end to
+            // end; macOS shares the POSIX branch below unchanged
+            // (pthread/`sigaction`/`pthread_kill` are all standard
+            // BSD/POSIX APIs there too, same as Linux). Does NOT
+            // free `.cancel_flag`/`.ctx` -- `cancel` doesn't consume
+            // the task; the checker still requires a following
+            // `join`/`detach`.
+            out.push_str(&format!("  *{}.cancel_flag = 1;\n", local_name(name)));
+            out.push_str("#if defined(_WIN32)\n");
+            out.push_str(&format!(
+                "  CancelSynchronousIo({}.thread);\n",
+                local_name(name)
+            ));
+            out.push_str("#else\n");
+            out.push_str(&format!(
+                "  pthread_kill({}.thread, INTENT_CANCEL_SIG);\n",
+                local_name(name)
+            ));
+            out.push_str("#endif\n");
         }
         TypedStmt::UnsafeBlock { reason, body } => {
             // Layer 1.1 of unsafe.md. The reason string is the
@@ -17247,6 +17381,12 @@ fn emit_task_spawn_call(
     let mut outline = String::new();
     outline.push_str(&format!("typedef struct {} {{\n", struct_name));
     outline.push_str(&format!("  {};\n", format_declarator(result_ty, "result")));
+    // Phase D: hidden field, not a user arg -- same shape as the
+    // block-form `task { .. }` in the main `TypedStmt::TaskSpawn`
+    // codegen. `result` must stay field 0 (the join side bitcasts
+    // the opaque ctx pointer straight to `result_ty*`), so this is
+    // appended, not prepended.
+    outline.push_str("  int* __cancel_flag_ptr;\n");
     for (i, arg_ty) in arg_types.iter().enumerate() {
         outline.push_str(&format!(
             "  {};\n",
@@ -17262,6 +17402,11 @@ fn emit_task_spawn_call(
         "  {}* ctx = ({}*)_ctx_raw;\n",
         struct_name, struct_name
     ));
+    outline.push_str(
+        "#if !defined(_WIN32)\n\
+         \x20 __intent_tls_cancel_flag = ctx->__cancel_flag_ptr;\n\
+         #endif\n",
+    );
     let call_args: Vec<String> = (0..arg_types.len())
         .map(|i| format!("ctx->arg_{}", i))
         .collect();
@@ -17291,6 +17436,18 @@ fn emit_task_spawn_call(
         "{}* _intent_ctx_{} = ({}*)malloc(sizeof({}));",
         struct_name, id, struct_name, struct_name
     ));
+    // Phase D: same cancel-flag allocation as the block-form
+    // `task { .. }` -- must happen before intent_thread_create so
+    // the spawned thread reads a valid pointer immediately.
+    stmt_expr.push_str(&format!(
+        " int* _intent_cancel_flag_{} = (int*)malloc(sizeof(int));",
+        id
+    ));
+    stmt_expr.push_str(&format!(" *_intent_cancel_flag_{} = 0;", id));
+    stmt_expr.push_str(&format!(
+        " _intent_ctx_{}->__cancel_flag_ptr = _intent_cancel_flag_{};",
+        id, id
+    ));
     for (i, arg) in rendered_args.iter().enumerate() {
         stmt_expr.push_str(&format!(" _intent_ctx_{}->arg_{} = {};", id, i, arg));
     }
@@ -17298,6 +17455,10 @@ fn emit_task_spawn_call(
     stmt_expr.push_str(&format!(
         " intent_thread_create(&_intent_handle_{}.thread, {}, _intent_ctx_{});",
         id, outline_fn, id
+    ));
+    stmt_expr.push_str(&format!(
+        " _intent_handle_{}.cancel_flag = _intent_cancel_flag_{};",
+        id, id
     ));
     stmt_expr.push_str(&format!(
         " _intent_handle_{}.ctx = _intent_ctx_{};",
@@ -17315,7 +17476,7 @@ fn emit_task_spawn_call(
 fn emit_task_join_expr(name: &str, result_ty: &Type) -> String {
     let handle = local_name(name);
     format!(
-        "({{ intent_thread_join({handle}.thread); {decl} = *({rty}*){handle}.ctx; free({handle}.ctx); _intent_join_result; }})",
+        "({{ intent_thread_join({handle}.thread); {decl} = *({rty}*){handle}.ctx; free({handle}.ctx); free({handle}.cancel_flag); _intent_join_result; }})",
         handle = handle,
         decl = format_declarator(result_ty, "_intent_join_result"),
         rty = c_type_name(result_ty),
@@ -23162,6 +23323,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             }
             TypedStmt::TaskJoin { .. }
             | TypedStmt::Detach { .. }
+            | TypedStmt::Cancel { .. }
             | TypedStmt::Break { .. }
             | TypedStmt::Continue { .. } => {}
             TypedStmt::ForIterShallowFree { element_ty, .. } => walk_type(element_ty, set),

@@ -1148,6 +1148,12 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             out.push_str(name);
             out.push_str(";\n");
         }
+        Stmt::Cancel { name, .. } => {
+            out.push_str(&pad);
+            out.push_str("cancel ");
+            out.push_str(name);
+            out.push_str(";\n");
+        }
         Stmt::UnsafeBlock { reason, body, span, .. } => {
             out.push_str(&pad);
             out.push_str("unsafe(reason = \"");
@@ -1862,6 +1868,9 @@ mod tests {
                     *span = crate::span::Span::new(0, 0);
                 }
                 Stmt::Detach { span, .. } => {
+                    *span = crate::span::Span::new(0, 0);
+                }
+                Stmt::Cancel { span, .. } => {
                     *span = crate::span::Span::new(0, 0);
                 }
                 Stmt::UnsafeBlock { body, span, reason_span, .. } => {

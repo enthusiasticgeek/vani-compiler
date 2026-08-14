@@ -222,7 +222,7 @@ data, the only difference is whether the call waits.
 | **A4.3** dynamic-N multi-task scheduling via `mut ref pool[i]` over `Vec<Task__<fn>>` | -- |
 | A built-in-shaped `Pollable`/`Executor` pattern (2026-08-14, below) -- drives heterogeneous `Task__<fn>` types without a hand-rolled driver loop | Auto-generating the `implement Pollable for Task__<fn>` boilerplate in the v3.1 synthesizer, so it's zero boilerplate instead of one block per async fn |
 | Per-dialect spellings: `अतुल्यकालिक` / `异步` / `非同期` for `async`; `प्रतीक्षा` / `等候` / `待機` for `await` | -- |
-| -- | Cancellable BLOCKING `task` threads (signal-based EINTR interruption over the existing `intent_task_handle`) -- no mechanism exists today; `detach()` removes the "must join" constraint but does not make an in-flight blocking syscall interruptible |
+| Cancellable BLOCKING `task` threads: `cancel <name>;` (2026-08-14, signal-based `EINTR` interruption for `tcp_accept`/`tcp_recv` on POSIX, `CancelSynchronousIo` on Windows) -- see [Advanced 3 -- Concurrency](03_concurrency.md#cancel) | `stdin_read_line`/`file_read_line` cancellation (buffered stdio's `EINTR` interaction needs its own design pass); auto-generating the `implement Pollable for Task__<fn>` boilerplate above |
 
 ## An executor, not a hand-rolled driver: `Pollable` + `Executor`
 

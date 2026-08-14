@@ -234,7 +234,8 @@ fn walk_block_for_identical_branches(
             | S::Break { .. }
             | S::Continue { .. }
             | S::TaskJoin { .. }
-            | S::Detach { .. } => {}
+            | S::Detach { .. }
+            | S::Cancel { .. } => {}
         }
     }
 }
@@ -6101,6 +6102,158 @@ mod tests {
         assert!(
             err.iter().any(|d| d.message.contains("cannot use `detach`")),
             "expected a pure-context 'cannot use detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_does_not_consume_the_task_still_needs_join() {
+        // Phase D (2026-08-14): unlike `join`/`detach`, `cancel`
+        // does NOT satisfy the affine "every task is consumed
+        // exactly once" rule on its own -- a following `join` (or
+        // `detach`) is still required.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              let r: i64 = join t;
+              return r;
+            }
+        "#;
+        compile(source).expect("cancel followed by join should compile");
+    }
+
+    #[test]
+    fn cancel_alone_without_join_or_detach_still_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              return 0;
+            }
+        "#;
+        let err = compile(source)
+            .expect_err("cancel alone (no following join/detach) should still be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("never consumed by `join t` or `detach t`")),
+            "expected a 'never consumed by join or detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_after_join_rejected() {
+        // Nothing left to signal once the task has already been
+        // consumed.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              let r: i64 = join t;
+              cancel t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("cancel after join should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("nothing left to cancel")),
+            "expected a 'nothing left to cancel' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_after_detach_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              cancel t;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancel after detach should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("nothing left to cancel")),
+            "expected a 'nothing left to cancel' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_twice_on_same_still_live_task_is_allowed() {
+        // Unlike join/detach, cancel is idempotent at the checker
+        // level -- calling it more than once on a still-live task
+        // is harmless (the runtime flag is just set again).
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              cancel t;
+              join t;
+              return 0;
+            }
+        "#;
+        compile(source).expect("cancelling a still-live task twice should compile");
+    }
+
+    #[test]
+    fn cancel_unknown_name_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              cancel nonexistent;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancelling an unknown name should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("no task named")),
+            "expected a 'no task named' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_non_task_binding_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              cancel x;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("cancelling a non-Task binding should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("expected Task or Task<R>")),
+            "expected a type-mismatch rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn cancel_inside_pure_fn_rejected() {
+        // Same reasoning as `detach` -- signaling another thread is
+        // a side effect outside the pure call's own sequential model.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            pure fn spawn_and_cancel() -> i64 {
+              let t: Task<i64> = task worker();
+              cancel t;
+              detach t;
+              return 0;
+            }
+            fn main() -> i64 {
+              return spawn_and_cancel();
+            }
+        "#;
+        let err = compile(source).expect_err("cancel inside a pure fn should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("cannot use `cancel`")),
+            "expected a pure-context 'cannot use cancel' rejection, got: {:?}",
             err
         );
     }

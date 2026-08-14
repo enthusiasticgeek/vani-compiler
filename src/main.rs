@@ -637,6 +637,10 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         // defensive error arm for `Detach`, which should never
         // actually run because of this gate.
         TypedStmt::Detach { .. } => false,
+        // Same gate as `Detach` just above -- no SSA-backend
+        // lowering yet for `cancel`. Matches ssa.rs::lower_stmt's
+        // own defensive error arm for `Cancel`.
+        TypedStmt::Cancel { .. } => false,
         TypedStmt::ForIterShallowFree { .. } => true,
         // `unsafe(reason = "...")` blocks route through the tree
         // backends in v1 of Layer 1.1 — the tree backends emit the

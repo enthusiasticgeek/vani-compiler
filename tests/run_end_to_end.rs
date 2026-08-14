@@ -15235,6 +15235,70 @@ fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backend
 }
 
 #[test]
+fn cancel_blocking_task_example_interrupts_real_blocking_accept_on_both_backends() {
+    // Phase D (2026-08-14): `cancel <name>;` -- forcibly interrupts
+    // a `task` thread blocked inside a REAL blocking syscall
+    // (`tcp_accept`), the capability `detach()` (2026-08-13)
+    // explicitly did NOT provide. Runs the real shipped example
+    // rather than a synthetic snippet so this test exercises the
+    // exact code path a user would hit, on both backends. If the
+    // signal-based interruption regresses (e.g. the SA_RESTART bug
+    // found via `strace` while building this feature -- a bare
+    // `signal()` on this glibc target installs the handler WITH
+    // SA_RESTART, silently turning every interrupted `accept()`
+    // into an infinite auto-retry loop instead of returning EINTR),
+    // this test HANGS rather than fails cleanly, so a tight overall
+    // timeout matters more here than in most e2e tests.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/cancel_blocking_task.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut child = Command::new(binary)
+            .args(&backend_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                break status;
+            }
+            if start.elapsed() > timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "intentc {:?} did not exit within {:?} -- cancel likely failed to \
+                     interrupt the blocked accept() (hung instead of returning EINTR)",
+                    backend_args, timeout
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let output = child.wait_with_output().expect("collect output");
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("cancelled thread returned -- no hang, no lingering client wait\n"),
+            "expected the cancellation success line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
 fn async_executor_example_drives_heterogeneous_and_cancelled_tasks_on_both_backends() {
     // Arc 8 v3.2 (2026-08-14): the `Pollable`/`Executor` pattern that
     // replaces a hand-rolled per-program driver loop. Exercises three

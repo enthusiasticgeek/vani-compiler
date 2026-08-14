@@ -232,12 +232,15 @@ DON'T use async when:
    handles the common case automatically for a non-blocking `async
    fn`/`Task__<fn>` (ASan-verified leak-safe even when cancelled
    mid-flight, holding real heap-owned locals). A BLOCKING `task`
-   thread is a different story: nothing today can interrupt a
+   thread used to be a different story -- nothing could interrupt a
    thread stuck inside a real blocking syscall (`tcp_accept`,
-   `stdin_read_line`, ...) -- `detach()` removes the "must join"
-   requirement but doesn't make the thread itself cancellable.
-   Signal-based interruption is designed but not yet shipped; see
-   `docs/TODO_CURRENT.md`.
+   `tcp_recv`), since `detach()` only removes the "must join"
+   requirement. **Shipped 2026-08-14**: `cancel <name>;` forces an
+   in-flight blocking `tcp_accept`/`tcp_recv` to return promptly
+   (signal-based on POSIX, `CancelSynchronousIo` on Windows -- see
+   [Advanced 3 -- Concurrency](03_concurrency.md#cancel)). `stdin_
+   read_line`/`file_read_line` cancellation is still open (buffered
+   stdio's EINTR interaction needs its own design pass).
 
 ## A summary you can carry
 

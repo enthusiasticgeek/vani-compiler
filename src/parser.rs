@@ -2825,6 +2825,8 @@ impl Parser {
             self.parse_task_join_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Detach)) {
             self.parse_task_detach_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::Cancel)) {
+            self.parse_task_cancel_stmt()
         } else if self.looks_like_select_stmt() {
             self.parse_select_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Unsafe)) {
@@ -3841,6 +3843,20 @@ impl Parser {
         Ok(Stmt::Detach {
             name,
             span: detach_tok.span.merge(semi.span),
+        })
+    }
+
+    /// `cancel <name>;` — mirrors `parse_task_detach_stmt` exactly;
+    /// see `ast::Stmt::Cancel` for the semantics.
+    fn parse_task_cancel_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let cancel_tok =
+            self.expect_keyword("'cancel'", |kind| matches!(kind, TokenKind::Cancel))?;
+        let name_tok = self.expect_ident()?;
+        let name = ident_text(name_tok);
+        let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
+        Ok(Stmt::Cancel {
+            name,
+            span: cancel_tok.span.merge(semi.span),
         })
     }
 
