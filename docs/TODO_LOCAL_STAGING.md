@@ -7871,3 +7871,12 @@ The observed symptom was a backend-divergence error, specifically `index out of 
 This mutation caused the compiler to diverge on the LLVM backend, leading to a runtime crash or hang. The staging log indicates that this issue affected both the Rust and LLVM backends.
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260814-152330-backend-divergence-7d8bbfc94f
+
+Repro: `tools/localfuzz/findings/20260814-152330-backend-divergence-7d8bbfc94f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-152330-backend-divergence-7d8bbfc94f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
