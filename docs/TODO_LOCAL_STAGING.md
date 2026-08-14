@@ -7809,3 +7809,12 @@ Repro: `tools/localfuzz/findings/20260814-094552-backend-divergence-2c8d6d6650/r
 Fix attempt: `tools/localfuzz/findings/20260814-094552-backend-divergence-2c8d6d6650/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-111758-backend-divergence-186e6d91e9
+
+Repro: `tools/localfuzz/findings/20260814-111758-backend-divergence-186e6d91e9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-111758-backend-divergence-186e6d91e9/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
