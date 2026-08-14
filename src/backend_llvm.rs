@@ -4349,28 +4349,39 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 c, ok, fail
             ));
             out.push_str(&format!("{}:\n", fail));
-            if let Some(msg) = message {
-                // Look up the message's global index, then
-                //   dprintf(2, "assertion failed: %s\n", <msg-ptr>)
-                // before aborting. The format string global is
-                // `@.fmt.assert`, layout `[22 x i8]`.
-                if let Some(&idx) = ctx.assert_msg_indices.get(msg) {
-                    let bytes = msg.len() + 1;
-                    let fmt_p = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [22 x i8], [22 x i8]* @.fmt.assert, i64 0, i64 0\n",
-                        fmt_p
-                    ));
-                    let msg_p = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [{} x i8], [{} x i8]* @.assert_msg.{}, i64 0, i64 0\n",
-                        msg_p, bytes, bytes, idx
-                    ));
-                    out.push_str(&format!(
-                        "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
-                        fmt_p, msg_p
-                    ));
-                }
+            // BUG-192: always print, even for a bare `assert expr;`
+            // with no `, "msg"` clause -- `message` is `None` there,
+            // treated as an empty string (mirrors ssa.rs's
+            // `lower_stmt` fix for the identical gap). Previously
+            // this whole block was gated on `if let Some(msg) =
+            // message`, so a message-less assert emitted NOTHING
+            // before `exit(3)` -- the exit code was still correct,
+            // but the failure was completely silent, unlike every
+            // other assert path (tree-C falls back to a plain C
+            // `assert()` diagnostic; SSA-LLVM already prints an
+            // empty message via this same fallback). Look up the
+            // message's global index, then
+            //   dprintf(2, "assertion failed: %s\n", <msg-ptr>)
+            // before aborting. The format string global is
+            // `@.fmt.assert`, layout `[22 x i8]`.
+            let default_msg = String::new();
+            let msg = message.as_ref().unwrap_or(&default_msg);
+            if let Some(&idx) = ctx.assert_msg_indices.get(msg) {
+                let bytes = msg.len() + 1;
+                let fmt_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [22 x i8], [22 x i8]* @.fmt.assert, i64 0, i64 0\n",
+                    fmt_p
+                ));
+                let msg_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [{} x i8], [{} x i8]* @.assert_msg.{}, i64 0, i64 0\n",
+                    msg_p, bytes, bytes, idx
+                ));
+                out.push_str(&format!(
+                    "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
+                    fmt_p, msg_p
+                ));
             }
             // exit(3) rather than abort(): see the matching comment in
             // ssa_backend_llvm.rs's `intent_assert_fail` lowering (MATH-3) --
@@ -45557,10 +45568,21 @@ fn collect_assert_messages(
     idx: &mut HashMap<String, usize>,
 ) {
     match stmt {
-        TypedStmt::Assert { message: Some(m), .. } => {
-            if !idx.contains_key(m) {
+        // BUG-192: intern EVERY assert's message, including a bare
+        // `assert expr;` with no `, "msg"` clause -- `message` is
+        // `None` there, treated the same as an explicit empty
+        // string (mirrors ssa.rs's `lower_stmt` fix for the same
+        // gap: "Always call the runtime abort helper, even when the
+        // assertion carries no user-facing message"). Previously
+        // only `Some(m)` was interned, so a message-less assert had
+        // no `@.assert_msg.N` global at all and the emitter below
+        // silently skipped printing anything before `exit(3)` --
+        // exit code still correct, but no diagnostic whatsoever.
+        TypedStmt::Assert { message, .. } => {
+            let m = message.clone().unwrap_or_default();
+            if !idx.contains_key(&m) {
                 idx.insert(m.clone(), msgs.len());
-                msgs.push(m.clone());
+                msgs.push(m);
             }
         }
         TypedStmt::If { then_body, else_body, .. } => {
@@ -47437,7 +47459,22 @@ fn emit_parallel_for_via_gomp(
             "  br i1 %range_no_of, label %par_range_ok, label %par_range_fail\n",
         );
         deferred.push_str("par_range_fail:\n");
-        deferred.push_str("  call void @exit(i32 3)\n");
+        // BUG-192: this trap called a bare `exit(3)` with no
+        // diagnostic at all -- exit code correct, but completely
+        // silent, unlike every sibling checked-arithmetic trap in
+        // this file (which all route through `@__intent_trap` with
+        // a message). Reuses the `.msg.ovf.i64.sub` global that's
+        // already unconditionally emitted for every program (see
+        // the top-level preamble's "8 int types x 5 ops" loop) --
+        // this failure IS conceptually an i64 subtraction overflow
+        // (`end - start`), so no new message text is needed.
+        deferred.push_str(&format!(
+            "  call void @__intent_trap(i8* {})\n",
+            crate::ssa_backend_llvm::trap_msg_ref(
+                ".msg.ovf.i64.sub",
+                "integer overflow in i64 sub\n"
+            )
+        ));
         deferred.push_str("  unreachable\n");
         deferred.push_str("par_range_ok:\n");
     } else {

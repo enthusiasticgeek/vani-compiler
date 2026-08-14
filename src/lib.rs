@@ -46194,6 +46194,81 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug192_llvm_bare_assert_after_await_still_emits_dprintf() {
+        // BUG-192 (2026-08-14): the tree-LLVM backend's `TypedStmt::
+        // Assert` codegen only emitted the `dprintf(2, "assertion
+        // failed: %s\n", <msg>)` call when `message` was `Some(_)` --
+        // a bare `assert expr;` (no `, "msg"` clause, so `message` is
+        // `None`) skipped the whole print block, leaving `exit(3)`
+        // with NO diagnostic at all. Found via localfuzz on a program
+        // using `await(...)` (which forces the tree backend, since
+        // async isn't SSA-supported), but the root cause was
+        // backend-wide, not async-specific -- any tree-LLVM program
+        // with a message-less assert was affected; async just
+        // happened to be the first repro. `collect_assert_messages`
+        // now interns `message.clone().unwrap_or_default()`
+        // unconditionally (mirroring `ssa.rs::lower_stmt`'s own
+        // `unwrap_or_default()` fix for the identical gap), so a
+        // `@.assert_msg.N` global always exists for the empty-string
+        // case too.
+        let source = r#"
+            async fn delay(ms: i64, v: i64) -> i64 {
+              sleep_ms(ms);
+              return v;
+            }
+            fn main() -> i64 {
+              let a: i64 = await(delay(5, 42));
+              assert a == 99;
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("await + bare assert should compile");
+        assert!(
+            llvm.contains("call i32 (i32, i8*, ...) @dprintf(i32 2,"),
+            "expected a dprintf call emitted before exit(3) even for a \
+             message-less assert, got:\n{llvm}"
+        );
+    }
+
+    #[test]
+    fn bug192_llvm_parallel_for_range_overflow_trap_has_a_message() {
+        // BUG-192 (2026-08-14): `parallel for`'s own internal range/
+        // chunk-size overflow guard (`end - start` computed via
+        // `llvm.ssub.with.overflow.i64` inside the outlined
+        // `__intent_par_<id>` worker) called a bare `exit(3)` with NO
+        // message at all -- a third, independent silent-trap site
+        // from the same bug class as the assert case above, but in a
+        // completely different codegen path (parallel-for's own
+        // range setup, not ordinary checked-arithmetic or assert).
+        // Fixed by routing through the shared `@__intent_trap`
+        // helper, reusing the `.msg.ovf.i64.sub` message global
+        // that's already unconditionally emitted for every program.
+        let source = r#"
+            fn main() -> i64 {
+              let product: i64 = 1;
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              parallel for i from -9223372036854775808 to 4
+              reduce product with *;
+              {
+                product = product * xs[i];
+              }
+              print product;
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("parallel for should compile");
+        assert!(
+            llvm.contains("par_range_fail:"),
+            "expected the range-overflow guard block, got:\n{llvm}"
+        );
+        assert!(
+            llvm.contains("call void @__intent_trap(i8*"),
+            "expected par_range_fail to route through @__intent_trap with a \
+             message instead of a bare exit(3), got:\n{llvm}"
+        );
+    }
+
+    #[test]
     fn rejects_bad_constant_shift_count() {
         let source = r#"
             fn main() -> i64 {

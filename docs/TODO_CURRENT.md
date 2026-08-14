@@ -14329,3 +14329,66 @@ bound -- genuinely, correctly very slow, not broken). Two cheap
 accepted-non-bug allow-list in `digest.py`; biasing the mutator away
 from extreme literals in timing/loop-bound positions) but not acted
 on -- optional, doesn't touch the compiler.
+
+## BUG-192 -- LLVM backend silently dropped runtime-trap messages in two codegen sites, FIXED (2026-08-14)
+
+Task #187, root-causing the Priority 1 finding from
+`docs/BUG_PATTERN_AUDIT_TODO_13.md`. Turned out to be TWO independent
+bugs in two completely unrelated codegen paths, both sharing the same
+observable symptom (exit code correct, stdout/stderr both empty) --
+the `await(...)`/`parallel for` framing in the audit doc was a red
+herring for the second one; root cause tracing (comparing IR for a
+constant-folded SSA-eligible assert, a tree-forced-via-`task` assert,
+and the actual async repro side by side) showed the two triggers
+don't share a common cause at all.
+
+1. **`TypedStmt::Assert` (tree-LLVM, `src/backend_llvm.rs`)**: the
+   `dprintf(2, "assertion failed: %s\n", <msg>)` call was only
+   emitted `if let Some(msg) = message` -- a bare `assert expr;` (no
+   `, "msg"` clause) parses with `message: None`
+   (`src/parser.rs::parse_assert_stmt` never synthesizes a default),
+   so the whole print block was skipped, straight to `exit(3)`.
+   `ssa.rs::lower_stmt` already had the identical fix for the SSA-
+   LLVM path (`message.clone().unwrap_or_default()`, with a comment
+   explaining it was itself a fix for a worse bug -- a bare
+   `Terminator::Unreachable` reached at runtime, real LLVM UB) --
+   tree-LLVM just never got the same treatment. Two-part fix: (a)
+   `collect_assert_messages`'s pre-scan now interns
+   `message.clone().unwrap_or_default()` for every assert (was
+   `Some(m)`-only, so a message-less assert had no `@.assert_msg.N`
+   global allocated at all), (b) the codegen arm now always looks up
+   `message.as_ref().unwrap_or(&default_msg)` instead of gating the
+   whole block on `Some`. Confirmed this affects ANY tree-LLVM
+   program with a message-less assert, not just `await`-adjacent
+   code -- async was just the first repro to surface it (a plain
+   `task{}` block doesn't force tree-LLVM the way `await` does,
+   since basic task-spawn IS SSA-supported; had to use `detach`/
+   `cancel` or an actual `await` to get a genuine tree-LLVM
+   comparison).
+2. **`parallel for`'s own internal range/chunk-size overflow guard**
+   (`src/backend_llvm.rs`, the `__intent_par_<id>` worker preamble):
+   a completely separate, pre-existing checked-subtraction guard
+   (`end - start` via `llvm.ssub.with.overflow.i64`, originally added
+   to fix a real SIGSEGV -- see that code's own surrounding comment)
+   called a bare `exit(3)` with no message at all -- this one was
+   never wired to any diagnostic, not a regression of anything that
+   used to work. Fixed by routing through the already-unconditionally
+   -emitted `@__intent_trap` helper, reusing the `.msg.ovf.i64.sub`
+   message global every program already carries (the failure IS
+   conceptually an i64 subtraction overflow, so no new message text
+   needed -- and it now matches the C backend's own independent
+   wording for the identical condition exactly).
+
+Added 2 new `src/lib.rs` unit tests
+(`bug192_llvm_bare_assert_after_await_still_emits_dprintf`,
+`bug192_llvm_parallel_for_range_overflow_trap_has_a_message`), both
+asserting on the emitted LLVM IR text directly. **Verification**:
+2968/2968 lib tests (2966 + 2 new, 0 regressions); 260/260 e2e tests
+(unchanged, no new e2e test this pass); 1051-file example corpus
+check matches the known 17-file baseline exactly; `valgrind
+--leak-check=full` clean on both repros' LLVM AOT builds (the
+`parallel for` repro's "912 bytes possibly lost" valgrind line is a
+pre-existing `libgomp`/glibc thread-pool TLS artifact, confirmed via
+an unrelated clean `parallel for` program showing the byte-for-byte
+identical line -- not introduced by this fix); ASan/UBSan clean on
+both repros via the C backend.

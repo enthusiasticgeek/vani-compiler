@@ -24,7 +24,18 @@ trusting localfuzz .vani repros" discipline as every prior round.
 ## Priority 1 (HIGH) -- LLVM backend silently drops the runtime-trap
 ## diagnostic message in some outlined/transformed codegen contexts
 
-**Status: confirmed real, isolated to a minimal repro, NOT yet fixed.**
+**Status: FIXED 2026-08-14 as BUG-192 -- see `docs/TODO_CURRENT.md`.**
+Turned out to be TWO independent bugs sharing one symptom, not one
+bug with two triggers: the "outlined/transformed codegen" framing
+below was this document's own working hypothesis and did NOT hold up
+under root-causing -- `TypedStmt::Assert`'s bug was backend-wide
+(any tree-LLVM program with a message-less assert, `await` just
+happened to be the first repro to force tree-LLVM), and `parallel
+for`'s bug was a wholly separate, pre-existing trap site that was
+simply never wired to a message in the first place. Left the
+original write-up below unedited for the historical record of what
+was actually investigated; see `docs/TODO_CURRENT.md`'s BUG-192
+entry for the real root causes and the fix.
 
 `assert`/overflow/bounds traps correctly exit(3) on the LLVM backend
 (matching BUG-115's established convention -- see below), but in at
@@ -285,11 +296,9 @@ still accurately described and none have silently become stale:
 
 In priority order:
 
-1. **Fix** (or at minimum root-cause and file as its own tracked bug
-   number, BUG-192): the LLVM silent-trap-message bug (Priority 1).
-   This is the only item in this document that's a live, novel,
-   user-visible compiler defect with a minimal, reliable repro ready
-   to hand off.
+1. ~~**Fix** (or at minimum root-cause and file as its own tracked bug
+   number, BUG-192): the LLVM silent-trap-message bug (Priority 1).~~
+   **DONE 2026-08-14** -- see `docs/TODO_CURRENT.md`'s BUG-192 entry.
 2. **Scope, don't quick-fix**: the general `Str`-param `OwnedStr` leak
    (Priority 2) -- needs its own `EnterPlanMode` pass given the
    blast radius, same as this document's own predecessor concluded.
