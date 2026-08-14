@@ -7552,3 +7552,48 @@ Repro: `tools/localfuzz/findings/20260814-043133-backend-divergence-bc58769170/r
 Fix attempt: `tools/localfuzz/findings/20260814-043133-backend-divergence-bc58769170/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-044319-backend-divergence-d281af6c99
+
+Repro: `tools/localfuzz/findings/20260814-044319-backend-divergence-d281af6c99/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-044319-backend-divergence-d281af6c99/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+## VANI Compiler: Local Staging Log Entry
+
+### Baseline Corpus File
+The base corpus file provided is `/home/virgo/source/vani-compiler-localfuzz/examples/language/sanskrit/vec_invariants.vani`.
+
+### Mutant/generated Source
+```vani
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/english/vec_invariants.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/vec_invariants.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/vec_invariants.vani -o /tmp/vec_invariants && /tmp/vec_invariants   # native binary
+
+उद्देश्य "Loop invariants over Vec length, end-to-end";
+
+// Builds a Vec by pushing one element per iteration. The invariant
+// `len(xs) == (i as u64)` is preserved by the body — the verifier
+// uses the builtin push-length relationship plus the substituted
+// reassignment for `i` to discharge preservation.
+//
+// At loop exit, the verifier knows `!(i < 5)` plus the invariants, so
+// `i == 5` and `len(xs) == 5` are both dischargeable without further
+// annotation.
+
+कार्य मुख्य() -> i64 {
+  माना सूचिः: Vec<i64> = vec(0);
+  माना क: i64 = 1;
+
+  यावत् क < 5
+  अपरिवर्तनीय len(सूचिः) == (क यथा u64);
+  अपरिवर
