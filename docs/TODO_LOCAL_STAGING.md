@@ -7712,3 +7712,41 @@ Repro: `tools/localfuzz/findings/20260814-075332-backend-divergence-2aa22b7cb1/r
 Fix attempt: `tools/localfuzz/findings/20260814-075332-backend-divergence-2aa22b7cb1/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-091142-backend-divergence-c289f6f113
+
+Repro: `tools/localfuzz/findings/20260814-091142-backend-divergence-c289f6f113/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-091142-backend-divergence-c289f6f113/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler-localfuzz project has encountered a backend-divergence issue with the provided mutant/generated source code on the base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/urdu/iterate.vani`. The exact repro source is:
+
+```vani
+// vani-lang: urdu
+مقصد "Urdu iterate smoke-test";
+فنکشن main() -> i64 {
+  مانیں فہرست: Vec<i64> = vec();
+  فہرست = push(فہرست, 20);
+  فہرست = push(فہرست, 10);
+  فہرست = push(فہرست, 30);
+  یقینی فہرست[-9223372036854775808] == 10;
+  یقینی فہرست[1] == 20;
+  یقینی فہرست[2] == 30;
+  مانیں کل: i64 = 0;
+  مانیں i: i64 = 0;
+  دوران i < (len(فہرست) بطور i64) {
+    کل = کل + فہرست[i];
+    i = i + 1;
+  }
+  یقینی کل == 60;
+  لکھو "Urdu iterate OK";
+  واپس 0;
+}
+```
+
+The observed symptom was a crash or hang when running the program with this source. The backend-divergence result indicates that the LLVM compiler failed to execute the code correctly for a specific input case, resulting in an index out of bounds error.
+
+This issue affects the vanilla
