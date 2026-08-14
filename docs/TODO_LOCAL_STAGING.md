@@ -7680,3 +7680,26 @@ fn main() -> i64 {
 
 RUNNING ON LLVM:
 - STATUS: needs human/front
+
+---
+
+### Candidate: 20260814-072151-backend-divergence-8f46cb8aed
+
+Repro: `tools/localfuzz/findings/20260814-072151-backend-divergence-8f46cb8aed/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-072151-backend-divergence-8f46cb8aed/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+VANIC RUNTIME ERROR - MONGOLIAN VANI ITERATE
+
+A vanic runtime error occurred during execution of the Mongolian Vani iterate example. The exact repro source is provided below:
+
+```vani
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/iterate.vani              # LLVM
+//   vanic run examples/language/mongolian/iterate.vani --backend=c  # C
+
+
+
