@@ -14392,3 +14392,82 @@ pre-existing `libgomp`/glibc thread-pool TLS artifact, confirmed via
 an unrelated clean `parallel for` program showing the byte-for-byte
 identical line -- not introduced by this fix); ASan/UBSan clean on
 both repros via the C backend.
+
+## BUG-193 -- general `OwnedStr`-arg leak into ordinary function calls, FIXED (2026-08-14)
+
+Task #187, closing `docs/BUG_PATTERN_AUDIT_TODO_13.md`'s Priority 2
+(carried over from `docs/BUG_PATTERN_AUDIT_TODO_9.md`'s Category 1
+"general case", left explicitly unscoped there). A fresh, never-bound
+`OwnedStr` expression passed as a `Str`-typed argument to an ordinary
+user-defined function had no owner to free it after the call --
+BUG-159/160/161 fixed the identical shape for specific builtin call
+sites (`hashmap_*`/`trie_*`) but deliberately left the general,
+every-user-function-call case open, since it "touches every function-
+call-argument codegen site in both backends" (turned out to be exactly
+ONE default/fallback match arm per backend, not many -- the scoping
+worry was bigger than the actual change).
+
+```vani
+fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+fn main() -> i64 {
+  let n: i64 = takes_str(i64_to_str(12345));   // used to leak
+  return n;
+}
+```
+
+Fixed in both backends' default `TypedExprKind::Call` codegen (the
+path every ordinary, non-builtin function call goes through):
+`src/backend_c.rs` binds each fresh arg to a named temp inside a GCC
+statement-expression (generalizing the existing 1-2-hardcoded-
+argument `hashmap_insert`/`trie_insert` shape to N arguments), calls
+using the temps, frees them all after, yields the result;
+`src/backend_llvm.rs` (already imperative -- no statement-expression
+trick needed) just emits `call void @free(i8* %v)` for each qualifying
+arg right after the `call` instruction.
+
+**A real regression found and fixed the same session, before
+shipping**: the first version of this fix (matching BUG-160's OWN
+check exactly, `is_fresh_owned_str(a) || is_fresh_owned_str_via_str_cast(a)`)
+caused a genuine double-free, caught by `tools/leak_sweep.py`'s
+corpus-wide ASan sweep (NOT by the plain, non-sanitized test suite --
+`examples/edge_cases/mix_tuple_non_copy.vani`'s `make_pair(msg:
+OwnedStr, val: i64) -> (OwnedStr, i64) { return (msg, val); }` moves
+`msg` straight into the returned tuple; the caller's tuple binding
+then owns and frees it through its own scope-exit Drop -- freeing it
+a second time right after the call is a double-free). Root cause:
+BUG-160's bare `is_fresh_owned_str` check was a hand-verified judgment
+call about THOSE SPECIFIC builtins' contracts (`hashmap_get`/
+`_contains_key`/`_remove` never store the key, lookup-only), not a
+generally-safe rule -- an ordinary user function's `OwnedStr`-typed
+(by-value) parameter really does take ownership, and the callee may
+hand that same heap value straight back to the caller through a
+struct/tuple/closure. The implicit `Str`-borrow cast
+(`is_fresh_owned_str_via_str_cast`, alone, no bare-`OwnedStr` OR) is
+the only reliable "this parameter never took ownership" signal for
+the general case -- narrowed the fix to that alone, re-verified
+clean.
+
+Added 4 `src/lib.rs` unit tests: single fresh arg, two fresh args in
+one call, a Var-sourced (non-fresh) `OwnedStr` arg does NOT get freed
+(the double-free regression guard), a plain string literal arg does
+NOT get freed. **Verification**: 2972/2972 lib tests (2966 + 2
+BUG-192 + 4 BUG-193 new, 0 regressions); 260/260 e2e tests (1 flaky
+failure on the first full-suite run, `concurrent_pipeline_dashboard_
+example_produces_correct_output_on_both_backends` -- confirmed
+pre-existing/unrelated via 5/5 clean reruns in isolation, same
+concurrent-print-interleaving-under-load class as `docs/TODO_CURRENT.
+md`'s own prior documented flakiness for this exact test, not caused
+by this fix); full `tools/leak_sweep.py` corpus sweep (1052 files)
+matches its baseline exactly, 0 new findings, both before AND after
+the double-free was caught and fixed; ASan/UBSan clean on the
+original repro, a 6-case edge-case stress test (nested calls, two
+fresh args in one call, Var-sourced OwnedStr arg, plain literal arg,
+discard-position call), and the double-free repro specifically;
+`valgrind --leak-check=full` clean (0 errors) on both the LLVM AOT
+repro and the stress test.
+
+**Still open**: Category 2 and Category 3 of
+`docs/BUG_PATTERN_AUDIT_TODO_9.md` remain as documented there (no
+action needed -- already-triaged non-fixes / fully resolved).
+`docs/BUG_PATTERN_AUDIT_TODO_13.md`'s Priorities 3-4 (localfuzz
+tooling improvements) remain optional, not acted on.

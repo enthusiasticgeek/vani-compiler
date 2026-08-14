@@ -21732,7 +21732,6 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             c_element_deep_clone(&slot, element_ty)
         }
         _ => {
-            let rendered_args = args.iter().map(emit_expr).collect::<Vec<_>>().join(", ");
             // Closure #269: extern "C" fns emit a bare C-ABI
             // call (no `fn_` prefix). The C_EXTERN_FN_REGISTRY
             // gets populated at backend entry from the
@@ -21747,7 +21746,81 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             } else {
                 function_name(name)
             };
-            format!("{}({})", symbol, rendered_args)
+            // BUG-193 (2026-08-14): a fresh, never-bound OwnedStr
+            // argument passed into an ordinary user-function call has
+            // no owner to free it after the call returns -- same
+            // shape BUG-159/160/161 fixed for specific builtin call
+            // sites (hashmap_*/trie_*, see those sites' own comments
+            // a few hundred lines up), generalized here to the
+            // default/fallback path every ordinary user-fn call goes
+            // through. ONLY `is_fresh_owned_str_via_str_cast` --
+            // NOT the bare `is_fresh_owned_str` check BUG-160 used
+            // for hashmap_get/_contains_key/_remove -- is safe here.
+            // BUG-160's bare check was a hand-verified judgment call
+            // about THOSE SPECIFIC builtins' contracts (lookup-only,
+            // never stores the key); it does not generalize. An
+            // ORDINARY user function's `OwnedStr`-typed (by value)
+            // parameter takes real OWNERSHIP -- the callee may move
+            // it into a returned struct/tuple/closure capture and
+            // hand it back to the caller, who then owns and frees it
+            // through a completely different scope-exit Drop. Freeing
+            // it again here after the call is a double-free. The
+            // implicit `Str`-borrow cast is the only reliable signal
+            // that a `Str`-typed parameter never took ownership in
+            // the first place -- first version of this fix included
+            // the bare check by analogy with BUG-160 and caused a
+            // real double-free (`examples/edge_cases/
+            // mix_tuple_non_copy.vani`'s `make_pair(msg: OwnedStr, ..)`
+            // moving `msg` straight into the returned tuple), caught
+            // by `tools/leak_sweep.py`'s corpus-wide ASan sweep, not
+            // by the plain (non-sanitized) test suite.
+            let fresh_positions: Vec<usize> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| crate::ir::is_fresh_owned_str_via_str_cast(a))
+                .map(|(i, _)| i)
+                .collect();
+            if fresh_positions.is_empty() {
+                let rendered_args = args.iter().map(emit_expr).collect::<Vec<_>>().join(", ");
+                format!("{}({})", symbol, rendered_args)
+            } else {
+                // Bind each fresh arg to its own named temp (in
+                // argument order -- a strict superset of C's own
+                // unspecified argument-evaluation order, not a
+                // reordering), call using the temps (or the plain
+                // expression for non-fresh args), then free every
+                // temp after the call, yielding the result. Mirrors
+                // the trie_insert/hashmap_insert statement-expression
+                // shape above, generalized to N arguments instead of
+                // 1-2 hardcoded positions.
+                let mut prelude = String::new();
+                let mut call_args: Vec<String> = Vec::with_capacity(args.len());
+                for (i, a) in args.iter().enumerate() {
+                    if fresh_positions.contains(&i) {
+                        let tmp = format!("_intent_arg_str_{}", i);
+                        prelude.push_str(&format!(
+                            "const char* {} = ({}); ",
+                            tmp,
+                            emit_expr(a)
+                        ));
+                        call_args.push(tmp);
+                    } else {
+                        call_args.push(emit_expr(a));
+                    }
+                }
+                let mut frees = String::new();
+                for i in &fresh_positions {
+                    frees.push_str(&format!("free((void*)_intent_arg_str_{}); ", i));
+                }
+                format!(
+                    "({{ {}{} _intent_call_r = {}({}); {}_intent_call_r; }})",
+                    prelude,
+                    c_type_name(result_ty),
+                    symbol,
+                    call_args.join(", "),
+                    frees
+                )
+            }
         }
     }
 }

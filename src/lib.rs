@@ -52373,6 +52373,120 @@ função main() -> i64 {
         );
     }
 
+    #[test]
+    fn bug193_ordinary_fn_call_frees_fresh_owned_str_str_param() {
+        // BUG-193 (2026-08-14): the general case BUG-159/160/161
+        // deliberately left open (docs/BUG_PATTERN_AUDIT_TODO_9.md
+        // Category 1) -- a fresh, never-bound OwnedStr expression
+        // passed as a `Str`-typed argument to an ORDINARY user-
+        // defined function (not a builtin like hashmap_*/trie_*) has
+        // no owner to free it after the call returns. Same
+        // is_fresh_owned_str_via_str_cast check, generalized from
+        // hardcoded 1-2 argument positions to the default call-
+        // codegen path every user-fn call goes through.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              let n: i64 = takes_str(i64_to_str(12345));
+              return n;
+            }
+        "#;
+        let c = compile_to_c(source).expect("ordinary fn call with fresh Str arg → C");
+        assert!(
+            c.contains("_intent_arg_str_0") && c.contains("free((void*)_intent_arg_str_0)"),
+            "expected the fresh arg bound to a temp and freed after the \
+             call:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("ordinary fn call with fresh Str arg → LLVM");
+        assert!(
+            ll.contains("call void @free(i8*"),
+            "expected a free call after the ordinary fn call:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_frees_multiple_fresh_owned_str_args() {
+        // Two fresh args in the same call -- both must be bound to
+        // their own temp and both freed, not just the first/last.
+        let source = r#"
+            fn takes_two(a: Str, b: Str) -> i64 { return len(a) as i64 + len(b) as i64; }
+            fn main() -> i64 {
+              return takes_two(i64_to_str(1), i64_to_str(22));
+            }
+        "#;
+        let c = compile_to_c(source).expect("two fresh Str args → C");
+        assert!(
+            c.contains("_intent_arg_str_0") && c.contains("_intent_arg_str_1"),
+            "expected both fresh args bound to distinct temps:\n{}",
+            c
+        );
+        assert_eq!(
+            c.matches("free((void*)_intent_arg_str_").count(),
+            2,
+            "expected exactly 2 frees, one per fresh arg:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("two fresh Str args → LLVM");
+        // >=, not ==: the module preamble's runtime helpers
+        // (i64_to_str/intent_str_concat internals) also contain
+        // unrelated `call void @free(i8*` sites -- matches the `>=`
+        // style the pre-existing hashmap/trie LLVM tests already use
+        // for the same reason, rather than an exact whole-module
+        // count.
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 2,
+            "expected at least 2 frees on the LLVM side (one per fresh \
+             arg):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_does_not_double_free_owned_var_arg() {
+        // Regression guard mirroring hashmap_insert/trie's own: a
+        // Var-sourced OwnedStr argument (bound to a `let`, still
+        // owned by that binding) must NOT go through the fresh-arg
+        // free path -- that binding's own scope-exit Drop already
+        // frees it, so an extra free-after-call would double-free.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              let bound: OwnedStr = i64_to_str(1);
+              let n: i64 = takes_str(bound);
+              return n;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Var-sourced Str arg → C");
+        assert!(
+            !c.contains("_intent_arg_str_0"),
+            "a Var-sourced argument must not go through the fresh-arg \
+             free path (that would double-free the binding's own \
+             scope-exit drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_str_literal_not_freed() {
+        // A plain string literal argument is never heap-owned --
+        // must not be routed through the fresh-arg free path either.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              return takes_str("hello");
+            }
+        "#;
+        let c = compile_to_c(source).expect("literal Str arg → C");
+        assert!(
+            !c.contains("_intent_arg_str_0"),
+            "a plain string literal must not go through the fresh-arg \
+             free path:\n{}",
+            c
+        );
+    }
+
     // ARC 4.2 — HashMap<i64, OwnedStr>: V drop walks on
     // drop/clear/remove; _insert clones V internally; _insert
     // duplicate + _remove transfer prior V ownership to caller.

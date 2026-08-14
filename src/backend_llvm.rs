@@ -17251,42 +17251,65 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // to its System V x86-64 packed-register form
             // (i64 / {i64, i64}) before the call. Mirrors the
             // declare-site lowering.
-            let arg_strs: Vec<String> = args
-                .iter()
-                .map(|a| {
-                    let v = emit_expr(a, ctx, out);
-                    if is_extern {
-                        if let Some(lowered) = llvm_ffi_struct_lowered_ty(&a.ty) {
-                            // Spill the struct to an alloca,
-                            // bitcast to the lowered ptr type,
-                            // load. The loaded value matches
-                            // cc's System V x86-64 ABI for the
-                            // call.
-                            let struct_ty = llvm_type_string(&a.ty);
-                            let spill = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = alloca {}\n", spill, struct_ty
-                            ));
-                            out.push_str(&format!(
-                                "  store {} {}, {}* {}\n",
-                                struct_ty, v, struct_ty, spill
-                            ));
-                            let cast_ptr = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = bitcast {}* {} to {}*\n",
-                                cast_ptr, struct_ty, spill, lowered
-                            ));
-                            let loaded = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = load {}, {}* {}\n",
-                                loaded, lowered, lowered, cast_ptr
-                            ));
-                            return format!("{} {}", lowered, loaded);
-                        }
+            // BUG-193 (2026-08-14): a fresh, never-bound OwnedStr
+            // argument passed into an ordinary user-function call has
+            // no owner to free it after the call returns -- same
+            // shape BUG-159/160/161 fixed for specific builtin call
+            // sites (hashmap_*/trie_*), generalized here to the
+            // default/fallback path every ordinary user-fn call goes
+            // through. ONLY `is_fresh_owned_str_via_str_cast` -- NOT
+            // the bare `is_fresh_owned_str` check BUG-160 used for
+            // hashmap_get/_contains_key/_remove -- is safe here; see
+            // the matching comment in backend_c.rs's identical fix
+            // for the full explanation (a bare fresh OwnedStr passed
+            // to an ordinary `OwnedStr`-typed BY-VALUE parameter
+            // transfers real ownership -- the callee may move it into
+            // a returned struct/tuple/closure and hand it back to the
+            // caller, who frees it through a different scope-exit
+            // Drop; freeing it again here double-frees. First version
+            // of this fix included the bare check by analogy with
+            // BUG-160 and caused a real double-free, caught by
+            // `tools/leak_sweep.py`'s ASan sweep, not the plain test
+            // suite).
+            let mut owned_str_frees: Vec<String> = Vec::new();
+            let mut arg_strs: Vec<String> = Vec::with_capacity(args.len());
+            for a in args {
+                let v = emit_expr(a, ctx, out);
+                if crate::ir::is_fresh_owned_str_via_str_cast(a) {
+                    owned_str_frees.push(v.clone());
+                }
+                if is_extern {
+                    if let Some(lowered) = llvm_ffi_struct_lowered_ty(&a.ty) {
+                        // Spill the struct to an alloca,
+                        // bitcast to the lowered ptr type,
+                        // load. The loaded value matches
+                        // cc's System V x86-64 ABI for the
+                        // call.
+                        let struct_ty = llvm_type_string(&a.ty);
+                        let spill = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = alloca {}\n", spill, struct_ty
+                        ));
+                        out.push_str(&format!(
+                            "  store {} {}, {}* {}\n",
+                            struct_ty, v, struct_ty, spill
+                        ));
+                        let cast_ptr = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast {}* {} to {}*\n",
+                            cast_ptr, struct_ty, spill, lowered
+                        ));
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}, {}* {}\n",
+                            loaded, lowered, lowered, cast_ptr
+                        ));
+                        arg_strs.push(format!("{} {}", lowered, loaded));
+                        continue;
                     }
-                    format!("{} {}", llvm_type_string(&a.ty), v)
-                })
-                .collect();
+                }
+                arg_strs.push(format!("{} {}", llvm_type_string(&a.ty), v));
+            }
             let dest = ctx.fresh_tmp();
             let symbol = if is_extern || is_no_mangle {
                 format!("@{}", name)
@@ -17308,6 +17331,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 symbol,
                 arg_strs.join(", ")
             ));
+            // BUG-193: free every fresh OwnedStr argument AFTER the
+            // call (the value is still a live, valid pointer for the
+            // call itself -- freeing beforehand would use-after-free
+            // the very argument being passed).
+            for v in &owned_str_frees {
+                out.push_str(&format!("  call void @free(i8* {})\n", v));
+            }
             // BUG-77: the call above correctly uses the System V
             // x86-64 packed-register LOWERED type (`ret_ll`, e.g.
             // `i64`) for the `call` instruction itself, matching

@@ -127,9 +127,17 @@ regression test once root-caused. Candidate bug number: **BUG-192**
 ## Priority 2 (MEDIUM) -- general `Str`-parameter `OwnedStr`
 ## auto-borrow leak (carried over from BUG_PATTERN_AUDIT_TODO_9.md)
 
-**Status: confirmed real (2026-08-10), deliberately left unscoped,
-still open. Not re-verified this round (no new evidence either way),
-carried forward as-is.**
+**Status: FIXED 2026-08-14 as BUG-193 -- see `docs/TODO_CURRENT.md`.**
+Turned out to be a single default/fallback match arm per backend
+(the ordinary-user-function-call codegen path), not the sprawling
+"every call-argument codegen site" this section's own recommendation
+below feared -- the scoping worry was bigger than the actual change.
+A real double-free regression was found and fixed in the same pass
+(the first draft copied BUG-160's bare `is_fresh_owned_str` check by
+analogy, which is unsafe for ordinary `OwnedStr`-by-value parameters
+that take real ownership; narrowed to
+`is_fresh_owned_str_via_str_cast` only). Left the original write-up
+below unedited for the historical record.
 
 ```vani
 fn takes_str(s: Str) -> i64 { return len(s) as i64; }
@@ -299,9 +307,12 @@ In priority order:
 1. ~~**Fix** (or at minimum root-cause and file as its own tracked bug
    number, BUG-192): the LLVM silent-trap-message bug (Priority 1).~~
    **DONE 2026-08-14** -- see `docs/TODO_CURRENT.md`'s BUG-192 entry.
-2. **Scope, don't quick-fix**: the general `Str`-param `OwnedStr` leak
+2. ~~**Scope, don't quick-fix**: the general `Str`-param `OwnedStr` leak
    (Priority 2) -- needs its own `EnterPlanMode` pass given the
-   blast radius, same as this document's own predecessor concluded.
+   blast radius, same as this document's own predecessor concluded.~~
+   **DONE 2026-08-14** -- see `docs/TODO_CURRENT.md`'s BUG-193 entry;
+   the blast-radius worry didn't hold up once actually scoped (one
+   match arm per backend).
 3. **Optional, cheap**: the two `tools/localfuzz` tooling
    improvements (Priorities 3 and 4) -- neither touches the compiler,
    both reduce future triage noise; fine to defer to whoever next
