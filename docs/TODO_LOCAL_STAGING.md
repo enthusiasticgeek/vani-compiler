@@ -7444,3 +7444,31 @@ Fix attempt: `tools/localfuzz/findings/20260814-002954-backend-divergence-84387d
 
 
 
+
+---
+
+### Candidate: 20260814-012303-backend-divergence-e22681a71a
+
+Repro: `tools/localfuzz/findings/20260814-012303-backend-divergence-e22681a71a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-012303-backend-divergence-e22681a71a/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  }
+}
+```
+
