@@ -15217,17 +15217,19 @@ fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backend
             backend_args,
             stdout
         );
-        // Each worker's own derived-values line is deterministic in
-        // CONTENT (not ordering) -- assert all 4 appear somewhere.
-        for (id, raw) in [(0, 5), (1, 10), (2, 15), (3, 20)] {
-            let needle = format!("worker {} derived 2 arena values from raw reading {}", id, raw);
-            assert!(
-                stdout.contains(&needle),
-                "expected \"{}\" for {:?}, got:\n{}",
-                needle,
-                backend_args,
-                stdout
-            );
-        }
+        // Deliberately NOT asserting anything about the individual
+        // worker "derived ... from raw reading ..." lines' exact
+        // shape: caught on real CI (not locally, after 10 repeated
+        // runs) -- multiple worker threads' `print` calls run fully
+        // concurrently and unsynchronized BEFORE any of them reaches
+        // the barrier, so their multi-argument prints can interleave
+        // byte-for-byte with each other (worker 1's line split mid-
+        // print by worker 3's own print call, in the observed CI
+        // failure). Same race class as `detach_heartbeat_example`'s
+        // heartbeat lines. The checkpoint/grand-total/mutex-confirms
+        // lines above are NOT subject to this -- by the time any
+        // thread reaches them, the Barrier (for the first three) or
+        // sequential single-threaded `main` execution (for the last)
+        // guarantees no other thread is still mid-print.
     }
 }

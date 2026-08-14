@@ -13599,4 +13599,21 @@ check (1048 pre-existing + 1 new file) matches the known 18-file
 non-ok baseline exactly, identical file set, the new file passes
 `vanic check`; mdBook rebuilds clean (only
 the same 7 known pre-existing false-positive warnings, no new ones).
+
+**CI caught a real flaky test**, not visible in 10 local runs: the
+`concurrent_pipeline_dashboard_example` e2e test originally also
+asserted each worker's own `"worker N derived ..."` print line
+verbatim. On the CI runner (different scheduling than this session's
+local machine), two workers' unsynchronized concurrent `print` calls
+interleaved byte-for-byte (worker 3's line landed in the middle of
+worker 1's) -- same race class `detach_heartbeat_example` already
+discovered and worked around for heartbeat lines, just triggered by
+worker-vs-worker printing instead of heartbeat-vs-main. Fixed by
+removing the per-worker line assertions entirely, keeping only the
+`registered`/`checkpoint`/`grand total`/`mutex total confirms` lines
+-- each of which IS provably race-free at the point it prints (the
+Barrier or `main`'s own single-threaded sequencing rules out any
+other thread being mid-print at that moment), and all four appeared
+intact even in the CI failure's own captured output. Re-verified 20x
+locally after the fix; pushed as a follow-up commit.
 Corpus check and CI to follow before this batch is pushed.
