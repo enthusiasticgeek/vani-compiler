@@ -7827,3 +7827,47 @@ Repro: `tools/localfuzz/findings/20260814-113242-backend-divergence-9caace1cd8/r
 Fix attempt: `tools/localfuzz/findings/20260814-113242-backend-divergence-9caace1cd8/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-140955-backend-divergence-49757563d4
+
+Repro: `tools/localfuzz/findings/20260814-140955-backend-divergence-49757563d4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-140955-backend-divergence-49757563d4/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+We ran the `/home/virgo/source/vani-compiler-localfuzz/examples/language/sindhi/iterate.vani` mutant on our vani-compiler local staging log.
+
+The exact repro source was:
+
+```vani
+// vani-lang: sindhi
+مقصد "Sindhi iterate smoke-test";
+فنکشن main() -> i64 {
+  مانیں فهرست: Vec<i64> = vec();
+  فهرست = push(فهرست, 10);
+  فهرست = push(فهرست, 20);
+  فهرست = push(فهرست, 30);
+  یقینی فهرست[0] == 10;
+  یقینی فهرست[1] == 20;
+  یقینی فهرست[2] == 30;
+  مانیں ڪل: i64 = 0;
+  مانیں i: i64 = 0;
+  تا i < (len(فهرست) بطور i64) {
+    ڪل = ڪل + فهرست[i];
+    i = i + -9223372036854775808;
+  }
+  یقینی ڪل == 60;
+  لکھو "Sindhi iterate OK";
+  واپس 0;
+}
+```
+
+The observed symptom was a backend-divergence error, specifically `index out of bounds` occurring in the LLVM backend.
+
+This mutation caused the compiler to diverge on the LLVM backend, leading to a runtime crash or hang. The staging log indicates that this issue affected both the Rust and LLVM backends.
+
+**STATUS: needs human/frontier root-cause review.**
