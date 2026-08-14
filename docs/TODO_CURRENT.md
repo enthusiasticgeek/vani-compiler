@@ -14197,3 +14197,98 @@ could adopt for free. `Pollable`/`Executor` (Phase B) integration
 with blocking-task cancellation not attempted -- they're
 orthogonal mechanisms (non-blocking `Task__<fn>` vs. blocking OS
 threads) with no natural composition point.
+
+## Phase F -- 2nd tic-tac-toe implementation over real TCP, SHIPPED (2026-08-14)
+
+Per the user's own follow-up plan ("we will revisit tic tac toe with
+different implementation if it helps with any changes to the
+compiler"): a second, deliberately different implementation of the
+timed tic-tac-toe idea, applying `task` + `cancel` to a domain
+`cancel` actually covers, since Advanced 3c's `stdin`-based game
+explicitly can't (see that file's own "Why not `task` + `cancel`
+here" section -- `cancel` doesn't reach `stdin_read_line`).
+
+Shipped: `examples/language/english/tic_tac_toe_networked_timed.vani`
+-- two players connect over real loopback TCP (two `task`-spawned
+bot clients keep the example self-contained). Most turns block
+directly on `tcp_recv` with no timeout at all; only the ONE turn
+this file deliberately stalls spawns a `task`, polls a `Mutex<i64>`
+the task publishes into, and issues a real `cancel <name>;` when the
+budget expires, interrupting the still-blocked `tcp_recv`. Verified
+via `strace` (not assumed): `tgkill(..., SIGUSR1)` followed by the
+blocked `recvfrom` returning `ERESTARTSYS` -- genuine EINTR-driven
+interruption, same verification standard as Phase D's own
+`cancel_blocking_task.vani`.
+
+**Two real design bugs found and fixed, both by actually running the
+example repeatedly rather than reading the code once:**
+
+1. An early draft raced a wall-clock budget against EVERY turn's
+   reply, not just the stalled one. Under real CPU contention on the
+   dev machine (a background `localfuzz` model-serving process
+   pinning most of a core), a perfectly healthy reply from a peer
+   that answered immediately could still miss an aggressive budget
+   purely from `pthread_create`/scheduling latency -- a spurious
+   forfeit with nothing actually wrong. Root-caused by tracing a
+   minimal repro (`Mutex<i64>` created fresh per loop iteration, task
+   spawned from the same call site each time, `worker`/`round`
+   lifecycle prints with real millisecond timestamps via a
+   `stdbuf -oL` + Perl `Time::HiRes` harness, since `vanic run`
+   buffers stdout until process exit) down to "this is thread-
+   scheduling variance under load, not a mutex or task-spawn bug" --
+   confirmed by reproducing the SAME 6+ second scheduling delay with
+   zero `Mutex` involvement at all (`t2` spawned while `t1` was still
+   running, joined immediately, no lock anywhere). Fixed at the
+   design level, not the compiler level: only the turn that might
+   genuinely never get a reply needs the bounded-poll-plus-cancel
+   machinery; every other turn just blocks normally, immune to this
+   failure mode entirely.
+2. The stalling bot originally closed its socket right after going
+   silent. That unblocks the server's `tcp_recv` too -- but via a
+   normal EOF (0 bytes read), which happened to decode to the same
+   `-1` sentinel this file uses for "cancelled". The forfeit
+   assertion kept passing for the WRONG reason, with `cancel`/EINTR
+   never actually firing -- caught only by adding the `strace` trace
+   in point 1 above and noticing the blocked `tcp_recv` returned via
+   plain EOF, not a signal. Fixed by having the stalling bot stay
+   connected but silent, so `cancel` is the only thing that can
+   unblock the server.
+
+**A real, previously-undocumented v1 gap surfaced (not fixed) building
+this**: `tcp_recv`'s received bytes are not inspectable from vani
+code at all -- no byte-accessor exists (`src/checker.rs`'s own doc
+comment for `tcp_recv` references a `tcp_buf_byte_at` builtin that
+was never actually implemented). Worked around by encoding the move
+as MESSAGE LENGTH (reply with a filler string of length `move + 1`)
+rather than content. Logged as `docs/v1_limitations.md` **L30**.
+
+Also confirmed NOT a fit for this file: the `Pollable`/`Executor`
+pattern (Arc 8 v3.2). Executor's value is driving several
+concurrently in-flight async tasks; this game is strictly turn-based
+-- exactly one blocking call outstanding at a time -- so there's
+nothing for an Executor to round-robin between. Documented directly
+in the example's own header comment rather than silently omitted, so
+a future reader doesn't wonder why it's missing.
+
+**Verification**: 2966/2966 lib tests pass (0 new -- no new checker/
+compiler surface, this is example + e2e-test work only); 260/260 e2e
+tests pass (259 + 1 new, 0 regressions); example corpus check
+(`vanic check examples`) shows the new file as `ok:` with the same
+pre-existing 17-file known-bad baseline (unrelated `xfail_*`/`mix_*`
+edge-case fixtures + one embedded-gated file) and no new failures;
+`valgrind --leak-check=full` clean (0 errors, 122 allocs / 122 frees,
+0 bytes leaked) on the LLVM AOT build; ASan/UBSan clean (3 repeated
+runs) on the C backend; 10/10 repeated runs clean on both backends
+after the fixes above (5/5 each), where the pre-fix version had
+failed roughly half the time under this session's load conditions.
+Tutorial coverage: new "A 2nd implementation: `task` + `cancel` over
+real TCP" section in Advanced 3c, cross-linking Advanced 1's
+Executor section for the "why not Executor" explanation.
+
+**Still open**: the ORIGINAL stdin-based tic-tac-toe problem
+(Advanced 3c's `tic_tac_toe_timed.vani`) is still unsolved by
+`cancel` and still correctly uses the non-blocking-poll
+(`stdin_ready_within_ms`) approach -- this phase deliberately did not
+attempt a 3rd stdin-cancellation-based implementation, since `cancel`
+still doesn't reach `stdin_read_line` (see L18/the Phase D writeup
+above). `tcp_buf_byte_at` (L30) not implemented.

@@ -15344,6 +15344,79 @@ fn async_executor_example_drives_heterogeneous_and_cancelled_tasks_on_both_backe
 }
 
 #[test]
+fn tic_tac_toe_networked_timed_example_forfeits_via_real_cancel_on_both_backends() {
+    // Phase F (2026-08-14): a 2nd implementation of the timed
+    // tic-tac-toe idea, this time over real TCP sockets instead of
+    // stdin polling -- built specifically to stress `task` + `cancel`
+    // + `Mutex<i64>` together in a shape none of the other shipped
+    // examples exercise (a per-call-site Mutex created fresh on every
+    // loop iteration, raced against a task spawned from the same call
+    // site each time). Two earlier drafts of this example had real
+    // design bugs caught only by actually running it repeatedly and
+    // with strace, not by "it compiles": (1) every turn raced a
+    // wall-clock budget even for replies that were always going to
+    // arrive, which could spuriously forfeit under real scheduling
+    // load; (2) the stalling bot closed its socket right after going
+    // silent, which unblocks a server's blocked `tcp_recv` via a
+    // normal EOF (0 bytes) -- decoding to the same -1 sentinel this
+    // file uses for "cancelled", so the assertion kept passing
+    // without `cancel`/EINTR ever actually firing. Both fixed; see
+    // examples/language/english/tic_tac_toe_networked_timed.vani's
+    // own comments for the full explanation. Uses the same bounded
+    // try_wait() loop as cancel_blocking_task_example above rather
+    // than a plain `.output()` wait, for the same reason: a
+    // regression in the cancel path manifests as a HANG, not a clean
+    // failure.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/tic_tac_toe_networked_timed.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let mut child = Command::new(binary)
+            .args(&backend_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| panic!("intentc {:?} should spawn: {e}", backend_args));
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(15);
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                break status;
+            }
+            if start.elapsed() > timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "intentc {:?} did not exit within {:?} -- cancel likely failed to \
+                     interrupt the server's blocked tcp_recv (hung instead of returning EINTR)",
+                    backend_args, timeout
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let output = child.wait_with_output().expect("collect output");
+        assert!(
+            status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("wins on forfeit!\n"),
+            "expected O to forfeit via a real cancel-driven timeout for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
 fn for_loop_backwards_to_range_warns_but_check_and_run_both_succeed() {
     // End-to-end CLI test of the new Severity::Warning mechanism
     // (2026-08-14): `vanic check` on a file with a `to`/`downto`

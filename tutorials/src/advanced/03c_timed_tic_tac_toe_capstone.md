@@ -256,6 +256,82 @@ place.
 
 ---
 
+## A 2nd implementation: `task` + `cancel` over real TCP (Phase F, 2026-08-14)
+
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="task + cancel, applied to a domain that actually supports it"/>
+
+This page's whole point is that `task`/`Atomic<bool>`/`join` was the
+*wrong* tool for racing a blocking *stdin* read against a clock,
+because nothing could interrupt `stdin_read_line()` once a thread was
+stuck inside it -- not even after `cancel <name>;` shipped, since
+`cancel` deliberately doesn't reach stdio (point 1, above). That's
+still true. But it raises an obvious question: is there a *shape* of
+this same problem where `task` + `cancel` genuinely IS the right
+tool?
+
+Yes -- networked I/O.
+[`examples/language/english/tic_tac_toe_networked_timed.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/tic_tac_toe_networked_timed.vani)
+is a second, deliberately different implementation of the same "per-
+turn budget" idea: two players connect over real loopback TCP sockets
+(simulated by two `task`-spawned bot clients so the file stays
+self-contained), and when one of them goes silent, the server spawns
+a `task` to block in `tcp_recv` for the reply, polls a `Mutex<i64>`
+that task publishes into, and -- if the budget expires -- issues a
+real `cancel <name>;` to interrupt the still-blocked `tcp_recv`
+(`tcp_recv`/`tcp_accept` ARE cancel-aware, unlike stdio). The silent
+player forfeits, and the server never hangs waiting for a reply that
+was never coming.
+
+Building it surfaced three real, non-obvious lessons, each caught
+only by actually running the thing repeatedly rather than reading the
+code:
+
+1. **Don't race a budget against a reply you already expect to
+   arrive.** An early draft used the bounded-poll-plus-cancel dance
+   for *every* turn, not just the stalled one. Under real scheduling
+   load (this was found on a dev machine with a CPU-heavy background
+   process competing for cores), a perfectly healthy reply can miss
+   an aggressive budget purely from `pthread_create`/scheduling
+   latency -- a spurious forfeit with nothing wrong in the protocol
+   at all. The fix: only the turn that might genuinely never get a
+   reply needs the timeout machinery; every other turn just blocks
+   directly on `tcp_recv`, immune to this failure mode entirely.
+2. **A closed connection isn't a cancelled one.** The stalling bot
+   originally closed its socket right after going silent. That
+   unblocks the server's `tcp_recv` too -- but via a normal EOF (0
+   bytes), which happened to decode to the same `-1` sentinel this
+   file uses for "cancelled". The forfeit assertion kept passing for
+   the wrong reason, with `cancel`/`EINTR` never actually firing.
+   Confirmed via `strace`: the fixed version shows a real
+   `tgkill(..., SIGUSR1)` followed by the blocked `recvfrom` returning
+   `ERESTARTSYS` -- genuine interruption, not a coincidence. The
+   stalling bot now stays connected but silent, so there is nothing
+   *but* `cancel` that can unblock the server.
+3. **`tcp_recv`'s received bytes aren't inspectable from vani code.**
+   v1 has no `tcp_recv`-buffer byte-accessor (only `tcp_send_buf`, to
+   echo it back out) -- a real, previously-undocumented gap surfaced
+   by trying to send an actual move number over the wire. Worked
+   around by encoding each move as **message length** instead of
+   content (a player replies with a filler string of length `move +
+   1`), which stays within what v1 already supports. Flagged for a
+   future limitations pass rather than fixed here.
+
+Why not the `Pollable`/`Executor` pattern (see
+[Advanced 1](01_async.md#an-executor-not-a-hand-rolled-driver-pollable--executor) /
+`async_executor.vani`) for this file? Executor's value is driving
+several *concurrently in-flight* async tasks; this game is strictly
+turn-based, exactly one blocking call outstanding at a time, so there
+is nothing for an Executor to round-robin between. `task` + `cancel`
+-- bound one blocking call, interrupt it if it overruns -- is the
+right-shaped tool for a sequential per-turn timeout.
+
+```bash
+vanic run examples/language/english/tic_tac_toe_networked_timed.vani                # LLVM backend
+vanic run examples/language/english/tic_tac_toe_networked_timed.vani --backend=c    # C backend
+```
+
+---
+
 ## Try it yourself
 
 1. Shrink `turn_timeout_ms` to something short (2000-3000) for faster
@@ -272,7 +348,13 @@ place.
    computer opponent: only time the human's turns (the computer's
    `ai_move` is synchronous and instant, so it never needs a clock at
    all).
-4. *(Bigger)* Read [Advanced 3](03_concurrency.md) and rebuild this
+4. Read the 2nd implementation above
+   (`tic_tac_toe_networked_timed.vani`) and try shrinking ITS
+   `turn_timeout_ms` well below 3000ms on a busy machine -- you should
+   be able to reproduce lesson 1's spurious-forfeit failure mode
+   directly, then see why confining the timeout to only the turn that
+   needs it fixes it.
+5. *(Bigger)* Read [Advanced 3](03_concurrency.md) and rebuild this
    file's *original* `task`/`Atomic<bool>`/`join` design from
    scratch, to feel the difference directly -- then compare the two
    versions' behavior on a timeout with `time` (real wall-clock time
