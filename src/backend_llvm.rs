@@ -46643,6 +46643,21 @@ fn emit_task_via_pthread(
     ctx.deferred_functions.push_str(&outlined_ctx.deferred_functions);
     ctx.deferred_functions.push_str(&deferred);
     ctx.next_outline = outlined_ctx.next_outline;
+    // A `while` loop inside the outlined task body writes its
+    // `!llvm.loop !N` back-edge reference directly into `deferred`
+    // (via `emit_stmt` -> the `TypedStmt::While` handler), but the
+    // matching `!N = ...` metadata DEFINITIONS accumulate in
+    // `outlined_ctx.loop_meta_buf`, a buffer that belongs to this
+    // now-discarded `outlined_ctx`. Only the outermost `FnCtx`'s
+    // `loop_meta_buf` is ever flushed (`emit_function`, after the
+    // top-level function's closing `}`) -- without this propagation
+    // the reference survives in the module but its definition never
+    // does, producing "use of undefined metadata '!N'" from `lli`/
+    // `llc` on ANY `task NAME { ... }` block whose body contains a
+    // `while` loop. Same fix applied to `emit_parallel_for_via_gomp`
+    // below for the identical gap on a `parallel for` body's nested
+    // `while` loops.
+    ctx.loop_meta_buf.push_str(&outlined_ctx.loop_meta_buf);
 }
 
 /// `task <callee>(args…)` in expression position — BUG-21 Path B.
@@ -47333,6 +47348,13 @@ fn emit_parallel_for_via_gomp(
         deferred.push_str(&outlined_ctx.deferred_functions);
     }
     ctx.deferred_functions.push_str(&deferred);
+    // Same gap as `emit_task_via_pthread`: a `while` loop nested
+    // inside a `parallel for` body writes its `!llvm.loop !N`
+    // back-edge reference into `deferred`, but the definitions land
+    // in `outlined_ctx.loop_meta_buf`, which nothing else flushes.
+    // Propagate up to the parent so the eventual top-level
+    // `emit_function` flush picks it up.
+    ctx.loop_meta_buf.push_str(&outlined_ctx.loop_meta_buf);
 
     // -- Call site in the parent function (writes to `out`). --
     let ctx_alloca = ctx.fresh_tmp();

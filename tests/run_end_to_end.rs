@@ -15235,6 +15235,51 @@ fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backend
 }
 
 #[test]
+fn async_executor_example_drives_heterogeneous_and_cancelled_tasks_on_both_backends() {
+    // Arc 8 v3.2 (2026-08-14): the `Pollable`/`Executor` pattern that
+    // replaces a hand-rolled per-program driver loop. Exercises three
+    // things in one program: two DIFFERENT `Task__<fn>` shapes driven
+    // through the same `Vec<Box<dyn Pollable>>` (heterogeneous
+    // dispatch), a third task cancelled mid-flight via `CancelToken`
+    // AFTER being handed to the executor holding live heap state (buf
+    // in the real leak-audit repro; here just its saved locals), and
+    // the LLVM-backend fix for `emit_task_via_pthread`/
+    // `emit_parallel_for_via_gomp` discarding a `while` loop's
+    // vectorize-metadata definitions when the loop lives inside an
+    // outlined `task { ... }` body (the `peers` task's own `while`
+    // loop here is exactly that shape -- this test would have failed
+    // with "use of undefined metadata" on the LLVM backend before
+    // that fix).
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/async_executor.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("tasks accounted for: 3\n"),
+            "expected all 3 tasks (2 completed + 1 cancelled) to be accounted for on {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}
+
+#[test]
 fn for_loop_backwards_to_range_warns_but_check_and_run_both_succeed() {
     // End-to-end CLI test of the new Severity::Warning mechanism
     // (2026-08-14): `vanic check` on a file with a `to`/`downto`

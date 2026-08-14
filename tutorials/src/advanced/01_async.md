@@ -220,7 +220,109 @@ data, the only difference is whether the call waits.
 | `try EXPR` keyword AND postfix `EXPR?` operator in both sync + async bodies | -- |
 | `Future<R>` for scalar R AND v3.1 Task<T> for all v3.1-allowed T | -- |
 | **A4.3** dynamic-N multi-task scheduling via `mut ref pool[i]` over `Vec<Task__<fn>>` | -- |
+| A built-in-shaped `Pollable`/`Executor` pattern (2026-08-14, below) -- drives heterogeneous `Task__<fn>` types without a hand-rolled driver loop | Auto-generating the `implement Pollable for Task__<fn>` boilerplate in the v3.1 synthesizer, so it's zero boilerplate instead of one block per async fn |
 | Per-dialect spellings: `अतुल्यकालिक` / `异步` / `非同期` for `async`; `प्रतीक्षा` / `等候` / `待機` for `await` | -- |
+| -- | Cancellable BLOCKING `task` threads (signal-based EINTR interruption over the existing `intent_task_handle`) -- no mechanism exists today; `detach()` removes the "must join" constraint but does not make an in-flight blocking syscall interruptible |
+
+## An executor, not a hand-rolled driver: `Pollable` + `Executor`
+
+Every driver loop on this page so far (`drive(...)`, the `select`
+example) is specific to ONE task at a time, hand-written per
+program. For more than a couple of concurrent tasks -- especially
+DIFFERENT `Task__<fn>` shapes -- that gets repetitive fast. The
+`Pollable`/`Executor` pattern below is a small, reusable, fully
+tested building block that solves this generically, built entirely
+from machinery this chapter already covers (`dyn` interfaces,
+`Box<dyn Iface>`, `epoll_wait_one`):
+
+```vani
+interface Pollable {
+  fn poll(self: mut ref Self) -> i64;
+}
+
+struct Executor {
+  ep: i64,
+  tasks: Vec<Box<dyn Pollable>>,
+}
+
+fn executor_new(ep: i64) -> Executor {
+  let empty: Vec<Box<dyn Pollable>> = vec();
+  return Executor { ep: ep, tasks: empty };
+}
+
+fn executor_spawn(ex: mut ref Executor, t: Box<dyn Pollable>) -> i64 {
+  push(mut ref ex.tasks, t);
+  return 0;
+}
+
+fn executor_run_to_completion(ex: mut ref Executor) -> i64 {
+  let done: i64 = 0;
+  while len(ref ex.tasks) > 0 as u64 {
+    let round_size: u64 = len(ref ex.tasks);
+    let i: u64 = 0;
+    let remaining: Vec<Box<dyn Pollable>> = vec();
+    while i < round_size {
+      let t: Box<dyn Pollable> = pop(mut ref ex.tasks);
+      let r: i64 = t.poll();
+      if r == 0 - 2 {
+        push(mut ref remaining, t);
+      } else {
+        done = done + 1;
+      }
+      i = i + 1 as u64;
+    }
+    ex.tasks = remaining;
+    if len(ref ex.tasks) > 0 as u64 {
+      let _ = epoll_wait_one(ex.ep, 100);
+    }
+  }
+  return done;
+}
+```
+
+For each `async fn` you want to run through it, write ONE small
+`implement Pollable` block that just forwards to the already-
+generated `__poll_<fn>`:
+
+```vani
+implement Pollable for Task__fetch_a {
+  fn poll(self: mut ref Task__fetch_a) -> i64 {
+    return __poll_fetch_a(self);
+  }
+}
+```
+
+Then spawn heterogeneous tasks (different `Task__<fn>` shapes) into
+ONE executor and drive them all with a single call:
+
+```vani
+let ex: Executor = executor_new(ep);
+let _ = executor_spawn(mut ref ex, box(fetch_a(fd_a) as dyn Pollable));
+let _ = executor_spawn(mut ref ex, box(fetch_b(fd_b) as dyn Pollable));
+let done: i64 = executor_run_to_completion(mut ref ex);
+```
+
+`executor_run_to_completion` returns how many tasks were accounted
+for (completed OR cancelled) -- not their individual results. A
+heterogeneous `Vec<Box<dyn Pollable>>` can't carry distinct result
+types back out through one uniform return value; have each task's
+own `poll()` body surface its result directly (print it, write it
+into a shared `Mutex`, etc.).
+
+**Why this is a copy-paste pattern, not a compiler builtin.** An
+earlier attempt injected `Pollable`/`Executor` into the compiler's
+universal prelude, the same mechanism `CancelToken`/`Future`/`Poll`
+already use. It broke SSA-backend compilation for EVERY program --
+not just ones using `Executor` -- because `Box<dyn Pollable>` is an
+SSA-unsupported shape and the prelude is injected unconditionally.
+Copy the block above into your own program instead; nothing is
+injected, so there's no blast radius on programs that don't use it.
+
+**Leak safety**: cancelling a task mid-flight (after it's already
+past its first suspend point, holding real heap-owned locals) and
+handing it to the executor is ASan/LeakSanitizer-verified clean --
+see [`async_executor.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/async_executor.vani)
+for the full worked example, including this cancellation case.
 
 ## Common patterns
 

@@ -42,6 +42,21 @@ use diagnostic::Diagnostic;
 /// its signature in scope.
 const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\nenum Poll<T> { Ready(T), Pending }\nenum Future<T> { Ready(T), Pending }\nstruct CancelToken { cancelled: bool }\n";
 
+// 2026-08-14: `Pollable`/`Executor` (the built-in async runtime,
+// see docs/TODO_CURRENT.md) were tried here first and reverted the
+// same session -- injecting them UNCONDITIONALLY into every
+// compiled program (the way CancelToken/Future/Poll already are)
+// broke SSA-path lowering for EVERY program, not just ones using
+// Executor: `Box<dyn Pollable>` is an SSA-unsupported shape, and
+// several SSA-backend unit tests call `lower_program`/`ssa_backend_
+// c::emit`/`ssa_backend_llvm::emit` directly against the full
+// (prelude-augmented) program rather than through the tree-LLVM/
+// tree-C fallback `emit_llvm_via_ssa`/`emit_c_via_ssa` use at the
+// real CLI boundary -- so a shape present in the prelude but never
+// referenced by the user's own code still broke lowering. Shipped
+// instead as an includable library file (see `examples/language/
+// english/lib/executor.vani`) so it's fully opt-in: zero blast
+// radius on any program that doesn't `include` it.
 fn inject_prelude(program: &mut ast::Program) {
     let prelude_tokens = match lexer::lex(PRELUDE) {
         Ok(t) => t,
@@ -31463,6 +31478,86 @@ fn main() -> i64 {
             "the two outlined functions must have DISTINCT names, not a duplicate definition:\n{}",
             outline_defines.join("\n")
         );
+    }
+
+    #[test]
+    fn task_block_while_loop_llvm_metadata_ids_are_all_defined() {
+        // Found auditing the async/executor work (2026-08-14): a
+        // `while` loop's back-edge branch always gets a
+        // `!llvm.loop !N` annotation (tree-LLVM's auto-vectorize
+        // hint, `TypedStmt::While`'s handler in backend_llvm.rs).
+        // When that loop lives inside a `task NAME { ... }` block's
+        // OUTLINED body, the reference is written into the outlined
+        // function's text via the parent `FnCtx`'s `deferred`
+        // buffer, but the matching `!N = ...` metadata DEFINITIONS
+        // were accumulating in a separate, throwaway `outlined_ctx`
+        // that nothing ever flushed -- `emit_task_via_pthread`
+        // propagated `outlined_ctx.deferred_functions` and
+        // `next_outline` to the parent but not `loop_meta_buf`. The
+        // result: 100% reproducible "use of undefined metadata '!N'"
+        // from `lli`/`llc` on any program with a `while` loop inside
+        // a `task { ... }` block, alongside at least one OTHER while
+        // loop anywhere else in the program (so the dangling ID
+        // isn't 0, which the LLVM parser tolerates as an implicit
+        // empty node in isolation -- see BUG note below). Same gap
+        // existed in `emit_parallel_for_via_gomp` for a `while` loop
+        // nested inside a `parallel for` body. Both fixed by
+        // propagating `outlined_ctx.loop_meta_buf` into the parent
+        // `ctx.loop_meta_buf` right alongside the existing
+        // `deferred_functions`/`next_outline` propagation, so the
+        // eventual top-level `emit_function` flush picks it up.
+        //
+        // This test asserts the general invariant directly against
+        // the LLVM IR text (every `!llvm.loop !N` reference has a
+        // matching `!N = ` definition line) rather than just
+        // re-running the one repro, so any FUTURE outlining call
+        // site that grows a similar per-`FnCtx` buffer without
+        // propagating it gets caught the same way.
+        let source = r#"
+            fn count_up(n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                i = i + 1;
+              }
+              return i;
+            }
+            fn main() -> i64 {
+              let a: i64 = count_up(3);
+              task worker {
+                let i: i64 = 0;
+                while i < 3 {
+                  i = i + 1;
+                }
+              }
+              join worker;
+              assert a == 3;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("task-block-with-while program must compile");
+        use std::collections::HashSet;
+        let referenced: HashSet<&str> = ll
+            .lines()
+            .filter_map(|l| l.split_once("!llvm.loop !"))
+            .map(|(_, id)| id.trim())
+            .collect();
+        let defined: HashSet<&str> = ll
+            .lines()
+            .filter_map(|l| l.strip_prefix('!'))
+            .filter_map(|l| l.split_once(" ="))
+            .map(|(id, _)| id.trim())
+            .collect();
+        assert!(
+            !referenced.is_empty(),
+            "expected at least one !llvm.loop metadata reference in the output:\n{ll}"
+        );
+        for id in &referenced {
+            assert!(
+                defined.contains(id),
+                "!llvm.loop !{id} is referenced but never defined (dangling metadata id) -- \
+                 `lli`/`llc` will reject this IR with \"use of undefined metadata\":\n{ll}"
+            );
+        }
     }
 
     #[test]

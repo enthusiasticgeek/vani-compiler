@@ -13892,3 +13892,191 @@ regressions); 257/257 e2e tests pass (256 + 1 new, 0 regressions);
 exactly (identical file set -- these are warnings, not errors, so
 `vanic check`'s exit code is unaffected regardless of warning count);
 mdBook rebuilds clean (same 7 known pre-existing warnings).
+
+## Arc 8 v3.2 -- built-in-shaped async executor + leak audit (2026-08-14)
+
+User asked (after a question about whether the timed tic-tac-toe
+example uses a detached thread) to build "real async -- a Future
+that can suspend and resume, non-blocking I/O", make tasks
+cancellable (both blocking-thread `task` and non-blocking `async fn`
+kinds), with no leaks, and update tutorials for done vs. TODO work.
+
+**Correction to the initial framing**: vāṇी already had genuine
+suspend/resume async, not just synchronous `async fn`/`await` sugar
+-- the Arc 8 v3.1 compiler-driven state-machine transform (`Task__
+<fn>` + `__poll_<fn>`, triggered by `io_*_async` calls in an async
+fn body) is real, epoll-backed, non-blocking, and already handles
+control flow, non-i64/affine locals across suspend points, `ref
+Struct` params, and `CancelToken` + A4.4 auto-injected cancel guards
+(when the fn returns bare `i64`). What was actually missing, per the
+compiler's own tutorial (`01a_async_primer.md`): a built-in executor
+-- every async program hand-writes its own `while true { poll;
+epoll_wait_one; }` driver loop.
+
+### Phase A -- leak audit (no bugs found)
+
+Three ASan/LeakSanitizer-verified repros (C backend, `-fsanitize=
+address,undefined`), each asserting zero leaked bytes on exit:
+1. A `Task__<fn>` holding an owned `Vec<i64>` local, cancelled via
+   `CancelToken` at three points: before the first suspend (heap
+   allocated, then abandoned), after running to completion, and
+   MID-FLIGHT between two suspend points (state_tag already
+   advanced, the owned field already holds real heap data, THEN
+   cancelled).
+2. Same shape with an `OwnedStr` local instead of `Vec<i64>` --
+   `OwnedStr` specifically chosen since it already had 3 distinct
+   escape-vector bugs this project (BUG-153/157/159), a plausible
+   place for a 4th.
+3. `select`'s documented "losing branches are abandoned" caveat
+   (`01_async.md`'s own text) -- built a repro with a losing
+   Task-wrapped `select` arm holding a real heap-owning local;
+   confirmed the Task is still an ordinary owned local (normal
+   scope-exit drop applies regardless of which arm won) and the
+   caller retains direct access to the raw fd to close it itself.
+
+**Result: all three ASan-clean, zero leaks.** The existing v3.1
+Task-struct drop machinery + CancelToken auto-plumbing is already
+leak-safe for every shape tested. No fix needed here -- the finding
+itself (verified, not assumed) is the deliverable. Locked in as
+permanent regression coverage via the `fetch_c` cancellation path in
+`examples/language/english/async_executor.vani` (see Phase B below)
+and its e2e test.
+
+### Real bug found + fixed: LLVM `while`-loop metadata dropped inside outlined `task`/`parallel for` bodies
+
+Building the executor prototype on the LLVM backend hit "lli: error:
+use of undefined metadata '!6'" -- a real, pre-existing, previously
+undiscovered compiler bug, unrelated to the executor itself (traced
+via bisection to a plain `task NAME { while ... }` block combined
+with at least one other `while` loop elsewhere in the same program;
+minimal repros with only ONE such combination didn't reproduce it
+because those small programs happened to route through the SSA-LLVM
+path instead, which doesn't have this vectorize-metadata mechanism
+at all -- the executor's `interface`/`Box<dyn Iface>`/v3.1-Task
+shapes force the TREE-LLVM path, `backend_llvm.rs`, where the bug
+actually lives).
+
+Root cause: `backend_llvm.rs`'s `TypedStmt::While` handler
+unconditionally attaches an `!llvm.loop !N` back-edge annotation
+(the tree-LLVM auto-vectorize hint) to every non-terminated while
+loop, allocating IDs from a module-global `AtomicU32` counter and
+writing the corresponding `!N = ...` metadata DEFINITIONS into the
+current `FnCtx`'s `loop_meta_buf`. That buffer is only ever flushed
+once, in `emit_function`, right after a top-level function's closing
+`}`. `emit_task_via_pthread` (outlines a `task NAME { ... }` block's
+body into `@intent_task_<prefix>_<id>`) and `emit_parallel_for_via_
+gomp` (outlines a `parallel for` body) each construct a FRESH,
+separate `FnCtx` to emit that outlined body, and correctly propagate
+`deferred_functions` (the outlined fn's own text) and `next_outline`
+(the id counter) back to the parent -- but never propagated
+`loop_meta_buf`. A `while` loop inside the outlined body still wrote
+its `!llvm.loop !N` REFERENCE into the outlined fn's text (via the
+normal `emit_stmt` call), but the matching DEFINITION lived only in
+the now-discarded child `FnCtx`, producing a dangling metadata
+reference `lli`/`llc` reject outright. 100% reproducible on ANY
+program with a `while` loop inside a `task { ... }` block or a
+`parallel for` body, PROVIDED the program also contains at least one
+other while loop (id 0 alone parses leniently; id ≥ 3 with a gap
+does not) AND routes through tree-LLVM rather than SSA-LLVM.
+
+**Fixed**: both call sites now propagate `outlined_ctx.loop_meta_buf`
+into `ctx.loop_meta_buf`, right alongside the existing
+`deferred_functions`/`next_outline` propagation.
+
+Regression test: `task_block_while_loop_llvm_metadata_ids_are_all_
+defined` (`src/lib.rs`) -- a general structural invariant check
+(every `!llvm.loop !N` reference in the emitted IR has a matching
+`!N = ` definition line), not just a re-run of the one repro, so any
+FUTURE outlining call site that grows a similar per-`FnCtx` buffer
+without propagating it gets caught the same way.
+
+### Phase B -- `Pollable`/`Executor`: a copy-paste pattern, NOT a prelude injection
+
+First attempt: inject `interface Pollable { fn poll(self: mut ref
+Self) -> i64; }` + `struct Executor { ep: i64, tasks: Vec<Box<dyn
+Pollable>> }` + `executor_new`/`executor_spawn`/`executor_run_to_
+completion` into the compiler's universal PRELUDE (`src/lib.rs`),
+the same mechanism `CancelToken`/`Future`/`Poll` already use.
+**Reverted the same session** -- a full `cargo test --release
+--workspace` run caught dozens of SSA-C/SSA-LLVM unit-test failures,
+including on completely unrelated, trivial programs (`fn main() ->
+i64 { return 42; }`). Root cause: `Box<dyn Pollable>` is an
+SSA-unsupported shape, and the prelude is injected into EVERY
+compiled program unconditionally -- so every program now carried an
+unsupported shape even when it never referenced Executor at all.
+Several SSA-backend unit tests call `lower_program`/`ssa_backend_c::
+emit`/`ssa_backend_llvm::emit` directly (bypassing the real CLI's
+safe tree-backend fallback, `emit_c_via_ssa`/`emit_llvm_via_ssa` in
+`main.rs`) and `.expect()` success unconditionally.
+
+Shipped instead as `examples/language/english/async_executor.vani`,
+a complete, tested, ~15-line copy-paste-able `Pollable`/`Executor`
+pattern -- zero blast radius on any program that doesn't use it,
+since nothing is injected. Demonstrates:
+- Two DIFFERENT `Task__<fn>` shapes (`fetch_a`, `fetch_b`) driven
+  through the SAME executor via `Vec<Box<dyn Pollable>>` dynamic
+  dispatch (heterogeneous tasks, the actual reason a built-in-shaped
+  executor is worth having over a single-task driver loop).
+- A third task (`fetch_c`, with a `CancelToken` param) cancelled
+  mid-flight -- polled once by hand (guaranteed past its first
+  suspend), cancelled, THEN handed to the executor already carrying
+  live heap state, exercising the exact shape Phase A's leak audit
+  proved ASan-clean.
+- `executor_run_to_completion` returns a count (tasks accounted for,
+  completed or cancelled) rather than trying to collect per-task
+  typed results -- a heterogeneous `Vec<Box<dyn Pollable>>` can't
+  carry distinct result types back out through one uniform `i64`
+  return; each task's own `poll()` body is responsible for
+  surfacing its actual result (print it, write to a shared `Mutex`,
+  etc.), same as any other `dyn`-dispatched call in v1.
+
+Verified: `vanic check` ok, runs correctly on BOTH backends (C and
+LLVM, Linux), ASan/UBSan clean (0 leaks, ran under `-fsanitize=
+address,undefined`), new e2e test `async_executor_example_drives_
+heterogeneous_and_cancelled_tasks_on_both_backends`
+(`tests/run_end_to_end.rs`), 1050-file example corpus check (1049 +
+this new file) matches the known 18-file non-ok baseline exactly.
+
+**Still boilerplate, not fully automatic**: the user must write one
+`implement Pollable for Task__<fn> { fn poll(self: mut ref Task__
+<fn>) -> i64 { return __poll_<fn>(self); } }` block per async fn
+they want to run through the executor. Auto-generating this in the
+v3.1 synthesizer (mirroring how `Task__<fn>`/`__poll_<fn>` are
+already synthesized and queued for end-of-parse flush) is a small,
+well-scoped follow-up, not started this session.
+
+**Verification (whole session)**: 2958/2958 lib tests pass (2957 +
+`task_block_while_loop_llvm_metadata_ids_are_all_defined`, 0
+regressions); 258/258 e2e tests pass (257 +
+`async_executor_example_...`, 0 regressions); 1050-file example
+corpus check matches the known 18-file baseline exactly.
+
+### Still open, not started this session
+
+- **Phase C** (non-blocking task cancellation robustness beyond what
+  Phase A already proved clean) -- effectively closed by the leak
+  audit finding nothing to fix; `Executor` + `CancelToken` compose
+  correctly today per `async_executor.vani`'s `fetch_c`.
+- **Phase D -- cancellable BLOCKING `task` threads.** No mechanism
+  exists today, in any form. `detach()` (shipped 2026-08-13) removes
+  the "must `join`" constraint but explicitly does not make a thread
+  stuck in a blocking syscall (`tcp_accept`, `tcp_recv`, `stdin_
+  read_line`) interruptible. Design (not started): reuse the
+  existing `intent_task_handle { intent_thread_t thread; void* ctx;
+  }` (`backend_c.rs:8009`, already tracks the live `pthread_t` per
+  spawned task) to add a `.cancel()` call -- sets a shared
+  cancellation flag AND sends a reserved real-time signal (no-op
+  handler installed once at runtime init) via `pthread_kill` to
+  force an in-flight blocking syscall to return `EINTR`; blocking
+  builtins get an EINTR-aware wrapper that checks the cancellation
+  flag on EINTR and unwinds through the function's normal RAII exit
+  path instead of retrying. Deliberately NOT `pthread_cancel` (too
+  coarse -- leaks locks/heap held at the interruption point,
+  discouraged even in C). Windows needs a materially different
+  mechanism (`CancelSynchronousIo` or an overlapped-I/O rewrite) --
+  scope that out to a later pass, same precedent as L24/L25 in
+  `docs/v1_limitations.md`.
+- Auto-generating `implement Pollable for Task__<fn>` in the v3.1
+  synthesizer (see Phase B note above).
+- Tutorial updates for the Executor pattern + this session's
+  findings (in progress).

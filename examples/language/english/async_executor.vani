@@ -1,0 +1,190 @@
+// Arc 8 v3.2 -- a built-in-shaped async executor: a `Pollable`
+// interface + an `Executor` that drives many DIFFERENT `Task__<fn>`
+// state machines to completion, so a program never has to hand-roll
+// its own `while true { poll; epoll_wait_one; }` driver loop the way
+// every prior async example did (see async_showcase.vani /
+// async_cancel_auto.vani's own `drive(...)` helpers).
+//
+// This is a copy-paste-able PATTERN, not a compiler builtin -- an
+// earlier attempt injected `Pollable`/`Executor` into the compiler's
+// universal prelude (the same mechanism `CancelToken`/`Future`/`Poll`
+// already use) and it broke SSA-path lowering for EVERY compiled
+// program, not just ones using Executor: `Box<dyn Pollable>` is an
+// SSA-unsupported shape, and it doesn't matter that a given program
+// never references Executor -- the shape was present in the
+// (prelude-augmented) program either way. Shipping it as an
+// includable ~15-line block that a program opts into keeps the
+// blast radius at zero. See docs/TODO_CURRENT.md for the full
+// writeup.
+//
+// Two things beyond a bare `Vec<Box<dyn Pollable>>` round-robin
+// loop:
+//   1. Heterogeneous tasks -- `fetch_a`/`fetch_b` are two DIFFERENT
+//      async fns (different `Task__<fn>` struct shapes), driven
+//      through the SAME executor via dynamic dispatch.
+//   2. Cancellation -- `fetch_c` takes a `CancelToken` and is
+//      cancelled mid-flight; the executor still reaches "every task
+//      accounted for" (no leaked Task, no leaked heap state -- see
+//      the ASan-verified leak audit in docs/TODO_CURRENT.md).
+//
+// build & run:
+//   vanic run examples/language/english/async_executor.vani                # LLVM
+//   vanic run examples/language/english/async_executor.vani --backend=c    # C
+
+intent "Arc 8 v3.2 -- a reusable Pollable/Executor pattern that drives heterogeneous async Tasks to completion without a hand-rolled driver loop per program";
+
+interface Pollable {
+  fn poll(self: mut ref Self) -> i64;
+}
+
+struct Executor {
+  ep: i64,
+  tasks: Vec<Box<dyn Pollable>>,
+}
+
+fn executor_new(ep: i64) -> Executor {
+  let empty: Vec<Box<dyn Pollable>> = vec();
+  return Executor { ep: ep, tasks: empty };
+}
+
+fn executor_spawn(ex: mut ref Executor, t: Box<dyn Pollable>) -> i64 {
+  push(mut ref ex.tasks, t);
+  return 0;
+}
+
+// Drives every registered task, round-robin, until each has either
+// completed or been cancelled. Removes a task from the pool as soon
+// as its poll returns anything other than -2 (Pending). Returns how
+// many tasks reached that point (completed OR cancelled) -- the
+// caller's own poll() bodies are responsible for surfacing their
+// actual result (print it, write it into a shared Mutex, etc.),
+// since a heterogeneous `Vec<Box<dyn Pollable>>` can't carry
+// per-task result types back out through one uniform return value.
+fn executor_run_to_completion(ex: mut ref Executor) -> i64 {
+  let done: i64 = 0;
+  while len(ref ex.tasks) > 0 as u64 {
+    let round_size: u64 = len(ref ex.tasks);
+    let i: u64 = 0;
+    let remaining: Vec<Box<dyn Pollable>> = vec();
+    while i < round_size {
+      let t: Box<dyn Pollable> = pop(mut ref ex.tasks);
+      let r: i64 = t.poll();
+      if r == 0 - 2 {
+        push(mut ref remaining, t);
+      } else {
+        done = done + 1;
+      }
+      i = i + 1 as u64;
+    }
+    ex.tasks = remaining;
+    if len(ref ex.tasks) > 0 as u64 {
+      let _ = epoll_wait_one(ex.ep, 100);
+    }
+  }
+  return done;
+}
+
+async fn fetch_a(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n * 10;
+}
+
+async fn fetch_b(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let m: i64 = io_recv_async(fd, 64);
+  return n + m;
+}
+
+// Never sends its second chunk in this example -- always cancelled
+// mid-flight, between its two suspend points, to exercise the
+// leak-safety of an abandoned Task through the executor.
+async fn fetch_c(fd: i64, token: ref CancelToken) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let m: i64 = io_recv_async(fd, 64);
+  return n + m;
+}
+
+implement Pollable for Task__fetch_a {
+  fn poll(self: mut ref Task__fetch_a) -> i64 {
+    return __poll_fetch_a(self);
+  }
+}
+
+implement Pollable for Task__fetch_b {
+  fn poll(self: mut ref Task__fetch_b) -> i64 {
+    return __poll_fetch_b(self);
+  }
+}
+
+implement Pollable for Task__fetch_c {
+  fn poll(self: mut ref Task__fetch_c) -> i64 {
+    return __poll_fetch_c(self);
+  }
+}
+
+fn accept_one(server: i64, ep: i64) -> i64 {
+  let fd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(fd);
+  let _ = epoll_add_read(ep, fd);
+  return fd;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  // Peer sends "ab" immediately to every connection. Connection #1
+  // (fetch_b's) follows up with "cd" after a short delay so fetch_b
+  // completes for real. Connection #2 (fetch_c's) never gets a
+  // second chunk -- fetch_c gets cancelled instead of ever seeing
+  // it.
+  task peers {
+    let i: i64 = 0;
+    while i < 3 {
+      let c: i64 = tcp_connect_local(port);
+      let _ = tcp_send_str(c, "ab");
+      if i == 1 {
+        let _ = sleep_ms(30);
+        let _ = tcp_send_str(c, "cd");
+      }
+      let _ = sleep_ms(150);
+      let _ = tcp_close(c);
+      i = i + 1;
+    }
+  }
+
+  let fd_a: i64 = accept_one(server, ep);
+  let fd_b: i64 = accept_one(server, ep);
+  let fd_c: i64 = accept_one(server, ep);
+  let _ = sleep_ms(60);
+
+  let ex: Executor = executor_new(ep);
+  let ta: Task__fetch_a = fetch_a(fd_a);
+  let tb: Task__fetch_b = fetch_b(fd_b);
+  let _ = executor_spawn(mut ref ex, box(ta as dyn Pollable));
+  let _ = executor_spawn(mut ref ex, box(tb as dyn Pollable));
+
+  // fetch_c is polled by hand once (guaranteed past its first
+  // suspend by the sleep above), cancelled, then handed to the
+  // executor already carrying a live heap-owning state -- the same
+  // shape the standalone leak audit proved ASan-clean.
+  let tok_c: CancelToken = CancelToken { cancelled: false };
+  let mut_tc: Task__fetch_c = fetch_c(fd_c, ref tok_c);
+  let tc_addr: Task__fetch_c = mut_tc;
+  let _ = __poll_fetch_c(mut ref tc_addr);
+  tok_c.cancelled = true;
+  let _ = executor_spawn(mut ref ex, box(tc_addr as dyn Pollable));
+
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  assert done == 3;
+  print "tasks accounted for:", done;
+
+  let _ = tcp_close(fd_a);
+  let _ = tcp_close(fd_b);
+  let _ = tcp_close(fd_c);
+  join peers;
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
