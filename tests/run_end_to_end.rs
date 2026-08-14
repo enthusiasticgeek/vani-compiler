@@ -15315,3 +15315,95 @@ fn main() -> i64 {
         );
     }
 }
+
+#[test]
+fn deny_warnings_flag_turns_a_warning_into_a_build_failure() {
+    // `--deny-warnings` (2026-08-14): a global pre-scan flag
+    // (removed from argv before any subcommand-specific parser sees
+    // it, sets VANIC_DENY_WARNINGS) that escalates any
+    // Severity::Warning diagnostic into a build failure, CI-style
+    // strictness akin to rustc's `-D warnings` / gcc's `-Werror`.
+    // Without the flag: warns but succeeds. With the flag: fails,
+    // and the rendered diagnostic says "error:", not "warning:".
+    let src = write_tmp_vani(
+        "deny_warnings_flag",
+        r#"
+fn main() -> i64 {
+  for i from 5 to 0 {
+    print "should never print";
+  }
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let without_flag = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(
+        without_flag.status.success(),
+        "without --deny-warnings, a warning-only diagnostic must not fail 'check'; \
+         status {:?}, stderr: {}",
+        without_flag.status,
+        String::from_utf8_lossy(&without_flag.stderr)
+    );
+
+    let with_flag = Command::new(binary)
+        .args(["check", "--deny-warnings", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check --deny-warnings should execute");
+    assert!(
+        !with_flag.status.success(),
+        "--deny-warnings must turn a warning-only diagnostic into a build failure; \
+         status {:?}, stdout: {}, stderr: {}",
+        with_flag.status,
+        String::from_utf8_lossy(&with_flag.stdout),
+        String::from_utf8_lossy(&with_flag.stderr)
+    );
+    let with_flag_stderr = String::from_utf8_lossy(&with_flag.stderr);
+    assert!(
+        with_flag_stderr.contains("error:") && with_flag_stderr.contains("never executes"),
+        "expected the escalated diagnostic to render with an 'error:' label, got:\n{}",
+        with_flag_stderr
+    );
+    assert!(
+        !with_flag_stderr.contains("warning:"),
+        "must not still say 'warning:' once escalated by --deny-warnings, got:\n{}",
+        with_flag_stderr
+    );
+
+    // The flag must also work for `run`, not just `check`, and must
+    // not affect a warning-free file at all.
+    let clean_src = write_tmp_vani(
+        "deny_warnings_flag_clean",
+        r#"
+fn main() -> i64 {
+  print "clean";
+  return 0;
+}
+"#,
+    );
+    let clean_run = Command::new(binary)
+        .args(["run", "--deny-warnings", clean_src.to_str().unwrap()])
+        .output()
+        .expect("intentc run --deny-warnings should execute");
+    assert!(
+        clean_run.status.success(),
+        "--deny-warnings on a warning-free file must still succeed; status {:?}, stderr: {}",
+        clean_run.status,
+        String::from_utf8_lossy(&clean_run.stderr)
+    );
+
+    let denied_run = Command::new(binary)
+        .args(["run", "--deny-warnings", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run --deny-warnings should execute");
+    assert!(
+        !denied_run.status.success(),
+        "--deny-warnings must also fail 'run' (not just 'check') on a warning-only file; \
+         status {:?}",
+        denied_run.status
+    );
+}

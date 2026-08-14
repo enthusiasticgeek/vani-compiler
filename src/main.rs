@@ -1419,7 +1419,26 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<ExitCode, String> {
-    let args: Vec<String> = env::args().collect();
+    let mut args: Vec<String> = env::args().collect();
+
+    // 2026-08-14: `--deny-warnings` -- treat any Severity::Warning
+    // diagnostic as a build-failing error (CI-style strictness, akin
+    // to rustc's `-D warnings` / gcc's `-Werror`). Recognized as a
+    // global pre-scan (removed from `args` before any subcommand-
+    // specific parser sees it) rather than threaded through every
+    // individual arg-parsing function (`parse_run_args`,
+    // `parse_build_args`, `parse_emit_args`, `check`'s own loop,
+    // ...) -- matches this codebase's existing convention for
+    // similar cross-cutting flags (`--no-verify` sets
+    // `VANIC_NO_VERIFY`, `--smt-debug` sets `VANIC_SMT_DEBUG`) of
+    // using an env var rather than a signature change reaching every
+    // call site. Consulted by `compile_path_or_report` (the shared
+    // choke point for build/run/emit) and the `check` command's own
+    // warning-handling.
+    if let Some(pos) = args.iter().position(|a| a == "--deny-warnings") {
+        args.remove(pos);
+        std::env::set_var("VANIC_DENY_WARNINGS", "1");
+    }
 
     // Deprecation warning when invoked as `intentc` (legacy alias).
     // Only emit when stderr is an interactive terminal so that piped
@@ -1532,9 +1551,60 @@ fn run() -> Result<ExitCode, String> {
             let mut combined_map = vani::diagnostic::FileMap::new();
             let mut combined_diags: Vec<vani::diagnostic::Diagnostic> = Vec::new();
 
+            let deny_warnings = std::env::var("VANIC_DENY_WARNINGS").is_ok();
             for file in &files {
                 match vani::compile_path(file) {
-                    Ok((checked, map)) => {
+                    Ok((mut checked, map)) => {
+                        // `--deny-warnings`: any warning turns this
+                        // file into a failure, same accounting as a
+                        // real error (severities flipped to Error so
+                        // the rendered label reads "error:").
+                        if deny_warnings && !checked.warnings.is_empty() {
+                            failed += 1;
+                            for w in &mut checked.warnings {
+                                w.severity = vani::diagnostic::Severity::Error;
+                            }
+                            if json {
+                                let shift = combined_map.extend_with(&map);
+                                for d in &checked.warnings {
+                                    let mut shifted = d.clone();
+                                    shifted.span = vani::span::Span::new(
+                                        d.span.start + shift,
+                                        d.span.end + shift,
+                                    );
+                                    shifted.related = d
+                                        .related
+                                        .iter()
+                                        .map(|(s, note)| {
+                                            (
+                                                vani::span::Span::new(
+                                                    s.start + shift,
+                                                    s.end + shift,
+                                                ),
+                                                note.clone(),
+                                            )
+                                        })
+                                        .collect();
+                                    combined_diags.push(shifted);
+                                }
+                            } else if files.len() == 1 {
+                                return Err(
+                                    vani::diagnostic::format_diagnostics_with_files(
+                                        &map,
+                                        &checked.warnings,
+                                    ),
+                                );
+                            } else {
+                                eprintln!(
+                                    "{}",
+                                    vani::diagnostic::format_diagnostics_with_files(
+                                        &map,
+                                        &checked.warnings,
+                                    )
+                                );
+                            }
+                            continue;
+                        }
                         if !json && files.len() > 1 {
                             println!("ok: {}", file.display());
                         }
@@ -3368,8 +3438,8 @@ fn parse_emit_args(
 fn compile_path_or_report(
     _path: &Path,
 ) -> Result<vani::checker::CheckedProgram, String> {
-    vani::compile_path(_path)
-        .map(|(c, map)| {
+    match vani::compile_path(_path) {
+        Ok((mut c, map)) => {
             // 2026-08-14: print any Severity::Warning diagnostics
             // (e.g. a `to`/`downto` for-loop whose constant bounds
             // contradict the keyword) to stderr -- non-fatal, the
@@ -3378,17 +3448,37 @@ fn compile_path_or_report(
             // cross-compile/QEMU variants) funnels through this one
             // function, so this is the single place that needs to
             // know about warnings at all.
+            //
+            // `--deny-warnings` (env var VANIC_DENY_WARNINGS, set by
+            // the global pre-scan in `run()`) escalates: any warning
+            // present turns this into a build failure, same as a
+            // real error -- rustc `-D warnings` / gcc `-Werror`
+            // equivalent. Flip each warning's own severity to Error
+            // before rendering so the printed label reads "error:",
+            // not "warning:", matching the CI-fails-so-treat-it-like-
+            // one framing.
             if !c.warnings.is_empty() {
+                if std::env::var("VANIC_DENY_WARNINGS").is_ok() {
+                    for w in &mut c.warnings {
+                        w.severity = vani::diagnostic::Severity::Error;
+                    }
+                    return Err(vani::diagnostic::format_diagnostics_with_files(
+                        &map,
+                        &c.warnings,
+                    ));
+                }
                 eprint!(
                     "{}",
                     vani::diagnostic::format_diagnostics_with_files(&map, &c.warnings)
                 );
             }
-            c
-        })
-        .map_err(|(map, diagnostics)| {
-            vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
-        })
+            Ok(c)
+        }
+        Err((map, diagnostics)) => Err(vani::diagnostic::format_diagnostics_with_files(
+            &map,
+            &diagnostics,
+        )),
+    }
 }
 
 /// BUG-130: `ExitStatus::code()` returns `None` when the child was

@@ -763,6 +763,27 @@ fn check_impl(
     let mut diagnostics = Vec::new();
     let mut program = program;
 
+    // 2026-08-14: style warnings (self-assignment, unused variable,
+    // unused parameter). All Severity::Warning -- see the
+    // `to`/`downto` bounds check inside `check_one_stmt`'s
+    // `Stmt::For` arm for why these default to non-fatal: an
+    // "unused variable" in particular has a real, common, LEGITIMATE
+    // shape in this language (a `Guard`/`ReadGuard`/`WriteGuard`
+    // binding kept alive purely for its scope-exit Drop, never
+    // otherwise read) that a hard-error version would have broken
+    // across the example corpus. MUST run here, on the freshly-
+    // parsed program, BEFORE `flatten_modules_in_program`/
+    // `lambda_lift_program` (below) rewrite it -- lambda-lifting in
+    // particular hoists `let f = fn(x){...}; f(5);`'s closure body
+    // into a synthetic top-level fn and rewrites the call site in a
+    // way `stmt_mentions_var`/`expr_mentions_var` don't reliably
+    // recognize as still referencing `f` (confirmed false-positive:
+    // a captured-variable closure called by name looked "unused").
+    // Neither module-flattening nor lambda-lifting can affect a
+    // LOCAL variable/parameter name's own self-reference, so
+    // checking the pre-desugar shape is both correct and safer.
+    check_style_warnings(&program, &mut diagnostics);
+
     // Closure #242: flatten modules into the global program
     // before anything else runs. Items inside a module
     // `M { fn bar() â€¦ }` get renamed to `M::bar`, and any
@@ -3438,7 +3459,17 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         ExprKind::Binary { left, right, .. } => {
             expr_mentions_var(left, name) || expr_mentions_var(right, name)
         }
-        ExprKind::Call { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
+        // 2026-08-14 fix: the callee position matters too, not just
+        // the args -- `ExprKind::Call { name: "add3", args: [5] }`
+        // is how `add3(5)` parses whether `add3` is a top-level fn
+        // OR a local closure-valued variable (that distinction isn't
+        // resolved until type-checking); missing this made the new
+        // unused-variable warning false-positive on every closure
+        // called by name (`let add3 = fn(x){...}; add3(5);` looked
+        // "unused" since only the call's ARGS were checked).
+        ExprKind::Call { name: callee_name, args, .. } => {
+            callee_name == name || args.iter().any(|a| expr_mentions_var(a, name))
+        }
         ExprKind::MethodCall { receiver, args, .. } => {
             expr_mentions_var(receiver, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }
@@ -3483,6 +3514,157 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         }
         ExprKind::TaskSpawnCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::TaskJoinExpr { name: n, .. } => n == name,
+    }
+}
+
+/// 2026-08-14: entry point for the new style-warning checks --
+/// unused parameter (per function), then per-statement checks
+/// (self-assignment, unused variable) recursively over every
+/// function body via `check_style_warnings_in_block`. All pushed
+/// diagnostics are `.as_warning()`.
+fn check_style_warnings(program: &Program, diagnostics: &mut Vec<Diagnostic>) {
+    for function in &program.functions {
+        // `extern "C" fn foo(x: Str) -> i32;` (an FFI declaration)
+        // has no body at all -- every parameter would otherwise be
+        // flagged "unused" (an empty body trivially never mentions
+        // any name), which is nonsensical for a signature-only
+        // declaration whose params exist to describe the C symbol's
+        // calling convention, not to be referenced by vāṇी code.
+        // Confirmed as a real false positive against `ffi.vani`.
+        if function.is_extern {
+            continue;
+        }
+        for param in &function.params {
+            if param.name.starts_with('_') {
+                continue;
+            }
+            if !function.body.iter().any(|s| stmt_mentions_var(s, &param.name)) {
+                diagnostics.push(
+                    Diagnostic::new(
+                        param.span,
+                        format!(
+                            "unused parameter '{}' -- never referenced in the body of '{}'",
+                            param.name, function.name,
+                        ),
+                    )
+                    .with_elaboration(vec![
+                        format!(
+                            "'{}' is declared as a parameter but never appears anywhere \
+                             in '{}'s body.",
+                            param.name, function.name,
+                        ),
+                        "If this is intentional (e.g. matching a required call signature, \
+                         or a callback parameter the implementation doesn't need), prefix \
+                         the name with an underscore ('_name') to silence this warning."
+                            .to_string(),
+                    ])
+                    .as_warning(),
+                );
+            }
+        }
+        check_style_warnings_in_block(&function.body, diagnostics);
+    }
+}
+
+/// Recursively walks one block (a function body, or the body of any
+/// nested `if`/`while`/`for`/etc.), checking each statement for
+/// self-assignment and each `let` for being unused for the REST of
+/// this same block (a `let` in a nested block only needs checking
+/// against its own block's remaining statements -- once the block
+/// ends, the binding is out of scope regardless). Mirrors
+/// `stmt_mentions_var`'s own match arms exhaustively so a future new
+/// `Stmt` variant with a nested body can't silently skip this walk.
+fn check_style_warnings_in_block(body: &[Stmt], diagnostics: &mut Vec<Diagnostic>) {
+    use crate::ast::Stmt as S;
+    for (i, stmt) in body.iter().enumerate() {
+        match stmt {
+            S::Assign { name, expr, span } => {
+                if let ExprKind::Var(rhs_name) = &expr.kind {
+                    if rhs_name == name {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                *span,
+                                format!(
+                                    "self-assignment '{name} = {name}' has no effect",
+                                ),
+                            )
+                            .with_elaboration(vec![
+                                format!(
+                                    "'{name}' is assigned its own current value -- this \
+                                     statement changes nothing."
+                                ),
+                                "This is usually a typo (meant a different variable on \
+                                 one side, e.g. `x = y;`), or a leftover from a refactor \
+                                 that should be deleted."
+                                    .to_string(),
+                            ])
+                            .as_warning(),
+                        );
+                    }
+                }
+            }
+            S::Let { name, span, .. } => {
+                if !name.starts_with('_')
+                    && !body[i + 1..].iter().any(|s| stmt_mentions_var(s, name))
+                {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "unused variable '{name}' -- never referenced after its \
+                                 declaration",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "'{name}' is declared here but never read or otherwise \
+                                 referenced again in this scope."
+                            ),
+                            "If this is intentional -- e.g. a lock guard (Guard<T>/\
+                             ReadGuard<T>/WriteGuard<T>) kept alive only for its \
+                             scope-exit unlock, never read directly -- prefix the name \
+                             with an underscore ('_name') to silence this warning."
+                                .to_string(),
+                        ])
+                        .as_warning(),
+                    );
+                }
+            }
+            S::If { then_body, else_body, .. } => {
+                check_style_warnings_in_block(then_body, diagnostics);
+                check_style_warnings_in_block(else_body, diagnostics);
+            }
+            S::While { body, .. }
+            | S::For { body, .. }
+            | S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. }
+            | S::WhileLet { body, .. } => {
+                check_style_warnings_in_block(body, diagnostics);
+            }
+            S::IfLet { then_body, else_body, .. } => {
+                check_style_warnings_in_block(then_body, diagnostics);
+                check_style_warnings_in_block(else_body, diagnostics);
+            }
+            S::Select { arms, .. } => {
+                for arm in arms {
+                    check_style_warnings_in_block(&arm.body, diagnostics);
+                }
+            }
+            S::LetTuple { .. }
+            | S::Return { .. }
+            | S::Assert { .. }
+            | S::Prove { .. }
+            | S::Print { .. }
+            | S::EPrint { .. }
+            | S::PrintBlock { .. }
+            | S::IndexAssign { .. }
+            | S::FieldAssign { .. }
+            | S::Break { .. }
+            | S::Continue { .. }
+            | S::TaskJoin { .. }
+            | S::Detach { .. } => {}
+        }
     }
 }
 

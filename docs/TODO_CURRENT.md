@@ -13769,10 +13769,126 @@ regressions); 256/256 e2e tests pass (255 + 1 new, 0 regressions);
 exactly (identical file set); mdBook rebuilds clean (same 7 known
 pre-existing warnings).
 
-## Broader audit: other language features where a compiler warning is essential (IN PROGRESS)
+## Broader audit: other language features where a compiler warning is essential (CLOSED)
 
 Requested directly, as a follow-up to the to/downto warning above:
 survey the language for other places where code is syntactically
 valid but semantically almost-certainly-wrong, and no diagnostic
-(error OR warning) currently fires. To be continued in a fresh
-pass -- see the next TODO_CURRENT.md entry once it lands.
+(error OR warning) currently fires.
+
+Survey findings (tested against the real compiler, not guessed):
+already covered as hard errors -- constant literal overflow/cast
+mismatch, constant division-by-zero, `while false`/`if <const-
+false>` unreachable branches, code after an unconditional return/
+break/continue (S-10, MISRA-style). Genuine gaps found, all four
+implemented (below): self-assignment, unused variable, unused
+parameter, identical if/else branches. Lower-priority items noted
+but NOT implemented: redundant identity casts (`x as i64` where x is
+already i64) and `assert`-of-a-tautology -- both low value, no
+evidence of real user confusion.
+
+## Four new style warnings + `--deny-warnings` flag (2026-08-14)
+
+All four `Severity::Warning` (see the to/downto entry above for why
+this diagnostic model exists at all):
+
+- **Self-assignment** (`x = x;`) -- checked in `checker.rs`'s new
+  `check_style_warnings_in_block`, which recursively walks every
+  block-bearing `Stmt` in a function (mirroring `stmt_mentions_var`'s
+  own exhaustive match so a future new `Stmt` variant can't silently
+  skip the walk).
+- **Unused variable** -- same function, per `let`: fires unless the
+  name is referenced in ANY later statement in the same block (via
+  `stmt_mentions_var`) or starts with `_`. The load-bearing design
+  question was whether this would false-positive on this language's
+  own idiomatic RAII pattern (`let g = mutex_lock(x); ...` held only
+  for its scope-exit Drop) -- confirmed clean against the full
+  1049-file corpus: `stmt_mentions_var` already treats a `ref`/
+  `mut ref` call ARGUMENT as a "use", which covers `guard_set(ref g,
+  ...)` and similar.
+- **Unused parameter** -- same shape, per-function, in
+  `check_style_warnings` (the entry point). Exempts `extern "C" fn`
+  declarations entirely (no body at all -- every param would
+  otherwise be flagged; confirmed as a real false positive against
+  `ffi.vani`).
+- **Identical if/else branches** -- separate function in `lib.rs`
+  (`detect_identical_if_else_branches`), NOT `checker.rs`, since it
+  needs the raw source text (no pre-existing span-insensitive Stmt/
+  Expr equality existed to build a proper AST comparison on, and
+  building one just for this check wasn't worth it): compares each
+  branch's whitespace-normalized source slice.
+
+**Two real bugs found and fixed while validating against the
+corpus** (the same "implement -> run full corpus -> fix conflicts"
+workflow the to/downto warning used):
+1. `expr_mentions_var`'s `ExprKind::Call` arm only checked the
+   call's ARGS, never the callee NAME itself -- `let add3 = fn(x)
+   {...}; add3(5);` looked "unused" since only `add3(5)`'s argument
+   (`5`) was checked, not the fact that `add3` is the thing being
+   called. Fixed: `callee_name == name || args.iter().any(...)`.
+   Safe change -- strictly more conservative (adds true results,
+   never removes one), so `stmt_mentions_var`'s original "fusion
+   pass" caller (confirm a binding isn't referenced before eliding
+   it) can only become MORE correct, never less.
+2. Both new checks originally ran on the FULLY-desugared program
+   (after `flatten_modules_in_program`/`lambda_lift_program`), which
+   broke on any closure that CAPTURES an outer variable -- lambda-
+   lifting rewrites a captured closure's call site in a way that no
+   longer textually/structurally matches what the user wrote,
+   independent of bug 1 above (a capture-free closure was fixed by
+   bug 1's fix alone; a capturing one needed this second fix too).
+   Fixed by moving BOTH checks (the checker.rs ones AND lib.rs's
+   identical-branches, via a `program.clone()` snapshot taken before
+   `checker_fn` consumes the original) to run on the freshly-parsed,
+   pre-desugar AST instead -- module-flattening/lambda-lifting can't
+   affect a LOCAL variable/parameter's own self-reference anyway, so
+   checking the pre-desugar shape is strictly more correct.
+
+Found via a genuinely useful validation technique: ran `vanic check`
+across the full 1049-file example corpus, counted total warnings
+(283 initially), then SAMPLED a cross-section (not just the first
+few alphabetically) and manually verified each was a true positive.
+Both bugs above were caught this way -- neither would have been
+obvious from a hand-written unit test alone. Final count: 233
+warnings across the corpus (200 unused-variable, 23 identical-
+branches, 9 unused-parameter, 1 to/downto), all spot-checked true
+positives (mostly deliberate "prove this compiles/drops correctly"
+example snippets that were never meant to "use" their bindings
+beyond that) -- NOT fixed/underscore-prefixed as part of this work;
+that's a separate, optional example-corpus cleanup, not a
+requirement of shipping the warnings correctly.
+
+**`--deny-warnings` flag**: requested directly, mid-implementation.
+CI-style strictness (rustc `-D warnings` / gcc `-Werror` equivalent)
+-- any warning becomes a build failure, rendered with an "error:"
+label instead of "warning:". Implemented as a global pre-scan in
+`main.rs`'s `run()` (removed from `argv` before any subcommand-
+specific parser sees it, sets `VANIC_DENY_WARNINGS=1`) rather than
+threaded through every individual arg-parsing function -- matches
+this codebase's existing convention for `--no-verify`/`--smt-debug`.
+Consulted by `compile_path_or_report` (the shared choke point for
+`build`/`run`/`emit`/`emit-c`) and by `check`'s own warning-handling
+(a separate code path).
+
+Regression tests: 12 new `src/lib.rs` unit tests (positive + negative
+cases for all 4 warnings, both false-positive-fix regressions
+codified explicitly, the extern-fn exemption, the underscore-prefix
+suppression). 2 new `tests/run_end_to_end.rs` CLI-level e2e tests
+(the identical-branches/to-downto combination test from the to/downto
+entry above already covers some of this; a new dedicated
+`deny_warnings_flag_turns_a_warning_into_a_build_failure` test covers
+`check`/`run`, both with and without the flag, both a warning-only
+file and a clean file).
+
+Docs: `tutorials/src/beginner/00_cli_reference.md` gained a
+`--deny-warnings` row in the flags table, a `VANIC_DENY_WARNINGS=1`
+row in the env-var table, and a new "Compiler warnings" section
+listing all 4 categories + the underscore-prefix suppression
+convention.
+
+Verification: 2957/2957 lib tests pass (2945 + 12 new, 0
+regressions); 257/257 e2e tests pass (256 + 1 new, 0 regressions);
+1049-file example corpus check matches the known 18-file baseline
+exactly (identical file set -- these are warnings, not errors, so
+`vanic check`'s exit code is unaffected regardless of warning count);
+mdBook rebuilds clean (same 7 known pre-existing warnings).
