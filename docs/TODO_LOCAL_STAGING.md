@@ -7624,3 +7624,59 @@ Repro: `tools/localfuzz/findings/20260814-054318-backend-divergence-34afd7cbc5/r
 Fix attempt: `tools/localfuzz/findings/20260814-054318-backend-divergence-34afd7cbc5/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-054937-backend-divergence-da492ddb9a
+
+Repro: `tools/localfuzz/findings/20260814-054937-backend-divergence-da492ddb9a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-054937-backend-divergence-da492ddb9a/fix_attempt.md`
+
+**STAGING ENTRY**
+
+VANIC VERSION: vanic-0.5.1.dev1
+
+BENCHMARK: examples/language/romanian/try_question_op.vani
+
+BASE CORPUS FILE: /home/virgo/source/vani-compiler-localfuzz/examples/language/romanian/try_question_op.vani
+
+MUTANT GENERATED SOURCE:
+
+```vani
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/try_question_op.vani              # LLVM
+//   vanic run examples/language/romanian/try_question_op.vani --backend=c  # C
+
+scop "Romanian postfix ? early-return sugar on payloaded enums";
+
+enumerare Opt { Some(i64), None }
+
+functie dublat_q(o: Opt) -> Opt {
+  fie v: i64 = o?;
+  intoarce Opt.Some(v * 2);
+}
+
+functie despacheta_sau(o: Opt, implicit: i64) -> i64 {
+  intoarce potriveste o {
+    Opt.Some(v) atunci v,
+    Opt.None    atunci implicit,
+  };
+}
+
+fn main() -> i64 {
+  fie a: Opt = dublat_q(Opt.Some(9223372036854775807));
+  afirma despacheta_sau(a, 0) == 10;
+
+  fie b: Opt = dublat_q(Opt.None);
+  afirma despacheta_sau(b, 99) == 99;
+
+  scrie "Some(5)? dublat =", despacheta_sau(a, 0);
+  scrie "None? implicit este", despacheta_sau(b, 99);
+  intoarce 0;
+}
+```
+
+RUNNING ON LLVM:
+- STATUS: needs human/front
