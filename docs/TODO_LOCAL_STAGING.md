@@ -7880,3 +7880,14 @@ Repro: `tools/localfuzz/findings/20260814-152330-backend-divergence-7d8bbfc94f/r
 Fix attempt: `tools/localfuzz/findings/20260814-152330-backend-divergence-7d8bbfc94f/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-172920-backend-divergence-1404f02777
+
+Repro: `tools/localfuzz/findings/20260814-172920-backend-divergence-1404f02777/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-172920-backend-divergence-1404f02777/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+In `/home/virgo/source/vani-compiler-localfuzz/examples/language/swahili/iterate.vani`, a mutant/generated source was run with both LLVM and C backends, but it resulted in a backend-divergence error (`index out of bounds`) in the C backend. The bug was discovered during fuzzing of the `kubwa_vec` function, which attempts to find the maximum value in a vector using an index that exceeds its length. The exact repro source is provided, and the observed symptom (backend-divergence) is described. Further investigation is needed to determine the root cause of this issue.
