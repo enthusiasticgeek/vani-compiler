@@ -8654,6 +8654,46 @@ fn monomorphize_type_decls_in_program(
                     }
                 }
             }
+            // BUG-189 (2026-08-14): `Pool<i64>` / `Handle<i64>` (v1:
+            // element is always i64) have a `pool_get` builtin
+            // returning `Option<i64>`, but that builtin's return type
+            // only forced `Option<i64>` to be registered (see
+            // `walk_expr_for_search_builtins` above) when the PROGRAM
+            // ACTUALLY CALLS `pool_get`. The C backend's Pool/Handle
+            // bundle (`emit_intent_pool_helpers_c_body`) always
+            // defines `pool_get` -- and thus always references
+            // `Enum_Option__i64` -- as soon as `Pool<i64>`/`Handle<
+            // i64>` appears ANYWHERE in the program
+            // (`program_uses_i64_pool`), independent of whether the
+            // user's own code calls `pool_get`. A program that only
+            // calls `pool_alloc`/`pool_free` (or forms a `Vec<Handle<
+            // i64>>` without ever calling `pool_get`) hit "unknown
+            // type name 'Enum_Option__i64'" from `cc` because the
+            // typedef was never registered. Registering `Option<i64>`
+            // here -- triggered by the mere presence of the type, like
+            // the HashMap/BTreeMap arm above -- closes that gap
+            // regardless of which Pool/Handle operations the program
+            // actually calls.
+            //
+            // Deliberately NOT `Type::BoundedPtr(_)`: BUG-179 already
+            // fixed the analogous `bptr_new`-without-`bptr_get` gap
+            // the OPPOSITE way -- gating `intent_bptr_i64_get`'s
+            // EMISSION on whether `Option__i64` is already registered,
+            // rather than force-registering `Option__i64` whenever
+            // `BoundedPtr<i64>` appears. Doing both would force
+            // `Option<i64>` (and its C/LLVM typedef) into every
+            // BoundedPtr-using program even when `bptr_get` is never
+            // called -- confirmed by `bug179_bptr_new_without_bptr_
+            // get_does_not_reference_undeclared_option_enum` failing
+            // when BoundedPtr was first added to this arm.
+            Type::Pool(_) | Type::Handle(_) => {
+                let key = ("Option".to_string(), vec![Type::I64]);
+                if enum_templates.contains_key("Option")
+                    && !needed_enums.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                {
+                    needed_enums.push(key);
+                }
+            }
             Type::Tuple(elements) => {
                 for e in elements {
                     collect_apply_in_ty(
@@ -10318,6 +10358,23 @@ fn collect_apply_in_stmt(
                         {
                             ne.push(key);
                         }
+                    }
+                }
+                // BUG-189 (2026-08-14): sibling copy of the same fix in
+                // the prologue `collect_apply_in_ty` -- see its comment
+                // for the full rationale, including why `BoundedPtr`
+                // is deliberately excluded. `Pool<i64>`/`Handle<i64>`
+                // appearing in a `let`'s type annotation (this
+                // walker's whole purpose) must also force `Option<
+                // i64>` registration, or a `Vec<Handle<i64>>` local
+                // never gets it since this is the walker that
+                // actually sees `Stmt::Let` type annotations.
+                Type::Pool(_) | Type::Handle(_) => {
+                    let key = ("Option".to_string(), vec![Type::I64]);
+                    if en.contains_key("Option")
+                        && !ne.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                    {
+                        ne.push(key);
                     }
                 }
                 Type::Tuple(elements) => {
@@ -22411,7 +22468,15 @@ fn check_ref_mut(
                     return CheckedExpr::fallback_integer(span);
                 }
             };
-            let element_ty = match &info.ty {
+            // 2026-08-14 fix: `.deref()` peels off a `Ref`/`RefMut`
+            // wrapper so `mut ref PARAM[i]` also works when PARAM is
+            // itself a `ref Vec<T>` / `mut ref Vec<T>` parameter, not
+            // just an owned local Vec -- mirrors the `mut ref t.field`
+            // arm above, which already used `.deref()` for the same
+            // reason. Whether the wrapper was `Ref` (shared) or
+            // `RefMut` is checked separately below (mutation through
+            // a shared `ref` is still rejected).
+            let element_ty = match info.ty.deref() {
                 Type::Vec(elem) => (**elem).clone(),
                 _ => {
                     // Not a Vec â€” fall through to the regular
@@ -22433,6 +22498,22 @@ fn check_ref_mut(
                     return CheckedExpr::fallback_integer(span);
                 }
             };
+            if info.ty.is_ref() {
+                diagnostics.push(
+                    Diagnostic::new(
+                        array.span,
+                        format!(
+                            "cannot take 'mut ref' on an element of '{}' because it's \
+                             borrowed immutably (&Vec<_>)",
+                            vec_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::alias_mut_with_shared(vec_name),
+                    ),
+                );
+                return CheckedExpr::fallback_integer(span);
+            }
             if info.moved.is_some() {
                 diagnostics.push(
                     Diagnostic::new(
@@ -22471,6 +22552,7 @@ fn check_ref_mut(
                     vec: vec_name.clone(),
                     index: Box::new(checked_idx.expr),
                     element_ty,
+                    vec_ty: info.ty.clone(),
                 },
                 ref_ty,
                 None,

@@ -183,6 +183,13 @@ fn use_pool() -> i64 {
 Full runnable version (double-free + stale-handle behavior
 included): [`examples/language/english/pool.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/pool.vani).
 
+For a real-world (not toy) use of `Pool<T>`/`Handle<T>`, see
+[`examples/language/english/handle_job_queue.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/handle_job_queue.vani):
+a job queue where jobs get cancelled mid-flight while other code
+still holds their handles, and re-checking every handle safely
+skips the cancelled ones (`pool_get` returning `None`) instead of
+crashing or double-freeing.
+
 ### `region { ... }` + `Region` / `ArenaRef<T>` -- compile-time-checked bump arena
 
 ```vani
@@ -274,6 +281,13 @@ function's frame, so the `ArenaRef` it returns is never dangling.
   work in a `Region`-parameter function instead.
 
 Full runnable version: [`examples/language/english/region_arena.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/region_arena.vani).
+
+For a real-world (not toy) use of `region`/`ArenaRef<i64>`, see
+[`examples/language/english/arena_batch_parse.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/arena_batch_parse.vani):
+parsing a batch of comma-separated sensor readings, arena-allocating
+each parsed value, and freeing the entire batch in one O(1) call
+when the `region` ends -- the classic per-batch/per-request/
+per-frame arena pattern compilers, parsers, and servers all use.
 
 ## What's safe vs unsafe in this layer
 

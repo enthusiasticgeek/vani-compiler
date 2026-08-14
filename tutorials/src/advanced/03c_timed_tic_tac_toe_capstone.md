@@ -48,18 +48,32 @@ it's not a workaround-able edge case:
    permanently stuck -- if the read it's doing could itself be told
    "give up after N ms," none of this would be a problem. That's
    exactly what this file's fix provides -- see below.)
-2. **`Task<R>` is affine.** The compiler requires every spawned task
-   to eventually be `join`ed -- no "fire and forget," no dropping a
-   handle. This is enforced at compile time, not a convention.
+2. **`Task<R>` is affine.** Every spawned task must be consumed
+   exactly once, by `join` OR (as of this session) `detach` -- see
+   [Advanced 3](03_concurrency.md#detach----fire-and-forget). At the
+   time this file's design problem first came up, `detach` didn't
+   exist yet, so a "fire and forget" worker genuinely wasn't
+   possible at all -- the program couldn't exit without eventually
+   joining the stuck thread. `detach` now removes that specific
+   constraint (a caller COULD `detach` the blocking-read worker and
+   let `main` exit immediately, leaving the orphaned thread to be
+   reclaimed at process exit) -- but it still doesn't make the
+   underlying `stdin_read_line()` call itself cancellable, and a
+   detached thread still holds stdin open and could still consume
+   the human's next keystroke at the wrong moment (e.g. bleeding
+   into a subsequent prompt). The real fix below is still the better
+   one: a genuinely non-blocking poll needs no thread, no `join`,
+   and no `detach` at all.
 
-Put together: once the timer wins the race, the worker thread is
-still sitting inside a real, blocking `stdin_read_line()` call, it
-cannot be killed, and the program cannot exit without eventually
-joining it -- so the timed-out player's opponent, who already knows
-they won, has to sit and wait for that thread's pending read to
-actually return (a stray keystroke, Ctrl-D, or the process being
-killed) before the process can fully exit. Not a bug -- an honest
-consequence of "no cancellable blocking I/O" combined with "no
+Put together (as things stood before this session added `detach`):
+once the timer wins the race, the worker thread is still sitting
+inside a real, blocking `stdin_read_line()` call, it cannot be
+killed, and the program cannot exit without eventually joining it --
+so the timed-out player's opponent, who already knows they won, has
+to sit and wait for that thread's pending read to actually return (a
+stray keystroke, Ctrl-D, or the process being killed) before the
+process can fully exit. Not a bug -- an honest consequence of "no
+cancellable blocking I/O" combined with (at the time) "no
 fire-and-forget tasks" -- but a real, user-visible annoyance.
 
 **Would `async`/`await` have fixed it?** No, and it's worth being
@@ -280,5 +294,5 @@ place.
 
 ---
 
-**Previous**: [Sec.3 -- `task` / `join` + atomics / mutexes / channels ->](03_concurrency.md)
-**Next**: [Sec.3b -- Condition variables primer ->](03b_condvar_primer.md)
+**Previous**: [Sec.3 -- `task` / `join` / `detach` + atomics / mutexes / channels ->](03_concurrency.md)
+**Next**: [Sec.3d -- Capstone: a concurrent sensor-dashboard pipeline ->](03d_concurrent_pipeline_capstone.md)

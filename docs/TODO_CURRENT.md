@@ -13466,3 +13466,137 @@ corpus check (1043 pre-existing + 5 new files) matches the known
 18-file non-ok baseline exactly, identical file set, all 5 new files
 pass `vanic check`; mdBook rebuilds clean (only the 7 known pre-
 existing false-positive warnings).
+
+## BUG-188/189/190 FIXED, `mut ref PARAM[i]` limitation FIXED, tutorials updated, new combination example (2026-08-14)
+
+Follow-up request: update tutorials to reference the 5 new examples,
+fix the 3 filed-not-fixed bugs (and the `mut ref PARAM[i]`
+limitation) rather than leave them filed, update the .md files that
+referenced them, and add a combination example exercising several
+advanced features together plus a reference tutorial page.
+
+**BUG-188 fixed** -- `backend_c.rs`'s `element_tag` gained an
+explicit `Type::ArenaRef(_) => "arena_ref_int64_t".to_string()` arm
+(v1: `ArenaRef<T>` is always `T = i64`, same restriction as the
+adjacent `Handle`/`Pool` arms), instead of falling through to the
+`_ => c_leaf_type(element).replace(' ', "_")` fallback whose
+`int64_t*` spelling left the `*` unescaped.
+
+**BUG-189 fixed** -- two independent gaps, both fixed:
+1. `backend_c.rs`'s `emit_c` now emits the Pool/Handle helper bundle
+   (which `typedef`s `intent_handle_i64`) BEFORE the `element_types`
+   Vec-bundle loop instead of after it, so a `Vec<Handle<i64>>`
+   bundle emitted by that loop can actually reference the typedef.
+2. Two sibling `collect_apply_in_ty`-family walkers in `checker.rs`
+   (the prologue walker + `collect_apply_in_stmt`'s local `rec`) now
+   force-register `Option<i64>` whenever `Pool<i64>`/`Handle<i64>`
+   appears in ANY type position, mirroring the pre-existing
+   HashMap/BTreeMap-forces-`Option<V>` arm -- the C backend's
+   Pool/Handle bundle unconditionally defines `pool_get` (which
+   returns `Enum_Option__i64`) the moment `Pool`/`Handle` appears
+   anywhere in the program, independent of whether the program's own
+   code ever calls `pool_get`. Deliberately NOT extended to
+   `BoundedPtr<i64>` -- BUG-179 already fixed the analogous
+   `bptr_new`-without-`bptr_get` gap the OPPOSITE way (gating
+   `intent_bptr_i64_get`'s *emission* on whether `Option__i64` is
+   already registered, rather than force-registering it); doing both
+   would force `Option<i64>` into every BoundedPtr-using program even
+   when `bptr_get` is never called. Caught by re-running
+   `bug179_bptr_new_without_bptr_get_does_not_reference_undeclared_
+   option_enum` after first (wrongly) including `BoundedPtr` in the
+   new arms.
+
+**BUG-190 fixed** -- root-caused to `TypedStmt::If`'s tree-LLVM
+codegen in `backend_llvm.rs` (not `vec_fill` itself). It opened the
+`then`/`else` labels but only started tracking `ctx.current_block`
+against them AFTER the whole `if` statement finished (the `cont_lbl`
+assignment from BUG-69) -- never while emitting each branch's OWN
+statements. Since `region NAME { ... }` desugars to `if true { ... }`
+(`parse_region_block_stmt`), any PHI-based codegen inside a `region`
+block (or any `if`'s `then`/`else` body) -- `vec_fill`'s hand-rolled
+SSA loop being the load-bearing example -- read the stale pre-`if`
+block when naming its phi's entry-edge predecessor, producing a phi
+whose declared predecessor didn't match the real CFG. Fixed by
+setting `ctx.current_block = then_lbl` / `= else_lbl` right after
+opening each label, before emitting either branch's statements.
+
+**`mut ref PARAM[i]` limitation fixed** -- `checker.rs`'s
+`check_ref_mut`'s `Index` arm now calls `.deref()` on the source
+binding's type before matching `Type::Vec(_)` (mirroring the
+`mut ref t.field` arm just above it, which already did this for
+struct field-borrows), and separately rejects the case where the
+binding is a SHARED `ref Vec<T>` (mutation through a shared
+reference is still correctly refused, matching the `mut ref t.field`
+arm's equivalent `info.ty.is_ref()` check). `ir.rs`'s
+`TypedExprKind::RefMutIndex` gained a new `vec_ty: Type` field
+(mirroring `RefMutField`'s pre-existing `object_ty`) so
+`backend_c.rs`'s codegen can choose `.`/`->` correctly depending on
+whether the C parameter representation is by-value or by-pointer;
+`backend_llvm.rs` needed no codegen change at all -- ref parameters
+already store their OWN incoming pointer as their "address" in
+`ctx.locals`, and the existing `vec_ty.deref()` call already stripped
+the wrapper correctly, so the LLVM side was already correct once the
+checker stopped rejecting the input.
+
+**Tutorials updated**:
+- `tutorials/src/advanced/03_concurrency.md` -- new `detach` section,
+  updated title, "spawn-and-forget" table row now points at `detach`
+  instead of the stale "immediate drop" description, links to
+  `task_parallel_chunk_sum.vani`/`detach_heartbeat.vani`/
+  `barrier_sensor_rendezvous.vani`.
+- `tutorials/src/advanced/02b_barrier_primer.md` -- new "A real-world
+  example" section walking through `barrier_sensor_rendezvous.vani`,
+  including the two non-obvious gotchas (uniform lock order to avoid
+  the S-19 false-positive; scoping the phase-1 guard to avoid a
+  self-deadlock).
+- `tutorials/src/intermediate/03c_shared_ownership_primer.md` --
+  Pattern 2 (handles) now links to `handle_job_queue.vani`; Pattern 3
+  (arena) now links to `arena_batch_parse.vani`.
+- `tutorials/src/advanced/04_embedded.md` -- both the `Pool<T>`/
+  `Handle<T>` and `Region`/`ArenaRef<T>` sections now link to their
+  real-world worked examples.
+- `tutorials/src/advanced/03c_timed_tic_tac_toe_capstone.md` --
+  updated the "why not task+Atomic<bool>" rationale's `Task<R>`-is-
+  affine point: `detach` (added this session) removes the specific
+  "can't exit without joining" constraint that point used to cite,
+  though the underlying blocking-`stdin_read_line` problem (and thus
+  this file's actual non-blocking-poll fix) is unaffected --
+  `detach` doesn't make a blocking read cancellable.
+- `examples/language/english/handle_job_queue.vani`'s own comment
+  updated -- it used to claim a "real, separate C-backend gap" for
+  `Vec<Handle<i64>>` as the reason it avoids that shape; now notes
+  the gap is BUG-189, fixed, and points at the new combination
+  example for the natural (un-worked-around) version. The example
+  file itself was deliberately left otherwise unchanged (already
+  shipped, already tested; no reason to re-churn it).
+
+**New combination example + tutorial page**:
+`examples/language/english/concurrent_pipeline_dashboard.vani` -- a
+small sensor-dashboard pipeline combining ALL of this session's
+advanced-feature work in one realistic program: `Pool<i64>`/
+`Handle<i64>` (a `Vec<Handle<i64>>` registry -- exercising the
+BUG-189 fix directly), `Region`/`ArenaRef<i64>` (a
+`Vec<ArenaRef<i64>>` per worker -- exercising BUG-188/190's fix),
+`Mutex<i64>` (shared running total), `Barrier` (checkpoint
+rendezvous), `task`+`join` (3 workers + main as the 4th), and
+`task`+`detach` (a fire-and-forget heartbeat). 4 sensor readings
+(5, 10, 15, 20) deterministically combine to a grand total of 204,
+cross-checked two independent ways (summed `join` return values vs.
+a direct mutex read) -- both assert equal. Verified stable across 10
+repeated runs on both backends. New tutorial page:
+`tutorials/src/advanced/03d_concurrent_pipeline_capstone.md`
+(inserted into `SUMMARY.md` between the timed-tic-tac-toe capstone
+and the condvar primer; prev/next links on both neighbors updated to
+match).
+
+**Verification**: 2938/2938 lib tests pass (2933 pre-existing + 5 new
+-- 3 for the bug fixes (bug188/189/190, the BUG-189 test's own body
+also re-confirms BUG-179's fix still holds), 2 for the `mut ref
+PARAM[i]` fix's positive + negative cases -- 0 regressions); 255/255
+e2e tests pass (254 pre-existing + 1 new for the combination example,
+0 regressions, 8 ignored same as before); 1049-file example corpus
+check (1048 pre-existing + 1 new file) matches the known 18-file
+non-ok baseline exactly, identical file set, the new file passes
+`vanic check`; mdBook rebuilds clean (only
+the same 7 known pre-existing false-positive warnings, no new ones).
+Corpus check and CI to follow before this batch is pushed.

@@ -178,6 +178,16 @@ holding `Vec<u32>` of neighbor indices -- no `Box`, no `Rc`, no
 cycles-as-pointers (cycles become valid index-graphs, freed
 together when the World drops).
 
+vāṇी's own concrete version of this pattern is `Pool<T>` /
+`Handle<T>` -- a generational-index handle that stays safely
+detectable (`pool_get` returns `Option::None`) instead of a
+use-after-free when the slot it named has since been freed and
+possibly reused. See `examples/language/english/handle_job_queue.vani`
+for a real-world (not toy) worked example: a job queue where jobs
+get cancelled mid-flight while other code still holds their
+handles, and re-checking every handle safely skips the cancelled
+ones without crashing.
+
 ### Pattern 3: arena / region allocation
 
 Allocate many values from a shared arena; free the whole arena
@@ -207,6 +217,13 @@ doesn't escape the region's scope. The shipped slot type is
 for [Pattern 2](#pattern-2-handles-indices-not-pointers)
 (`World` + `Vec<Node>` indices) instead until a generic
 `ArenaRef<T>` ships.
+
+See `examples/language/english/arena_batch_parse.vani` for a
+real-world (not toy) worked example: parsing a batch of
+comma-separated readings, arena-allocating each one, and freeing
+the whole batch in one O(1) call when the `region` ends -- the
+classic per-batch/per-request/per-frame arena pattern compilers,
+parsers, and servers all use.
 
 ### Pattern 4: channels for moving ownership between threads
 

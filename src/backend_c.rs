@@ -1458,6 +1458,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !array_return_seen.is_empty() {
         body.push('\n');
     }
+    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> helpers.
+    // The bundle's `pool_get` returns `Enum_Option__i64`; the
+    // `Option__i64` monomorph is auto-registered by the
+    // pool_get-uses-Option pre-pass in checker.rs, so the
+    // typedef is already in `program.enums` -- and the enum-decl
+    // pass above (which runs well before this point) has already
+    // emitted `Enum_Option__i64`'s typedef into `body`.
+    //
+    // BUG-189 (2026-08-14): this used to run much later (after the
+    // `element_types` Vec-bundle loop just below), so a program
+    // that formed `Vec<Handle<i64>>` -- e.g. `vec(h1, h2)` -- had
+    // its Vec bundle reference `intent_handle_i64` BEFORE that
+    // typedef existed anywhere in the generated C file ("unknown
+    // type name 'intent_handle_i64'"). Moving this block ahead of
+    // the Vec-bundle loop (but still after the enum-decl pass it
+    // depends on) fixes the ordering without touching either pass.
+    if program_uses_i64_pool(program) {
+        emit_intent_pool_helpers_c_body(&mut body);
+    }
     for element in &element_types {
         // Skip Vec bundles already emitted in the pre-struct
         // pass for fields like `struct Bag { contents: Vec<i64> }`.
@@ -1577,14 +1596,6 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // but keep alongside deque for consistency).
     if program_uses_i64_hashset(program) {
         emit_intent_hashset_helpers_c_body(&mut body);
-    }
-    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> helpers.
-    // The bundle's `pool_get` returns `Enum_Option__i64`; the
-    // `Option__i64` monomorph is auto-registered by the
-    // pool_get-uses-Option pre-pass in checker.rs, so the
-    // typedef is in scope by the time this bundle is emitted.
-    if program_uses_i64_pool(program) {
-        emit_intent_pool_helpers_c_body(&mut body);
     }
     // Layer 3.1 of `unsafe.md` — canary-protected heap
     // allocator. Gated on program usage. Always-on canaries
@@ -11020,6 +11031,16 @@ pub(crate) fn element_tag(element: &Type) -> String {
         Type::Vec128(inner) => format!("vec128_{}", element_tag(inner)),
         Type::Vec256(inner) => format!("vec256_{}", element_tag(inner)),
         Type::Vec512(inner) => format!("vec512_{}", element_tag(inner)),
+        // BUG-188 (2026-08-14): `ArenaRef<T>` (v1: T is always i64,
+        // same restriction as Pool/Handle above) falls through to
+        // the `_` arm below, whose `c_leaf_type(element)` spelling
+        // is the raw pointer type `"int64_t*"` -- the `*` survives
+        // `.replace(' ', "_")` unescaped, so `Vec<ArenaRef<i64>>`
+        // produced the invalid C identifier `intent_vec_int64_t*`
+        // ("expected '=', ',', ';'..." from cc, one per corrupted
+        // occurrence). Give it its own identifier-safe tag, mirroring
+        // the `Handle`/`Pool` arms' fixed v1-i64 spelling.
+        Type::ArenaRef(_) => "arena_ref_int64_t".to_string(),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
@@ -16261,15 +16282,23 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 _ => format!("&{}", local_name(name)),
             }
         }
-        TypedExprKind::RefMutIndex { vec, index, .. } => {
+        TypedExprKind::RefMutIndex { vec, index, vec_ty, .. } => {
             // `mut ref vec[i]` → `&v_vec.data[idx]`. The Vec's
             // `.data` heap buffer is a contiguous array of
             // element-sized slots; the resulting pointer is
             // valid until the surrounding code resizes the Vec
             // (the user is responsible for that discipline —
             // same as `mut ref Var` semantics today).
+            //
+            // 2026-08-14: when `vec` names a `mut ref Vec<T>`
+            // parameter (not an owned local Vec), its C parameter
+            // spelling is a POINTER to the Vec struct, so the
+            // field access needs `->` instead of `.` — same
+            // `vec_ty.is_any_ref()` test `RefField`/`RefMutField`
+            // already use just below for the same reason.
             let idx_expr = emit_expr(index);
-            format!("(&{}.data[{}])", local_name(vec), idx_expr)
+            let sep = if vec_ty.is_any_ref() { "->" } else { "." };
+            format!("(&{}{}data[{}])", local_name(vec), sep, idx_expr)
         }
         TypedExprKind::RefField { object, field, object_ty, .. }
         | TypedExprKind::RefMutField { object, field, object_ty, .. } => {

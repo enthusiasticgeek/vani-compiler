@@ -15,8 +15,10 @@ fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
 // Checks one handle against the pool and folds its priority into a
 // running total if it's still live. Factored out so main() doesn't
 // need a Vec<Handle<i64>> -- each handle stays an individually-named
-// local (Handle<T> in a Vec has a real, separate C-backend gap; see
-// docs/TODO_CURRENT.md).
+// local here (this was originally a workaround for a real C-backend
+// gap in Vec<Handle<i64>>, fixed as BUG-189; see
+// docs/TODO_CURRENT.md and concurrent_pipeline_dashboard.vani for a
+// worked example that DOES collect handles into a Vec).
 fn check_job(jobs: ref Pool<i64>, h: Handle<i64>, total: i64, ran: i64, skipped: i64) -> Vec<i64> {
   let slot: Option<i64> = pool_get(jobs, h);
   if option_is_some(slot) {

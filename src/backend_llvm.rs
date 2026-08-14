@@ -3158,6 +3158,22 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", then_lbl));
+            // BUG-190 (2026-08-14): `ctx.current_block` must track
+            // `then_lbl` WHILE emitting `then_body`'s own statements,
+            // not just once the whole `if` is done (the `cont_lbl`
+            // assignment at the bottom, from BUG-69, only fixed the
+            // AFTER-the-if case). Any PHI-based codegen inside the
+            // then-branch (e.g. `vec_fill`'s hand-rolled SSA loop,
+            // which reads `ctx.current_block` to name its entry-edge
+            // predecessor) otherwise wired its phi to whatever block
+            // was current BEFORE the `if` -- reproduced by `region
+            // NAME { ... }` (which desugars to `if true { ... }`,
+            // see parse_region_block_stmt) containing a `vec_fill`:
+            // the phi declared `%entry` as a predecessor but the real
+            // CFG predecessor was `%then0`, so the LLVM verifier
+            // rejected the module ("PHI node entries do not match
+            // predecessors!").
+            ctx.current_block = then_lbl.clone();
             let then_terminated_before = ctx.terminated;
             ctx.terminated = false;
             for s in then_body {
@@ -3169,6 +3185,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             }
 
             out.push_str(&format!("{}:\n", else_lbl));
+            ctx.current_block = else_lbl.clone();
             ctx.terminated = then_terminated_before;
             for s in else_body {
                 emit_stmt(s, ctx, out);
@@ -17689,11 +17706,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             ));
             p
         }
-        TypedExprKind::RefMutIndex { vec, index, element_ty } => {
+        TypedExprKind::RefMutIndex { vec, index, element_ty, .. } => {
             // `mut ref vec[i]` → GEP into the Vec's heap data
             // buffer. The local at `vec` holds a Vec struct
             // value (`{T*, i64, i64}`); extract its data
             // pointer, then GEP at the element index.
+            //
+            // 2026-08-14: no change needed here for `vec` naming a
+            // `mut ref Vec<T>` parameter rather than an owned local
+            // Vec -- `ctx.locals` already records a ref parameter's
+            // OWN incoming pointer as its "address" (see the param-
+            // binding prologue's `is_any_ref` branch), and `vec_ty.
+            // deref()` two lines below already strips the RefMut
+            // wrapper to get the right struct type string. The IR's
+            // new `vec_ty` field (added alongside the checker fix
+            // that now accepts this case) isn't needed on this
+            // backend at all; only `backend_c.rs`'s codegen needed
+            // it, to choose between `.`/`->` for its by-value-vs-
+            // by-pointer C parameter representation.
             let (vec_ty, vec_addr) = ctx
                 .locals
                 .get(vec)

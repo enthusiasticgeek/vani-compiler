@@ -15160,3 +15160,74 @@ fn detach_heartbeat_example_succeeds_and_prints_the_deterministic_result_on_both
         );
     }
 }
+
+#[test]
+fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends() {
+    // Combination-features capstone: Pool<i64>/Handle<i64> (a
+    // Vec<Handle<i64>> registry -- BUG-189's fix), Region/
+    // ArenaRef<i64> (a Vec<ArenaRef<i64>> per worker -- BUG-188/190's
+    // fix), Mutex<i64> (shared running total), Barrier (checkpoint
+    // rendezvous), task+join (3 workers + main as the 4th), and
+    // task+detach (a fire-and-forget heartbeat). All non-deterministic
+    // output (worker print ordering, heartbeat ticks) is filtered out
+    // before comparing -- only the deterministic checkpoint/total
+    // lines, which the Barrier + Mutex combination guarantees are
+    // correct regardless of thread scheduling, are asserted exactly.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/concurrent_pipeline_dashboard.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("registered 4 sensors\n"),
+            "expected sensor-registration line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("checkpoint reached, running total: 204\n"),
+            "expected the checkpoint total line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("grand total: 204\n"),
+            "expected the grand-total line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        assert!(
+            stdout.contains("mutex total confirms: 204\n"),
+            "expected the mutex-confirmation line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+        // Each worker's own derived-values line is deterministic in
+        // CONTENT (not ordering) -- assert all 4 appear somewhere.
+        for (id, raw) in [(0, 5), (1, 10), (2, 15), (3, 20)] {
+            let needle = format!("worker {} derived 2 arena values from raw reading {}", id, raw);
+            assert!(
+                stdout.contains(&needle),
+                "expected \"{}\" for {:?}, got:\n{}",
+                needle,
+                backend_args,
+                stdout
+            );
+        }
+    }
+}

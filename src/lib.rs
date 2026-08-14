@@ -41743,6 +41743,68 @@ função main() -> i64 {
     }
 
     #[test]
+    fn mut_ref_vec_index_through_mut_ref_param_now_accepted() {
+        // 2026-08-14 fix: `mut ref PARAM[i]` used to be rejected
+        // whenever PARAM was already typed `ref Vec<T>` / `mut ref
+        // Vec<T>` (only an owned local Vec worked), forcing every
+        // real-world example needing this shape (found writing the
+        // barrier/handle/task examples) to route through individually-
+        // named parameters instead of `Vec<Mutex<T>>` + indexing.
+        // `check_ref_mut`'s Index arm now `.deref()`s the source
+        // type first, mirroring the `mut ref t.field` arm just above
+        // it, which already did this for struct field-borrows.
+        let source = r#"
+            fn modify(slot: mut ref i64) -> i64 {
+              return 0;
+            }
+            fn call_modify(xs: mut ref Vec<i64>) -> i64 {
+              let _ = modify(mut ref xs[1]);
+              return 0;
+            }
+            fn main() -> i64 {
+              let ys: Vec<i64> = vec(1, 2, 3);
+              let _ = call_modify(mut ref ys);
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("mut ref PARAM[i] compiles");
+        let c = crate::compile_to_c(source).expect("C backend accepts mut ref PARAM[i]");
+        // The C codegen must follow the incoming pointer with `->`,
+        // not `.` (PARAM's C parameter type is `intent_vec_int64_t*`,
+        // not a by-value struct) -- assert the generated GEP-equivalent
+        // uses arrow syntax so a future regression that flips this
+        // back to `.` fails loudly instead of silently miscompiling.
+        assert!(
+            c.contains("xs->data["),
+            "expected `xs->data[...]` (pointer deref) in generated C; got:\n{}",
+            c
+        );
+        crate::compile_to_llvm(source).expect("LLVM backend accepts mut ref PARAM[i]");
+    }
+
+    #[test]
+    fn mut_ref_vec_index_through_shared_ref_param_still_rejected() {
+        // The companion rejection: `ref Vec<T>` (shared/read-only) must
+        // still be refused for `mut ref xs[i]` -- you can't get an
+        // exclusive mutable borrow of an element through a shared
+        // reference to the whole Vec. Mirrors the equivalent
+        // `mut ref t.field` rejection for `ref T` struct bases.
+        let source = r#"
+            fn bad(xs: ref Vec<i64>) -> i64 {
+              let slot: mut ref i64 = mut ref xs[0];
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = crate::compile(source).expect_err("mut ref through &Vec must be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("borrowed immutably")),
+            "expected a 'borrowed immutably' diagnostic; got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn mut_ref_vec_index_rejects_non_vec_source() {
         // The new arm requires the indexed binding to be a
         // Vec<T>. Indexing a non-Vec via `mut ref` surfaces a
@@ -53252,6 +53314,151 @@ função main() -> i64 {
             c2.contains("intent_bptr_i64_get"),
             "expected intent_bptr_i64_get helper when bptr_get is called"
         );
+    }
+
+    #[test]
+    fn bug188_vec_of_arena_ref_compiles_on_both_backends() {
+        // BUG-188 (2026-08-14): found writing arena_batch_parse.vani.
+        // `Vec<ArenaRef<i64>>`'s per-shape C identifier was built by
+        // naive string concatenation of `element_tag`'s fallback,
+        // which spelled `ArenaRef<i64>` as the raw C pointer type
+        // `"int64_t*"` -- the unescaped `*` produced the invalid C
+        // identifier `intent_vec_int64_t*` ("expected '=', ',', ';'
+        // ..." from cc, one per corrupted occurrence). Fixed by
+        // giving `ArenaRef<_>` its own identifier-safe `element_tag`
+        // arm (`"arena_ref_int64_t"`, mirroring Handle/Pool's fixed
+        // v1-i64 spelling) instead of falling through to the raw
+        // `c_leaf_type` spelling.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              region scratch {
+                let a: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 10);
+                let b: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 32);
+                let refs: Vec<ArenaRef<i64>> = vec(a, b);
+                print "len:", len(ref refs);
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<ArenaRef<i64>> compiles to C");
+        assert!(
+            !c.contains("intent_vec_int64_t*"),
+            "the invalid identifier must not appear in generated C:\n{}",
+            c
+        );
+        compile_to_llvm(source).expect("Vec<ArenaRef<i64>> compiles to LLVM");
+    }
+
+    #[test]
+    fn bug189_pool_handle_used_without_calling_pool_get_compiles_on_both_backends() {
+        // BUG-189 (2026-08-14): found writing handle_job_queue.vani.
+        // Two related gaps, both stemming from the same root cause --
+        // `Enum_Option__i64` only got registered when the PROGRAM
+        // ITSELF called `pool_get` (`walk_expr_for_search_builtins`),
+        // but the C backend's Pool/Handle bundle
+        // (`emit_intent_pool_helpers_c_body`) unconditionally defines
+        // `pool_get` (and thus always references `Enum_Option__i64`)
+        // as soon as `Pool<i64>`/`Handle<i64>` appears ANYWHERE
+        // (`program_uses_i64_pool`) -- independent of whether
+        // `pool_get` is ever called. A program using only
+        // `pool_alloc`/`pool_free` (this test's repro) hit "unknown
+        // type name 'Enum_Option__i64'" from cc regardless of whether
+        // a Vec was involved. Separately, `Vec<Handle<i64>>`
+        // specifically (formed via a `vec(...)` literal) ALSO failed
+        // even when `pool_get` WAS called elsewhere, because the
+        // C backend emitted the `Vec<Handle<i64>>` bundle (which
+        // references `intent_handle_i64`) BEFORE
+        // `emit_intent_pool_helpers_c_body` (which typedefs
+        // `intent_handle_i64`) ran. Fixed both: (1) two sibling
+        // `collect_apply_in_ty`-family walkers in checker.rs now
+        // force-register `Option<i64>` whenever `Pool<i64>`/
+        // `Handle<i64>` appears in a type position at all (mirroring
+        // the pre-existing HashMap/BTreeMap-forces-Option<V> arm) --
+        // deliberately NOT extended to `BoundedPtr<i64>`, which
+        // BUG-179 already fixed the opposite way (gating emission
+        // instead of forcing registration); (2) backend_c.rs's
+        // `emit_c` now emits the Pool/Handle bundle before the
+        // `element_types` Vec-bundle loop instead of after it.
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h1: Handle<i64> = pool_alloc(mut ref p, 1);
+              let h2: Handle<i64> = pool_alloc(mut ref p, 2);
+              let hs: Vec<Handle<i64>> = vec(h1, h2);
+              print "len:", len(ref hs);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Pool/Handle without pool_get compiles to C");
+        compile_to_llvm(source).expect("Pool/Handle without pool_get compiles to LLVM");
+
+        // Companion no-Vec repro: just pool_alloc, no Vec, no
+        // pool_get at all -- isolates the ordering-independent half
+        // of the fix (checker-side forced Option<i64> registration).
+        let source_no_vec = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let _h1: Handle<i64> = pool_alloc(mut ref p, 1);
+              print "ok";
+              return 0;
+            }
+        "#;
+        compile_to_c(source_no_vec).expect("Pool/Handle (no Vec, no pool_get) compiles to C");
+
+        // BUG-179 must still hold: BoundedPtr without bptr_get still
+        // must NOT reference Enum_Option__i64 (this fix was
+        // deliberately NOT extended to BoundedPtr).
+        let bptr_source = r#"
+            fn make(p: *mut i64, n: i64) -> i64 {
+              let bp: BoundedPtr<i64> = bptr_new(p, n, n);
+              return bptr_len(ref bp);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _bptr_guard = EmbeddedTargetGuard::embedded();
+        let bptr_c = compile_to_c(bptr_source)
+            .expect("BoundedPtr without bptr_get still compiles to C");
+        assert!(
+            !bptr_c.contains("Enum_Option__i64"),
+            "BUG-179's fix must still hold -- BoundedPtr alone must not \
+             force Option__i64 registration:\n{}",
+            bptr_c
+        );
+    }
+
+    #[test]
+    fn bug190_vec_fill_inside_if_true_block_no_malformed_phi_on_llvm() {
+        // BUG-190 (2026-08-14): found writing arena_batch_parse.vani
+        // via the same Vec<ArenaRef<i64>> shape as BUG-188, but this
+        // repro isolates it with plain i64 (no ArenaRef/region
+        // needed) -- the real bug is in `TypedStmt::If`'s tree-LLVM
+        // codegen, not in vec_fill or region/ArenaRef at all.
+        // `region NAME { ... }` desugars to `if true { ... }`
+        // (`parse_region_block_stmt`); `TypedStmt::If`'s LLVM codegen
+        // opened the `then0:`/`else1:` labels but never set
+        // `ctx.current_block` to track them WHILE emitting each
+        // branch's own statements (only the post-if `cont_lbl`
+        // assignment, from BUG-69, was there). Any PHI-based codegen
+        // inside the then-branch -- `vec_fill`'s hand-rolled SSA loop
+        // is the load-bearing example -- read the stale pre-if
+        // `ctx.current_block` when naming its entry-edge predecessor,
+        // so the emitted phi's declared predecessor didn't match the
+        // real CFG ("PHI node entries do not match predecessors!" at
+        // the LLVM verifier). Fixed by setting `ctx.current_block =
+        // then_lbl` / `else_lbl` right after opening each label.
+        let source = r#"
+            fn main() -> i64 {
+              if true {
+                let xs: Vec<i64> = vec_fill(4, 7);
+                print "len:", len(ref xs);
+              }
+              return 0;
+            }
+        "#;
+        compile_to_llvm(source)
+            .expect("vec_fill inside if-true block compiles to LLVM without a malformed PHI");
+        compile_to_c(source).expect("vec_fill inside if-true block compiles to C");
     }
 
     #[test]

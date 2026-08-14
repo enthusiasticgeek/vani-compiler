@@ -468,6 +468,19 @@ pub enum TypedExprKind {
         vec: String,
         index: Box<TypedExpr>,
         element_ty: Type,
+        /// The `vec` binding's OWN type, as seen in `env` --
+        /// `Type::Vec(_)` for an owned local, or `Type::RefMut(Vec(_))`
+        /// when `vec` is itself a `mut ref Vec<T>` parameter (e.g.
+        /// `fn f(xs: mut ref Vec<i64>) { let e = mut ref xs[0]; ... }`).
+        /// Mirrors `RefMutField`'s `object_ty` field, for the same
+        /// reason: a backend needs to know whether the binding's own
+        /// storage IS the Vec struct (owned local -- take its address
+        /// with `.`/no extra deref) or a POINTER to it (ref parameter
+        /// -- follow the pointer with `->`/no extra address-of).
+        /// Added fixing the v1 limitation where `mut ref PARAM[i]` was
+        /// rejected whenever PARAM was already `ref`/`mut ref Vec<T>`
+        /// (2026-08-14).
+        vec_ty: Type,
     },
     /// Reference to a top-level function as a first-class
     /// value. Produced when an identifier in value position
