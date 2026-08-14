@@ -7800,3 +7800,12 @@ fn main() -> i64 {
   let ep: i64 = epoll_new();
   if ep < 0 {
     print
+
+---
+
+### Candidate: 20260814-094552-backend-divergence-2c8d6d6650
+
+Repro: `tools/localfuzz/findings/20260814-094552-backend-divergence-2c8d6d6650/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-094552-backend-divergence-2c8d6d6650/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
