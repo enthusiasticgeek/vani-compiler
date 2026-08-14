@@ -327,6 +327,17 @@ impl Env {
 pub struct CheckedProgram {
     pub program: Program,
     pub ir: TypedProgram,
+    /// `Severity::Warning` diagnostics collected during checking --
+    /// see `diagnostic::Severity`'s doc comment. Empty on the vast
+    /// majority of successful compiles (most diagnostics are still
+    /// hard errors); non-empty only when a checking pass found
+    /// something LIKELY wrong but not definitely wrong enough to
+    /// reject (e.g. a `to`/`downto` for-loop whose constant bounds
+    /// contradict the keyword's direction). Callers that care
+    /// (the CLI) render and print these without failing the build;
+    /// callers that don't (most tests) simply never look at this
+    /// field.
+    pub warnings: Vec<crate::diagnostic::Diagnostic>,
 }
 
 #[derive(Clone, Debug)]
@@ -1910,7 +1921,13 @@ fn check_impl(
         crate::safety::enforce_complexity(&typed_program_view, &mut diagnostics);
     }
 
-    if diagnostics.is_empty() {
+    // 2026-08-14: only ERROR-severity diagnostics fail the build now
+    // -- see `diagnostic::Severity`'s doc comment. `diagnostics` may
+    // still contain warnings on the `Ok` path; they ride along in
+    // `CheckedProgram::warnings` instead of being silently dropped.
+    let has_errors = diagnostics.iter().any(|d| d.is_error());
+    if !has_errors {
+        let warnings = diagnostics;
         let intents = program
             .intents
             .iter()
@@ -1945,6 +1962,7 @@ fn check_impl(
         Ok(CheckedProgram {
             program,
             ir: TypedProgram { intents, functions, structs, enums },
+            warnings,
         })
     } else {
         Err(diagnostics)
@@ -15386,6 +15404,87 @@ fn check_one_stmt(
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::for_over_non_iterable(&start_checked.ty().to_string())));
                 return false;
+            }
+
+            // 2026-08-14: `to`/`downto` bounds-direction check. `to`
+            // is ascending and half-open on the end (`for i from LO
+            // to HI` walks LO..HI, excluding HI); `downto` is
+            // descending and half-open on the (lower) end (`for i
+            // from HI downto LO` walks HI down to LO+1, excluding
+            // LO). When BOTH bounds are compile-time constants
+            // (literals or const-folded expressions), a `to` with
+            // start > end, or a `downto` with start < end, can never
+            // execute a single iteration -- the loop direction
+            // contradicts the keyword. Equal bounds are deliberately
+            // NOT flagged: `for i from n to n` / `n downto n` is a
+            // legitimate (if unusual) empty-range edge case, e.g. in
+            // generic code where `n` happens to be 0. Only checked
+            // for CONSTANT bounds -- a runtime-computed bound
+            // (`for i from lo to hi` where `hi` comes from user
+            // input) can't be judged at compile time and isn't
+            // flagged here at all.
+            if let (Some(TypedConst::Int(s)), Some(TypedConst::Int(e))) =
+                (start_checked.constant(), end_checked.constant())
+            {
+                if !descending && s > e {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "'for {var} from {s} to {e}' never executes -- \
+                                 {s} > {e}, but 'to' counts UP (needs start <= end)",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "The loop variable '{var}' starts at {s} and 'to' \
+                                 increments toward {e} -- since {s} is already past \
+                                 {e}, the loop body never runs."
+                            ),
+                            "'to' is ascending-only (like 'downto' is descending-only) \
+                             -- neither keyword infers direction from the bounds; you \
+                             pick the keyword that matches which way you're counting."
+                                .to_string(),
+                            format!(
+                                "If you meant to count DOWN from {s} to {e}, use \
+                                 'downto': 'for {var} from {s} downto {e}'. If the \
+                                 bounds are correct and an empty loop is intentional, \
+                                 no fix is needed -- this is a warning, not a hard \
+                                 requirement to change anything."
+                            ),
+                        ])
+                        .as_warning(),
+                    );
+                } else if *descending && s < e {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "'for {var} from {s} downto {e}' never executes -- \
+                                 {s} < {e}, but 'downto' counts DOWN (needs start >= end)",
+                            ),
+                        )
+                        .with_elaboration(vec![
+                            format!(
+                                "The loop variable '{var}' starts at {s} and 'downto' \
+                                 decrements toward {e} -- since {s} is already below \
+                                 {e}, the loop body never runs."
+                            ),
+                            "'downto' is descending-only (like 'to' is ascending-only) \
+                             -- neither keyword infers direction from the bounds; you \
+                             pick the keyword that matches which way you're counting."
+                                .to_string(),
+                            format!(
+                                "If you meant to count UP from {s} to {e}, use 'to': \
+                                 'for {var} from {s} to {e}'. If the bounds are correct \
+                                 and an empty loop is intentional, no fix is needed -- \
+                                 this is a warning, not a hard requirement to change \
+                                 anything."
+                            ),
+                        ])
+                        .as_warning(),
+                    );
+                }
             }
 
             let Some(loop_ty) = promoted_integer_type(&start_checked, &end_checked, diagnostics)

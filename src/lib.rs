@@ -4986,6 +4986,166 @@ mod tests {
     }
 
     #[test]
+    fn for_loop_reverse_to_range_produces_a_warning_not_an_error() {
+        // 2026-08-14: added a diagnostic for `to`/`downto` bounds
+        // that contradict the keyword's direction when both bounds
+        // are compile-time constants. Must be Severity::Warning, NOT
+        // Severity::Error -- `for_loop_reverse_range_compiles` above
+        // (already an existing test) already established that a
+        // backwards `to` range is a LEGAL, silent, zero-iteration
+        // loop (real shipped code depends on this --
+        // `examples/language/english/for_loop_downto.vani`'s
+        // `empty_when_backwards()`), so this diagnostic must not
+        // fail the build.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 5 to 3 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("a backwards 'to' range must still compile (warning, not error)");
+        assert_eq!(
+            checked.warnings.len(),
+            1,
+            "expected exactly one warning, got: {:?}",
+            checked.warnings
+        );
+        assert!(
+            checked.warnings[0].is_warning(),
+            "the to/downto bounds diagnostic must be Severity::Warning, got: {:?}",
+            checked.warnings[0]
+        );
+        assert!(
+            checked.warnings[0].message.contains("never executes")
+                && checked.warnings[0].message.contains("'to' counts UP"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn for_loop_reverse_downto_range_produces_a_warning_not_an_error() {
+        // Companion to the `to` case above, for `downto`.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 downto 5 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("a backwards 'downto' range must still compile (warning, not error)");
+        assert_eq!(checked.warnings.len(), 1, "expected exactly one warning, got: {:?}", checked.warnings);
+        assert!(checked.warnings[0].is_warning());
+        assert!(
+            checked.warnings[0].message.contains("never executes")
+                && checked.warnings[0].message.contains("'downto' counts DOWN"),
+            "unexpected warning message: {}",
+            checked.warnings[0].message
+        );
+    }
+
+    #[test]
+    fn for_loop_correct_direction_and_equal_bounds_produce_no_warning() {
+        // Negative cases: a correctly-directed `to`/`downto`, and
+        // equal bounds (a legitimate empty-range edge case, e.g. in
+        // generic code where a length parameter happens to be 0),
+        // must NOT produce a warning.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 5 { n = n + 1; }
+              for i from 5 downto 0 { n = n + 1; }
+              for i from 3 to 3 { n = n + 1; }
+              for i from 3 downto 3 { n = n + 1; }
+              return n;
+            }
+        "#;
+        let checked = compile(source).expect("correctly-directed / equal-bounds ranges compile");
+        assert!(
+            checked.warnings.is_empty(),
+            "expected no warnings, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn for_loop_runtime_bounds_produce_no_warning() {
+        // A non-constant (runtime-computed) bound can't be judged at
+        // compile time and must not be flagged at all, regardless of
+        // what value it happens to hold at runtime.
+        let source = r#"
+            fn f(lo: i64, hi: i64) -> i64 {
+              let n: i64 = 0;
+              for i from lo to hi { n = n + 1; }
+              return n;
+            }
+            fn main() -> i64 {
+              return f(5, 0);
+            }
+        "#;
+        let checked = compile(source).expect("runtime bounds compile");
+        assert!(
+            checked.warnings.is_empty(),
+            "runtime-computed bounds must not be flagged, got: {:?}",
+            checked.warnings
+        );
+    }
+
+    #[test]
+    fn diagnostic_severity_warning_does_not_fail_check_program_but_error_still_does() {
+        // Direct test of the new Severity mechanism itself (not tied
+        // to the to/downto feature): a Severity::Warning diagnostic
+        // must not appear in check_program's Err path, and a real
+        // Severity::Error (the overwhelming majority of existing
+        // diagnostics) must still fail compilation exactly as before.
+        let good = r#"
+            fn main() -> i64 {
+              for i from 5 to 3 { }
+              return 0;
+            }
+        "#;
+        assert!(compile(good).is_ok(), "warning-only diagnostics must not fail compilation");
+
+        let bad = r#"
+            fn main() -> i64 {
+              let x: i64 = "not an int";
+              return 0;
+            }
+        "#;
+        assert!(compile(bad).is_err(), "a real type error must still fail compilation");
+    }
+
+    #[test]
+    fn warning_diagnostic_renders_with_warning_label_not_error() {
+        // The rendered CLI text must say "warning:", not "error:",
+        // for a Severity::Warning diagnostic -- confirms
+        // format_diagnostics picks the label from the diagnostic's
+        // own severity rather than hardcoding "error" for everything.
+        let source = r#"
+            fn main() -> i64 {
+              for i from 5 to 3 { }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles with a warning");
+        assert_eq!(checked.warnings.len(), 1);
+        let rendered = crate::diagnostic::format_diagnostics(
+            "test.vani", source, &checked.warnings,
+        );
+        assert!(
+            rendered.contains(": warning: "),
+            "expected a 'warning:' label in the rendered output, got:\n{}",
+            rendered
+        );
+        assert!(
+            !rendered.contains(": error: "),
+            "must not render a Severity::Warning diagnostic with an 'error:' label, got:\n{}",
+            rendered
+        );
+    }
+
+    #[test]
     fn for_loop_downto_rejected_on_parallel_for() {
         // `parallel for ... downto ...` is out of scope for now --
         // the parser rejects it with a clear message rather than

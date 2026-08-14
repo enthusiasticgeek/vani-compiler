@@ -3336,6 +3336,7 @@ pub fn enforce_lock_order(
                         diagnostics.push(crate::diagnostic::Diagnostic {
                             span,
                             message: msg,
+                            severity: crate::diagnostic::Severity::Error,
                             related: vec![],
                             elaboration: vec![hint],
                         });
@@ -3593,6 +3594,7 @@ pub fn enforce_isr_preemption(
             diagnostics.push(crate::diagnostic::Diagnostic {
                 span: *high_span,
                 message: msg,
+                severity: crate::diagnostic::Severity::Error,
                 related: vec![],
                 elaboration: vec![hint],
             });

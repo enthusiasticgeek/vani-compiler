@@ -13664,3 +13664,115 @@ regressions); 255/255 e2e tests pass (0 regressions); 1049-file
 example corpus check matches the known 18-file baseline exactly
 (identical file set to the pre-fix run); mdBook rebuilds clean (same
 7 known pre-existing warnings). Next free bug number is **BUG-192**.
+
+## New feature: real compiler warnings (`Severity::Warning`), first use is a `to`/`downto` bounds-direction check (2026-08-14)
+
+Requested directly: `for i from 5 to 0` (ascending `to`, but start >
+end) and `for i from 0 downto 5` (descending `downto`, but start <
+end) should produce a compiler warning when both bounds are
+compile-time constants -- the loop body can never execute a single
+iteration, and the direction contradicts the keyword.
+
+**The diagnostic model had no "warning" concept at all.** Every
+`Diagnostic` ever pushed into a checking pass's `Vec<Diagnostic>`
+was, unconditionally, a hard build-blocking error --
+`check_program`'s success gate was a bare `diagnostics.is_empty()`.
+Implementing the check as a hard error broke real things
+immediately: two existing regression tests
+(`for_loop_reverse_range_compiles`, `for_loop_downto_empty_when_
+start_le_end_compiles`) and the shipped example `for_loop_downto.
+vani`'s own `empty_when_backwards()` function all deliberately
+demonstrate that a backwards `to`/`downto` range is legal,
+documented, silent, zero-iteration behavior (useful in generic code
+where bounds can legitimately collapse to empty) -- rejecting it
+outright would have revoked a real, intentional language feature.
+Asked the user how to proceed; chose to build a real soft-warning
+mechanism rather than either breaking that feature or dropping the
+check.
+
+**New `Severity` enum** (`diagnostic.rs`): `Error` (default, via
+`Diagnostic::new` -- every existing call site is completely
+unaffected) or `Warning` (opt-in via the new chainable
+`.as_warning()`, mirroring `.with_elaboration(...)`'s builder
+style). `check_program`'s success gate (`checker.rs`) changed from
+`diagnostics.is_empty()` to `!diagnostics.iter().any(|d|
+d.is_error())` -- only errors fail the build now. `CheckedProgram`
+(the `Ok` payload, single construction site) gained a `pub warnings:
+Vec<Diagnostic>` field carrying whatever warnings survived to the
+`Ok` path, so `compile()`/`compile_path()`'s existing `Result<
+CheckedProgram, Vec<Diagnostic>>` signature needed ZERO changes --
+every one of the ~2900 existing tests that call `.expect(...)` on a
+`compile()` result is unaffected. `format_diagnostics`/
+`format_diagnostics_with_files` and both `--json` renderers
+(`diagnostic.rs`) now pick the rendered label ("warning"/"error")
+from each diagnostic's own severity instead of hardcoding "error"
+for everything.
+
+**CLI wiring**: `compile_path_or_report` (`main.rs`) -- the single
+choke point `build`/`run`/`emit`/`emit-c` and their cross-compile/
+QEMU variants all funnel through -- now prints any
+`checked.warnings` to stderr (non-fatal) right after a successful
+compile. The `check` command (a separate code path, doesn't use
+`compile_path_or_report`) got the same treatment directly, including
+folding warnings into the `--json` combined-diagnostics output
+(already severity-labeled) rather than only the text-mode stderr
+path.
+
+**Two existing diagnostics that were ALREADY commented "warning
+level" in the source but were, in fact, still hard errors** (S-19
+`enforce_lock_order`'s deadlock-cycle diagnostic, S-20 `enforce_isr_
+preemption`'s priority-inversion diagnostic, both in `safety.rs`) --
+left AS hard errors for now (their own struct-literal `Diagnostic {
+..., severity: Severity::Error, ... }` construction was updated only
+enough to compile against the new field) rather than silently
+changed to genuine warnings alongside this fix; whether they SHOULD
+become real warnings is exactly the kind of question the broader
+essential-warnings audit (below) should answer, not something to
+flip as a side effect of an unrelated feature.
+
+**The check itself**: added inside `Stmt::For`'s handling in
+`check_one_stmt` (`checker.rs`), right after the integer-bounds type
+check, using `start_checked.constant()`/`end_checked.constant()`
+(the checker's existing constant-folding, `TypedConst::Int(i128)`)
+-- only fires when BOTH bounds are compile-time constants; a
+runtime-computed bound is never flagged, since it can't be judged at
+compile time. Equal bounds (`for i from n to n`) are deliberately
+NOT flagged either -- a legitimate empty-range edge case (e.g.
+generic code where `n` happens to be 0), not a direction mismatch.
+
+Regression tests (`src/lib.rs`): positive cases for both `to` and
+`downto` assert `checked.warnings.len() == 1`,
+`.is_warning()`, and the message content; negative cases confirm
+correctly-directed ranges, equal bounds, and runtime-computed bounds
+all produce zero warnings; a direct test of the `Severity` mechanism
+itself confirms a warning-only compile still succeeds while a real
+type error still fails; a rendering test confirms the CLI text says
+"warning:" not "error:". Plus one full CLI-level e2e test
+(`tests/run_end_to_end.rs`) driving the actual `intentc` binary:
+`check` exits 0 with the warning on stderr and "ok:" on stdout;
+`run` (both backends) exits 0, prints the warning, and produces
+EXACTLY the expected stdout (proving the loop body was genuinely
+skipped and execution continued normally end-to-end, not just at
+the library API level).
+
+Docs: `tutorials/src/beginner/05_loops.md`'s "still doesn't count
+down" section (which used to explicitly say "no error, no warning")
+updated to describe the new warning and its two deliberate
+non-triggers (equal bounds, runtime bounds).
+`examples/language/english/for_loop_downto.vani`'s own comment on
+`empty_when_backwards()` updated to note it's the exact legitimate
+case the warning doesn't block.
+
+Verification: 2945/2945 lib tests pass (2939 + 6 new, 0
+regressions); 256/256 e2e tests pass (255 + 1 new, 0 regressions);
+1049-file example corpus check matches the known 18-file baseline
+exactly (identical file set); mdBook rebuilds clean (same 7 known
+pre-existing warnings).
+
+## Broader audit: other language features where a compiler warning is essential (IN PROGRESS)
+
+Requested directly, as a follow-up to the to/downto warning above:
+survey the language for other places where code is syntactically
+valid but semantically almost-certainly-wrong, and no diagnostic
+(error OR warning) currently fires. To be continued in a fresh
+pass -- see the next TODO_CURRENT.md entry once it lands.

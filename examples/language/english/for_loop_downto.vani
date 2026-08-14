@@ -17,7 +17,13 @@ fn countdown_sum(n: i64) -> i64 {
 
 // `for i from 0 downto 5` has no valid descending sequence
 // (0 <= 5), so the body never executes -- mirrors `for i from 5
-// to 3` silently running zero times for the ascending form.
+// to 3` running zero times for the ascending form. Both are legal,
+// and the RUN behavior is unchanged, but as of 2026-08-14 the
+// compiler now prints a (non-fatal) warning for a backwards range
+// like this one when the bounds are compile-time constants -- it's
+// usually a mistake, so `vanic check`/`build`/`run` flag it, but
+// this specific empty-on-purpose usage is exactly the legitimate
+// case the warning deliberately doesn't block.
 fn empty_when_backwards() -> i64 {
   let count: i64 = 0;
   for i from 0 downto 5 {

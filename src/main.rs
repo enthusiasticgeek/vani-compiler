@@ -1534,9 +1534,50 @@ fn run() -> Result<ExitCode, String> {
 
             for file in &files {
                 match vani::compile_path(file) {
-                    Ok((checked, _map)) => {
+                    Ok((checked, map)) => {
                         if !json && files.len() > 1 {
                             println!("ok: {}", file.display());
+                        }
+                        // 2026-08-14: Severity::Warning diagnostics
+                        // (e.g. a `to`/`downto` for-loop whose
+                        // constant bounds contradict the keyword)
+                        // don't fail `check`, but should still be
+                        // visible -- print to stderr in text mode,
+                        // fold into the combined diagnostics list
+                        // (already severity-labeled) in --json mode.
+                        if !checked.warnings.is_empty() {
+                            if json {
+                                let shift = combined_map.extend_with(&map);
+                                for d in &checked.warnings {
+                                    let mut shifted = d.clone();
+                                    shifted.span = vani::span::Span::new(
+                                        d.span.start + shift,
+                                        d.span.end + shift,
+                                    );
+                                    shifted.related = d
+                                        .related
+                                        .iter()
+                                        .map(|(s, note)| {
+                                            (
+                                                vani::span::Span::new(
+                                                    s.start + shift,
+                                                    s.end + shift,
+                                                ),
+                                                note.clone(),
+                                            )
+                                        })
+                                        .collect();
+                                    combined_diags.push(shifted);
+                                }
+                            } else {
+                                eprint!(
+                                    "{}",
+                                    vani::diagnostic::format_diagnostics_with_files(
+                                        &map,
+                                        &checked.warnings,
+                                    )
+                                );
+                            }
                         }
                         // User-direction item (2026-06-08):
                         // emit Big-O annotations for this
@@ -3328,7 +3369,23 @@ fn compile_path_or_report(
     _path: &Path,
 ) -> Result<vani::checker::CheckedProgram, String> {
     vani::compile_path(_path)
-        .map(|(c, _)| c)
+        .map(|(c, map)| {
+            // 2026-08-14: print any Severity::Warning diagnostics
+            // (e.g. a `to`/`downto` for-loop whose constant bounds
+            // contradict the keyword) to stderr -- non-fatal, the
+            // build still succeeds. Every CLI command that compiles
+            // a file (`build`, `run`, `emit`/`emit-c`, and their
+            // cross-compile/QEMU variants) funnels through this one
+            // function, so this is the single place that needs to
+            // know about warnings at all.
+            if !c.warnings.is_empty() {
+                eprint!(
+                    "{}",
+                    vani::diagnostic::format_diagnostics_with_files(&map, &c.warnings)
+                );
+            }
+            c
+        })
         .map_err(|(map, diagnostics)| {
             vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
         })

@@ -15233,3 +15233,85 @@ fn concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backend
         // guarantees no other thread is still mid-print.
     }
 }
+
+#[test]
+fn for_loop_backwards_to_range_warns_but_check_and_run_both_succeed() {
+    // End-to-end CLI test of the new Severity::Warning mechanism
+    // (2026-08-14): `vanic check` on a file with a `to`/`downto`
+    // for-loop whose constant bounds contradict the keyword's
+    // direction must exit 0 (NOT fail the build -- a backwards range
+    // is legal, silent, zero-iteration behavior, see
+    // examples/language/english/for_loop_downto.vani), but must
+    // still print a "warning:"-labeled diagnostic. `vanic run` must
+    // both print the same warning AND actually execute the program
+    // (proving the warning is genuinely non-fatal end-to-end, not
+    // just at the library API level already covered by
+    // src/lib.rs's unit tests).
+    let src = write_tmp_vani(
+        "for_loop_backwards_to_warns",
+        r#"
+fn main() -> i64 {
+  for i from 5 to 0 {
+    print "should never print";
+  }
+  print "after loop";
+  return 0;
+}
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+
+    let check_output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(
+        check_output.status.success(),
+        "a warning-only diagnostic must not fail 'check'; status {:?}, stderr: {}",
+        check_output.status,
+        String::from_utf8_lossy(&check_output.stderr)
+    );
+    let check_stderr = String::from_utf8_lossy(&check_output.stderr);
+    assert!(
+        check_stderr.contains("warning:") && check_stderr.contains("never executes"),
+        "expected a 'warning: ... never executes' line on stderr, got:\n{}",
+        check_stderr
+    );
+    let check_stdout = String::from_utf8_lossy(&check_output.stdout);
+    assert!(
+        check_stdout.contains("ok:"),
+        "expected 'check' to still report ok, got:\n{}",
+        check_stdout
+    );
+
+    for backend_args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let run_output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            run_output.status.success(),
+            "a warning-only diagnostic must not fail 'run' for {:?}; status {:?}, stderr: {}",
+            backend_args,
+            run_output.status,
+            String::from_utf8_lossy(&run_output.stderr)
+        );
+        let run_stderr = String::from_utf8_lossy(&run_output.stderr);
+        assert!(
+            run_stderr.contains("warning:") && run_stderr.contains("never executes"),
+            "expected the warning on stderr for {:?}, got:\n{}",
+            backend_args,
+            run_stderr
+        );
+        let run_stdout = String::from_utf8_lossy(&run_output.stdout).replace("\r\n", "\n");
+        assert_eq!(
+            run_stdout, "after loop\n",
+            "expected the loop body to be genuinely skipped (0 iterations) and \
+             execution to continue normally for {:?}, got:\n{}",
+            backend_args, run_stdout
+        );
+    }
+}
