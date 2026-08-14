@@ -7413,3 +7413,34 @@ Repro: `tools/localfuzz/findings/20260814-000231-run-crash-5b2d7325a3/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260814-000231-run-crash-5b2d7325a3/fix_attempt.md`
 
 Status: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-002954-backend-divergence-84387d3b2e
+
+Repro: `tools/localfuzz/findings/20260814-002954-backend-divergence-84387d3b2e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-002954-backend-divergence-84387d3b2e/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Vani Compiler Local Fuzzing Log**
+
+#### Bug Report
+
+**Repository URL:** https://github.com/vanilang/vani-compiler
+
+**Branch:** localfuzz
+
+**Mutant Generated Source:**
+
+```vani
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/vec_invariants.vani              # LLVM
+//   vanic run examples/language/tibetan/vec_invariants.vani --backend=c  # C
+//
+// Note: Tibetan has no native invariant keyword; བསྒྲུབས (prove) used instead.
+
+
+
