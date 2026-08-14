@@ -118,6 +118,40 @@ jobs:
       - name: Run leak sweep against the checked-in baseline
         run: python3 tools/leak_sweep.py
 
+  # ── Backend cross-check: LLVM vs. C exit-code differential over the corpus
+  #
+  # Added for #191 (2026-08-14, "improve internal compiler-testing
+  # tooling"). Every example under examples/ that passes `vanic check` is
+  # run via BOTH `vanic run` (LLVM, the default) and `vanic run
+  # --backend=c`, and their exit codes must agree. Targets the exact bug
+  # class BUG-192 turned out to be: a silent LLVM-vs-tree-backend
+  # divergence found only by a human manually diffing IR. This sweep's
+  # very first local run caught a real one on its own (an overflow/
+  # divide-by-zero/shift trap that exited 3 on LLVM but 134/SIGABRT on
+  # C), fixed the same day -- see docs/TODO_CURRENT.md's #191 entry. A
+  # NEW finding not already tracked in
+  # tools/backend_crosscheck_baseline.json (if that file exists -- there
+  # is currently nothing to baseline) fails the job.
+  backend-crosscheck:
+    name: Backend cross-check (LLVM vs. C exit codes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM tools and SMT solver
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y llvm clang z3
+
+      - name: Build vanic (release)
+        run: cargo build --release --bin vanic
+
+      - name: Run backend cross-check against the checked-in baseline
+        run: python3 tools/backend_crosscheck.py
+
   # ── vani_translate.py regression suite ───────────────────────────────────
   #
   # Added 2026-08-12 after confirming this tool's hand-maintained ALIASES

@@ -12302,11 +12302,12 @@ fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_bac
 
     for (backend_args, expect_code) in [
         (vec!["run", &example], 3),
-        // 134 = 128 + SIGABRT (6): the C-backend overflow trap still
-        // raises a raw `abort()`, and BUG-130 (2026-08-07) fixed
-        // `vanic run` to report the shell convention for a signal-
-        // killed child instead of masking it as a bare `1`.
-        (vec!["run", &example, "--backend=c"], 134),
+        // Was 134 (128 + SIGABRT) before #191 (2026-08-14): the
+        // C-backend overflow trap used to raise a raw `abort()`,
+        // caught as a genuine backend-divergence bug by
+        // tools/backend_crosscheck.py's very first corpus sweep and
+        // fixed the same day to `exit(3)`, matching LLVM.
+        (vec!["run", &example, "--backend=c"], 3),
     ] {
         let mut cmd_args = vec!["10", binary];
         cmd_args.extend(backend_args.iter().copied());
@@ -12383,28 +12384,33 @@ fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
 // `status.code().unwrap_or(1)` at every call site, which silently
 // converts a signal-killed child into a generic exit code `1` --
 // indistinguishable from a program that legitimately called
-// `exit(1)`, and losing which signal it actually was. Integer
-// overflow on the C backend still raises a real `SIGABRT`
-// (deliberately out of scope for the BUG-106-class `exit(3)`
-// conversions, which were scoped to the LLVM backend's misleading-
-// `lli`-crash-report problem -- see the "What actually happens"
-// section of `tutorials/src/intermediate/10b_runtime_errors_primer.md`),
-// making it a reliable way to produce a signal-killed child for this
-// test. (The `#[bounded(N)]` guard used to serve this same role, but
-// itself moved to a clean `exit(3)` on both C codegen paths as a
-// follow-up cleanup after BUG-130 -- see the "Aside (not fixed, out
-// of scope)" note this test's own history carries in
-// `docs/TODO_CURRENT.md`'s BUG-130 entry.) Expects the shell
-// convention `128 + signal` (134 = 128 + SIGABRT's 6), matching what
-// a directly-executed binary's own shell would show.
+// `exit(1)`, and losing which signal it actually was. Originally used
+// integer overflow on the C backend as the SIGABRT vehicle, since it
+// deliberately still raised a raw `abort()` at the time; #191
+// (2026-08-14) converted overflow (along with divide-by-zero and
+// shift) to a clean `exit(3)` on both C backends after
+// tools/backend_crosscheck.py's corpus sweep caught it as a genuine
+// backend-divergence bug, so this test switched to an out-of-bounds
+// Vec index instead -- bounds-check traps are a separate helper
+// family that #191 deliberately did NOT touch (no divergence was
+// found for it), so it's still a real `abort()`/SIGABRT source. See
+// the "What actually happens" section of `tutorials/src/intermediate/
+// 10b_runtime_errors_primer.md` for the current, up-to-date picture
+// of which trap categories are exit(3) vs. abort() on each backend.
+// Expects the shell convention `128 + signal` (134 = 128 + SIGABRT's
+// 6), matching what a directly-executed binary's own shell would
+// show.
 #[test]
 fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let src = write_tmp_vani(
         "bug130-signal-exit-code",
         r#"
-fn add_it(a: i64, b: i64) -> i64 { return a + b; }
-fn main() -> i64 { return add_it(9223372036854775807, 1); }
+fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  return read(ref xs, 99);
+}
 "#,
     );
     let output = Command::new(binary)
@@ -13008,6 +13014,11 @@ fn main() -> i64 { return 0; }
 // program. Verifies both the pathological case now traps identically
 // on both backends, AND that a normal, non-pathological `parallel for`
 // still computes the correct answer (no false-positive regression).
+// The C-backend trap here goes through the same shared overflow-check
+// helper #191 (2026-08-14) converted from `abort()` to `exit(3)` --
+// was 134 (128+SIGABRT), now 3, matching LLVM's own exit code exactly
+// (it already used exit(3) before this fix, so only the C-backend
+// expectation changed).
 #[test]
 fn parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c() {
     let binary = env!("CARGO_BIN_EXE_intentc");
@@ -13033,8 +13044,8 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
-        "BUG-140 regression: C backend should trap (134) on this extreme \
+        Some(3),
+        "BUG-140 regression: C backend should trap (3) on this extreme \
          loop range instead of silently skipping the loop, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -14883,12 +14894,16 @@ fn main() -> i64 {
         "expected an overflow message on LLVM's stderr, got: {:?}",
         String::from_utf8_lossy(&llvm_out.stderr)
     );
-    // C: unchanged reference behavior (rc=134, its own message).
+    // C: was rc=134 (128+SIGABRT) here; #191 (2026-08-14) converted
+    // this trap from `abort()` to `exit(3)` after
+    // tools/backend_crosscheck.py's corpus sweep caught the two
+    // backends disagreeing on exit code for this exact trap category
+    // -- now matches LLVM's own rc=3 exactly, message unchanged.
     let c_out = Command::new(binary)
         .args(["run", src.to_str().unwrap(), "--backend=c"])
         .output()
         .expect("intentc run (C) should execute");
-    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert_eq!(c_out.status.code(), Some(3), "C exit code must now match LLVM's 3");
     assert!(
         String::from_utf8_lossy(&c_out.stderr).contains("integer overflow in int64_t add"),
         "expected an overflow message on C's stderr, got: {:?}",

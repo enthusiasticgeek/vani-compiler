@@ -35332,23 +35332,32 @@ fn main() -> i64 {
 
     // BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
     // backend-divergence finding. The bounds / overflow / divide-by-zero
-    // / shift traps on the C backend are deliberately still raw
-    // `abort()` (out of scope for the BUG-106/113/116/120/129/135
-    // `exit(3)` conversions -- see `tutorials/src/intermediate/
-    // 10b_runtime_errors_primer.md`'s Row 2). But `abort()` does NOT
-    // flush stdio, unlike `exit()` -- so any `print` output buffered
-    // before the trap fired was silently discarded on the C backend
-    // while the LLVM backend's `exit(3)` preserved it, making the two
-    // backends' crash diagnostics look like they disagreed (a "backend
-    // divergence") even when the underlying trap condition matched
-    // exactly. Fixed by adding `fflush(stdout);` immediately before
-    // each `abort()` at these 4 trap categories, on both C codegen
-    // paths (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
-    // Deliberately NOT touching the many OOM-guard `abort()` calls
-    // (`if (!ptr) abort();`) scattered through the runtime helpers --
-    // a different class, out of scope here.
+    // / shift traps on the C backend used to be raw `abort()`, which
+    // does NOT flush stdio, unlike `exit()` -- so any `print` output
+    // buffered before the trap fired was silently discarded on the C
+    // backend while the LLVM backend's `exit(3)` preserved it, making
+    // the two backends' crash diagnostics look like they disagreed (a
+    // "backend divergence") even when the underlying trap condition
+    // matched exactly. Fixed by adding `fflush(stdout);` immediately
+    // before each trap at these 4 categories, on both C codegen paths
+    // (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
+    //
+    // At the time, overflow/divide-by-zero/shift stayed on raw
+    // `abort()` after that flush (only the *lost output* half of the
+    // divergence was fixed, the *differing exit code* half -- SIGABRT
+    // (128+6=134) vs. LLVM's `exit(3)` -- was left as documented,
+    // deliberate out-of-scope). #191's tools/backend_crosscheck.py
+    // corpus sweep (2026-08-14) caught that remaining half on its very
+    // first run (`examples/language/english/
+    // loop_carried_overflow_not_elided.vani` exited 134 on `--backend=c`
+    // vs. 3 on LLVM) and it was fixed then: overflow, divide-by-zero,
+    // and shift all now call `exit(3)` too, on both C backends,
+    // matching LLVM exactly. Bounds-check traps (`index out of
+    // bounds`) were NOT part of that fix -- a separate helper family,
+    // no divergence found for it, still raw `abort()` (with the
+    // `fflush(stdout)` from the original BUG-136 fix still in place).
     #[test]
-    fn c_backend_flushes_stdout_before_abort_on_all_four_row2_traps() {
+    fn c_backend_flushes_stdout_before_trapping_on_all_four_row2_traps() {
         let overflow_source = r#"
             fn add_it(a: i64, b: i64) -> i64 { return a + b; }
             fn main() -> i64 { return add_it(9223372036854775807, 1); }
@@ -35358,8 +35367,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("integer overflow in") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("integer overflow in") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              overflow trap in SSA-C output, got:\n{c}"
         );
 
@@ -35372,8 +35381,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("division by zero") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("division by zero") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              divide-by-zero trap in SSA-C output, got:\n{c}"
         );
 
@@ -35386,8 +35395,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("shift amount out of range") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("shift amount out of range") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              shift trap in SSA-C output, got:\n{c}"
         );
 
@@ -35426,16 +35435,16 @@ fn main() -> i64 {
             }
         "#;
         let c = compile_to_c(tree_c_source).expect("tree-C compiles");
-        for (needle, label) in [
-            ("index out of bounds", "bounds"),
-            ("integer overflow in", "overflow"),
-            ("division by zero", "division by zero"),
+        for (needle, label, trap_call) in [
+            ("index out of bounds", "bounds", "abort()"),
+            ("integer overflow in", "overflow", "exit(3)"),
+            ("division by zero", "division by zero", "exit(3)"),
         ] {
             let idx = c.find(needle).unwrap_or_else(|| panic!("expected {label} guard in tree-C output, got:\n{c}"));
             let window = &c[idx..(idx + 200).min(c.len())];
             assert!(
-                window.contains("fflush(stdout)") && window.contains("abort()"),
-                "expected fflush(stdout) before abort() near the {label} guard in tree-C output, got:\n{window}"
+                window.contains("fflush(stdout)") && window.contains(trap_call),
+                "expected fflush(stdout) before {trap_call} near the {label} guard in tree-C output, got:\n{window}"
             );
         }
     }

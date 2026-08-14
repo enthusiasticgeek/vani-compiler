@@ -23038,6 +23038,14 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     // and Clang 3.8+. The builtin returns true if the operation overflowed.
     // Both signed and unsigned overflow are trapped (unsigned wrapping is
     // defined C behavior but still undesired in ASIL-D / DO-178C contexts).
+    // Found by #191's new tools/backend_crosscheck.py sweep (2026-08-14,
+    // its very first run): these three arms still raised SIGABRT instead
+    // of the clean `exit(3)` the LLVM backend's overflow-trap path already
+    // uses -- the exact same bug class `TypedStmt::Assert` was fixed for
+    // (2026-08-04, see that match arm's own comment) just never migrated
+    // here. `vanic run examples/language/english/
+    // loop_carried_overflow_not_elided.vani --backend=c` exited 134
+    // (128+SIGABRT) while the LLVM backend exited 3 for the same program.
     for ((ty, c_ty, _signed), op) in &used_overflows {
         let builtin = match *op {
             "add" => "__builtin_add_overflow",
@@ -23051,7 +23059,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect({bl}(a, b, &r), 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     return r;\n\
 }}\n",
@@ -23068,7 +23076,9 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     // "divisor is zero" that the old divisor-only check (still used
     // for unsigned/float below) never covered, so a raw `sdiv`/
     // `srem` reached the hardware and SIGFPE'd instead of hitting
-    // vani's own clean abort message.
+    // vani's own clean abort message. Both branches below also
+    // switched from `abort()` to `exit(3)` for the same reason as the
+    // overflow helpers just above (#191, 2026-08-14).
     for ((ty, c_ty, min_macro), op) in &used_div_rem {
         let c_op = if *op == "div" { "/" } else { "%" };
         out.push_str(&format!(
@@ -23076,12 +23086,12 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect(b == 0, 0)) {{\n\
         fprintf(stderr, \"division by zero\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     if (__builtin_expect(b == -1 && a == {min}, 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     return a {c_op} b;\n\
 }}\n",
