@@ -5421,6 +5421,128 @@ mod tests {
     }
 
     #[test]
+    fn detach_consumes_a_spawned_task_like_join_does() {
+        // 2026-08-13: `detach` is a second way (alongside `join`) to
+        // satisfy the affine "every task is consumed exactly once"
+        // rule -- the thread keeps running independently instead of
+        // being waited on.
+        let source = r#"
+            fn worker() -> i64 { return 1 + 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              return 0;
+            }
+        "#;
+        compile(source).expect("detach should satisfy the affine task-consumption rule");
+    }
+
+    #[test]
+    fn detach_then_join_same_task_rejected() {
+        // A task can be consumed by join OR detach, never both.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              let r: i64 = join t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("detach then join should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn join_then_detach_same_task_rejected() {
+        // Same rule, opposite order.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              let r: i64 = join t;
+              detach t;
+              return r;
+            }
+        "#;
+        let err = compile(source).expect_err("join then detach should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn detach_twice_on_same_task_rejected() {
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              detach t;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("detaching the same task twice should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("already joined or detached")),
+            "expected an 'already joined or detached' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn spawned_task_never_consumed_still_rejected_with_detach_mentioned() {
+        // A spawned-but-never-joined-or-detached task must still be
+        // rejected (same underlying affine rule as before detach
+        // existed) -- and the message should now mention BOTH ways
+        // to consume it.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            fn main() -> i64 {
+              let t: Task<i64> = task worker();
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("spawned-but-unconsumed task should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("never consumed by `join t` or `detach t`")),
+            "expected a 'never consumed by join or detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn detach_inside_pure_fn_rejected() {
+        // Unlike `join` (side-effect-free in v1's sequential
+        // lowering), `detach` leaves a thread running past the pure
+        // call's own return, so its side effects aren't bounded by
+        // the call the way `join`'s are -- rejected in pure contexts.
+        let source = r#"
+            fn worker() -> i64 { return 1; }
+            pure fn spawn_and_detach() -> i64 {
+              let t: Task<i64> = task worker();
+              detach t;
+              return 0;
+            }
+            fn main() -> i64 {
+              return spawn_and_detach();
+            }
+        "#;
+        let err = compile(source).expect_err("detach inside a pure fn should be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("cannot use `detach`")),
+            "expected a pure-context 'cannot use detach' rejection, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn cast_bool_to_int_rejected() {
         // bool ↔ int casts are rejected — different semantic
         // domains. Forces explicit if/else conversion.

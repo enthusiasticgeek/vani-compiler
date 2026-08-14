@@ -2170,7 +2170,7 @@ fn compute_indirect_locks(
                     walk_stmts(&arm.body, param_names, signatures, out);
                 }
             }
-            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+            Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
         }
     }
     fn walk_expr(
@@ -3406,7 +3406,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
             expr_mentions_var(&arm.poll_call, name)
                 || arm.body.iter().any(|s| stmt_mentions_var(s, name))
         }),
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => false,
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => false,
     }
 }
 
@@ -3596,7 +3596,7 @@ fn walk_stmt_for_captures(
                 for s in &arm.body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -3833,7 +3833,7 @@ fn rename_vars_in_stmt(
                 for s in &mut arm.body { rename_vars_in_stmt(s, rename); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } | S::TaskSpawn { .. } => {}
     }
 }
 
@@ -4037,7 +4037,7 @@ fn rewrite_closure_calls_in_stmt(
                 for s in &mut arm.body { rewrite_closure_calls_in_stmt(s, closures); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
     }
 }
 
@@ -4260,7 +4260,7 @@ fn lift_stmt_anon_fn(
                 for s in &mut arm.body { lift_stmt_anon_fn(s, counter, hoisted); }
             }
         }
-        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
+        S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::Detach { .. } => {}
     }
 }
 
@@ -5726,7 +5726,7 @@ fn resolve_enum_types_in_stmt(
                 for s in &mut arm.body { resolve_enum_types_in_stmt(s, enums); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -6155,7 +6155,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                 for s in &mut arm.body { sub_aliases_in_stmt(s, aliases); }
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -7795,7 +7795,7 @@ fn collect_generic_calls_in_stmt(
             }
         }
         // `Continue` and `TaskJoin` carry no expression to scan.
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -8323,7 +8323,7 @@ fn rewrite_generic_calls_in_stmt(
                 }
             }
         }
-        Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+        Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
     }
 }
 
@@ -12609,6 +12609,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
         use std::collections::HashSet;
         let mut spawned: HashSet<String> = HashSet::new();
         let mut joined: HashSet<String> = HashSet::new();
+        let mut detached: HashSet<String> = HashSet::new();
         for stmt in stmts {
             match stmt {
                 TypedStmt::TaskSpawn { name, body, .. } => {
@@ -12646,6 +12647,32 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                             crate::span::Span::default(),
                             format!(
                                 "join: task '{}' was joined twice in the same block",
+                                name
+                            ),
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                    }
+                }
+                TypedStmt::Detach { name } => {
+                    // Mirrors the TaskJoin arm just above -- same
+                    // same-block-spawn requirement, same "twice"
+                    // check, but against `detached` instead of
+                    // `joined`. Both sets count as valid consumption
+                    // in the final spawned-but-unconsumed sweep
+                    // below.
+                    if !spawned.contains(name) {
+                        diagnostics.push(Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "detach: task '{}' was not spawned in this block (cross-block detach isn't supported in v1)",
+                                name
+                            ),
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                    }
+                    if !detached.insert(name.clone()) {
+                        diagnostics.push(Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "detach: task '{}' was detached twice in the same block",
                                 name
                             ),
                         ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
@@ -12729,14 +12756,16 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                 _ => {}
             }
         }
-        // Any name in `spawned` but not in `joined` is unjoined.
-        for name in spawned.difference(&joined) {
+        // Any name in `spawned` but in neither `joined` nor
+        // `detached` is unconsumed.
+        let consumed: HashSet<String> = joined.union(&detached).cloned().collect();
+        for name in spawned.difference(&consumed) {
             diagnostics.push(Diagnostic::new(
                 crate::span::Span::default(),
                 format!(
-                    "task '{}' was never consumed by `join {}`; \
-                     each `task` handle must be joined exactly once",
-                    name, name
+                    "task '{}' was never consumed by `join {}` or `detach {}`; \
+                     each `task` handle must be joined or detached exactly once",
+                    name, name, name
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
         }
@@ -16240,7 +16269,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     format!(
-                        "join: task '{}' was already joined at byte {}..{}",
+                        "join: task '{}' was already joined or detached at byte {}..{}",
                         name, prev.start, prev.end
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
@@ -16250,6 +16279,52 @@ fn check_one_stmt(
                 info_mut.moved = Some(*span);
             }
             body.push(TypedStmt::TaskJoin { name: name.clone() });
+            false
+        }
+        Stmt::Detach { name, span } => {
+            // Mirrors `Stmt::TaskJoin` above -- `detach` is the
+            // other way to satisfy the affine "every spawned task
+            // is consumed exactly once" rule, but without waiting
+            // for the thread or retrieving its result. Same
+            // same-block-only restriction as `join` (see the
+            // "cross-block joins aren't supported in v1" comment
+            // on `verify_loop_invariants`'s callers / the spawn/
+            // join block-locality walk) -- `info.moved` is the
+            // shared mechanism both `join` and `detach` use to mark
+            // a task consumed, so joining an already-detached task
+            // (or detaching an already-joined one) is caught by the
+            // same "already joined at byte N..M" check below.
+            let Some(info) = env.lookup(name) else {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!("detach: no task named '{}' in scope", name),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            };
+            if !matches!(info.ty, Type::Task | Type::TaskR(_)) {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "detach: '{}' has type {}, expected Task or Task<R>",
+                        name, info.ty
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(prev) = info.moved {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "detach: task '{}' was already joined or detached at byte {}..{}",
+                        name, prev.start, prev.end
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                return false;
+            }
+            if let Some(info_mut) = env.lookup_mut(name) {
+                info_mut.moved = Some(*span);
+            }
+            body.push(TypedStmt::Detach { name: name.clone() });
             false
         }
         Stmt::UnsafeBlock {
@@ -25413,7 +25488,7 @@ fn check_task_join_expr(
             Diagnostic::new(
                 span,
                 format!(
-                    "join: task '{}' was already joined at byte {}..{}",
+                    "join: task '{}' was already joined or detached at byte {}..{}",
                     name, prev.start, prev.end
                 ),
             )
@@ -26450,7 +26525,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                         walk(&arm.body, param_names, locks);
                     }
                 }
-                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
+                Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } | Stmt::Detach { .. } => {}
             }
         }
     }
@@ -37945,6 +38020,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::ForIter { .. }
         | TypedStmt::TaskSpawn { .. }
         | TypedStmt::TaskJoin { .. }
+        | TypedStmt::Detach { .. }
         | TypedStmt::UnsafeBlock { .. }
         | TypedStmt::ForIterShallowFree { .. } => vec![],
     }
@@ -38104,6 +38180,27 @@ fn verify_pure_body(
                     // Consuming a Task handle in a pure context
                     // is OK â€” join itself is side-effect-free in
                     // v1's sequential lowering.
+                }
+                TypedStmt::Detach { .. } => {
+                    // Unlike `join`, `detach` deliberately does NOT
+                    // wait for the spawned thread -- its side
+                    // effects (whatever the task body does) can
+                    // still be in flight after the pure function
+                    // returns, which `join`'s "finished by the time
+                    // we return" reasoning above doesn't cover.
+                    // Reject unconditionally.
+                    diagnostics.push(
+                        Diagnostic::new(
+                            crate::span::Span::default(),
+                            format!(
+                                "{} cannot use `detach` -- a detached task's side effects can outlive the pure call, unlike `join` which waits for them to finish first",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
+                        ),
+                    );
                 }
                 TypedStmt::Break { .. } => {
                     // OpenMP parallel-for rejects `break` â€”

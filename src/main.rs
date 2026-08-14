@@ -631,6 +631,12 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         }
         TypedStmt::TaskSpawn { body, .. } => stmts_ssa_supported(body, extra_reject),
         TypedStmt::TaskJoin { .. } => true,
+        // No SSA-backend lowering yet -- routes through the tree
+        // backends, which fully support it (see backend_c.rs /
+        // backend_llvm.rs). Matches ssa.rs::lower_stmt's own
+        // defensive error arm for `Detach`, which should never
+        // actually run because of this gate.
+        TypedStmt::Detach { .. } => false,
         TypedStmt::ForIterShallowFree { .. } => true,
         // `unsafe(reason = "...")` blocks route through the tree
         // backends in v1 of Layer 1.1 — the tree backends emit the

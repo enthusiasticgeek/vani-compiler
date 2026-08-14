@@ -13291,3 +13291,178 @@ only proves lexer-level reachability (the word tokenizes to
 `TokenKind::DownTo` and round-trips through the translator), not
 linguistic correctness. `step`/stride-N remains unimplemented in any
 dialect.
+
+## Feature: `detach()` for `Task<R>` -- fire-and-forget threads (SHIPPED 2026-08-13)
+
+Requested directly: `Task<R>` was affine-only-via-`join` (must always
+be waited on), with no way to spawn a thread and genuinely walk away
+from it. Added `detach <name>;` as a second, mutually-exclusive way
+to consume a spawned task -- the thread keeps running independently;
+`Task<R>`'s affine tracking now requires exactly one of `join` or
+`detach`, never both, never neither.
+
+**Design**: mirrors `join`'s existing plumbing as closely as
+possible at every layer -- new `TokenKind::Detach` (English only, no
+dialect rollout yet, matching this session's `downto`/
+`stdin_ready_within_ms` scoping precedent), `ast::Stmt::Detach` /
+`ir::TypedStmt::Detach`, a `parse_task_detach_stmt` mirroring
+`parse_task_join_stmt`. checker.rs's affine walk
+(`verify_task_affine`) now tracks a `detached` set alongside
+`spawned`/`joined`; a task is "consumed" if it's in either. `detach`
+is rejected inside `pure fn` bodies (unlike `join`, which the
+compiler already treats as side-effect-free in v1's sequential
+lowering) since a detached thread's side effects can outlive the
+pure call, breaking the purity contract. No SSA-backend lowering
+yet -- `main.rs::stmt_ssa_supported` routes any function containing
+`detach` through the tree backends, which fully support it.
+
+**The ctx-freeing problem**: `join`'s codegen frees the spawned
+task's heap-allocated capture/result struct (`ctx`) AFTER
+`pthread_join` returns, since the joiner may still need to read a
+`Task<R>` result out of it. `detach` can't do the same -- nobody
+will ever join, so there's no safe point to free `ctx` without a
+race against the still-running thread (which might still be reading
+or writing it). Making the WORKER self-free its own `ctx` isn't safe
+either without extra coordination, because the SAME outline function
+is shared regardless of whether the task ends up joined or
+detached, and join's codegen still needs `ctx` alive after the
+thread exits. Chose the pragmatic, documented tradeoff: `detach`
+calls `pthread_detach`/`CloseHandle` but deliberately does NOT free
+`ctx` -- a bounded, one-time-per-`detach`-call leak of `sizeof(ctx)`
+bytes, not a growing leak, not a race. Same design on both backends.
+
+Touches: lexer.rs, ast.rs, ir.rs, parser.rs, checker.rs (affine
+tracking + pure-fn rejection + type checking), backend_c.rs
+(`intent_thread_detach`, POSIX `pthread_detach`/Win32 `CloseHandle`),
+backend_llvm.rs (same, raw IR + `declare i32 @pthread_detach(i64)`),
+main.rs (SSA exclusion), ssa.rs (defensive error arm, should never
+run), format.rs / lsp.rs / safety.rs (exhaustive-match passthroughs).
+
+Regression tests: manual verification of basic detach (compiles,
+runs without waiting, on both backends), detach-then-join correctly
+rejected ("already joined or detached"), spawned-but-never-consumed
+still correctly rejected with the updated message. Full suite
+re-verified clean (see the closeout entry below for exact numbers).
+
+## Bugs found while writing real-world examples for barrier/handle/region/task/detach (FILED, not fixed)
+
+Three separate, genuine compiler bugs surfaced while building non-toy
+example programs for the new `detach()` feature and its
+concurrency/memory-management neighbors (Barrier, Handle/Pool,
+Region/Arena). All three examples were redesigned to avoid the
+triggering shape rather than blocked on a fix, since none is on the
+critical path for what was actually requested (working, honest
+examples) -- but none should be forgotten either.
+
+**BUG-188** -- `Vec<ArenaRef<i64>>` breaks the C backend. Repro:
+```vani
+region r {
+  let xs: Vec<ArenaRef<i64>> = vec_fill(0, region_borrow_i64(mut ref r, 0));
+}
+```
+`--backend=c` fails to compile the generated C: the Vec-of-element
+type name is built by naively concatenating `"intent_vec_" + <element's
+C type spelling>`, and `ArenaRef<i64>`'s C spelling is `int64_t*` --
+the `*` lands unescaped inside what's supposed to be a bare C
+identifier (`intent_vec_int64_t*`), which isn't valid C syntax and
+fails every generated helper function for that Vec instantiation.
+The LLVM backend hits a DIFFERENT bug on the same repro (see
+BUG-190) rather than this one, so this is C-backend-specific.
+
+**BUG-189** -- `Vec<Handle<i64>>` also breaks the C backend, same
+symptom family but a different root cause: the emitted C references
+a type name (`intent_handle_i64`) that's never actually `typedef`'d
+before the Vec-of-Handle helper functions need it -- an ordering/
+emission gap, not a name-mangling one (no invalid characters this
+time, just a missing declaration). Repro:
+```vani
+fn main() -> i64 {
+  let p: Pool<i64> = pool_new();
+  let h: Handle<i64> = pool_alloc(mut ref p, 1);
+  let xs: Vec<Handle<i64>> = vec(h);
+  return 0;
+}
+```
+LLVM backend compiles this one correctly -- confirmed independently
+(a `Vec<Handle<i64>>` built via a `vec(...)` literal, not
+`vec_fill`, ran correctly on `vanic run` with no `--backend=c`).
+
+**BUG-190** -- `vec_fill` on the LLVM backend can emit a malformed
+PHI node when the fill-value expression's own evaluation involves a
+call that (even indirectly) requires the codegen context's "current
+block" to be accurate at the point `vec_fill`'s internal loop
+continues after computing the fill value. Repro: the same
+`Vec<ArenaRef<i64>>` snippet from BUG-188, run via `vanic run`
+(default LLVM backend, no `--backend=c`): `lli` rejects the module
+with `"PHI node entries do not match predecessors! ... label %then0"`.
+Given this session's OTHER LLVM PHI-tracking fix (the `&&`/`||`
+short-circuit fix's `TypedStmt::Assert` `ctx.current_block` gap, same
+day), this is very likely the same general CLASS of bug --
+`vec_fill`'s own codegen probably has a similar "opened a block,
+didn't update `ctx.current_block` before continuing" gap somewhere in
+its fill-loop emission -- but this specific instance wasn't root-
+caused; only the trigger (a `region_borrow_i64` call as the fill
+value) was isolated.
+
+None of these three are naming-collision or soundness bugs -- all
+three are "this specific shape doesn't compile / doesn't compile
+correctly," caught before shipping, not silent miscompilation. Next
+free bug number is **BUG-191**.
+
+## Real-world example programs for barrier/handle/region/task/detach (SHIPPED 2026-08-13)
+
+Requested directly: existing examples for these constructs (`pool.vani`,
+`region_arena.vani`, `task_result.vani`, the Barrier tutorial's own
+worked example) were toy-sized API demonstrations (allocate a few
+values, print them) rather than programs that do something a real
+caller would actually want. Added five new examples, each doing real
+(if small) work where the concurrency/memory-management primitive is
+load-bearing, not incidental:
+
+- `barrier_sensor_rendezvous.vani` -- 4 workers publish independent
+  sensor readings, rendezvous, then EVERY worker computes its own
+  percentage share of the combined total -- genuinely needs `Barrier`
+  over `join`, since every worker keeps doing real work (phase 2)
+  after the sync point, using data every other worker just finished
+  writing. Hit a real self-deadlock in an early draft (worker 0's
+  own-slot lock guard wasn't scoped to drop before phase 2 re-locked
+  the same mutex through `m0`) and a static lock-order false-positive
+  (S-19) from an early draft's per-`id` branching -- both fixed by
+  redesigning the example, not compiler bugs.
+- `handle_job_queue.vani` -- a small job queue where jobs get
+  cancelled mid-flight (freed) while other code still holds their
+  handles; re-checking every handle safely skips the cancelled ones
+  via `pool_get`'s None-on-stale-handle behavior instead of a
+  use-after-free. The generational-index pattern real game engines/
+  ECS systems/widget-tree UIs use.
+- `arena_batch_parse.vani` -- parses a comma-separated batch of
+  readings, arena-allocates each one, computes stats, and frees the
+  whole batch in one O(1) call when the `region` block ends -- the
+  per-request/per-frame/per-compilation-unit arena pattern.
+- `task_parallel_chunk_sum.vani` -- splits a 32-element dataset into
+  4 chunks (3 background tasks + the main thread itself as the 4th),
+  sums each in parallel, joins and combines -- the standard parallel-
+  reduce/map-reduce shape.
+- `detach_heartbeat.vani` -- a background heartbeat task fired and
+  immediately detached (not joined) while the main computation runs;
+  demonstrates the actual reason `detach` exists -- a background
+  activity main never needs a result from and shouldn't have to wait
+  on.
+
+All five verified compiling and running correctly on both backends
+with exact expected output/assertions before being added to the
+example corpus.
+
+## Closeout for detach() + real-world examples (2026-08-13)
+
+Full suite re-verified clean after all of the above: 2933/2933 lib
+tests pass (2927 pre-existing + 6 new detach tests, 0 regressions);
+254/254 e2e tests pass (249 pre-existing + 5 new example tests, 0
+regressions -- the `detach_heartbeat` test only asserts main's
+deterministic result line, not the heartbeat's own racy/possibly-
+interleaved-mid-line output, and was re-run 5x locally to confirm
+that's actually stable, not just lucky once); 1048-file example
+corpus check (1043 pre-existing + 5 new files) matches the known
+18-file non-ok baseline exactly, identical file set, all 5 new files
+pass `vanic check`; mdBook rebuilds clean (only the 7 known pre-
+existing false-positive warnings).

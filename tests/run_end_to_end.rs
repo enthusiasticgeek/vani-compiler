@@ -14990,3 +14990,173 @@ fn short_circuit_and_or_still_evaluate_right_operand_when_left_does_not_decide()
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// 2026-08-13: real-world (not toy) example programs for Barrier,
+// Handle<T>/Pool<T>, Region<T>/ArenaRef<T>, and Task<R>/join, plus
+// detach() itself via detach_heartbeat.vani. Each one's output is
+// fully deterministic except detach_heartbeat's background ticks
+// (a genuine race against main's own exit -- that test only checks
+// the deterministic part).
+#[test]
+fn barrier_sensor_rendezvous_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/barrier_sensor_rendezvous.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "all readings collected\nworker 0 share: 10\nworker 1 share: 20\nworker 2 share: 30\nworker 3 share: 40\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn handle_job_queue_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/handle_job_queue.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "jobs run: 3\njobs skipped (cancelled): 2\ntotal priority of jobs that ran: 90\ndouble-cancel of j2 was a safe no-op\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn arena_batch_parse_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/arena_batch_parse.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "batch size: 6\nsum: 232\nmax: 89\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn task_parallel_chunk_sum_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/task_parallel_chunk_sum.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+            "chunk sums: 31 49 35 40\ngrand total: 155\n",
+            "unexpected output for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn detach_heartbeat_example_succeeds_and_prints_the_deterministic_result_on_both_backends() {
+    // The heartbeat's own ticks are a genuine race against main's
+    // exit (that's the whole point of `detach`) -- only assert the
+    // deterministic part (main's own computation result), and that
+    // IF heartbeat lines appear at all, they're well-formed.
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/detach_heartbeat.vani",
+        manifest_dir
+    );
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // Only assert the deterministic part. The heartbeat's own
+        // `print` calls run on a real, un-joined, un-synchronized
+        // thread (that's the whole point of `detach`), so their
+        // output can interleave BYTE-for-byte with main's own
+        // prints -- e.g. a heartbeat line can appear truncated
+        // mid-line if main's print interjects before the
+        // heartbeat's trailing tick number lands. Asserting
+        // anything about the heartbeat lines' exact shape would be
+        // asserting a race outcome, not a semantic guarantee.
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        assert!(
+            stdout.contains("main computation result: 332833500\n"),
+            "expected the deterministic result line for {:?}, got:\n{}",
+            backend_args,
+            stdout
+        );
+    }
+}

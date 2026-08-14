@@ -1,0 +1,42 @@
+// build & run:
+//   vanic run examples/language/english/task_parallel_chunk_sum.vani                          # LLVM backend
+//   vanic run examples/language/english/task_parallel_chunk_sum.vani --backend=c              # C backend
+//   vanic build examples/language/english/task_parallel_chunk_sum.vani -o /tmp/task_parallel_chunk_sum && /tmp/task_parallel_chunk_sum
+
+intent "Task<R>/join: split a dataset into chunks, sum each chunk on its own thread in parallel, join every task and combine -- the classic parallel-reduce pattern (map-reduce, parallel aggregation over a large array).";
+
+fn sum_chunk(data: ref Vec<i64>, start: u64, end: u64) -> i64 {
+  let total: i64 = 0;
+  let i: u64 = start;
+  while i < end {
+    total = total + data[i];
+    i = i + 1;
+  }
+  return total;
+}
+
+fn main() -> i64 {
+  let data: Vec<i64> = vec(
+    3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8, 9, 7, 9, 3,
+    2, 3, 8, 4, 6, 2, 6, 4, 3, 3, 8, 3, 2, 7, 9, 5
+  );
+  let n: u64 = len(data);
+  let chunk: u64 = n / 4 as u64;
+
+  // Fire off 3 background chunks; the 4th runs on the main thread
+  // itself so no core sits idle waiting.
+  let t1: Task<i64> = task sum_chunk(ref data, 0 as u64, chunk);
+  let t2: Task<i64> = task sum_chunk(ref data, chunk, chunk * 2 as u64);
+  let t3: Task<i64> = task sum_chunk(ref data, chunk * 2 as u64, chunk * 3 as u64);
+  let last: i64 = sum_chunk(ref data, chunk * 3 as u64, n);
+
+  let s1: i64 = join t1;
+  let s2: i64 = join t2;
+  let s3: i64 = join t3;
+
+  let total: i64 = s1 + s2 + s3 + last;
+  print "chunk sums:", s1, s2, s3, last;
+  print "grand total:", total;
+  assert total == 155;
+  return 0;
+}

@@ -45,6 +45,11 @@ pub enum TokenKind {
     /// `join <name>;` — consumes a `Task` handle. v1 lowers to a
     /// no-op once the spawn's body has executed.
     Join,
+    /// `detach <name>;` — consumes a `Task` handle WITHOUT waiting
+    /// for it; the spawned thread keeps running independently.
+    /// Alternative to `join` for satisfying the affine
+    /// "every task is consumed exactly once" rule.
+    Detach,
     Let,
     Return,
     If,
@@ -6293,6 +6298,7 @@ pub(crate) fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::With
             | TokenKind::Task
             | TokenKind::Join
+            | TokenKind::Detach
             | TokenKind::Let
             | TokenKind::Return
             | TokenKind::If
@@ -7056,6 +7062,7 @@ impl<'a> Lexer<'a> {
             "with" => TokenKind::With,
             "task" => TokenKind::Task,
             "join" => TokenKind::Join,
+            "detach" => TokenKind::Detach,
             // Note: `min` / `max` are NOT global reserved
             // keywords — they're context-sensitive
             // identifiers used by `reduce X with min;`

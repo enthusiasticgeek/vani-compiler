@@ -8558,7 +8558,7 @@ fn collect_vec_elements_in_stmt(
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } => {}
         TypedStmt::ForIterShallowFree { element_ty, .. } => {
             collect_vec_elements(element_ty, seen, out);
         }
@@ -8831,6 +8831,8 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("}\n");
     out.push_str("static void intent_thread_yield(void) INTENT_UNUSED;\n");
     out.push_str("static void intent_thread_yield(void) { SwitchToThread(); }\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) INTENT_UNUSED;\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) { CloseHandle(th); }\n");
     out.push_str("#else\n");
     out.push_str("# include <pthread.h>\n");
     out.push_str("# include <sched.h>\n");
@@ -8845,6 +8847,8 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("}\n");
     out.push_str("static void intent_thread_yield(void) INTENT_UNUSED;\n");
     out.push_str("static void intent_thread_yield(void) { sched_yield(); }\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) INTENT_UNUSED;\n");
+    out.push_str("static void intent_thread_detach(intent_thread_t th) { pthread_detach(th); }\n");
     out.push_str("#endif\n\n");
 }
 
@@ -11210,7 +11214,7 @@ pub(crate) fn collect_rwlock_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11384,7 +11388,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -11506,7 +11510,7 @@ pub(crate) fn collect_mutex_specs_in_stmt(
         TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
         }
-        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::Detach { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -15168,6 +15172,31 @@ return __intent_ret; }}\n",
                 local_name(name)
             ));
             out.push_str(&format!("  free({}.ctx);\n", local_name(name)));
+        }
+        TypedStmt::Detach { name } => {
+            // Real-thread detach: the OS keeps the thread running
+            // independently, so `.ctx` (the heap-allocated capture
+            // struct the thread's outline function reads from --
+            // and, for `Task<R>`, writes its result into) cannot be
+            // freed here: the thread may still be using it, and
+            // nobody will ever `join` to learn when it's finished.
+            // A self-freeing outline (the thread frees its own ctx
+            // right before returning) isn't safe either without
+            // more coordination, since the SAME outline function is
+            // shared by whichever consumption (join or detach) a
+            // task ends up getting -- join's own codegen still
+            // needs ctx alive after the thread exits, to read a
+            // `Task<R>` result out of it. So this is a deliberate,
+            // bounded, one-time-per-`detach`-call leak of
+            // `sizeof(ctx)` bytes -- documented as a known v1
+            // tradeoff, not swept under the rug. `.thread` itself
+            // has no such issue: `intent_thread_detach` releases
+            // our reference to the OS thread handle without
+            // leaking it.
+            out.push_str(&format!(
+                "  intent_thread_detach({}.thread);\n",
+                local_name(name)
+            ));
         }
         TypedStmt::UnsafeBlock { reason, body } => {
             // Layer 1.1 of unsafe.md. The reason string is the
@@ -23078,6 +23107,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
             TypedStmt::TaskJoin { .. }
+            | TypedStmt::Detach { .. }
             | TypedStmt::Break { .. }
             | TypedStmt::Continue { .. } => {}
             TypedStmt::ForIterShallowFree { element_ty, .. } => walk_type(element_ty, set),

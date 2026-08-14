@@ -1,0 +1,54 @@
+// build & run:
+//   vanic run examples/language/english/arena_batch_parse.vani                          # LLVM backend
+//   vanic run examples/language/english/arena_batch_parse.vani --backend=c              # C backend
+//   vanic build examples/language/english/arena_batch_parse.vani -o /tmp/arena_batch_parse && /tmp/arena_batch_parse
+
+intent "Region<T>/ArenaRef<i64>: parse a small batch of comma-separated sensor readings, arena-allocate each one, and free the whole batch in one O(1) call -- the classic per-batch/per-request/per-frame arena pattern used by compilers, parsers, and servers.";
+
+fn main() -> i64 {
+  region batch {
+    // A tiny "parser": splits one line of readings and allocates
+    // each value into the arena. Real parsers do this same shape
+    // at a much larger scale -- allocate every AST node/token into
+    // one arena tied to the compilation unit's lifetime, then drop
+    // it all at once when done.
+    let line: Str = "12,45,7,89,23,56";
+    let parts: Vec<OwnedStr> = str_split(line, ",");
+
+    let count: i64 = 0;
+    let sum: i64 = 0;
+    let max: i64 = i64_min_value();
+    let i: u64 = 0;
+    while i < len(parts) {
+      let one: OwnedStr = clone_at(ref parts, i);
+      let trimmed: OwnedStr = str_trim(one);
+      if let Option.Some(v) = parse_int(trimmed) {
+        // Arena-allocate this reading -- in a real parser this
+        // ArenaRef would get threaded into an AST node or record
+        // stored elsewhere in the SAME arena; here it's enough to
+        // show the allocation itself is real and batch-scoped.
+        let a: ArenaRef<i64> = region_borrow_i64(mut ref batch, v);
+        count = count + 1;
+        sum = sum + aref_load(a);
+        if v > max {
+          max = v;
+        }
+      }
+      i = i + 1;
+    }
+
+    print "batch size:", count;
+    print "sum:", sum;
+    print "max:", max;
+    assert count == 6;
+    assert sum == 232;
+    assert max == 89;
+
+    // The whole batch -- every ArenaRef<i64> allocated above --
+    // frees in this one deterministic O(1) call when `batch` goes
+    // out of scope. No per-reading free, no risk of forgetting one,
+    // no use-after-free risk either: the checker's escape analysis
+    // rejects any attempt to let an ArenaRef outlive `batch`.
+  }
+  return 0;
+}

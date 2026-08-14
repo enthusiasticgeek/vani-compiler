@@ -2823,6 +2823,8 @@ impl Parser {
             self.parse_task_spawn_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Join)) {
             self.parse_task_join_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::Detach)) {
+            self.parse_task_detach_stmt()
         } else if self.looks_like_select_stmt() {
             self.parse_select_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Unsafe)) {
@@ -3825,6 +3827,20 @@ impl Parser {
         Ok(Stmt::TaskJoin {
             name,
             span: join_tok.span.merge(semi.span),
+        })
+    }
+
+    /// `detach <name>;` — mirrors `parse_task_join_stmt` exactly;
+    /// see `ast::Stmt::Detach` for the semantics.
+    fn parse_task_detach_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let detach_tok =
+            self.expect_keyword("'detach'", |kind| matches!(kind, TokenKind::Detach))?;
+        let name_tok = self.expect_ident()?;
+        let name = ident_text(name_tok);
+        let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
+        Ok(Stmt::Detach {
+            name,
+            span: detach_tok.span.merge(semi.span),
         })
     }
 

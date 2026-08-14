@@ -1,0 +1,91 @@
+// build & run:
+//   vanic run examples/language/english/barrier_sensor_rendezvous.vani                          # LLVM backend
+//   vanic run examples/language/english/barrier_sensor_rendezvous.vani --backend=c              # C backend
+//   vanic build examples/language/english/barrier_sensor_rendezvous.vani -o /tmp/barrier_sensor_rendezvous && /tmp/barrier_sensor_rendezvous
+
+intent "Barrier: 4 sensor workers publish a reading, rendezvous, then each computes its own share of the combined total -- needs a Barrier (not join) because every worker keeps working AFTER the sync point, using data every OTHER worker only just finished writing.";
+
+fn read_sensor(id: i64) -> i64 {
+  // Deterministic "reading" so the output is reproducible.
+  return (id + 1) * 10;
+}
+
+fn worker(
+  id: i64,
+  own: ref Mutex<i64>,
+  m0: ref Mutex<i64>,
+  m1: ref Mutex<i64>,
+  m2: ref Mutex<i64>,
+  m3: ref Mutex<i64>,
+  b: mut ref Barrier
+) -> i64 {
+  // Phase 1: take a reading, publish it into this worker's own
+  // slot (the caller passes which mutex is "mine" as `own`, so
+  // every call takes the exact same code path -- no per-id
+  // branching that could confuse the static lock-order checker
+  // below). mutex_lock only needs a SHARED reference to the Mutex
+  // itself (the lock provides the runtime exclusivity), so every
+  // worker can hold `ref` to all four mutexes at once.
+  let value: i64 = read_sensor(id);
+  {
+    // Scoped so the guard (and its lock on `own`) drops here --
+    // phase 2 re-locks the same mutex through `m0..m3` (worker 0's
+    // `own` is `s0`, same as `m0`), and mutex_lock is non-
+    // reentrant, so the lock MUST be released before phase 2
+    // starts or worker 0 deadlocks against itself.
+    let g = mutex_lock(own);
+    guard_set(ref g, value);
+  }
+
+  // Rendezvous: block here until every worker has published its
+  // own reading. join can't do this -- it would pull each worker
+  // back to the main thread and end its parallel phase-2 work.
+  let is_last: bool = barrier_wait(b);
+  if is_last {
+    print "all readings collected";
+  }
+
+  // Phase 2: safe now to read every OTHER worker's reading too --
+  // the barrier guarantees every publish happened-before this
+  // point. Every call locks m0, m1, m2, m3 in this SAME fixed
+  // order, so there's no cross-thread lock-order cycle for
+  // vāṇी's static deadlock checker (S-19) to worry about.
+  let g0 = mutex_lock(m0);
+  let r0: i64 = guard_get(ref g0);
+  let g1 = mutex_lock(m1);
+  let r1: i64 = guard_get(ref g1);
+  let g2 = mutex_lock(m2);
+  let r2: i64 = guard_get(ref g2);
+  let g3 = mutex_lock(m3);
+  let r3: i64 = guard_get(ref g3);
+  let total: i64 = r0 + r1 + r2 + r3;
+  return value * 100 / total;
+}
+
+fn main() -> i64 {
+  let s0: Mutex<i64> = mutex_new(0);
+  let s1: Mutex<i64> = mutex_new(0);
+  let s2: Mutex<i64> = mutex_new(0);
+  let s3: Mutex<i64> = mutex_new(0);
+  let b: Barrier = barrier_new(4);
+
+  let t1: Task<i64> = task worker(1, ref s1, ref s0, ref s1, ref s2, ref s3, mut ref b);
+  let t2: Task<i64> = task worker(2, ref s2, ref s0, ref s1, ref s2, ref s3, mut ref b);
+  let t3: Task<i64> = task worker(3, ref s3, ref s0, ref s1, ref s2, ref s3, mut ref b);
+  let share0: i64 = worker(0, ref s0, ref s0, ref s1, ref s2, ref s3, mut ref b);
+
+  let share1: i64 = join t1;
+  let share2: i64 = join t2;
+  let share3: i64 = join t3;
+
+  // Readings: 10, 20, 30, 40 -- total 100. Shares: 10%, 20%, 30%, 40%.
+  print "worker 0 share:", share0;
+  print "worker 1 share:", share1;
+  print "worker 2 share:", share2;
+  print "worker 3 share:", share3;
+  assert share0 == 10;
+  assert share1 == 20;
+  assert share2 == 30;
+  assert share3 == 40;
+  return 0;
+}

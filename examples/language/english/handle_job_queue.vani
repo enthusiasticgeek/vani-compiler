@@ -1,0 +1,70 @@
+// build & run:
+//   vanic run examples/language/english/handle_job_queue.vani                          # LLVM backend
+//   vanic run examples/language/english/handle_job_queue.vani --backend=c              # C backend
+//   vanic build examples/language/english/handle_job_queue.vani -o /tmp/handle_job_queue && /tmp/handle_job_queue
+
+intent "Handle<T>/Pool<T>: a tiny job queue where jobs can be cancelled mid-flight -- a real generational-index pattern (the same one game engines/ECS systems and window-manager widget tables use) that makes stale handles safely detectable instead of a use-after-free.";
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
+
+// Checks one handle against the pool and folds its priority into a
+// running total if it's still live. Factored out so main() doesn't
+// need a Vec<Handle<i64>> -- each handle stays an individually-named
+// local (Handle<T> in a Vec has a real, separate C-backend gap; see
+// docs/TODO_CURRENT.md).
+fn check_job(jobs: ref Pool<i64>, h: Handle<i64>, total: i64, ran: i64, skipped: i64) -> Vec<i64> {
+  let slot: Option<i64> = pool_get(jobs, h);
+  if option_is_some(slot) {
+    return vec(total + unwrap_or(slot, 0), ran + 1, skipped);
+  }
+  return vec(total, ran, skipped + 1);
+}
+
+fn main() -> i64 {
+  let jobs: Pool<i64> = pool_new();
+
+  // Enqueue 5 jobs, each holding a priority score.
+  let j1: Handle<i64> = pool_alloc(mut ref jobs, 10);
+  let j2: Handle<i64> = pool_alloc(mut ref jobs, 20);
+  let j3: Handle<i64> = pool_alloc(mut ref jobs, 30);
+  let j4: Handle<i64> = pool_alloc(mut ref jobs, 40);
+  let j5: Handle<i64> = pool_alloc(mut ref jobs, 50);
+
+  // The scheduler cancels job 2 and job 4 before they run --
+  // ordinary, expected traffic for any real job queue.
+  let _ = pool_free(mut ref jobs, j2);
+  let _ = pool_free(mut ref jobs, j4);
+
+  // Other code still holds j1..j5 (e.g. a UI list showing "your
+  // queued jobs"). Checking every handle again must skip the
+  // cancelled ones without crashing -- pool_get returns None for a
+  // freed handle instead of touching freed memory.
+  let acc: Vec<i64> = vec(0, 0, 0);
+  let acc1: Vec<i64> = check_job(ref jobs, j1, acc[0], acc[1], acc[2]);
+  let acc2: Vec<i64> = check_job(ref jobs, j2, acc1[0], acc1[1], acc1[2]);
+  let acc3: Vec<i64> = check_job(ref jobs, j3, acc2[0], acc2[1], acc2[2]);
+  let acc4: Vec<i64> = check_job(ref jobs, j4, acc3[0], acc3[1], acc3[2]);
+  let acc5: Vec<i64> = check_job(ref jobs, j5, acc4[0], acc4[1], acc4[2]);
+
+  let total_priority: i64 = acc5[0];
+  let ran: i64 = acc5[1];
+  let skipped: i64 = acc5[2];
+
+  print "jobs run:", ran;
+  print "jobs skipped (cancelled):", skipped;
+  print "total priority of jobs that ran:", total_priority;
+  assert ran == 3;
+  assert skipped == 2;
+  assert total_priority == 90;
+
+  // Re-cancelling an already-cancelled job is a silent no-op, not
+  // a double-free -- the generation check catches it.
+  let _ = pool_free(mut ref jobs, j2);
+  print "double-cancel of j2 was a safe no-op";
+  return 0;
+}

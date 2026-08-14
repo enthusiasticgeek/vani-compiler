@@ -1369,6 +1369,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         // `unsigned long` in glibc.
         out.push_str("declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)\n");
         out.push_str("declare i32 @pthread_join(i64, i8**)\n");
+        out.push_str("declare i32 @pthread_detach(i64)\n");
         // Linux futex syscall used by `mutex_lock`/
         // `Drop(Guard)` for real kernel-wait parking.
         // `@syscall` is libc's generic syscall(2)
@@ -5212,6 +5213,52 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx_v, ctx_p
             ));
             out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
+        }
+        TypedStmt::Detach { name } => {
+            // Real-thread detach: read the handle and release it
+            // (pthread_detach on POSIX; CloseHandle without waiting
+            // on Win32) WITHOUT freeing `.ctx` -- see the matching
+            // comment on backend_c.rs's Detach arm for why: the
+            // thread may still be reading (or, for `Task<R>`,
+            // writing a result into) `.ctx`, and nobody will ever
+            // `join` to learn when it's safe to free. A deliberate,
+            // bounded, one-time-per-`detach`-call leak, same
+            // documented v1 tradeoff as the C backend.
+            let addr = match ctx.locals.get(name) {
+                Some((_, a)) => a.clone(),
+                None => unreachable!(
+                    "checker: detach '{}' is in scope when we get here",
+                    name
+                ),
+            };
+            let handle_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 0\n",
+                handle_p, addr
+            ));
+            let handle_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i64, i64* {}\n",
+                handle_v, handle_p
+            ));
+            if host_uses_win32_threading() {
+                let h = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    h, handle_v
+                ));
+                let _close = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @CloseHandle(i8* {})\n",
+                    _close, h
+                ));
+            } else {
+                let _ret = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @pthread_detach(i64 {})\n",
+                    _ret, handle_v
+                ));
+            }
         }
         TypedStmt::UnsafeBlock { reason, body } => {
             // Layer 1.1 of unsafe.md. Emit the reason string
@@ -46171,6 +46218,10 @@ pub(crate) fn walk_body(
                 // this same block; treat it like a read of the
                 // local binding so capture analysis sees nothing
                 // crossing the parallel-for boundary.
+                let _ = name;
+            }
+            TypedStmt::Detach { name } => {
+                // Mirrors the TaskJoin arm just above.
                 let _ = name;
             }
             TypedStmt::UnsafeBlock { body, .. } => {

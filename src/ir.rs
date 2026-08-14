@@ -322,6 +322,13 @@ pub enum TypedStmt {
     TaskJoin {
         name: String,
     },
+    /// `detach <name>;` — consumes a previously-declared `Task`
+    /// handle without joining it; the spawned thread keeps running
+    /// independently. See `ast::Stmt::Detach` for the full
+    /// semantics.
+    Detach {
+        name: String,
+    },
     /// `unsafe(reason = "...") { <body> }` — lexically scoped
     /// block. The `reason` string is mandatory at parse time
     /// and is emitted as machine-readable debug metadata in
