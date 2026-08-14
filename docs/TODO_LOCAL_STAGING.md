@@ -7534,3 +7534,12 @@ gawain main() -> i64 {
 ```
 
 **STATUS: needs
+
+---
+
+### Candidate: 20260814-041526-run-crash-83625fb88d
+
+Repro: `tools/localfuzz/findings/20260814-041526-run-crash-83625fb88d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-041526-run-crash-83625fb88d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
