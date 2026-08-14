@@ -469,5 +469,5 @@ contract from across this track into one real program.
 ---
 
 **Previous**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
-**Next**: [Sec.17 -- Capstone: a terminal tic-tac-toe game ->](17_tic_tac_toe_capstone.md)
+**Next**: [Sec.16a -- Testing your vāṇी code ->](16a_testing_primer.md)
 

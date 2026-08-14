@@ -561,5 +561,5 @@ that needs to care about it -- unchanged by the AI addition, since
 
 ---
 
-**Previous**: [Sec.16 -- Packages with Kosh ->](16_packages.md)
+**Previous**: [Sec.16a -- Testing your vāṇी code ->](16a_testing_primer.md)
 **Next**: [Advanced track: Async / await -- intuition primer ->](../advanced/01a_async_primer.md)

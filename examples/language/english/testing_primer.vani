@@ -1,0 +1,71 @@
+// build & run:
+//   vanic test examples/language/english/testing_primer.vani                # run every #[test] fn
+//   vanic test examples/language/english/testing_primer.vani --filter=div   # only tests whose label contains "div"
+//   vanic test examples/language/english/testing_primer.vani --json         # machine-readable results
+//
+// This file has NO top-level `fn main` -- `vanic test` only enters
+// harness mode for a file with at least one `#[test]` fn AND no
+// zero-param `fn main` (a file with both runs the tests, not main --
+// see the tutorial). A file meant to also be `vanic run`-able needs
+// its own `fn main`.
+
+intent "A worked tour of vanic test: #[test], #[should_panic], --filter, and the assert_eq_* builtins.";
+
+fn divide(a: i64, b: i64) -> i64 {
+  assert b != 0, "division by zero";
+  return a / b;
+}
+
+fn is_even(n: i64) -> bool {
+  return n % 2 == 0;
+}
+
+// Plain #[test]: pass = exit 0, fail = any runtime trap (a failing
+// assert, an assert_eq_* mismatch, ...).
+#[test]
+fn divide_computes_correctly() -> i64 {
+  assert divide(10, 2) == 5;
+  assert divide(9, 3) == 3;
+  return 0;
+}
+
+// assert_eq_i64 (Test-fw Phase F) prints BOTH sides on a mismatch --
+// unlike plain `assert a == b;`, which shows neither unless you write
+// a custom message by hand. Prefer it whenever a test could plausibly
+// fail with an unexpected number; it turns a blank "assertion failed:"
+// into "left: 4\n right: 5", the actual evidence you need.
+#[test]
+fn is_even_classifies_correctly() -> i64 {
+  let _ = assert_eq_bool(is_even(4), true);
+  let _ = assert_eq_bool(is_even(7), false);
+  return 0;
+}
+
+// #[should_panic] (Test-fw Phase C) inverts pass/fail: this test
+// PASSES iff the process panics (any non-zero exit), and FAILS with
+// "did not panic as expected" if it exits cleanly. Use it to prove a
+// function correctly REJECTS bad input, instead of writing the
+// negative case in a way that looks like it's testing the wrong
+// thing.
+#[test]
+#[should_panic]
+fn divide_by_zero_correctly_panics() -> i64 {
+  let _ = divide(10, 0);
+  return 0;
+}
+
+// assert_eq_str compares by CONTENT (like Rust's assert_eq!), not
+// pointer identity -- a literal and a freshly concatenated OwnedStr
+// with the same text still compare equal.
+#[test]
+fn assert_eq_str_compares_by_content() -> i64 {
+  let built: OwnedStr = "vā" + "ṇी";
+  let _ = assert_eq_str(built, "vāṇी");
+  return 0;
+}
+
+#[test]
+fn assert_eq_f64_catches_float_results() -> i64 {
+  let _ = assert_eq_f64(1.5 + 1.5, 3.0);
+  return 0;
+}
