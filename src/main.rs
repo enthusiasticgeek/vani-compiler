@@ -1288,12 +1288,16 @@ COMMANDS:
                                           any file is not canonical;
                                           --in-place rewrites each file
                                           (mtime stable when canonical).
-    test <path>... [--json] [--smt-debug] Compile + run each path via the
-        [--filter=<substring>]            LLVM backend, treating exit 0 as
-        [--test-threads=<N>]              pass. Paths may be files or
+    test [<path>...] [--json] [--smt-debug] Compile + run each path via the
+        [--filter=<substring>]             LLVM backend, treating exit 0 as
+        [--test-threads=<N>]               pass. Paths may be files or
                                           directories (the latter expand
                                           recursively to *.vani
                                           descendants; dot-dirs skipped).
+                                          With no path at all, defaults to
+                                          the enclosing vani.toml package
+                                          root (error if none found) --
+                                          `cd`-and-run like `cargo test`.
                                           A file with one or more #[test]
                                           fns runs harness mode instead:
                                           each fn in its own process
@@ -2657,9 +2661,16 @@ fn run() -> Result<ExitCode, String> {
             // (see `walk_intent_files`). A file with no top-level
             // `fn main` and at least one `#[test]` fn runs in
             // harness mode instead (see `detect_harness_test_fns`).
-            if args.len() < 3 {
-                return Err("test requires at least one source file\n\n".to_string() + HELP);
-            }
+            // Test-fw Phase E (2026-08-14): no explicit path arg is
+            // also allowed now -- see the `path_args.is_empty()`
+            // manifest fallback below, mirroring `cargo test`'s own
+            // "just works" behavior inside a project root. The old
+            // hard `args.len() < 3` gate would have rejected that
+            // before the flag loop even ran, so it's removed here;
+            // the real "nothing to test" check now happens after
+            // path expansion (still an error either way, just a
+            // later one with a message that mentions the manifest
+            // fallback).
             // Split flags from path args. Supported: --smt-debug,
             // --json, --filter=<substring>. The JSON form is
             // machine-readable for CI; a single object on stdout, no
@@ -2702,6 +2713,34 @@ fn run() -> Result<ExitCode, String> {
                     }
                     other => path_args.push(other.to_string()),
                 }
+            }
+            // Test-fw Phase E (2026-08-14): `vanic test` with no path
+            // args at all defaults to the enclosing Kosh package root
+            // (the same `vani.toml` `find_manifest`/`load_manifest`
+            // already used by `vanic publish`/`add`/etc.), recursing
+            // over the whole package the same way an explicit
+            // directory arg would (via the existing
+            // `walk_intent_files`/`expand_intent_paths`, unchanged --
+            // note this does NOT specially exclude `vendor/`, matching
+            // every other recursive command in this CLI, none of
+            // which filter vendored deps out either; only dot-
+            // directories are skipped). `detect_harness_test_fns` only
+            // ever picks up genuine `#[test]`-containing, main-less
+            // files, so this is safe even if a dependency happens to
+            // ship one.
+            if path_args.is_empty() {
+                let cwd = std::env::current_dir()
+                    .map_err(|e| format!("failed to read cwd: {}", e))?;
+                let manifest_path = vani::manifest::find_manifest(&cwd).ok_or_else(|| {
+                    "test requires at least one source file, or a vani.toml \
+                     manifest in the current directory or a parent (found \
+                     neither)\n\n"
+                        .to_string()
+                        + HELP
+                })?;
+                let manifest = vani::manifest::load_manifest(&manifest_path)
+                    .map_err(|e| format!("failed to load '{}': {:?}", manifest_path.display(), e))?;
+                path_args.push(manifest.root_dir.display().to_string());
             }
             let files = expand_intent_paths(&path_args)?;
             if files.is_empty() {

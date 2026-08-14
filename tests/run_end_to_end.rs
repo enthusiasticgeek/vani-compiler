@@ -4370,6 +4370,95 @@ fn intentc_test_threads_flag_accepts_one_and_rejects_zero() {
 }
 
 #[test]
+fn intentc_test_no_args_defaults_to_manifest_package_root() {
+    // Test-fw Phase E (2026-08-14): `vanic test` with no path args at
+    // all, run from inside a directory with a vani.toml, defaults to
+    // scanning that package's root recursively -- mirrors `cargo
+    // test`'s own "just works" behavior inside a project. Outside
+    // any package (no vani.toml in cwd or any parent) it's still a
+    // clear error, not a panic or a confusing "no .vani files".
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let pkg_dir = std::env::temp_dir().join(format!(
+        "intentc_test_pkg_default_{}",
+        std::process::id()
+    ));
+    let tests_dir = pkg_dir.join("tests");
+    std::fs::create_dir_all(&tests_dir).expect("mkdir package/tests");
+    std::fs::write(
+        pkg_dir.join("vani.toml"),
+        b"[package]\nname = \"pkg_default_test\"\nversion = \"0.1.0\"\nentry = \"main.vani\"\n",
+    )
+    .expect("write vani.toml");
+    std::fs::write(
+        pkg_dir.join("main.vani"),
+        b"fn main() -> i64 {\n  return 0;\n}\n",
+    )
+    .expect("write main.vani");
+    std::fs::write(
+        tests_dir.join("basic.vani"),
+        b"#[test]\nfn basic_math() -> i64 {\n  assert 2 + 2 == 4;\n  return 0;\n}\n",
+    )
+    .expect("write tests/basic.vani");
+
+    let run = Command::new(binary)
+        .args(["test"])
+        .current_dir(&pkg_dir)
+        .output()
+        .expect("vanic test (no args) inside package");
+    let _ = std::fs::remove_dir_all(&pkg_dir);
+    assert!(
+        run.status.success(),
+        "got:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("test basic_math ... ok"),
+        "expected the package's tests/ file to be discovered, got:\n{stdout}"
+    );
+    assert!(stdout.contains("2 passed; 0 failed"), "got:\n{stdout}");
+}
+
+#[test]
+fn intentc_test_no_args_outside_package_is_a_clear_error() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    // A fresh empty temp dir has no vani.toml in it or any of its
+    // ancestors reachable purely through it (relies on /tmp itself
+    // never containing one, true for this project's own CI/dev
+    // environments).
+    let empty_dir = std::env::temp_dir().join(format!(
+        "intentc_test_no_manifest_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&empty_dir).expect("mkdir empty dir");
+    let run = Command::new(binary)
+        .args(["test"])
+        .current_dir(&empty_dir)
+        .output()
+        .expect("vanic test (no args) outside any package");
+    let _ = std::fs::remove_dir_all(&empty_dir);
+    assert!(!run.status.success(), "must fail outside any package");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("vani.toml manifest"),
+        "expected a manifest-aware error message, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn intentc_check_smt_debug_flag_dumps_smt_query() {
     // `--smt-debug` should surface the same query/response stream
     // as `INTENTC_SMT_DEBUG=1`: each SMT round-trip emits a
