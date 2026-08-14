@@ -7404,3 +7404,12 @@ Repro: `tools/localfuzz/findings/20260813-235200-run-crash-d75a8ff09b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260813-235200-run-crash-d75a8ff09b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260814-000231-run-crash-5b2d7325a3
+
+Repro: `tools/localfuzz/findings/20260814-000231-run-crash-5b2d7325a3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-000231-run-crash-5b2d7325a3/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
