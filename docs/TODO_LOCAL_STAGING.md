@@ -7947,3 +7947,45 @@ fn main() -> i64 {
   vypiš xs[1];
   vypiš xs[-9223372036854775808];
   vypiš
+
+---
+
+### Candidate: 20260814-184433-backend-divergence-ae3ce9eb45
+
+Repro: `tools/localfuzz/findings/20260814-184433-backend-divergence-ae3ce9eb45/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260814-184433-backend-divergence-ae3ce9eb45/fix_attempt.md`
+
+### Staging Entry for vani-compiler Local Fuzzing
+
+**Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/assamese/vec_invariants.vani`
+
+**Mutant/generated Source:**
+```vani
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/assamese/vec_invariants.vani --backend=c  # C
+
+উদ্দেশ্য "Loop invariants over Vec length, end-to-end";
+
+// `অপরিবর্তনীয়` = invariant ("unchanging"), `প্রমাণ` = prove
+
+কাজ main() -> i64 {
+  মান xs: Vec<i64> = vec(0);
+  মান i: i64 = 1;
+
+  যতক্ষণ i < 5
+  অপরিবর्तনীয় len(xs) == (i হিসাবে u64);
+  অপरিবর্তনীय় i >= 1;
+  অপরিবর্তনীয় i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  প্রমাণ i == 5;
+  প্রমाण len(xs) == 5;
+
+  লেখ xs[0];
+  লে
