@@ -8258,3 +8258,48 @@ Fix attempt: `tools/localfuzz/findings/20260815-044032-run-crash-79127e5d30/fix_
 
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260815-045836-backend-divergence-cb8f735866
+
+Repro: `tools/localfuzz/findings/20260815-045836-backend-divergence-cb8f735866/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-045836-backend-divergence-cb8f735866/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Report**
+
+The vani-compiler's local staging log indicates a backend-divergence issue with the provided mutant/generated source code. The specific details are as follows:
+
+- **Base corpus file**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/interfaces.vani`
+- **Mutant/generated source**: As provided in the prompt.
+- **Observed symptom**: An integer overflow error occurred during the execution of the program, specifically when trying to perform an `i64 mul` operation. This resulted in a crash.
+- **Backend(s) affected**: The experiment was run on both LLVM and C backends, as specified with `--backend=c`.
+
+**Raw result data**:
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in i64 mul\n",
+    "timed_out": false
+  }
+}
+```
+
+**Analysis**
+
+The integer overflow error occurs during the multiplication of `self.x` and `self.y` within the `Area` interface method implementation for the `Point` struct. This issue arises because the result of `self.x * self.y` exceeds the maximum representable value for an `i64` in C, which is 2^63 - 1.
+
+**Root Cause**
+
+The root cause of this problem lies in the design of the interfaces and their implementations. The `Area` interface requires a method `area(self: Point) -> i64`, but the implementation for the `Point` struct includes a multiplication operation that exceeds the range of `i64`. This leads to an
