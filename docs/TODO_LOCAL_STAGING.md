@@ -8245,3 +8245,16 @@ Fix attempt: `tools/localfuzz/findings/20260815-043230-backend-divergence-bf966f
 }
 ```
 
+
+---
+
+### Candidate: 20260815-044032-run-crash-79127e5d30
+
+Repro: `tools/localfuzz/findings/20260815-044032-run-crash-79127e5d30/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-044032-run-crash-79127e5d30/fix_attempt.md`
+
+```
+[2023-05-19 14:56:37] [vani-localfuzz] Running /home/virgo/source/vani-compiler-localfuzz/examples/language/hebrew/early_exit.vani with LLVM backend
+
+STATUS: needs human/frontier root-cause review.
+```
