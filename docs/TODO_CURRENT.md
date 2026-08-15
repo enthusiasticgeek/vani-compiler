@@ -14620,6 +14620,99 @@ corpus-based tooling here turns out insufficient.
 sweep) is now fully unblocked -- all of #185/#187/#189/#191 are
 complete.
 
+## RTOS priority-ceiling / priority-inversion example (2026-08-14)
+
+User request, following directly on #191: a worked example of an
+RTOS scheduling concept -- priority ceiling protocol, priority
+inversion, and simulated preemption -- as a discrete-tick userland
+scheduler (`examples/language/english/rtos_priority_ceiling_
+simulation.vani`, 264 lines). `struct Job { id, name: Str, priority,
+arrival, work, needs_mutex, phase }` (named `Job`, not `Task` --
+`Task` is a reserved built-in type name); `effective_priority`
+returns the shared resource's ceiling while a job holds the mutex,
+else the job's own priority; `pick_next` linear-scans for the lowest
+effective-priority runnable job each tick. `run_simulation(use_
+ceiling, ceiling, max_ticks, verbose)` drives the classic 3-job
+scenario (L/M/H, hand-traced before writing code: naive H finishes
+tick 11, ceiling-protected H finishes tick 7) twice -- once without
+the ceiling (showing the inversion), once with it (showing the fix).
+
+Mid-task follow-up from the user: add randomized priority changes so
+the demo isn't static. M's priority now gets reassigned via `rand_
+in_range(2, 6)` with a ~30% per-tick chance while M is active. Both
+scenario runs re-seed to the same `demo_seed` (`seed_rng(7)`) before
+each run so the naive-vs-ceiling comparison stays apples-to-apples
+under randomness. A follow-up 30-trial stress test (`trial_seed =
+1000 + trial`) re-runs both scenarios non-verbosely across 30
+independently-seeded schedules, asserting the textbook PCP guarantee
+(`t_ceiling <= t_naive`) holds on every single trial, and counts how
+many trials had a real inversion the ceiling actively prevented (25
+of 30 in the shipped run).
+
+Confirmed real vāṇी constraints while building this: enums have no
+built-in `==` (`match ... { Variant then true, _ then false }` used
+throughout instead of `s == St.B`); `len(xs)` returns `u64`, needing
+explicit `as i64` casts; plain scalar reassignment (`x = expr;`) on
+an ordinary `let` binding is legal without any `mut` marker.
+
+**Verification**: identical output byte-for-byte on both backends
+(diffed directly); ASan/LeakSanitizer/UBSan clean via `gcc
+-fsanitize=address,leak,undefined -fno-sanitize-recover=all`; `valgrind
+--leak-check=full` clean (0 errors, 63/63 allocations freed) on both
+the LLVM AOT build (`vanic build`) and a plain-gcc C build (note:
+profiling `vanic run --backend=c` directly under valgrind profiles
+the COMPILER's own process, not the compiled program -- the correct
+methodology is `vanic build`/`vanic emit`+`gcc` first, then valgrind
+the resulting native binary); `vanic check examples` corpus diff
+showed exactly the expected +1; `ssa_lowers_every_example` passed;
+full `cargo test --release --workspace` unchanged. Pushed as
+`67516e89`.
+
+## Make/CMake/Meson/Ninja build-system example (2026-08-14)
+
+User request: a worked example of build-system integration covering
+all four of Make, CMake, Meson, and (hand-written, not just as a
+CMake/Meson generator backend) Ninja. `tutorials/src/intermediate/
+09d_build_systems.md` already documented a mixed C+vāṇी project
+layout, but its snippets had never actually been built --
+confirmed by trying, which surfaced a real bug: the tutorial's
+`meson.build` linked against a `static_library()` of the raw,
+un-stripped vāṇी C output, which fails to link with "multiple
+definition of `main`" (every vāṇी entry point lowers `fn main()` to
+a literal C `int main(void)`, and `c_helper.c` has its own `main`
+too). Fixed by compiling to a plain object, `objcopy -N main`-
+stripping vāṇी's `main` symbol out of it, then linking the C side
+directly against that stripped object -- never against a
+`static_library()` of it. Same fix applied to both the tutorial's
+own snippet and the new real project.
+
+New `examples/build_systems/myproject/`: `src/math.vani` (a `math`
+module, `pub fn square`/`cube`) + `src/main.vani` (imports it,
+exposes `#[no_mangle] fn vani_square`/`vani_cube` for C FFI, plus its
+own `fn main()`) + `c_helper.c` (calls the exposed FFI functions).
+Four independent build files (`Makefile`, `CMakeLists.txt`,
+`meson.build`, hand-written `build.ninja`), each building to its own
+`build-<tool>/` directory so all four can be built in the same
+checkout without collisions, all producing identical output
+(`square(4) = 16`, `cube(3) = 27`). New CI job `build-systems-example`
+builds and runs all four in sequence and greps their output, so a
+future change to `vanic emit`'s C output shape (or to any of the four
+build files) gets caught here instead of silently rotting docs again.
+
+**Verification**: all four tools built and ran correctly both
+standalone and in sequence in the same checkout; incremental-rebuild
+dependency tracking spot-checked on the hand-written Ninja file
+(`touch src/math.vani` correctly triggers a re-emit; a no-op rebuild
+correctly reports nothing to do); CMake with the Ninja generator
+(`-G Ninja`) also confirmed working; `mdbook build` clean; full
+`cargo test --release --workspace` unchanged; `vanic check examples`
+corpus diff showed exactly +1 (`src/math.vani`, a module fragment
+with no `fn main`, same category as `testing_primer.vani` --
+`src/main.vani` itself checks clean as a real entry point). Pushed as
+`dc3cce4d`; CI green including the new job's first-ever live run
+(`CI` 7m30s, `CodeQL`, and the tutorials-deploy job all `completed
+success`).
+
 ## Cross-language "did you mean" syntax hints (2026-08-15)
 
 User request, prompted directly by probing several common
@@ -14685,4 +14778,264 @@ the new hint strings (none -- confirms zero false positives against
 real code, including the 40+ non-English dialect trees where
 identifiers like "do"/"var" could plausibly appear as real names).
 Full `cargo test --release --workspace` clean: 2989 lib (2979 + 10
-new) / 268 e2e, 0 failed.
+new) / 268 e2e, 0 failed. Pushed as `af82dc7b`; CI green.
+
+## #190 -- final documentation/tutorial consistency sweep (2026-08-15, DONE)
+
+Last item in `docs/TODO_NEXT_SESSIONS.md`'s plan, unblocked once
+#185/#187/#189/#191 all shipped. Per the plan's own scope: sweep
+`docs/TODO_CURRENT.md`, `docs/v1_limitations.md`, tutorial pages,
+cross-references, `SUMMARY.md` nav, the glossary, and check for any
+newly-stale claims introduced by the other four items -- plus fold in
+per-item doc updates that should have already happened alongside 1-6
+but hadn't.
+
+Found two real gaps: the RTOS example (`67516e89`) and the
+build-systems example (`dc3cce4d`) had both shipped -- each with its
+own in-context doc updates (tutorial edits, `SUMMARY.md`) -- but
+neither had the `docs/TODO_CURRENT.md` writeup this project's
+convention calls for every shipped item to get; backfilled both
+above. Also found `tutorials/src/advanced/11_llm_workflows.md`'s
+self-documented-as-drifting English example count was stale again
+(207, now 208 -- the RTOS example landed in `examples/language/
+english/`) -- corrected. Checked `docs/v1_limitations.md`, the
+glossary, and `SUMMARY.md` nav directly; all three already correctly
+reflect this window's work (no new limitation was introduced or
+resolved by the RTOS/build-systems examples or the syntax-hints
+feature -- the last is a parser UX improvement, not a language
+surface change, so it needed no glossary entry). New `STATUS.md`
+handoff entry (2026-08-15) summarizing the window and closing
+`docs/TODO_NEXT_SESSIONS.md`'s plan end to end -- all 7 of its tasks
+are now DONE.
+
+**Verification**: `mdbook build` across the whole tutorial book (not
+just the edited page, to catch any cross-reference this sweep might
+have broken) succeeds -- only the same pre-existing `<T>`/`<f32>`
+generic-syntax-parsed-as-HTML-tag warnings on files this sweep didn't
+touch, unrelated to and unchanged by this edit. No code changes this
+item -- docs only.
+
+## BUG-194 -- C-backend bounds-check exit-code divergence (2026-08-15, DONE)
+
+Found via localfuzz (not `tools/backend_crosscheck.py`, which had
+already swept clean for this exact pattern before this bug was ever
+fixed -- it never exercised bounds-check specifically), the same
+afternoon #190 closed. Mutated
+`examples/language/sanskrit/vec_invariants.vani` diverged: C backend
+exited `134` (SIGABRT), LLVM exited `3`, both printing the identical
+`"index out of bounds\n"` message.
+
+Root cause: #191's abort()-vs-exit(3) sweep (2026-08-14) fixed
+overflow/divide-by-zero/shift on both C backends but deliberately
+left the bounds-check helper family alone, on the stated assumption
+it was "still legitimately abort()-based, no divergence found there."
+That assumption was wrong -- checked directly this time instead of
+re-trusting the old note: both LLVM backends' `__intent_bounds_check`
+helper has called `exit(3)` since BUG-108 (tree-LLVM) and BUG-162
+(SSA-LLVM), predating #191 entirely. Only the C backends' bounds
+helpers never got the same treatment.
+
+Fixed 7 call sites to `exit(3)` (adding `fflush(stdout)` where
+missing, matching the established BUG-136 convention): tree-C's
+single shared `intent_check_bounds` helper (`backend_c.rs`, used by
+every Vec/array read, write, and struct-field-array access site);
+SSA-C's 4 inline bounds guards (`ssa_backend_c.rs`, read + write x
+{Vec, fixed-array}); and the 2 remaining C-only method-specific
+bounds messages (`swap_remove`/`insert` on both the generic-Vec and
+`Vec<bool>`-specialized runtime, `set`/`set_mut`) that shared the
+same `abort()` anti-pattern even though they were never localfuzz's
+specific trigger.
+
+`signal_killed_child_reports_128_plus_signal_not_a_bare_1` (BUG-130's
+regression test) used an out-of-bounds Vec read as its SIGABRT
+vehicle specifically because bounds-check was believed to be the one
+trap category still guaranteed to raise a real signal -- that
+assumption just became false, so the test needed a THIRD vehicle
+(overflow was the original one, retired by #191). Switched to `pop()`
+on an empty `Vec<i64>`, a distinct, still-genuinely-`abort()`-based
+helper (`{struct}__pop_mut` in `backend_c.rs`) with no LLVM
+equivalent to diverge from -- `pop()` on LLVM has no empty-check at
+all, a separate, pre-existing gap, explicitly out of scope here.
+
+Updated 9 more `Some(134)` -> `Some(3)` assertions across
+`tests/run_end_to_end.rs` (BUG-149's three array-bounds tests,
+BUG-147 clone_at, BUG-148 vec_remove_at, BUG-162's bounds half,
+BUG-163, BUG-164 -- the last of these previously asserted the C/LLVM
+divergence was *intentional*, rewritten since both now agree), plus
+`src/lib.rs`'s `c_backend_flushes_stdout_before_trapping_on_all_four_
+row2_traps` (bounds sub-check: `abort()` -> `exit(3)` in both its
+SSA-C and tree-C assertions).
+
+Docs: rewrote `tutorials/src/intermediate/10b_runtime_errors_primer.
+md`'s "Row 2: the abort surface" C-backend bullet and its final "A
+summary you can carry" section -- both previously named bounds-check
+as "the one remaining exception" still raising `SIGABRT`; now all
+four trap categories agree on `exit(3)` across both backends.
+
+**Verification**: re-ran the original localfuzz repro directly --
+both backends now exit `3` with identical stdout/stderr. Full corpus
+swept twice: `tools/backend_crosscheck.py` (0 flagged across all 1056
+files, matches its empty baseline) and `tools/leak_sweep.py` (4
+flagged, matches its existing baseline exactly -- unaffected by an
+exit-code-only change). Full `cargo test --release --workspace`
+clean: 2989 lib / 268 e2e, 0 failed (no test count change -- every
+edit here updated an existing assertion's expected value or swapped
+a test's trap vehicle, none added/removed a test). `mdbook build`
+clean (only pre-existing, unrelated warnings).
+
+Also, per the same-session localfuzz digest that surfaced this bug:
+the `run-crash` (both-backends-timeout) and `check-crash` (`vanic
+check` itself hangs) clusters in the same digest were separately
+triaged and found NOT to be compiler bugs -- `run-crash` findings are
+fuzzer-mutation artifacts (diffed each repro against its base
+example: the mutations removed a loop increment or flipped `+1` to
+`+ -1`, creating a genuinely infinite loop in the SOURCE program that
+both backends correctly hang on forever, not a backend defect); all 3
+`check-crash` findings no longer reproduce at all against the current
+binary (re-ran directly, all exit clean) -- stale, predating the
+digest's own 07:03 UTC refresh boundary, already fixed on main before
+today. Neither cluster needed a fix.
+
+## Cache precompiled sort_runtime.c / parallel_runtime.c objects (2026-08-15, DONE)
+
+User question: "parallel vani build possible for faster compilation?
+e.g. j flag for make." Measured a real single-file `vanic build`
+phase by phase before answering rather than guessing: `vanic check`
+0.19s, LLVM emit 0.24s, `gcc -O3 -c` on `sort_runtime.c` alone
+**0.94s (55% of the total 1.7s build)**, `gcc -O2 -c` on
+`parallel_runtime.c` 0.07s, `opt -O3` 0.17s, `llc` 0.16s. A `-j`-style
+flag doesn't map cleanly onto vāṇी's architecture -- the whole
+program flattens into one `Program`/one LLVM module
+(`flatten_modules_in_program`), and there's no multi-package
+workspace build yet (kosh is still a design doc, no CLI command).
+But `sort_runtime.c`/`parallel_runtime.c` are static, unchanging C
+sources embedded via `include_str!` -- recompiling them from scratch
+on literally every single build, even for programs that never call
+`sort()`, is pure waste with nothing to do with parallelism at all.
+
+User's explicit design directive before implementing: **"correctness
+is most important than speed of compilation. design such that
+staleness is auto detected and fast compilation only applied bearing
+that condition."** Design followed accordingly -- new
+`compile_runtime_helper_cached` (`src/main.rs`) wraps both call
+sites:
+
+- **Cache key** = a hash over the exact source text, the resolved
+  `cc` path, that compiler's OWN `--version` output (so a system
+  compiler upgrade invalidates old entries instead of silently
+  reusing objects from a possibly ABI-incompatible toolchain), the
+  exact flags passed (host vs. cross-target already differ here, so
+  cross builds get their own cache entries for free), and a
+  best-effort **host identity** (`$HOSTNAME`/`$COMPUTERNAME`/
+  `hostname`) -- added specifically because `-march=native` bakes in
+  the HOST CPU's instruction set at compile time, so a cached object
+  is only valid on the machine that produced it; without this, a
+  shared cache directory (NFS home, copied `~/.cache`) could silently
+  reuse a `-march=native` object built for a different CPU and
+  `SIGILL` at runtime.
+- **Every cache HIT is double-checked** against a plaintext `.key`
+  sidecar holding those same inputs verbatim, byte-for-byte, before
+  the cached `.o` is trusted -- defense against a hash collision,
+  astronomically unlikely for this non-adversarial input space but
+  cheap enough to rule out entirely rather than hope against.
+- **Fails OPEN, never closed**: no cache directory available (`$HOME`
+  unset), an unwritable cache dir, a racing writer, a corrupt/
+  mismatched entry -- every one of these falls back to a normal,
+  correct compile rather than erroring the build or (worse) silently
+  trusting something unverified.
+- **Concurrency-safe without a lock file**: two `vanic build`
+  invocations racing on the identical cache key both compute
+  byte-identical objects (same deterministic compile of the same
+  inputs) and install via write-to-temp-then-`rename` (atomic on the
+  same filesystem) -- whichever rename lands last still leaves a
+  fully valid file, never a torn one.
+- Cache location: `$XDG_CACHE_HOME` / `$HOME/.cache` / `%LOCALAPPDATA%`
+  (in that priority order) under `vanic/runtime-objs/`.
+
+**Verification**: measured directly, not assumed -- cold build
+(empty cache) 1.46-1.61s, warm build (cache hit) 0.50s, a **~66%
+reduction**, larger than the naive 55% estimate since
+`parallel_runtime.c` is cached too. Confirmed correctness explicitly
+at each failure mode: (a) cold-vs-warm program OUTPUT is
+byte-identical (binaries themselves differ -- expected, embedded
+build-path/timestamp metadata -- but that's irrelevant to
+correctness); (b) manually corrupted a cached `.key` sidecar and
+confirmed the next build correctly detected the mismatch, fell back
+to a full real recompile (same 1.5s+ wall time as a cold build, not
+the cache-hit 0.5s), and repaired the cache entry -- the staleness
+check the user asked for, proven to actually fire; (c) ran with
+`HOME`/`XDG_CACHE_HOME`/`LOCALAPPDATA` all unset and confirmed the
+build still succeeds with correct output (fail-open path); (d)
+`sort()`-calling and `parallel for`-using example programs both
+produce identical output across a cold-then-warm build pair, so the
+cache doesn't corrupt the actual runtime helper functionality it's
+caching, not just the build wrapper. 4 new unit tests in
+`src/main.rs` (`compile_runtime_helper_cached` now takes its cache
+directory as an explicit `Option<&Path>` parameter specifically so
+these tests don't need to mutate process-global env vars under
+`cargo test`'s parallel execution): cache-hit avoids a real compile
+(proven by pointing the scratch `.c` path at a nonexistent directory
+on the second call and confirming it still succeeds), different
+flags produce distinct cache entries (never collide), a mismatched
+sidecar is never trusted, and `cache_dir: None` still compiles
+correctly every time. Full `cargo test --release --workspace` clean:
+2989 lib / 14 `vanic`-bin unit tests (10 pre-existing + 4 new) / 268
+e2e, 0 failed.
+
+## L31 -- investigated the LLVM detach/heartbeat segfault (2026-08-15, root-caused to lli, not vāṇी)
+
+Last of the 4 localfuzz-prompted threads from this session. The
+finding: a mutated `examples/language/english/detach_heartbeat.vani`
+(the detached heartbeat's loop counter changed from `0` to near
+`i64::MIN`, so it's still running when `main` returns almost
+immediately) segfaulted under `vanic run` (rc=139) while the C
+backend exited cleanly (rc=0, output correctly truncated mid-print --
+the documented, honest "fire and forget" race, not a bug).
+
+Reproduced reliably (3/3, no mutation/huge-value needed) with a
+minimal repro: `detach` a task with an ordinary long-running counting
+loop (2 billion iterations of `i = i + 1` is plenty), return from
+`main` immediately. `lli` prints its own "PLEASE submit a bug report
+to https://github.com/llvm/llvm-project/issues/" banner -- the same
+misleading-JIT-crash signature already on record for
+BUG-106/108/110/113/115/117/120/162, except this time there's a real
+segfault underneath, not a controlled trap.
+
+**Root-caused, not a vāṇी codegen bug**: the IDENTICAL program built
+via `vanic build` (real AOT native compile, `lli` never involved) ran
+correctly 3/3 times -- `exit 0`, correct output. `vanic run` (LLVM,
+no `--backend`) literally shells out to the external `lli` binary to
+JIT-execute the emitted `.ll`; since AOT is proven correct and both
+paths share the same codegen, the bug lives entirely inside `lli`'s
+own JIT engine -- most likely `lli` tears down its JIT-compiled
+machine code when the JIT'd `main` returns without waiting for (or
+being aware of) a real OS pthread spawned via vāṇी's `task`/`detach`
+runtime that may still be executing through that same code -- a
+classic "code memory freed out from under a still-running thread"
+segfault, entirely inside upstream LLVM, outside anything vāṇी's own
+source controls.
+
+**No code fix this pass** -- there's nothing in vāṇी's codegen or
+runtime C shims to fix (confirmed by AOT working). Documented instead
+as a new tracked limitation: `docs/v1_limitations.md`'s L31, plus a
+`vanic run`-only caveat added to `tutorials/src/advanced/
+03_concurrency.md`'s `detach` section pointing users at `vanic build`
+or `--backend=c` when a detached task's runtime might genuinely
+outlive `main`. A real fix (if this ever bites a non-fuzzer-
+manufactured program) would mean either patching upstream `lli` or
+having `vanic run`'s own subprocess wrapper drain/join detached OS
+threads before `lli`'s teardown runs -- flagged in L31 as a candidate
+for a dedicated future design pass, not attempted here.
+
+**Verification**: this item is docs-only (no `src/` changes) --
+`mdbook build` clean (only the same pre-existing, unrelated `<T>`/
+`<f32>` warnings). No test suite changes; the repro itself isn't
+added as a regression test since there's no fix to regress against
+(a `vanic run`-crashes-on-this-shape test would just be asserting a
+known, documented, upstream-`lli` limitation, not vāṇी's own
+behavior).
+
+With this, all 4 items selected from this session's localfuzz-driven
+"what's next" triage (bounds-check divergence, runtime-helper
+caching, and this investigation, plus the earlier timeout-cluster
+re-verification) are closed out.

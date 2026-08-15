@@ -11698,7 +11698,7 @@ fn emit_vec_bool_bundle(out: &mut String) {
          \x20 return (bool)((xs->data[xs->len / 64] >> (xs->len % 64)) & 1);\n\
          }\n\
          static INTENT_UNUSED bool intent_vec_bool__swap_remove(intent_vec_bool* xs, uint64_t i) {\n\
-         \x20 if (i >= xs->len) { fprintf(stderr, \"swap_remove: index out of bounds\\n\"); abort(); }\n\
+         \x20 if (i >= xs->len) { fprintf(stderr, \"swap_remove: index out of bounds\\n\"); fflush(stdout); exit(3); }\n\
          \x20 bool tmp = (bool)((xs->data[i / 64] >> (i % 64)) & 1);\n\
          \x20 xs->len--;\n\
          \x20 if (i < xs->len) {\n\
@@ -11709,7 +11709,7 @@ fn emit_vec_bool_bundle(out: &mut String) {
          \x20 return tmp;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_vec_bool__insert(intent_vec_bool* xs, uint64_t i, bool v) {\n\
-         \x20 if (i > xs->len) { fprintf(stderr, \"insert: index out of bounds\\n\"); abort(); }\n\
+         \x20 if (i > xs->len) { fprintf(stderr, \"insert: index out of bounds\\n\"); fflush(stdout); exit(3); }\n\
          \x20 if (xs->len >= xs->capacity) {\n\
          \x20   uint64_t nc = xs->capacity ? xs->capacity * 2 : 64;\n\
          \x20   xs->data = (uint64_t*)realloc(xs->data, ((nc + 63) / 64) * sizeof(uint64_t));\n\
@@ -11968,7 +11968,7 @@ pub(crate) fn emit_vec_bundle_functions(element: &Type, out: &mut String) {
         // NOT preserved.
         out.push_str(&format!(
             "static INTENT_UNUSED {ct} {sn}__swap_remove({sn}* xs, uint64_t i) {{\
-\n    if (i >= xs->len) {{ fprintf(stderr, \"swap_remove: index out of bounds\\n\"); abort(); }}\
+\n    if (i >= xs->len) {{ fprintf(stderr, \"swap_remove: index out of bounds\\n\"); fflush(stdout); exit(3); }}\
 \n    {ct} tmp = xs->data[i];\
 \n    xs->len--;\
 \n    if (i < xs->len) {{ xs->data[i] = xs->data[xs->len]; }}\
@@ -11982,7 +11982,7 @@ pub(crate) fn emit_vec_bundle_functions(element: &Type, out: &mut String) {
         // owner transfer into the slot).
         out.push_str(&format!(
             "static INTENT_UNUSED int64_t {sn}__insert({sn}* xs, uint64_t i, {ct} v) {{\
-\n    if (i > xs->len) {{ fprintf(stderr, \"insert: index out of bounds\\n\"); abort(); }}\
+\n    if (i > xs->len) {{ fprintf(stderr, \"insert: index out of bounds\\n\"); fflush(stdout); exit(3); }}\
 \n    if (xs->len >= xs->capacity) {{\
 \n        xs->capacity = xs->capacity ? xs->capacity * 2 : 1;\
 \n        xs->data = ({ct}*)realloc(xs->data, xs->capacity * sizeof({ct}));\
@@ -12812,7 +12812,7 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
     };
     out.push_str(&format!(
         "static INTENT_UNUSED {sn} {sn}__set({sn} xs, uint64_t i, {ct} v) {{\
-\n    if (__builtin_expect(i >= xs.len, 0)) {{ fprintf(stderr, \"set: index out of bounds\\n\"); abort(); }}\
+\n    if (__builtin_expect(i >= xs.len, 0)) {{ fprintf(stderr, \"set: index out of bounds\\n\"); fflush(stdout); exit(3); }}\
 \n    if (i >= xs.len) __builtin_unreachable();\
 {cleanup}\
 \n{store}\
@@ -12844,7 +12844,7 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
         };
         out.push_str(&format!(
             "static INTENT_UNUSED int64_t {sn}__set_mut({sn}* xs, int64_t i, {ct} v) {{\
-\n    if (__builtin_expect(i < 0 || i >= (int64_t)xs->len, 0)) {{ fprintf(stderr, \"set_mut: index out of bounds\\n\"); abort(); }}\
+\n    if (__builtin_expect(i < 0 || i >= (int64_t)xs->len, 0)) {{ fprintf(stderr, \"set_mut: index out of bounds\\n\"); fflush(stdout); exit(3); }}\
 \n    if (i < 0 || i >= (int64_t)xs->len) __builtin_unreachable();\
 {cleanup}\
 \n{store}\
@@ -22992,13 +22992,23 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         // is provably in-range, eliminate the check entirely.
         // The trailing __builtin_unreachable() is an optimizer assumption:
         // if gcc can prove index < length it removes the whole branch;
-        // otherwise the abort() fires before reaching it (safe).
+        // otherwise the exit(3) fires before reaching it (safe).
+        // BUG-194 (2026-08-15): was `abort()` (rc=134). Both LLVM
+        // backends' equivalent `__intent_bounds_check` helper has
+        // used `exit(3)` since BUG-108/162 -- a real backend-exit-
+        // code divergence localfuzz caught directly (both backends
+        // detect the same fault and print the same message; only
+        // the exit code differed). #191's abort()-vs-exit(3) sweep
+        // deliberately left this family alone on the mistaken
+        // assumption it was consistently abort()-based on every
+        // backend -- it wasn't. `exit(3)` now matches every other
+        // vāṇी runtime trap's convention on both backends.
         out.push_str("static INTENT_UNUSED inline uint64_t intent_check_bounds(int64_t index, int64_t length) {\n\
     if (__builtin_expect(index < 0 || index >= length, 0)) {\n\
         fprintf(stderr, \"index out of bounds: %lld, len %lld\\n\",\n\
                 (long long)index, (long long)length);\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }\n\
     if (index < 0 || index >= length) __builtin_unreachable();\n\
     return (uint64_t)index;\n\

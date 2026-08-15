@@ -30,6 +30,14 @@
 > networked tic-tac-toe capstone, filed not fixed). Still open, same
 > as before: L5, L6, L10-macOS, L13 (partial), L14, L24, L25.
 >
+> **Update (2026-08-15): L31 added, not fixable in vāṇी.** A
+> `detach`'d task still running when `main` returns can segfault
+> under `vanic run` (LLVM `lli` JIT) -- found via localfuzz,
+> root-caused to `lli`'s own JIT-code-teardown-vs-still-running-
+> pthread race (confirmed via `vanic build`/AOT running the identical
+> program correctly every time), so there's no vāṇी-side codegen fix
+> available. Documented as a `vanic run`-only caveat instead.
+>
 > | # | Summary | Status |
 > |---|---|---|
 > | L1 | Enum destructure-bindings of affine payloads | ✅ Resolved v0.1.0 (2026-06-07) |
@@ -62,6 +70,7 @@
 > | L28 | `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit | ⬜ Not fixed — needs a checked-vs-saturating semantics decision |
 > | L29 | `for i from lo to hi` is ascending-only | ✅ Partially resolved 2026-08-13 — `downto` added; `step`/stride-N still unsupported |
 > | L30 | `tcp_recv`'s received bytes are not inspectable from vani code | ⬜ Not fixed — no `tcp_buf_byte_at`-style builtin yet |
+> | L31 | `detach`'d task still running when `main` returns can segfault under `vanic run` (LLVM `lli` JIT only) | ⬜ Not fixable in vāṇी — root-caused to upstream `lli`'s own JIT teardown; `vanic build`/AOT confirmed correct |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -1774,3 +1783,55 @@ builtins (`src/checker.rs::check_tcp_builtin`, `src/backend_c.rs`,
 should also work against `tcp_recv_nb`/`io_recv_async`'s buffer (Arc
 8 v2/v3 non-blocking paths) or only the blocking v1.6 `tcp_recv`
 family.
+
+### L31 -- `detach`'d tasks still running when `main` returns can crash under `vanic run` (LLVM `lli` JIT only)
+
+Found via localfuzz (2026-08-15): a mutated
+`examples/language/english/detach_heartbeat.vani` (the detached
+heartbeat's loop counter changed to start near `i64::MIN`, so it's
+still running when `main` returns almost immediately) segfaulted
+(`rc=139`) under `vanic run` (LLVM, the default). Reproduced reliably
+(3/3) with a minimal, non-mutated repro too: `detach` a task with a
+plain, long-running counting loop (no huge/adversarial values needed
+-- 2 billion iterations of `i = i + 1` is enough), `detach` it, and
+return from `main` immediately. `lli` prints its own "PLEASE submit a
+bug report to https://github.com/llvm/llvm-project/issues/" crash
+banner -- the same misleading-JIT-crash signature already documented
+for BUG-106/108/110/113/115/117/120/162 (a real vāṇी runtime trap
+that `lli`'s JIT engine reports as if it were an LLVM internal
+crash), except this time there's no controlled trap underneath it at
+all -- this is a genuine segfault.
+
+**Root-caused, not vāṇी's own bug**: the identical program, built
+with `vanic build` (real AOT native compilation, no `lli` involved)
+and then run directly, completes cleanly and correctly every time --
+confirmed 3/3 runs, `exit 0`, both the background heartbeat's own
+prints (when it finishes fast enough to) and `main`'s own output
+behave exactly as documented. `vanic run` (LLVM, no `--backend`)
+literally shells out to the external `lli` binary
+(`src/main.rs`, `env::var("LLI").unwrap_or_else(|_| "lli".to_string())`)
+to JIT-execute the emitted `.ll` -- vāṇी's own codegen is
+byte-identical between the JIT and AOT paths, and AOT is proven
+correct, so the bug lives entirely inside `lli`'s own JIT engine:
+most likely, `lli` tears down (unmaps/frees) its JIT-compiled machine
+code when the JIT'd `main` function returns, without any awareness
+that a real OS-level pthread spawned via vāṇी's `task`/`detach`
+runtime may still be executing machine code the JIT engine owns --
+a classic "the CPU is still executing code whose memory was just
+freed" segfault, entirely inside upstream LLVM's `lli` tool, outside
+what vāṇी's own source can patch.
+
+**Not fixed this pass** -- there's no vāṇी-side code change available
+(the bug isn't in vāṇī's emitted IR or runtime C shims, confirmed by
+AOT working). The honest mitigation is the documentation update this
+pass DID make: `tutorials/src/advanced/03_concurrency.md`'s `detach`
+section now calls out that a `detach`'d task still running when
+`main` returns is only safe under `vanic build` (AOT) -- use `vanic
+run --backend=c` or `vanic build` if a detached task's runtime might
+outlive `main`, not the default LLVM `lli`-JIT path. A real fix would
+mean either patching upstream `lli` (out of scope) or `vanic run`
+itself explicitly draining/joining detached OS threads before
+`lli`'s own process teardown runs, which would need to happen from
+outside the JIT'd program (`vanic`'s own subprocess wrapper around
+`lli`), not from generated IR -- worth a dedicated design pass if this
+turns out to bite real (non-fuzzer-manufactured) programs.

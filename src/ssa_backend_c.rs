@@ -2791,6 +2791,19 @@ fn emit_instr(
             }
         }
         InstrKind::Index { array, index, checked } => {
+            // BUG-194 (2026-08-15): this bounds-check guard (and its
+            // IndexAssign twin below) called `abort()` on
+            // out-of-bounds, while both LLVM backends' equivalent
+            // `__intent_bounds_check` helper has used `exit(3)` since
+            // BUG-108/162 -- a real backend-exit-code divergence
+            // localfuzz caught (both backends detect the same fault
+            // and print the same message; only the exit code
+            // differed). #191's abort()-vs-exit(3) sweep
+            // (tools/backend_crosscheck.py) deliberately left this
+            // family alone on the mistaken assumption it was
+            // consistently abort()-based on every backend -- it
+            // wasn't. `exit(3)` now matches every other vāṇी runtime
+            // trap's convention on both backends.
             // Dispatch on the array operand's source type.
             // Arrays / array refs index naturally; Vec needs
             // a `.data` indirection; Vec refs need `->data`.
@@ -2819,7 +2832,7 @@ fn emit_instr(
                     if *checked {
                         writeln!(
                             out,
-                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); exit(3); }}",
                             idx_str, array_op_str, dot,
                         )
                         .unwrap();
@@ -2845,7 +2858,7 @@ fn emit_instr(
                         if let Some(n) = static_len {
                             writeln!(
                                 out,
-                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); exit(3); }}",
                                 idx_str, n,
                             )
                             .unwrap();
@@ -2917,7 +2930,7 @@ fn emit_instr(
                     if *checked {
                         writeln!(
                             out,
-                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); exit(3); }}",
                             c_operand(index),
                             c_operand(array),
                             dot,
@@ -2961,7 +2974,7 @@ fn emit_instr(
                         if let Some(n) = static_len {
                             writeln!(
                                 out,
-                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); abort(); }}",
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); fflush(stdout); exit(3); }}",
                                 c_operand(index),
                                 n,
                             )
