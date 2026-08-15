@@ -35353,9 +35353,15 @@ fn main() -> i64 {
     // vs. 3 on LLVM) and it was fixed then: overflow, divide-by-zero,
     // and shift all now call `exit(3)` too, on both C backends,
     // matching LLVM exactly. Bounds-check traps (`index out of
-    // bounds`) were NOT part of that fix -- a separate helper family,
-    // no divergence found for it, still raw `abort()` (with the
-    // `fflush(stdout)` from the original BUG-136 fix still in place).
+    // bounds`) were explicitly left alone in that pass -- #191 assumed
+    // (wrongly) they were consistently abort()-based on every backend,
+    // so no divergence was flagged. BUG-194 (2026-08-15), found via
+    // localfuzz directly (not backend_crosscheck.py), caught the same
+    // gap for bounds-check specifically: both LLVM backends'
+    // `__intent_bounds_check` have used `exit(3)` since BUG-108/162,
+    // so the C-only `abort()` here WAS a real, live divergence. Now
+    // fixed to `exit(3)` too, on both C backends -- all four Row 2
+    // trap categories fully agree across backends.
     #[test]
     fn c_backend_flushes_stdout_before_trapping_on_all_four_row2_traps() {
         let overflow_source = r#"
@@ -35412,8 +35418,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("index out of bounds") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("index out of bounds") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              bounds trap in SSA-C output, got:\n{c}"
         );
 
@@ -35436,7 +35442,7 @@ fn main() -> i64 {
         "#;
         let c = compile_to_c(tree_c_source).expect("tree-C compiles");
         for (needle, label, trap_call) in [
-            ("index out of bounds", "bounds", "abort()"),
+            ("index out of bounds", "bounds", "exit(3)"),
             ("integer overflow in", "overflow", "exit(3)"),
             ("division by zero", "division by zero", "exit(3)"),
         ] {

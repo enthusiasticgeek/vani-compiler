@@ -14814,3 +14814,84 @@ have broken) succeeds -- only the same pre-existing `<T>`/`<f32>`
 generic-syntax-parsed-as-HTML-tag warnings on files this sweep didn't
 touch, unrelated to and unchanged by this edit. No code changes this
 item -- docs only.
+
+## BUG-194 -- C-backend bounds-check exit-code divergence (2026-08-15, DONE)
+
+Found via localfuzz (not `tools/backend_crosscheck.py`, which had
+already swept clean for this exact pattern before this bug was ever
+fixed -- it never exercised bounds-check specifically), the same
+afternoon #190 closed. Mutated
+`examples/language/sanskrit/vec_invariants.vani` diverged: C backend
+exited `134` (SIGABRT), LLVM exited `3`, both printing the identical
+`"index out of bounds\n"` message.
+
+Root cause: #191's abort()-vs-exit(3) sweep (2026-08-14) fixed
+overflow/divide-by-zero/shift on both C backends but deliberately
+left the bounds-check helper family alone, on the stated assumption
+it was "still legitimately abort()-based, no divergence found there."
+That assumption was wrong -- checked directly this time instead of
+re-trusting the old note: both LLVM backends' `__intent_bounds_check`
+helper has called `exit(3)` since BUG-108 (tree-LLVM) and BUG-162
+(SSA-LLVM), predating #191 entirely. Only the C backends' bounds
+helpers never got the same treatment.
+
+Fixed 7 call sites to `exit(3)` (adding `fflush(stdout)` where
+missing, matching the established BUG-136 convention): tree-C's
+single shared `intent_check_bounds` helper (`backend_c.rs`, used by
+every Vec/array read, write, and struct-field-array access site);
+SSA-C's 4 inline bounds guards (`ssa_backend_c.rs`, read + write x
+{Vec, fixed-array}); and the 2 remaining C-only method-specific
+bounds messages (`swap_remove`/`insert` on both the generic-Vec and
+`Vec<bool>`-specialized runtime, `set`/`set_mut`) that shared the
+same `abort()` anti-pattern even though they were never localfuzz's
+specific trigger.
+
+`signal_killed_child_reports_128_plus_signal_not_a_bare_1` (BUG-130's
+regression test) used an out-of-bounds Vec read as its SIGABRT
+vehicle specifically because bounds-check was believed to be the one
+trap category still guaranteed to raise a real signal -- that
+assumption just became false, so the test needed a THIRD vehicle
+(overflow was the original one, retired by #191). Switched to `pop()`
+on an empty `Vec<i64>`, a distinct, still-genuinely-`abort()`-based
+helper (`{struct}__pop_mut` in `backend_c.rs`) with no LLVM
+equivalent to diverge from -- `pop()` on LLVM has no empty-check at
+all, a separate, pre-existing gap, explicitly out of scope here.
+
+Updated 9 more `Some(134)` -> `Some(3)` assertions across
+`tests/run_end_to_end.rs` (BUG-149's three array-bounds tests,
+BUG-147 clone_at, BUG-148 vec_remove_at, BUG-162's bounds half,
+BUG-163, BUG-164 -- the last of these previously asserted the C/LLVM
+divergence was *intentional*, rewritten since both now agree), plus
+`src/lib.rs`'s `c_backend_flushes_stdout_before_trapping_on_all_four_
+row2_traps` (bounds sub-check: `abort()` -> `exit(3)` in both its
+SSA-C and tree-C assertions).
+
+Docs: rewrote `tutorials/src/intermediate/10b_runtime_errors_primer.
+md`'s "Row 2: the abort surface" C-backend bullet and its final "A
+summary you can carry" section -- both previously named bounds-check
+as "the one remaining exception" still raising `SIGABRT`; now all
+four trap categories agree on `exit(3)` across both backends.
+
+**Verification**: re-ran the original localfuzz repro directly --
+both backends now exit `3` with identical stdout/stderr. Full corpus
+swept twice: `tools/backend_crosscheck.py` (0 flagged across all 1056
+files, matches its empty baseline) and `tools/leak_sweep.py` (4
+flagged, matches its existing baseline exactly -- unaffected by an
+exit-code-only change). Full `cargo test --release --workspace`
+clean: 2989 lib / 268 e2e, 0 failed (no test count change -- every
+edit here updated an existing assertion's expected value or swapped
+a test's trap vehicle, none added/removed a test). `mdbook build`
+clean (only pre-existing, unrelated warnings).
+
+Also, per the same-session localfuzz digest that surfaced this bug:
+the `run-crash` (both-backends-timeout) and `check-crash` (`vanic
+check` itself hangs) clusters in the same digest were separately
+triaged and found NOT to be compiler bugs -- `run-crash` findings are
+fuzzer-mutation artifacts (diffed each repro against its base
+example: the mutations removed a loop increment or flipped `+1` to
+`+ -1`, creating a genuinely infinite loop in the SOURCE program that
+both backends correctly hang on forever, not a backend defect); all 3
+`check-crash` findings no longer reproduce at all against the current
+binary (re-ran directly, all exit clean) -- stale, predating the
+digest's own 07:03 UTC refresh boundary, already fixed on main before
+today. Neither cluster needed a fix.

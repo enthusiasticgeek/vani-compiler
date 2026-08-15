@@ -12391,25 +12391,30 @@ fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
 // shift) to a clean `exit(3)` on both C backends after
 // tools/backend_crosscheck.py's corpus sweep caught it as a genuine
 // backend-divergence bug, so this test switched to an out-of-bounds
-// Vec index instead -- bounds-check traps are a separate helper
-// family that #191 deliberately did NOT touch (no divergence was
-// found for it), so it's still a real `abort()`/SIGABRT source. See
-// the "What actually happens" section of `tutorials/src/intermediate/
-// 10b_runtime_errors_primer.md` for the current, up-to-date picture
-// of which trap categories are exit(3) vs. abort() on each backend.
-// Expects the shell convention `128 + signal` (134 = 128 + SIGABRT's
-// 6), matching what a directly-executed binary's own shell would
-// show.
+// Vec index instead. BUG-194 (2026-08-15) then did the same for
+// bounds-check traps specifically (a localfuzz finding, not
+// backend_crosscheck.py -- #191's sweep mistakenly assumed bounds-
+// check was consistently abort()-based on every backend and left it
+// alone), so THIS test switched vehicles again: `pop()` on an empty
+// `Vec<i64>` is a distinct helper (`{struct}__pop_mut`, backend_c.rs)
+// that's still genuinely `abort()`-based on the C backend -- no LLVM
+// equivalent exists to diverge from (`pop()` on LLVM has no empty-
+// check at all, a separate, pre-existing gap, out of scope here).
+// See the "What actually happens" section of `tutorials/src/
+// intermediate/10b_runtime_errors_primer.md` for the current,
+// up-to-date picture of which trap categories are exit(3) vs.
+// abort() on each backend. Expects the shell convention `128 +
+// signal` (134 = 128 + SIGABRT's 6), matching what a directly-
+// executed binary's own shell would show.
 #[test]
 fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let src = write_tmp_vani(
         "bug130-signal-exit-code",
         r#"
-fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
 fn main() -> i64 {
-  let xs: Vec<i64> = vec(10, 20, 30);
-  return read(ref xs, 99);
+  let xs: Vec<i64> = vec();
+  return pop(mut ref xs);
 }
 "#,
     );
@@ -13316,7 +13321,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "the ivdep-pragma'd non-parallel for-loop should trap on the first \
          out-of-bounds access (same as a plain loop would), got status {:?}, \
          stdout: {}, stderr: {}",
@@ -13769,7 +13774,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "out-of-bounds clone_at should trap on C, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -13862,7 +13867,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "out-of-bounds vec_remove_at should trap on C, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -13961,7 +13966,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "out-of-bounds array read should trap on C, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -14015,7 +14020,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "out-of-bounds struct-field array read should trap on C, got status \
          {:?}, stdout: {}, stderr: {}",
         output_c.status,
@@ -14060,7 +14065,7 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
+        Some(3),
         "out-of-bounds array write should trap on C, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -14945,11 +14950,16 @@ fn main() -> i64 {
         "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
         String::from_utf8_lossy(&llvm_out.stderr)
     );
+    // C: was rc=134 (128+SIGABRT) here; BUG-194 (2026-08-15) converted
+    // tree-C's `intent_check_bounds` from `abort()` to `exit(3)` after
+    // a localfuzz finding caught the two backends disagreeing on exit
+    // code for this exact trap -- now matches LLVM's own rc=3
+    // exactly, message unchanged.
     let c_out = Command::new(binary)
         .args(["run", src.to_str().unwrap(), "--backend=c"])
         .output()
         .expect("intentc run (C) should execute");
-    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert_eq!(c_out.status.code(), Some(3), "C exit code must now match LLVM's 3");
     assert!(
         String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
         "expected the exact idx/len bounds message on C's stderr, got: {:?}",
@@ -14994,11 +15004,14 @@ fn main() -> i64 {
         "expected the exact idx/len bounds message on LLVM's stderr, got: {:?}",
         String::from_utf8_lossy(&llvm_out.stderr)
     );
+    // C: was rc=134; BUG-194 (2026-08-15) -- see the matching comment
+    // on bug162_bounds_check_prints_idx_len_message_on_llvm_matching_
+    // exit3_convention just above.
     let c_out = Command::new(binary)
         .args(["run", src.to_str().unwrap(), "--backend=c"])
         .output()
         .expect("intentc run (C) should execute");
-    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert_eq!(c_out.status.code(), Some(3), "C exit code must now match LLVM's 3");
     assert!(
         String::from_utf8_lossy(&c_out.stderr).contains("index out of bounds: 7, len 3"),
         "expected the exact idx/len bounds message on C's stderr, got: {:?}",
@@ -15060,16 +15073,17 @@ fn main() -> i64 {
         .args(["run", src.to_str().unwrap(), "--backend=c"])
         .output()
         .expect("intentc run (C) should execute");
-    // Exit codes deliberately still differ (LLVM: exit(3), C: raw
-    // abort()/SIGABRT -> 134) -- that split is intentional and
-    // untouched by this fix (see BUG-106/113/115/117/120). What
-    // BUG-164 fixes is the MESSAGE TEXT: before the fix, this program
-    // would take the SSA path on LLVM (static "index out of bounds")
-    // but silently fall back to tree-C (dynamic "index out of
-    // bounds: N, len M") -- now both take the SSA path, so both use
-    // the SSA-pair's own static wording.
+    // Exit codes used to deliberately differ here (LLVM: exit(3), C:
+    // raw abort()/SIGABRT -> 134) -- BUG-164 itself only fixed the
+    // MESSAGE TEXT: before that fix, this program took the SSA path
+    // on LLVM (static "index out of bounds") but silently fell back
+    // to tree-C (dynamic "index out of bounds: N, len M") -- now both
+    // take the SSA path, so both use the SSA-pair's own static
+    // wording. BUG-194 (2026-08-15) then closed the remaining exit-
+    // code gap too (a localfuzz finding), so both backends now fully
+    // agree: same message, same exit code.
     assert_eq!(llvm_out.status.code(), Some(3), "LLVM exit code unaffected");
-    assert_eq!(c_out.status.code(), Some(134), "C exit code unaffected");
+    assert_eq!(c_out.status.code(), Some(3), "C exit code must now match LLVM's 3");
     assert_eq!(
         String::from_utf8_lossy(&llvm_out.stderr),
         String::from_utf8_lossy(&c_out.stderr),
