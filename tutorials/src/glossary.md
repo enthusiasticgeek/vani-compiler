@@ -122,6 +122,8 @@ you can move between the two without re-orienting.
 | **future** | An in-progress async computation. vāṇी's `Future<T>` is a state-machine enum with `Ready(T)` / `Pending` variants. |
 | **pure fn** | A function with no observable side effects -- no I/O, no heap allocation, no non-determinism, no impure callees. Verified by the effects checker. |
 | **effects checker** | The pass that decides whether a function body is pure, by walking calls and rejecting any impure builtin or non-pure callee. Same logic gates `parallel for` bodies. |
+| **`Pollable` / `Executor`** | A small, reusable *user-space* pattern (not a built-in prelude type like `Future<T>`) for driving several heterogeneous `Task__<fn>` state machines without a hand-rolled loop per shape -- `interface Pollable { fn poll(mut ref self) -> bool; }` plus an `Executor` holding `Vec<Box<dyn Pollable>>`. See [Advanced 1 -- Async / await](advanced/01_async.md#an-executor-not-a-hand-rolled-driver-pollable--executor) for the full worked pattern. |
+| **`cancel <name>;`** | Cooperative cancellation for a spawned `task`/`Executor` entry -- see [Advanced 3 -- Concurrency](advanced/03_concurrency.md#cancel). For a BLOCKING task thread (one parked in a syscall like `tcp_accept`), cancellation is signal-based (`EINTR` interruption on POSIX, `CancelSynchronousIo` on Windows), not cooperative polling. |
 
 > Worked examples: *Async, await, and Task -- intuition primer*
 > ([`advanced/01a_async_primer.md`](advanced/01a_async_primer.md));

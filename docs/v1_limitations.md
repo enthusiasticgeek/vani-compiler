@@ -18,6 +18,18 @@
 > design), L10-macOS (no hardware), L13 (partial — `match` SOV by design),
 > L14 (by design for v1), L24 (Windows-only, scoped).**
 >
+> **Update (2026-08-14): L26–L30 added since the note above, none of
+> them fixed this pass** — L26 (loop-body bounds-check elision
+> disabled for soundness after BUG-181, no unsound-recovery fix
+> planned), L27 (`vanic run`'s JIT path deliberately skips `opt -O3`,
+> a latency/pathological-loop trade-off, not applied), L28
+> (float-to-int `as i64` casts stay unchecked pending a semantics
+> decision — checked vs. saturating), L29 (✅ partially — `downto`
+> shipped 2026-08-13; `step`/stride-N still open), L30 (`tcp_recv`'s
+> buffer has no byte-accessor builtin yet, found building the
+> networked tic-tac-toe capstone, filed not fixed). Still open, same
+> as before: L5, L6, L10-macOS, L13 (partial), L14, L24, L25.
+>
 > | # | Summary | Status |
 > |---|---|---|
 > | L1 | Enum destructure-bindings of affine payloads | ✅ Resolved v0.1.0 (2026-06-07) |
@@ -45,6 +57,11 @@
 > | L23 | `pub(kosh)`: external Kosh-boundary access enforced; same-project sibling-module access now allowed | ✅ Fixed 2026-07-24 (phase 2) |
 > | L24 | `parallel for`'s Windows thread count is fixed at build time, not run time | ⬜ Windows-only; scoped, not started |
 > | L25 | Windows: `print`/`f64_to_str` scientific-notation exponent width differs between C and LLVM backends | ⬜ Windows-only; scoped, not started |
+> | L26 | Vec/array indexing inside a loop body never elides its bounds check, even when provably safe | ⬜ By design since BUG-181 (2026-08-12) — soundness over performance |
+> | L27 | `vanic run`'s LLVM JIT path skips the `opt` optimizer, unlike `vanic build`/`--backend=c` | ⬜ Not fixed — deliberate latency/pathological-loop trade-off |
+> | L28 | `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit | ⬜ Not fixed — needs a checked-vs-saturating semantics decision |
+> | L29 | `for i from lo to hi` is ascending-only | ✅ Partially resolved 2026-08-13 — `downto` added; `step`/stride-N still unsupported |
+> | L30 | `tcp_recv`'s received bytes are not inspectable from vani code | ⬜ Not fixed — no `tcp_buf_byte_at`-style builtin yet |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation

@@ -72,7 +72,7 @@ python3 tools/llm_context/bundle.py --section patterns   # GoF catalog only
 | 2 | Keyword alias table (English <-> Sanskrit <-> Hindi <-> Marathi) | `tools/vani_translate.py::ALIASES` |
 | 3 | SOV verb-at-end statement shape table | README + bundle |
 | 4 | 22 GoF design patterns, one-line intent each | `examples/.../design_patterns/` |
-| 5 | English example corpus signatures (`intent` + `fn`) | 194 example files (confirmed by testing; earlier versions of this page said 155, then 165 -- the corpus keeps growing, re-derive with `find examples/language/english -name '*.vani' \| wc -l` if this drifts again) |
+| 5 | English example corpus signatures (`intent` + `fn`) | 207 example files (confirmed by testing, 2026-08-14; earlier versions of this page said 155, then 165, then 194 -- the corpus keeps growing, re-derive with `find examples/language/english -name '*.vani' \| wc -l` if this drifts again) |
 | 6 | Dialect-aware error prefixes | `src/diagnostic.rs::localize_message` |
 | 7 | v1 limitations catalog (verbatim) | `docs/v1_limitations.md` |
 
