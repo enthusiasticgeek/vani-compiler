@@ -8359,3 +8359,44 @@ We ran a deterministic test case on the local staging log of the `vani-compiler`
 
 intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat is done, because it isn't ever 'done' in any sense main cares about.";
 intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat
+
+---
+
+### Candidate: 20260815-092804-backend-divergence-859db1ccf6
+
+Repro: `tools/localfuzz/findings/20260815-092804-backend-divergence-859db1ccf6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-092804-backend-divergence-859db1ccf6/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+**Test:**
+- **Source:** `examples/language/sanskrit/vec_invariants.vani`
+- **Mutant/generated source:**
+```vani
+// श्री।.
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/english/vec_invariants.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/vec_invariants.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/vec_invariants.vani -o /tmp/vec_invariants && /tmp/vec_invariants   # native binary
+
+उद्देश्य "Loop invariants over Vec length, end-to-end";
+
+// Builds a Vec by pushing one element per iteration. The invariant
+// `len(xs) == (i as u64)` is preserved by the body — the verifier
+// uses the builtin push-length relationship plus the substituted
+// reassignment for `i` to discharge preservation.
+//
+// At loop exit, the verifier knows `!(i < 5)` plus the invariants, so
+// `i == 5` and `len(xs) == 5` are both dischargeable without further
+// annotation.
+
+कार्य मुख्य() -> i64 {
+  माना सूचिः: Vec<i64> = vec(0);
+  माना क: i64 = 1;
+
+  यावत् क < 5
+  अपरिवर्तनीय len(सूचिः) == (क यथा u64);
+  अपरिवर्तनीय क >= 1;
+  अपरिवर्तनीय क <= 
