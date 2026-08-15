@@ -1,0 +1,3 @@
+[package]
+name  = "myproject"
+entry = "src/main.vani"

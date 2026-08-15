@@ -1,0 +1,6 @@
+intent "Math helpers.";
+
+module math {
+  pub fn square(n: i64) -> i64 { return n * n; }
+  pub fn cube(n: i64)   -> i64 { return n * n * n; }
+}

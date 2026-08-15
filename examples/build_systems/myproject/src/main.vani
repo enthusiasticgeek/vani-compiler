@@ -1,0 +1,31 @@
+intent "Multi-file demo + FFI entry points for c_helper.c -- the same 'myproject' layout tutorials/src/intermediate/09d_build_systems.md documents, wired up as a real, buildable project instead of markdown snippets nobody runs.";
+
+use "math.vani";
+use math::square;
+use math::cube;
+
+// Exposed to c_helper.c. #[no_mangle] goes on a plain top-level fn
+// -- no `pub`/module wrapper needed (that's for vāṇी's own
+// module-visibility system, an unrelated concern).
+#[no_mangle]
+fn vani_square(n: i64) -> i64 {
+  return square(n);
+}
+
+#[no_mangle]
+fn vani_cube(n: i64) -> i64 {
+  return cube(n);
+}
+
+// vāṇी requires exactly one fn main() per entry point, and `vanic
+// emit --backend=c` always lowers it to a literal `int main(void)`
+// -- every build below strips this symbol (`objcopy -N main`)
+// before linking against c_helper.c's own main, or c_helper.c's
+// `main` would collide with it at link time. Running `vanic run
+// src/main.vani` directly (no C involved at all) exercises this
+// fn main() on its own, unaffected by any of that.
+fn main() -> i64 {
+  print square(4);
+  print cube(3);
+  return 0;
+}

@@ -1,4 +1,4 @@
-# Intermediate 9d — Build-system integration: Makefile, CMake, Meson
+# Intermediate 9d — Build-system integration: Makefile, CMake, Meson, Ninja
 
 > **Learning goal**: integrate vāṇī into an existing C/C++ build pipeline using
 > either the **C backend** (`vanic emit --backend=c`) or the **LLVM backend**
@@ -6,6 +6,13 @@
 > (including Ninja-backend projects).
 
 > **Prerequisite**: [FFI: `extern "C"` + `--link-with`](09_ffi.md)
+
+> **Want to just build it?** [`examples/build_systems/myproject/`](https://github.com/enthusiasticgeek/vani-compiler/tree/main/examples/build_systems/myproject)
+> is a real, CI-checked project with all four build files below --
+> `Makefile`, `CMakeLists.txt`, `meson.build`, and a hand-written
+> `build.ninja` -- building the identical binary from the identical
+> sources. Every snippet on this page is copied from (or was fixed
+> against) that directory, not the other way around.
 
 ---
 
@@ -325,6 +332,7 @@ project('myproject', 'c',
   default_options: ['c_std=c11', 'optimization=2'])
 
 vanic = find_program('vanic', required: true)
+objcopy = find_program('objcopy', required: true)
 
 # Emit vāṇī → C
 vani_c = custom_target('vani_emit',
@@ -334,15 +342,43 @@ vani_c = custom_target('vani_emit',
   depend_files: files('src/math.vani'),   # re-emit when modules change
 )
 
-# Compile to a static library
-vani_lib = static_library('myproject_vani', vani_c)
+# Compile to a plain object file. (Meson's static_library() doesn't
+# expose its compiled .o path for a post-processing step like
+# objcopy below, so compile directly via custom_target instead of
+# static_library() + extraction.)
+vani_obj = custom_target('vani_compile_obj',
+  input:   vani_c,
+  output:  'main_vani.o',
+  command: [meson.get_compiler('c').cmd_array(), '-O2', '-c', '@INPUT@', '-o', '@OUTPUT@'],
+)
 
-# Link with the C side
+# Strip vāṇī's own `main` so it doesn't collide with c_helper.c's
+# (see "Calling vāṇī functions from C" above -- every vāṇी entry
+# point emits a literal `int main(void)`, and linking two objects
+# that each define `main` fails at link time).
+vani_obj_nomain = custom_target('vani_strip_main',
+  input:   vani_obj,
+  output:  'main_vani_nomain.o',
+  command: [objcopy, '-N', 'main', '@INPUT@', '@OUTPUT@'],
+)
+
+# Link the C side against the stripped object.
 executable('myproject',
-  sources:      ['c_helper.c'],
-  link_with:    vani_lib,
+  sources: ['c_helper.c', vani_obj_nomain],
 )
 ```
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="linking against a static_library() here fails -- confirmed"/>
+
+**Don't link against a `static_library()` of the raw vāṇी output the
+way you might for a project with no `main`-collision problem.** An
+earlier version of this snippet did exactly that
+(`vani_lib = static_library(...)` + `link_with: vani_lib`) and it
+looks reasonable, but it re-introduces the exact `multiple definition
+of 'main'` linker error the Makefile/CMake sections above both
+explicitly work around -- confirmed by actually building it. The
+`custom_target` chain above sidesteps `static_library()` entirely so
+`objcopy -N main` has a concrete `.o` file to operate on.
 
 **Build:**
 
