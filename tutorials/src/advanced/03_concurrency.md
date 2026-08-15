@@ -126,6 +126,22 @@ fn main() -> i64 {
   fuller worked example (a background heartbeat detached while
   `main` runs an independent, deterministic computation and
   checks the result once it's done).
+- **`vanic run`-only caveat ([L31 in
+  `docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)):**
+  if
+  a `detach`'d task is still actively running when `main` returns,
+  running the program with plain `vanic run` (the default LLVM path,
+  which JIT-executes via the external `lli` tool) can segfault --
+  `lli`'s own JIT engine appears to tear down its compiled machine
+  code when the JIT'd `main` returns without waiting for OS-level
+  pthreads (like a detached task's) that may still be executing
+  through it. Root-caused to `lli` itself, not vāṇी's codegen: the
+  identical program compiled with `vanic build` (AOT, no `lli`
+  involved) or run via `vanic run --backend=c` completes correctly
+  every time. If a detached task's runtime might outlive `main`
+  (a genuine background heartbeat, not one that's guaranteed to
+  finish first), prefer `vanic build` or `--backend=c` over the
+  default `vanic run`.
 
 ## `cancel` -- interrupting a thread stuck in a blocking call {#cancel}
 

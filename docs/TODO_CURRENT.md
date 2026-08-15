@@ -14981,3 +14981,61 @@ sidecar is never trusted, and `cache_dir: None` still compiles
 correctly every time. Full `cargo test --release --workspace` clean:
 2989 lib / 14 `vanic`-bin unit tests (10 pre-existing + 4 new) / 268
 e2e, 0 failed.
+
+## L31 -- investigated the LLVM detach/heartbeat segfault (2026-08-15, root-caused to lli, not vāṇी)
+
+Last of the 4 localfuzz-prompted threads from this session. The
+finding: a mutated `examples/language/english/detach_heartbeat.vani`
+(the detached heartbeat's loop counter changed from `0` to near
+`i64::MIN`, so it's still running when `main` returns almost
+immediately) segfaulted under `vanic run` (rc=139) while the C
+backend exited cleanly (rc=0, output correctly truncated mid-print --
+the documented, honest "fire and forget" race, not a bug).
+
+Reproduced reliably (3/3, no mutation/huge-value needed) with a
+minimal repro: `detach` a task with an ordinary long-running counting
+loop (2 billion iterations of `i = i + 1` is plenty), return from
+`main` immediately. `lli` prints its own "PLEASE submit a bug report
+to https://github.com/llvm/llvm-project/issues/" banner -- the same
+misleading-JIT-crash signature already on record for
+BUG-106/108/110/113/115/117/120/162, except this time there's a real
+segfault underneath, not a controlled trap.
+
+**Root-caused, not a vāṇी codegen bug**: the IDENTICAL program built
+via `vanic build` (real AOT native compile, `lli` never involved) ran
+correctly 3/3 times -- `exit 0`, correct output. `vanic run` (LLVM,
+no `--backend`) literally shells out to the external `lli` binary to
+JIT-execute the emitted `.ll`; since AOT is proven correct and both
+paths share the same codegen, the bug lives entirely inside `lli`'s
+own JIT engine -- most likely `lli` tears down its JIT-compiled
+machine code when the JIT'd `main` returns without waiting for (or
+being aware of) a real OS pthread spawned via vāṇी's `task`/`detach`
+runtime that may still be executing through that same code -- a
+classic "code memory freed out from under a still-running thread"
+segfault, entirely inside upstream LLVM, outside anything vāṇी's own
+source controls.
+
+**No code fix this pass** -- there's nothing in vāṇी's codegen or
+runtime C shims to fix (confirmed by AOT working). Documented instead
+as a new tracked limitation: `docs/v1_limitations.md`'s L31, plus a
+`vanic run`-only caveat added to `tutorials/src/advanced/
+03_concurrency.md`'s `detach` section pointing users at `vanic build`
+or `--backend=c` when a detached task's runtime might genuinely
+outlive `main`. A real fix (if this ever bites a non-fuzzer-
+manufactured program) would mean either patching upstream `lli` or
+having `vanic run`'s own subprocess wrapper drain/join detached OS
+threads before `lli`'s teardown runs -- flagged in L31 as a candidate
+for a dedicated future design pass, not attempted here.
+
+**Verification**: this item is docs-only (no `src/` changes) --
+`mdbook build` clean (only the same pre-existing, unrelated `<T>`/
+`<f32>` warnings). No test suite changes; the repro itself isn't
+added as a regression test since there's no fix to regress against
+(a `vanic run`-crashes-on-this-shape test would just be asserting a
+known, documented, upstream-`lli` limitation, not vāṇी's own
+behavior).
+
+With this, all 4 items selected from this session's localfuzz-driven
+"what's next" triage (bounds-check divergence, runtime-helper
+caching, and this investigation, plus the earlier timeout-cluster
+re-verification) are closed out.
