@@ -8561,3 +8561,12 @@ candidates in this window. Re-ran directly against the fixed
 binary: both backends now exit 3 with the identical "index out of
 bounds" message. Stale by the time it landed (finding timestamped
 before the day's refresh); no further action.
+
+---
+
+### Candidate: 20260815-233651-run-crash-69d5ba39fb
+
+Repro: `tools/localfuzz/findings/20260815-233651-run-crash-69d5ba39fb/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-233651-run-crash-69d5ba39fb/fix_attempt.md`
+
+VANIC-4589 STATUS: needs human/frontier root-cause review.
