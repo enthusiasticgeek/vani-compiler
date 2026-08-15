@@ -8135,3 +8135,48 @@ Repro: `tools/localfuzz/findings/20260815-021242-run-crash-7233b6a88d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260815-021242-run-crash-7233b6a88d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260815-022812-run-crash-653f1b0742
+
+Repro: `tools/localfuzz/findings/20260815-022812-run-crash-653f1b0742/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-022812-run-crash-653f1b0742/fix_attempt.md`
+
+```json
+{
+  "stage": "local-fuzz",
+  "test_case": "examples/language/english/tcp_echo_epoll.vani",
+  "repro_source": """
+      // Arc 8 v2 — single-threaded cooperative TCP echo via epoll.
+      //
+      // This is the real "Arc 8 fully complete" example: one OS
+      // thread serves multiple concurrent clients via epoll +
+      // non-blocking I/O. No `task` / `join` here — the event
+      // loop multiplexes everything cooperatively.
+      //
+      // Architecture:
+      //   1. Bind a TCP listener, set it non-blocking, register
+      //      with epoll for read events.
+      //   2. Spawn a single client-driver `task` that connects
+      //      three times sequentially and sends a probe each.
+      //      (Real users would have external clients; the task
+      //      keeps the example self-contained for the parity
+      //      runner.)
+      //   3. In the main loop, epoll_wait_one until the listener
+      //      has a client, accept, set non-blocking, register
+      //      with epoll. When a client fd is ready, recv + echo
+      //      until EOF, then close + remove from epoll.
+      //   4. Exit after three clients handled.
+      //
+      // Both backends produce byte-identical stdout via the parity
+      // runner.
+      //
+      // build & run:
+      //   vanic run examples/language/english/tcp_echo_epoll.vani                # LLVM
+      //   vanic run examples/language/english/tcp_echo_epoll.vani --backend=c    # C
+  """,
+  "observed_symptom": "crash",
+  "affects_backend": ["llvm", "c"]
+}
+```
