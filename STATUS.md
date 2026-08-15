@@ -10,6 +10,31 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-08-15 (RTOS + build-systems examples, cross-language syntax hints, #190 closes the `TODO_NEXT_SESSIONS.md` plan)
+
+**State**: `docs/TODO_NEXT_SESSIONS.md`'s 7-task plan (#185-#191, all
+shipped as of the 2026-08-14 entry below) is now **fully closed** --
+this window's work is #190, the plan's own final documentation sweep,
+plus two ad hoc example requests and one compiler-UX feature that
+landed the same window. No release cut (still `0.9.4-dev`).
+
+### Shipped this window (2026-08-14 -- 2026-08-15)
+
+| Item | What shipped |
+|------|-------------|
+| RTOS priority-ceiling / priority-inversion example | `examples/language/english/rtos_priority_ceiling_simulation.vani` -- a discrete-tick userland scheduler demonstrating priority inversion and its fix via the priority ceiling protocol, plus randomized per-tick priority reassignment and a 30-trial statistical stress test asserting the textbook PCP guarantee holds every time. Pushed `67516e89`. |
+| Make/CMake/Meson/Ninja build-system example | `examples/build_systems/myproject/` -- a real, CI-checked project built four independent ways. Found and fixed a genuine bug in the process: the pre-existing tutorial's Meson snippet linked against a `static_library()` of raw vāṇी C output and would fail with "multiple definition of `main`" -- fixed by compiling to a plain object and `objcopy -N main`-stripping it before linking, applied to both the tutorial and the new project. New CI job `build-systems-example`. Pushed `dc3cce4d`. |
+| Cross-language "did you mean" syntax hints | The parser now recognizes common syntax mistakes from C/Rust/Python/Pascal/JS/PHP (`for(init;cond;incr)`, old `for i in LOW..HIGH` ranges, `for i = LO to HI`, `foreach`, `do...while`, `switch`/`case`, `let mut`, `var` decls, `elif`) and responds with the correct vāṇी syntax instead of an opaque parser error. Found and fixed a real infinite-loop bug in the process: a zero-consumption error sitting exactly on `TokenKind::Let` made `parse_block`'s own error-recovery loop (`sync_to_stmt`) spin forever, since `Let` is one of its recovery boundary tokens and it stops there without consuming. 10 new regression tests; full 1056-file corpus swept for both hangs and false positives (none found). Pushed `af82dc7b`. |
+| #190 -- final documentation/tutorial consistency sweep | Backfilled two missing `docs/TODO_CURRENT.md` writeups (RTOS + build-systems examples had shipped without one), corrected a stale example count in `tutorials/src/advanced/11_llm_workflows.md` (207 -> 208 English example files), this handoff entry. Closes `docs/TODO_NEXT_SESSIONS.md`'s plan end to end. |
+
+### Key numbers (2026-08-15)
+- **Compiler version**: `0.9.4-dev` (last tagged release: `v0.9.3`, 2026-08-12 -- no release cut this window)
+- **`cargo test`**: 2989 lib tests (+10 vs. the 2026-08-14 baseline, all new syntax-hint regression tests) + 268 e2e tests, 0 failures
+- **`vanic check` example corpus**: 1056 files total (+3 vs. 2026-08-14: the RTOS example + the build-systems project's 2 `.vani` files), 20 non-ok -- the same 17 known pre-existing xfail/embedded-gated files, `examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani` (pre-existing, embedded-target-gated `unsafe` demo -- fails without `INTENT_TARGET_EMBEDDED=1` set, confirmed unrelated to this window's changes), `testing_primer.vani`, and `examples/build_systems/myproject/src/math.vani` (both intentionally `fn main`-less module/test fragments)
+- **`tools/backend_crosscheck.py`**: still 0 findings across the full corpus (re-run after the syntax-hints change, which touches only the parser, not codegen)
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-08-14 (BUG-185 through BUG-193; async Executor/cancel, vani-language test framework, compiler-testing tooling)
 
 **State**: one long session, 9 bugs (BUG-185–193), no release cut this

@@ -11,10 +11,11 @@
 > #188+#189 (test framework, Phases A-G), and #191 (compiler-testing
 > tooling, incl. the real abort()-vs-exit(3) bug
 > `tools/backend_crosscheck.py` found on its first run) all shipped
-> and are CI-green. #190 (this plan's own final sweep item) is the
-> task this edit is part of. See `docs/TODO_CURRENT.md`'s entries
-> for each task's full writeup -- this file is kept as the historical
-> planning record, not updated play-by-play.
+> and are CI-green. **Update (2026-08-15): #190 (this plan's own
+> final sweep item) is also DONE** -- all 7 tasks in this plan have
+> now shipped. See `docs/TODO_CURRENT.md`'s entries for each task's
+> full writeup -- this file is kept as the historical planning
+> record, not updated play-by-play.
 
 ## Context
 

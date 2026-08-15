@@ -14620,6 +14620,99 @@ corpus-based tooling here turns out insufficient.
 sweep) is now fully unblocked -- all of #185/#187/#189/#191 are
 complete.
 
+## RTOS priority-ceiling / priority-inversion example (2026-08-14)
+
+User request, following directly on #191: a worked example of an
+RTOS scheduling concept -- priority ceiling protocol, priority
+inversion, and simulated preemption -- as a discrete-tick userland
+scheduler (`examples/language/english/rtos_priority_ceiling_
+simulation.vani`, 264 lines). `struct Job { id, name: Str, priority,
+arrival, work, needs_mutex, phase }` (named `Job`, not `Task` --
+`Task` is a reserved built-in type name); `effective_priority`
+returns the shared resource's ceiling while a job holds the mutex,
+else the job's own priority; `pick_next` linear-scans for the lowest
+effective-priority runnable job each tick. `run_simulation(use_
+ceiling, ceiling, max_ticks, verbose)` drives the classic 3-job
+scenario (L/M/H, hand-traced before writing code: naive H finishes
+tick 11, ceiling-protected H finishes tick 7) twice -- once without
+the ceiling (showing the inversion), once with it (showing the fix).
+
+Mid-task follow-up from the user: add randomized priority changes so
+the demo isn't static. M's priority now gets reassigned via `rand_
+in_range(2, 6)` with a ~30% per-tick chance while M is active. Both
+scenario runs re-seed to the same `demo_seed` (`seed_rng(7)`) before
+each run so the naive-vs-ceiling comparison stays apples-to-apples
+under randomness. A follow-up 30-trial stress test (`trial_seed =
+1000 + trial`) re-runs both scenarios non-verbosely across 30
+independently-seeded schedules, asserting the textbook PCP guarantee
+(`t_ceiling <= t_naive`) holds on every single trial, and counts how
+many trials had a real inversion the ceiling actively prevented (25
+of 30 in the shipped run).
+
+Confirmed real vāṇी constraints while building this: enums have no
+built-in `==` (`match ... { Variant then true, _ then false }` used
+throughout instead of `s == St.B`); `len(xs)` returns `u64`, needing
+explicit `as i64` casts; plain scalar reassignment (`x = expr;`) on
+an ordinary `let` binding is legal without any `mut` marker.
+
+**Verification**: identical output byte-for-byte on both backends
+(diffed directly); ASan/LeakSanitizer/UBSan clean via `gcc
+-fsanitize=address,leak,undefined -fno-sanitize-recover=all`; `valgrind
+--leak-check=full` clean (0 errors, 63/63 allocations freed) on both
+the LLVM AOT build (`vanic build`) and a plain-gcc C build (note:
+profiling `vanic run --backend=c` directly under valgrind profiles
+the COMPILER's own process, not the compiled program -- the correct
+methodology is `vanic build`/`vanic emit`+`gcc` first, then valgrind
+the resulting native binary); `vanic check examples` corpus diff
+showed exactly the expected +1; `ssa_lowers_every_example` passed;
+full `cargo test --release --workspace` unchanged. Pushed as
+`67516e89`.
+
+## Make/CMake/Meson/Ninja build-system example (2026-08-14)
+
+User request: a worked example of build-system integration covering
+all four of Make, CMake, Meson, and (hand-written, not just as a
+CMake/Meson generator backend) Ninja. `tutorials/src/intermediate/
+09d_build_systems.md` already documented a mixed C+vāṇी project
+layout, but its snippets had never actually been built --
+confirmed by trying, which surfaced a real bug: the tutorial's
+`meson.build` linked against a `static_library()` of the raw,
+un-stripped vāṇी C output, which fails to link with "multiple
+definition of `main`" (every vāṇी entry point lowers `fn main()` to
+a literal C `int main(void)`, and `c_helper.c` has its own `main`
+too). Fixed by compiling to a plain object, `objcopy -N main`-
+stripping vāṇी's `main` symbol out of it, then linking the C side
+directly against that stripped object -- never against a
+`static_library()` of it. Same fix applied to both the tutorial's
+own snippet and the new real project.
+
+New `examples/build_systems/myproject/`: `src/math.vani` (a `math`
+module, `pub fn square`/`cube`) + `src/main.vani` (imports it,
+exposes `#[no_mangle] fn vani_square`/`vani_cube` for C FFI, plus its
+own `fn main()`) + `c_helper.c` (calls the exposed FFI functions).
+Four independent build files (`Makefile`, `CMakeLists.txt`,
+`meson.build`, hand-written `build.ninja`), each building to its own
+`build-<tool>/` directory so all four can be built in the same
+checkout without collisions, all producing identical output
+(`square(4) = 16`, `cube(3) = 27`). New CI job `build-systems-example`
+builds and runs all four in sequence and greps their output, so a
+future change to `vanic emit`'s C output shape (or to any of the four
+build files) gets caught here instead of silently rotting docs again.
+
+**Verification**: all four tools built and ran correctly both
+standalone and in sequence in the same checkout; incremental-rebuild
+dependency tracking spot-checked on the hand-written Ninja file
+(`touch src/math.vani` correctly triggers a re-emit; a no-op rebuild
+correctly reports nothing to do); CMake with the Ninja generator
+(`-G Ninja`) also confirmed working; `mdbook build` clean; full
+`cargo test --release --workspace` unchanged; `vanic check examples`
+corpus diff showed exactly +1 (`src/math.vani`, a module fragment
+with no `fn main`, same category as `testing_primer.vani` --
+`src/main.vani` itself checks clean as a real entry point). Pushed as
+`dc3cce4d`; CI green including the new job's first-ever live run
+(`CI` 7m30s, `CodeQL`, and the tutorials-deploy job all `completed
+success`).
+
 ## Cross-language "did you mean" syntax hints (2026-08-15)
 
 User request, prompted directly by probing several common
@@ -14685,4 +14778,39 @@ the new hint strings (none -- confirms zero false positives against
 real code, including the 40+ non-English dialect trees where
 identifiers like "do"/"var" could plausibly appear as real names).
 Full `cargo test --release --workspace` clean: 2989 lib (2979 + 10
-new) / 268 e2e, 0 failed.
+new) / 268 e2e, 0 failed. Pushed as `af82dc7b`; CI green.
+
+## #190 -- final documentation/tutorial consistency sweep (2026-08-15, DONE)
+
+Last item in `docs/TODO_NEXT_SESSIONS.md`'s plan, unblocked once
+#185/#187/#189/#191 all shipped. Per the plan's own scope: sweep
+`docs/TODO_CURRENT.md`, `docs/v1_limitations.md`, tutorial pages,
+cross-references, `SUMMARY.md` nav, the glossary, and check for any
+newly-stale claims introduced by the other four items -- plus fold in
+per-item doc updates that should have already happened alongside 1-6
+but hadn't.
+
+Found two real gaps: the RTOS example (`67516e89`) and the
+build-systems example (`dc3cce4d`) had both shipped -- each with its
+own in-context doc updates (tutorial edits, `SUMMARY.md`) -- but
+neither had the `docs/TODO_CURRENT.md` writeup this project's
+convention calls for every shipped item to get; backfilled both
+above. Also found `tutorials/src/advanced/11_llm_workflows.md`'s
+self-documented-as-drifting English example count was stale again
+(207, now 208 -- the RTOS example landed in `examples/language/
+english/`) -- corrected. Checked `docs/v1_limitations.md`, the
+glossary, and `SUMMARY.md` nav directly; all three already correctly
+reflect this window's work (no new limitation was introduced or
+resolved by the RTOS/build-systems examples or the syntax-hints
+feature -- the last is a parser UX improvement, not a language
+surface change, so it needed no glossary entry). New `STATUS.md`
+handoff entry (2026-08-15) summarizing the window and closing
+`docs/TODO_NEXT_SESSIONS.md`'s plan end to end -- all 7 of its tasks
+are now DONE.
+
+**Verification**: `mdbook build` across the whole tutorial book (not
+just the edited page, to catch any cross-reference this sweep might
+have broken) succeeds -- only the same pre-existing `<T>`/`<f32>`
+generic-syntax-parsed-as-HTML-tag warnings on files this sweep didn't
+touch, unrelated to and unchanged by this edit. No code changes this
+item -- docs only.
