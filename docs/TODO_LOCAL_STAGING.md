@@ -8321,3 +8321,41 @@ Repro: `tools/localfuzz/findings/20260815-072323-run-crash-d41753dff0/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260815-072323-run-crash-d41753dff0/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260815-074035-backend-divergence-1483865041
+
+Repro: `tools/localfuzz/findings/20260815-074035-backend-divergence-1483865041/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-074035-backend-divergence-1483865041/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Component:** vani-compiler
+
+**Build ID:** <build-id>
+
+**Date:** <date>
+
+**Time:** <time>
+
+**Description:**
+We ran a deterministic test case on the local staging log of the `vani-compiler` project, which includes mutations and generated code. The mutation was designed to introduce an unused variable in the `heartbeat` function, which does not affect the functionality of the program. However, the generated code diverged between different backends (LLVM and C) when this mutation was applied.
+
+**Steps taken:**
+1. **Identify the Mutation:** The mutation is located at line 32 of the `candidate.vani` file.
+2. **Generate Code for Different Backends:**
+   - **LLVM Backend:** The function `heartbeat` is compiled and executed using LLVM, resulting in a divergent output.
+   - **C Backend:** A similar approach is taken, but with different backend-specific optimizations applied, leading to a divergent output.
+
+**Generated Source:**
+```vani
+// build & run:
+//   vanic run examples/language/english/detach_heartbeat.vani                          # LLVM backend
+//   vanic run examples/language/english/detach_heartbeat.vani --backend=c              # C backend
+//   vanic build examples/language/english/detach_heartbeat.vani -o /tmp/detach_heartbeat && /tmp/detach_heartbeat
+
+intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat is done, because it isn't ever 'done' in any sense main cares about.";
+intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat
