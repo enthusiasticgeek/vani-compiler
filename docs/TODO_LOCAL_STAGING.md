@@ -8217,3 +8217,31 @@ Backends Affected: C, LLVM
 
 Status: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260815-043230-backend-divergence-bf966f3c6a
+
+Repro: `tools/localfuzz/findings/20260815-043230-backend-divergence-bf966f3c6a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-043230-backend-divergence-bf966f3c6a/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:25:3: warning: unused variable 'r1' -- never referenced after its declaration\n  \u13a0\u13c1\u13b3 r1: Option<i64> = chain(10, 2);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'r1' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n/tmp/localfuzz/candidate.vani:26:3: warning: unused variable 'r2' -- never referenced after its declaration\n  \u13a0\u13c1\u13b3 r2: Option<i64> = chain(5, 0);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'r2' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\ndivision by zero\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:25:3: warning: unused variable 'r1' -- never referenced after its declaration\n  \u13a0\u13c1\u13b3 r1: Option<i64> = chain(10, 2);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'r1' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n/tmp/localfuzz/candidate.vani:26:3: warning: unused variable 'r2' -- never referenced after its declaration\n  \u13a0\u13c1\u13b3 r2: Option<i64> = chain(5, 0);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'r2' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\ndivision by zero\n",
+    "timed_out": false
+  }
+}
+```
+
