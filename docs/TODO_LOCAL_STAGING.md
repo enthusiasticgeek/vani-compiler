@@ -8511,6 +8511,23 @@ The generated source code exhibits a `backend-divergence` error when compiled us
   "stdout": "",
   "stderr": "cc failed while compiling '/tmp/vanic-candidate-510617-1786807215551095237.c' (left at this path for debugging):\n/tmp/vanic-candidate-510617-1786807215551095237.c: In function \u2018fn_traced\u2019:\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:58: error: redefinition of \u2018v_next\u2019\n  380 | int64_t v_next = (intent_check_i64_add(v_v, 7)); int64_t v_next = (intent_check_i64_add(v_v, 7));   fputs(\"  traced(): computed next=\", stdout);\n      |                                                          ^~~~~~\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:9: note: previous definition of \u2018v_next\u2019 with type \u2018int64_t\u
 
+STATUS: FIXED -- BUG-195 on main (2026-08-15). Real bug, not fuzzer
+noise: the fuzzer duplicated one `let next = v + 7;` line inside
+`traced`'s try-desugared Some-arm block. Reduced to a minimal repro
+with no `try` involved at all (any match-arm block body with a
+same-name shadowed `let` reproduces it). Root cause: `check_expr`'s
+`ExprKind::Block` arm (the "T-block MVP" match-arm-body checker)
+never checked for same-scope shadowing the way the regular fn-body
+`Let` handler does -- every `let` inside a block-expr became a fresh
+`TypedStmt::Let` unconditionally, so the C backend emitted TWO C
+declarations of the same identifier (`int64_t v_next = ..; int64_t
+v_next = ..;`, a C "redefinition" compile error) instead of one
+declaration + a plain reassignment. Also would have leaked a
+shadowed non-Copy value's heap allocation (confirmed via a dedicated
+OwnedStr-shadow + valgrind check: 2 allocs, 2 frees, 0 leaks after
+the fix). Fixed by mirroring the fn-body handler's same-scope-
+shadow-to-`Reassign` conversion in the Block-expr Let arm.
+
 ---
 
 ### Candidate: 20260815-163032-run-crash-334b12d50c
@@ -8518,7 +8535,18 @@ The generated source code exhibits a `backend-divergence` error when compiled us
 Repro: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-15). Diffed against the
+base example (`echo_p3r_nonint_returns.vani`): the fuzzer changed
+`drive_bool`'s poll loop from `if r == 0 { return t.__result; }` to
+`if r == -1 { return t.__result; }` -- the standard poll-done (r==0)
+completion signal is no longer checked at all (the mutated line is
+now redundant with the very next `if r == 0 - 1` check), so the
+`while true` loop never terminates on a legitimate completion --
+genuinely infinite in the SOURCE program, both backends correctly
+hang on it forever. Same class as the earlier
+20260815-00{1502,2812}/2242 run-crash candidates (missing increment
+/ flipped sign creating a real infinite loop, not a backend defect).
+No compiler change needed.
 
 ---
 
@@ -8527,4 +8555,9 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260815-180157-backend-divergence-824731aaa2/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260815-180157-backend-divergence-824731aaa2/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED -- BUG-194 on main (2026-08-15), same abort()-vs-
+exit(3) bounds-check divergence as the other backend-divergence
+candidates in this window. Re-ran directly against the fixed
+binary: both backends now exit 3 with the identical "index out of
+bounds" message. Stale by the time it landed (finding timestamped
+before the day's refresh); no further action.
