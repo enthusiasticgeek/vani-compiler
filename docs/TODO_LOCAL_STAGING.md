@@ -8303,3 +8303,12 @@ The integer overflow error occurs during the multiplication of `self.x` and `sel
 **Root Cause**
 
 The root cause of this problem lies in the design of the interfaces and their implementations. The `Area` interface requires a method `area(self: Point) -> i64`, but the implementation for the `Point` struct includes a multiplication operation that exceeds the range of `i64`. This leads to an
+
+---
+
+### Candidate: 20260815-055426-backend-divergence-f48c15b952
+
+Repro: `tools/localfuzz/findings/20260815-055426-backend-divergence-f48c15b952/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-055426-backend-divergence-f48c15b952/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
