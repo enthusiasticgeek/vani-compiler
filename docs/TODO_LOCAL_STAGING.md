@@ -8075,3 +8075,54 @@ Fix attempt: `tools/localfuzz/findings/20260814-225607-backend-divergence-6f8ad5
 }
 ```
 
+
+---
+
+### Candidate: 20260815-001502-run-crash-46908d8f48
+
+Repro: `tools/localfuzz/findings/20260815-001502-run-crash-46908d8f48/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-001502-run-crash-46908d8f48/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/punjabi_shahmukhi/early_exit.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi early exit smoke-test";
+فنکشن پہلی_صفر(فہرست: Vec<i64>) -> i64 {
+  مانیں i: i64 = 0;
+  تا i < (len(فہرست) بطور i64) {
+    اگر فہرست[i] == 0 { واپس i; }
+  }
+  واپس -1;
+}
+فنکشن main() -> i64 {
+  مانیں و: Vec<i64> = vec();
+  و = push(و, 3);
+  w = push(و, 3);
+  w = push(و, 0);
+  w = push(و, 7);
+  یقینی پہلی_صفر(و) == 1;
+  مانیں i: i64 = 0;
+  تا i < 5 {
+    اگر i == 3 { بند; }
+    i = i + 1;
+  }
+  یقینی i == 3;
+  لکھو "Punjabi Shahmukhi early exit OK";
+  واپس 0;
+}
+```
+
+Finding kind: run-crash
+Raw result data:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": 127,
+    "stdout": "",
+    "stderr": "aborting due to runtime error\n",
+    "timed_out
