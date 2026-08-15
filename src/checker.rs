@@ -22361,25 +22361,93 @@ fn check_expr(
                             continue;
                         }
                         let ty = rhs_checked.ty().clone();
-                        env.insert_current(name.clone(), VarInfo {
-                            ty: ty.clone(),
-                            constant: rhs_checked.constant().cloned(),
-                            moved: None,
-                            decl_span: *span,
-                            vec_literal_elements: None,
-                            array_version: 0,
-                            guarded_mutex: None,
-                            no_drop: false,
-                            is_const: false,
-                            struct_literal_fields: None,
-                            moved_fields: std::collections::BTreeMap::new(),
-                            ref_aliases: Vec::new(),
-                        });
-                        typed_stmts.push(TypedStmt::Let {
-                            name: name.clone(),
-                            ty,
-                            expr: rhs_checked.expr,
-                        });
+                        // BUG-195 (2026-08-15): this Block-expr Let
+                        // arm (match-arm bodies, the `try` desugar's
+                        // Some-arm) never checked for same-scope
+                        // shadowing the way the regular fn-body Let
+                        // arm does (~line 13578) -- every `let` here
+                        // became a fresh `TypedStmt::Let`
+                        // unconditionally, so `let x = ..; let x =
+                        // ..;` inside a block-expr emitted TWO C
+                        // declarations of the same identifier
+                        // (`int64_t v_x = ..; int64_t v_x = ..;`),
+                        // a C compile error -- confirmed via
+                        // localfuzz (a mutated `try_keyword.vani`
+                        // duplicating one `let` line) and reduced to
+                        // a minimal repro with no `try` involved at
+                        // all (any match-arm block body with
+                        // same-name shadowed lets). It also would
+                        // have leaked a shadowed non-Copy value's
+                        // heap allocation (no `Reassign`'s
+                        // `drop_old` ever ran). Mirrors the fn-body
+                        // handler's same-scope-shadow-to-Reassign
+                        // conversion; the smaller "T-block MVP"
+                        // scope here has no `smt_facts`/`loops`
+                        // threaded through `check_expr`, so this
+                        // intentionally skips the fn-body handler's
+                        // SMT-fact-dropping and bounds-elision calls
+                        // (optimization/proof concerns, not
+                        // correctness for this bug) while still
+                        // fixing the actual duplicate-declaration
+                        // and leak-on-shadow defects.
+                        let same_scope_existing = env.current_get(name).cloned();
+                        let real_shadow = same_scope_existing.filter(|old| !old.is_const);
+                        if let Some(old) = real_shadow {
+                            if old.ty != ty {
+                                diagnostics.push(
+                                    Diagnostic::new(
+                                        *span,
+                                        format!(
+                                            "shadowing 'let {}' must preserve its type; previous type was {}, new type is {}",
+                                            name, old.ty, ty
+                                        ),
+                                    )
+                                    .with_related(old.decl_span, format!("'{}' was previously declared here as {}", name, old.ty))
+                                    .with_elaboration(crate::diagnostic_elaborations::type_mismatch(&old.ty.to_string(), &ty.to_string())),
+                                );
+                            }
+                            let drop_old = !old.ty.is_copy() && old.moved.is_none();
+                            env.insert_current(name.clone(), VarInfo {
+                                ty: ty.clone(),
+                                constant: rhs_checked.constant().cloned(),
+                                moved: None,
+                                decl_span: *span,
+                                vec_literal_elements: None,
+                                array_version: 0,
+                                guarded_mutex: None,
+                                no_drop: false,
+                                is_const: false,
+                                struct_literal_fields: None,
+                                moved_fields: std::collections::BTreeMap::new(),
+                                ref_aliases: Vec::new(),
+                            });
+                            typed_stmts.push(TypedStmt::Reassign {
+                                name: name.clone(),
+                                ty,
+                                expr: rhs_checked.expr,
+                                drop_old,
+                            });
+                        } else {
+                            env.insert_current(name.clone(), VarInfo {
+                                ty: ty.clone(),
+                                constant: rhs_checked.constant().cloned(),
+                                moved: None,
+                                decl_span: *span,
+                                vec_literal_elements: None,
+                                array_version: 0,
+                                guarded_mutex: None,
+                                no_drop: false,
+                                is_const: false,
+                                struct_literal_fields: None,
+                                moved_fields: std::collections::BTreeMap::new(),
+                                ref_aliases: Vec::new(),
+                            });
+                            typed_stmts.push(TypedStmt::Let {
+                                name: name.clone(),
+                                ty,
+                                expr: rhs_checked.expr,
+                            });
+                        }
                     }
                     Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                         let is_ep = matches!(s, Stmt::EPrint { .. });

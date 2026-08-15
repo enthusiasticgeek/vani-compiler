@@ -15039,3 +15039,59 @@ With this, all 4 items selected from this session's localfuzz-driven
 "what's next" triage (bounds-check divergence, runtime-helper
 caching, and this investigation, plus the earlier timeout-cluster
 re-verification) are closed out.
+
+## BUG-195 -- same-scope let-shadowing inside a block-expr duplicated C declarations (2026-08-15)
+
+Follow-up "what's next" pass: refreshed the (now-stale, pre-dating
+today's 3 fixes) localfuzz worktree and re-triaged the 3 findings
+that landed since the last check. Two were noise/stale (one
+fuzzer-mutation infinite loop -- a poll-completion check got
+mutated away, same class as earlier `run-crash` findings; one
+already-fixed instance of BUG-194's bounds-check divergence, just
+timestamped before the fix landed). The third was a **real, new**
+bug: a mutated `examples/language/english/try_keyword.vani`
+(duplicating one `let next = v + 7;` line inside the `try`-desugar's
+Some-arm) produced a C **compile error** -- `cc failed ... error:
+redefinition of 'v_next'` -- on `--backend=c`, while LLVM ran fine.
+
+Reduced to a minimal repro with `try` removed entirely: ANY
+match-arm block body (`Opt.Some(v) then { let x = ..; let x = ..;
+x }`) with a same-name shadowed `let` reproduces it. Root cause:
+`check_expr`'s `ExprKind::Block` arm (`src/checker.rs`, the
+"T-block MVP" checker for match-arm bodies -- what the `try` desugar
+also produces for its Some-arm) never checked for same-scope
+shadowing the way the regular fn-body `Let` handler does (~line
+13578: `env.current_get(name)` -> convert to `TypedStmt::Reassign`
+if found). Every `let` inside a block-expr became a fresh
+`TypedStmt::Let` unconditionally, so the C backend faithfully
+emitted TWO declarations of the same C identifier for two same-name
+`let`s -- illegal C. It would ALSO have silently leaked a shadowed
+non-Copy value's heap allocation (no `Reassign`'s `drop_old` ever
+ran for this path), a second, independent defect from the same
+missing logic.
+
+Fixed by mirroring the fn-body handler's same-scope-shadow
+detection inside the Block-expr `Let` arm: `env.current_get(name)`,
+convert to `TypedStmt::Reassign` (with the same type-mismatch
+diagnostic and `drop_old` computation) when a same-scope, non-const
+binding already exists; keep the existing `TypedStmt::Let` path
+otherwise. `check_expr`'s signature has no `smt_facts`/`loops`
+threaded through (unlike the fn-body handler), so this intentionally
+does NOT replicate the fn-body handler's SMT-fact-dropping or
+bounds-elision calls -- those are optimization/proof concerns, not
+what this bug needed fixed.
+
+**Verification**: original localfuzz repro and the reduced minimal
+repro both now compile and run correctly on both backends (matching
+output). Type-mismatch shadow case (`let next: i64 = ..; let next:
+bool = ..;`) correctly rejected with a clear diagnostic. Non-Copy
+shadow case (`let s: OwnedStr = ..; let s: OwnedStr = ..;`) verified
+leak-free under `valgrind --leak-check=full` on a `vanic build` AOT
+binary: 2 allocs, 2 frees, 0 leaks -- confirms the `drop_old` half of
+the fix actually fires, not just the C-compile-error half. Full
+corpus swept: `tools/backend_crosscheck.py` (0 flagged/1056) and
+`tools/leak_sweep.py` (4 flagged, matches existing baseline) both
+clean. 2 new `src/lib.rs` unit tests. Full `cargo test --release
+--workspace` clean: 2991 lib (2989 + 2 new) / 268 e2e, 0 failed.
+Marked FIXED in both this file and the localfuzz worktree's
+`docs/TODO_LOCAL_STAGING.md`, per the project's closeout convention.

@@ -64118,5 +64118,74 @@ fn main() -> i64 { return leak_check(); }
             errs
         );
     }
+
+    /// BUG-195 (2026-08-15): found via localfuzz (a mutated
+    /// `try_keyword.vani` that duplicated one `let` line), reduced
+    /// to a minimal repro with no `try` involved at all. `check_expr`'s
+    /// Block-expr arm (match-arm bodies; also what the `try` desugar
+    /// produces for its Some-arm) never checked for same-scope
+    /// shadowing the way the regular fn-body `Let` handler does --
+    /// every `let` inside a block-expr became a fresh `TypedStmt::Let`
+    /// unconditionally, so `let x = 1; let x = 2;` inside a
+    /// match-arm body emitted TWO C declarations of the same
+    /// identifier (a C compile error: "redefinition of 'v_x'") and
+    /// would have leaked a shadowed non-Copy value's heap allocation
+    /// (no `Reassign`'s `drop_old` ever ran). Fixed by mirroring the
+    /// fn-body handler's same-scope-shadow-to-`Reassign` conversion.
+    #[test]
+    fn block_expr_same_scope_shadow_emits_reassign_not_duplicate_let() {
+        let source = r#"
+            enum Opt { Some(i64), None }
+            fn f(o: Opt) -> i64 {
+                return match o {
+                    Opt.Some(v) then {
+                        let next: i64 = v + 7;
+                        let next: i64 = v + 7;
+                        next
+                    },
+                    Opt.None then 0,
+                };
+            }
+            fn main() -> i64 { return f(Opt.Some(5)); }
+        "#;
+        let c = compile_to_c(source).expect("shadowed match-arm block compiles to C");
+        let decl_count = c.matches("int64_t v_next = ").count();
+        assert_eq!(
+            decl_count, 1,
+            "the shadowed `let next` must lower to ONE C declaration \
+             plus a plain reassignment, not two declarations of the \
+             same identifier (a C 'redefinition' compile error), got:\n{c}"
+        );
+        assert!(
+            c.contains("v_next = ") && decl_count == 1,
+            "expected a plain `v_next = ...;` reassignment for the \
+             second `let`, got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn block_expr_shadow_with_type_change_is_rejected() {
+        let source = r#"
+            enum Opt { Some(i64), None }
+            fn f(o: Opt) -> i64 {
+                return match o {
+                    Opt.Some(v) then {
+                        let next: i64 = v + 7;
+                        let next: bool = true;
+                        v
+                    },
+                    Opt.None then 0,
+                };
+            }
+            fn main() -> i64 { return f(Opt.Some(5)); }
+        "#;
+        let errs = compile(source).expect_err("type-changing shadow must be rejected");
+        assert!(
+            errs.iter().any(|e| e.message.contains("shadowing 'let next' must preserve its type")),
+            "expected a type-mismatch diagnostic for a type-changing shadow \
+             inside a block-expr, got: {:?}",
+            errs
+        );
+    }
 }
 
