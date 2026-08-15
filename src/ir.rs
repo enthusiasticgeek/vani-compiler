@@ -165,8 +165,8 @@ pub struct TypedParam {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypedPrintItem {
-    Expr(TypedExpr),
-    Str(String),
+    Expr(TypedExpr, Option<crate::ast::FormatSpec>),
+    Str(String, Option<crate::ast::FormatSpec>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

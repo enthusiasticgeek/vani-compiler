@@ -1769,7 +1769,8 @@ fn emit_instr(
             // here. Emit as an empty inline action so the
             // pass-of-concept still compiles; tests on this
             // backend pick programs that don't print.
-            if name == "intent_print_item" {
+            let print_item_spec = crate::ssa::decode_print_item_spec(name);
+            if name == "intent_print_item" || print_item_spec.is_some() {
                 // Per-item printer used by SSA-lowered
                 // multi-item `print` statements. Emits the
                 // value with a type-dispatched printf format
@@ -1862,11 +1863,34 @@ fn emit_instr(
                         return Ok(());
                     }
                 }
+                // #27: build the width/precision flags once from
+                // the decoded spec (empty string when `name` was
+                // the plain, unmangled "intent_print_item" -- the
+                // untouched common case). `Str`/`OwnedStr` never
+                // reach here with a spec (the checker rejects any
+                // spec on non-numeric types before codegen), so no
+                // special-casing needed for that arm below.
+                let (flags, precision) = match print_item_spec {
+                    Some((zero_pad, width, precision)) => {
+                        let mut f = String::new();
+                        if zero_pad {
+                            f.push('0');
+                        }
+                        if let Some(w) = width {
+                            f.push_str(&w.to_string());
+                        }
+                        (f, precision)
+                    }
+                    None => (String::new(), None),
+                };
                 let fmt = match aty {
-                    Type::F32 | Type::F64 => "%g",
-                    Type::Str | Type::OwnedStr => "%s",
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => "%llu",
-                    _ => "%lld",
+                    Type::F32 | Type::F64 => match precision {
+                        Some(p) => format!("%{}.{}f", flags, p),
+                        None => format!("%{}g", flags),
+                    },
+                    Type::Str | Type::OwnedStr => "%s".to_string(),
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => format!("%{}llu", flags),
+                    _ => format!("%{}lld", flags),
                 };
                 let cast = match aty {
                     Type::F32 | Type::F64 => "(double)",

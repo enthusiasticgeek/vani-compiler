@@ -165,6 +165,25 @@ pub enum TokenKind {
     RBracket,
     Colon,
     ColonColon,
+    /// `print`-item format spec: `:03`, `:.2`, `:08.3`. Lexed as ONE
+    /// atomic token (not `Colon` + `Int` + `Dot` + `Int`) because
+    /// `Int(i128)` only stores the parsed numeric VALUE, not the
+    /// source spelling -- `"03"` and `"3"` both lex to the same
+    /// `Int(3)`, so the pad-with-zero-vs-space flag would already be
+    /// lost by the time a general-token-stream parser saw it, and
+    /// `Parser` has no reference back to the source text to recover
+    /// it. Safe to recognize unconditionally (not gated to "right
+    /// after a print item"): `:` is never legally followed by a digit
+    /// or `.` anywhere else in vāṇी's grammar today (type
+    /// annotations/struct fields/labels are always `: IDENT`/`::`),
+    /// confirmed by grepping the full example corpus for the byte
+    /// pattern -- the only hits are inside `//` comments, not real
+    /// tokens.
+    FormatSpec {
+        zero_pad: bool,
+        width: Option<u32>,
+        precision: Option<u32>,
+    },
     Semicolon,
     Comma,
     Plus,
@@ -6617,6 +6636,11 @@ impl<'a> Lexer<'a> {
                 b'[' => self.push(TokenKind::LBracket, start),
                 b']' => self.push(TokenKind::RBracket, start),
                 b':' if self.match_byte(b':') => self.push(TokenKind::ColonColon, start),
+                b':' if matches!(self.peek(), Some(b'0'..=b'9'))
+                    || (self.peek() == Some(b'.') && matches!(self.peek_next(), Some(b'0'..=b'9'))) =>
+                {
+                    self.lex_format_spec(start)?
+                }
                 b':' => self.push(TokenKind::Colon, start),
                 b';' => self.push(TokenKind::Semicolon, start),
                 b',' => self.push(TokenKind::Comma, start),
@@ -7425,6 +7449,70 @@ impl<'a> Lexer<'a> {
             kind,
             span: Span::new(start, self.pos),
         });
+    }
+
+    /// Scans a `print`-item format spec after the leading `:` has
+    /// already been consumed (`start` is the `:`'s own byte offset,
+    /// per this file's convention for every other `lex_*` helper).
+    /// Grammar: `'0'? DIGIT* ('.' DIGIT+)?`. The `0` flag is only
+    /// recognized when at least one more digit immediately follows
+    /// it -- a lone `:0` is width=0 (a plain single-digit width), not
+    /// "flag with no width", a degenerate case not worth
+    /// distinguishing. See `TokenKind::FormatSpec`'s doc comment for
+    /// why this needs to be one atomic token rather than
+    /// `Colon`+`Int`+`Dot`+`Int` from the general token stream.
+    fn lex_format_spec(&mut self, start: usize) -> Result<(), Diagnostic> {
+        let mut zero_pad = false;
+        if self.peek() == Some(b'0') && matches!(self.peek_next(), Some(b'0'..=b'9')) {
+            zero_pad = true;
+            self.advance();
+        }
+        let width_start = self.pos;
+        while matches!(self.peek(), Some(b'0'..=b'9')) {
+            self.advance();
+        }
+        let width_text = &self.source[width_start..self.pos];
+        let width = if width_text.is_empty() {
+            None
+        } else {
+            Some(width_text.parse::<u32>().map_err(|_| {
+                Diagnostic::new(
+                    Span::new(width_start, self.pos),
+                    format!("format spec width '{}' is too large", width_text),
+                )
+            })?)
+        };
+        let precision = if self.peek() == Some(b'.') {
+            self.advance();
+            let prec_start = self.pos;
+            while matches!(self.peek(), Some(b'0'..=b'9')) {
+                self.advance();
+            }
+            if self.pos == prec_start {
+                return Err(Diagnostic::new(
+                    Span::new(start, self.pos),
+                    "expected digits after '.' in format spec",
+                ));
+            }
+            let prec_text = &self.source[prec_start..self.pos];
+            Some(prec_text.parse::<u32>().map_err(|_| {
+                Diagnostic::new(
+                    Span::new(prec_start, self.pos),
+                    format!("format spec precision '{}' is too large", prec_text),
+                )
+            })?)
+        } else {
+            None
+        };
+        self.push(
+            TokenKind::FormatSpec {
+                zero_pad,
+                width,
+                precision,
+            },
+            start,
+        );
+        Ok(())
     }
 }
 

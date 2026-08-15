@@ -16098,3 +16098,189 @@ fn main() -> i64 {
         denied_run.status
     );
 }
+
+// #27: inline `print` format specs (`print x:03;` / `print y:.2;`).
+// Real end-to-end coverage via the actual `vanic` CLI (not a direct
+// `LlvmBackend::emit`/`CBackend::emit` call) specifically because
+// the feature spans FOUR independent codegen paths -- tree-C,
+// tree-LLVM, SSA-C, SSA-LLVM -- and the real risk this feature
+// carried was keeping the SSA-vs-tree dispatch consistent (SSA
+// mangles the `intent_print_item` call name; tree threads a `spec`
+// parameter directly). Going through the CLI exercises whichever
+// path `emit_c_via_ssa`/`emit_llvm_via_ssa` actually pick for a
+// given program, matching real usage, rather than hand-selecting
+// one backend and silently missing a divergence in the other.
+#[test]
+fn format_spec_width_precision_zero_pad_match_across_all_four_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug27-format-spec-basic",
+        r#"
+fn main() -> i64 {
+  print 5:03;
+  print 3.14159:.2;
+  print 3.14159:08.3;
+  print 0 - 7:04;
+  let u: u64 = 42;
+  print u:05;
+  return 0;
+}
+"#,
+    );
+    let expected = "005\n3.14\n0003.142\n-007\n00042\n";
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert!(
+        llvm_out.status.success(),
+        "LLVM run should succeed; status {:?}, stderr: {}",
+        llvm_out.status,
+        String::from_utf8_lossy(&llvm_out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&llvm_out.stdout),
+        expected,
+        "LLVM backend format-spec output mismatch"
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert!(
+        c_out.status.success(),
+        "C run should succeed; status {:?}, stderr: {}",
+        c_out.status,
+        String::from_utf8_lossy(&c_out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&c_out.stdout),
+        expected,
+        "C backend format-spec output mismatch"
+    );
+}
+
+// This program forces the tree backends (an `#[no_mangle]` marker
+// function makes the whole file ineligible for the SSA fast path --
+// same technique `c_backend_flushes_stdout_before_trapping_on_all_
+// four_row2_traps` in src/lib.rs uses), so it's a genuinely
+// different codegen path from the test above, which -- for this
+// simple a program -- takes the SSA path on both backends.
+#[test]
+fn format_spec_matches_on_tree_backends_when_ssa_path_is_unavailable() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug27-format-spec-tree-forced",
+        r#"
+#[no_mangle]
+fn keep_alive() -> i64 { return 0; }
+fn main() -> i64 {
+  print 5:03;
+  print 3.14159:.2;
+  return 0;
+}
+"#,
+    );
+    let expected = "005\n3.14\n";
+    let llvm_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])
+        .output()
+        .expect("intentc run (LLVM) should execute");
+    assert_eq!(
+        String::from_utf8_lossy(&llvm_out.stdout),
+        expected,
+        "tree-LLVM format-spec output mismatch"
+    );
+    let c_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run (C) should execute");
+    assert_eq!(
+        String::from_utf8_lossy(&c_out.stdout),
+        expected,
+        "tree-C format-spec output mismatch"
+    );
+}
+
+// Real bug caught while implementing this feature (not a fuzzer
+// finding): `eprint` always renders integers via plain ASCII `%lld`
+// regardless of the file's print-lang-mode (confirmed by reading
+// `emit_eprint_expr_no_newline`/`_llvm` -- neither has the Brahmi-
+// suffix branch `emit_print_expr_no_newline` has), but the first
+// draft of `print_spec_needs_derived_format` checked the file's
+// GLOBAL print-lang-mode regardless of print-vs-eprint, so an
+// `eprint x:03;` in a Devanagari-mode file would have wrongly
+// treated its own always-ASCII output as a spec no-op. Locks in the
+// fix: `eprint` under a non-ASCII print-lang-mode file must still
+// apply width/zero-pad.
+#[test]
+fn format_spec_on_eprint_applies_even_under_devanagari_print_lang_mode() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "bug27-format-spec-eprint-hindi",
+        "// vani-lang: hindi\nफलन मुख्य() -> i64 {\n  त्रुटिलिखो 5:03;\n  लौटाओ 0;\n}\n",
+    );
+    for args in [
+        vec!["run", src.to_str().unwrap()],
+        vec!["run", src.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc run should execute ({args:?}): {e}"));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "005\n",
+            "eprint's format spec must apply (plain ASCII \"005\", not the \
+             Devanagari-digit no-op \"५\") regardless of print-lang-mode ({args:?})"
+        );
+    }
+}
+
+// Confirms the checker-side validation this feature added: a spec
+// on a non-numeric type, and precision on a non-float numeric type,
+// are both compile-time diagnostics -- not a silent no-op and not a
+// codegen crash.
+#[test]
+fn format_spec_on_unsupported_type_or_precision_on_int_is_rejected() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let bad_type = write_tmp_vani(
+        "bug27-format-spec-bad-type",
+        r#"
+fn main() -> i64 {
+  print true:03;
+  return 0;
+}
+"#,
+    );
+    let out = Command::new(binary)
+        .args(["check", bad_type.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(!out.status.success(), "a spec on bool must be rejected");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("format specs aren't supported on"),
+        "expected the format-specs-unsupported diagnostic, got: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let bad_precision = write_tmp_vani(
+        "bug27-format-spec-precision-on-int",
+        r#"
+fn main() -> i64 {
+  print 5:.2;
+  return 0;
+}
+"#,
+    );
+    let out2 = Command::new(binary)
+        .args(["check", bad_precision.to_str().unwrap()])
+        .output()
+        .expect("intentc check should execute");
+    assert!(!out2.status.success(), "precision on an int must be rejected");
+    assert!(
+        String::from_utf8_lossy(&out2.stderr).contains("precision is only valid on f32/f64"),
+        "expected the precision-on-non-float diagnostic, got: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+}

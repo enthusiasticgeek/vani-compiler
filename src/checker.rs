@@ -2156,7 +2156,7 @@ fn compute_indirect_locks(
             }
             Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         walk_expr(e, param_names, signatures, out);
                     }
                 }
@@ -2164,7 +2164,7 @@ fn compute_indirect_locks(
             Stmt::PrintBlock { groups, .. } => {
                 for items in groups {
                     for item in items {
-                        if let crate::ast::PrintItem::Expr(e) = item {
+                        if let crate::ast::PrintItem::Expr(e, _) = item {
                             walk_expr(e, param_names, signatures, out);
                         }
                     }
@@ -3395,11 +3395,11 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
         | S::Prove { expr, .. }
         | S::Assign { expr, .. } => expr_mentions_var(expr, name),
         S::Print { items, .. } | S::EPrint { items, .. } => items.iter().any(|it| match it {
-            crate::ast::PrintItem::Expr(e) => expr_mentions_var(e, name),
+            crate::ast::PrintItem::Expr(e, _) => expr_mentions_var(e, name),
             _ => false,
         }),
         S::PrintBlock { groups, .. } => groups.iter().any(|items| items.iter().any(|it| match it {
-            crate::ast::PrintItem::Expr(e) => expr_mentions_var(e, name),
+            crate::ast::PrintItem::Expr(e, _) => expr_mentions_var(e, name),
             _ => false,
         })),
         S::If { cond, then_body, else_body, .. } => {
@@ -3716,7 +3716,7 @@ fn walk_stmt_for_captures(
         }
         S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     walk_expr_for_captures(e, bound, env, top_level_names, captures, seen);
                 }
             }
@@ -3724,7 +3724,7 @@ fn walk_stmt_for_captures(
         S::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         walk_expr_for_captures(e, bound, env, top_level_names, captures, seen);
                     }
                 }
@@ -3953,7 +3953,7 @@ fn rename_vars_in_stmt(
         }
         S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     rename_vars_in_expr(e, rename);
                 }
             }
@@ -3961,7 +3961,7 @@ fn rename_vars_in_stmt(
         S::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         rename_vars_in_expr(e, rename);
                     }
                 }
@@ -4168,7 +4168,7 @@ fn rewrite_closure_calls_in_stmt(
         }
         S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     rewrite_closure_calls_in_expr(e, closures);
                 }
             }
@@ -4176,7 +4176,7 @@ fn rewrite_closure_calls_in_stmt(
         S::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         rewrite_closure_calls_in_expr(e, closures);
                     }
                 }
@@ -4391,7 +4391,7 @@ fn lift_stmt_anon_fn(
         }
         S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     lift_expr_anon_fn(e, counter, hoisted);
                 }
             }
@@ -4399,7 +4399,7 @@ fn lift_stmt_anon_fn(
         S::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         lift_expr_anon_fn(e, counter, hoisted);
                     }
                 }
@@ -4968,7 +4968,7 @@ fn flatten_modules_in_program(
                 }
                 Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                     for item in items {
-                        if let crate::ast::PrintItem::Expr(e) = item {
+                        if let crate::ast::PrintItem::Expr(e, _) = item {
                             rewrite_expr(e, qualify);
                         }
                     }
@@ -4976,7 +4976,7 @@ fn flatten_modules_in_program(
                 Stmt::PrintBlock { groups, .. } => {
                     for items in groups {
                         for item in items {
-                            if let crate::ast::PrintItem::Expr(e) = item {
+                            if let crate::ast::PrintItem::Expr(e, _) = item {
                                 rewrite_expr(e, qualify);
                             }
                         }
@@ -5575,7 +5575,7 @@ fn rewrite_stmt_for_alias(
         }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     rewrite_expr_for_alias(e, qualify);
                 }
             }
@@ -5583,7 +5583,7 @@ fn rewrite_stmt_for_alias(
         Stmt::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         rewrite_expr_for_alias(e, qualify);
                     }
                 }
@@ -5899,7 +5899,7 @@ fn resolve_enum_types_in_stmt(
         }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     resolve_enum_types_in_expr(e, enums);
                 }
             }
@@ -5907,7 +5907,7 @@ fn resolve_enum_types_in_stmt(
         Stmt::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         resolve_enum_types_in_expr(e, enums);
                     }
                 }
@@ -6328,7 +6328,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
         }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
-                if let crate::ast::PrintItem::Expr(e) = item {
+                if let crate::ast::PrintItem::Expr(e, _) = item {
                     sub_aliases_in_expr(e, aliases);
                 }
             }
@@ -6336,7 +6336,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
         Stmt::PrintBlock { groups, .. } => {
             for items in groups {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         sub_aliases_in_expr(e, aliases);
                     }
                 }
@@ -7896,7 +7896,7 @@ fn collect_generic_calls_in_stmt(
         }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for it in items {
-                if let crate::ast::PrintItem::Expr(e) = it {
+                if let crate::ast::PrintItem::Expr(e, _) = it {
                     collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
                 }
             }
@@ -7904,7 +7904,7 @@ fn collect_generic_calls_in_stmt(
         Stmt::PrintBlock { groups, .. } => {
             for items in groups {
                 for it in items {
-                    if let crate::ast::PrintItem::Expr(e) = it {
+                    if let crate::ast::PrintItem::Expr(e, _) = it {
                         collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
                     }
                 }
@@ -8431,7 +8431,7 @@ fn rewrite_generic_calls_in_stmt(
         }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for it in items.iter_mut() {
-                if let crate::ast::PrintItem::Expr(e) = it {
+                if let crate::ast::PrintItem::Expr(e, _) = it {
                     rewrite_generic_calls_in_expr(e, generics, scope);
                 }
             }
@@ -8439,7 +8439,7 @@ fn rewrite_generic_calls_in_stmt(
         Stmt::PrintBlock { groups, .. } => {
             for items in groups.iter_mut() {
                 for it in items.iter_mut() {
-                    if let crate::ast::PrintItem::Expr(e) = it {
+                    if let crate::ast::PrintItem::Expr(e, _) = it {
                         rewrite_generic_calls_in_expr(e, generics, scope);
                     }
                 }
@@ -9084,13 +9084,13 @@ fn monomorphize_type_decls_in_program(
             Stmt::FieldAssign { object, value, .. } => { f(object); f(value); }
             Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for it in items {
-                    if let crate::ast::PrintItem::Expr(e) = it { f(e); }
+                    if let crate::ast::PrintItem::Expr(e, _) = it { f(e); }
                 }
             }
             Stmt::PrintBlock { groups, .. } => {
                 for items in groups {
                     for it in items {
-                        if let crate::ast::PrintItem::Expr(e) = it { f(e); }
+                        if let crate::ast::PrintItem::Expr(e, _) = it { f(e); }
                     }
                 }
             }
@@ -11023,7 +11023,7 @@ fn substitute_type_param_in_stmt(stmt: &mut Stmt, t_name: &str, concrete: &Type)
         }
         S::Print { items, .. } => {
             for it in items.iter_mut() {
-                if let crate::ast::PrintItem::Expr(e) = it {
+                if let crate::ast::PrintItem::Expr(e, _) = it {
                     substitute_type_param_in_expr(e, t_name, concrete);
                 }
             }
@@ -12438,7 +12438,7 @@ fn walk_branch_mutations(
             }
             Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for item in items {
-                    if let crate::ast::PrintItem::Expr(e) = item {
+                    if let crate::ast::PrintItem::Expr(e, _) = item {
                         walk_branch_mutations_in_expr(e, out);
                     }
                 }
@@ -12446,7 +12446,7 @@ fn walk_branch_mutations(
             Stmt::PrintBlock { groups, .. } => {
                 for items in groups {
                     for item in items {
-                        if let crate::ast::PrintItem::Expr(e) = item {
+                        if let crate::ast::PrintItem::Expr(e, _) = item {
                             walk_branch_mutations_in_expr(e, out);
                         }
                     }
@@ -13280,6 +13280,40 @@ fn check_while_loop_as_let_init(
         },
     });
     false
+}
+
+/// #27: validates an inline `print` format spec (`print x:03;`)
+/// against the print item's checked type. Shared across all 6
+/// Print/EPrint/PrintBlock construction sites (the fn-body checker
+/// here, plus `check_expr`'s Block-expr arm's top-level AND nested-
+/// `while` variants -- the same "T-block MVP" checker BUG-195 also
+/// touched this session) rather than duplicating this validation at
+/// each one. `WIDTH` pads any numeric type; `PRECISION` is only
+/// valid on `f32`/`f64`; any spec at all on a non-numeric type
+/// (bool/Str/OwnedStr/struct/enum/...) is rejected. A `None` spec is
+/// always a silent no-op.
+fn validate_print_item_spec(
+    ty: &Type,
+    spec: &Option<crate::ast::FormatSpec>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(spec) = spec else { return };
+    if !ty.is_numeric() {
+        diagnostics.push(Diagnostic::new(
+            spec.span,
+            format!("format specs aren't supported on `{}` print items", ty),
+        ));
+        return;
+    }
+    if spec.precision.is_some() && !ty.is_float() {
+        diagnostics.push(Diagnostic::new(
+            spec.span,
+            format!(
+                "`:.N` precision is only valid on f32/f64 print items, got `{}`",
+                ty
+            ),
+        ));
+    }
 }
 
 fn check_one_stmt(
@@ -14269,8 +14303,11 @@ fn check_one_stmt(
                 let mut typed_items: Vec<TypedPrintItem> = Vec::with_capacity(items.len());
                 for item in items {
                     match item {
-                        PrintItem::Str(s) => typed_items.push(TypedPrintItem::Str(s.clone())),
-                        PrintItem::Expr(e) => {
+                        PrintItem::Str(s, spec) => {
+                            validate_print_item_spec(&Type::Str, spec, diagnostics);
+                            typed_items.push(TypedPrintItem::Str(s.clone(), *spec));
+                        }
+                        PrintItem::Expr(e, spec) => {
                             verify_call_args_in_expr(e, smt_facts, env, signatures, diagnostics);
                             let checked = check_expr(e, env, signatures, diagnostics);
                             let ty = checked.ty();
@@ -14300,9 +14337,10 @@ fn check_one_stmt(
                                     "cannot print a reference directly; read the pointed-to value into an owned binding first",
                                 ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                             }
+                            validate_print_item_spec(ty, spec, diagnostics);
                             let mut t = checked.expr;
                             try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures, !loops.is_empty());
-                            typed_items.push(TypedPrintItem::Expr(t));
+                            typed_items.push(TypedPrintItem::Expr(t, *spec));
                         }
                     }
                 }
@@ -14317,8 +14355,11 @@ fn check_one_stmt(
             let mut typed_items: Vec<TypedPrintItem> = Vec::with_capacity(items.len());
             for item in items {
                 match item {
-                    PrintItem::Str(s) => typed_items.push(TypedPrintItem::Str(s.clone())),
-                    PrintItem::Expr(e) => {
+                    PrintItem::Str(s, spec) => {
+                        validate_print_item_spec(&Type::Str, spec, diagnostics);
+                        typed_items.push(TypedPrintItem::Str(s.clone(), *spec));
+                    }
+                    PrintItem::Expr(e, spec) => {
                         verify_call_args_in_expr(e, smt_facts, env, signatures, diagnostics);
                         let checked = check_expr(e, env, signatures, diagnostics);
                         let ty = checked.ty();
@@ -14348,9 +14389,10 @@ fn check_one_stmt(
                                 "cannot print a reference directly; read the pointed-to value into an owned binding first",
                             ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         }
+                        validate_print_item_spec(ty, spec, diagnostics);
                         let mut t = checked.expr;
                         try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures, !loops.is_empty());
-                        typed_items.push(TypedPrintItem::Expr(t));
+                        typed_items.push(TypedPrintItem::Expr(t, *spec));
                     }
                 }
             }
@@ -22455,12 +22497,16 @@ fn check_expr(
                             Vec::with_capacity(items.len());
                         for item in items {
                             match item {
-                                crate::ast::PrintItem::Str(s) => typed_items
-                                    .push(crate::ir::TypedPrintItem::Str(s.clone())),
-                                crate::ast::PrintItem::Expr(e) => {
-                                    let ce = check_expr(e, env, signatures, diagnostics);
+                                crate::ast::PrintItem::Str(s, spec) => {
+                                    validate_print_item_spec(&Type::Str, spec, diagnostics);
                                     typed_items
-                                        .push(crate::ir::TypedPrintItem::Expr(ce.expr));
+                                        .push(crate::ir::TypedPrintItem::Str(s.clone(), *spec));
+                                }
+                                crate::ast::PrintItem::Expr(e, spec) => {
+                                    let ce = check_expr(e, env, signatures, diagnostics);
+                                    validate_print_item_spec(ce.ty(), spec, diagnostics);
+                                    typed_items
+                                        .push(crate::ir::TypedPrintItem::Expr(ce.expr, *spec));
                                 }
                             }
                         }
@@ -22476,12 +22522,16 @@ fn check_expr(
                                 Vec::with_capacity(items.len());
                             for item in items {
                                 match item {
-                                    crate::ast::PrintItem::Str(s) => typed_items
-                                        .push(crate::ir::TypedPrintItem::Str(s.clone())),
-                                    crate::ast::PrintItem::Expr(e) => {
-                                        let ce = check_expr(e, env, signatures, diagnostics);
+                                    crate::ast::PrintItem::Str(s, spec) => {
+                                        validate_print_item_spec(&Type::Str, spec, diagnostics);
                                         typed_items
-                                            .push(crate::ir::TypedPrintItem::Expr(ce.expr));
+                                            .push(crate::ir::TypedPrintItem::Str(s.clone(), *spec));
+                                    }
+                                    crate::ast::PrintItem::Expr(e, spec) => {
+                                        let ce = check_expr(e, env, signatures, diagnostics);
+                                        validate_print_item_spec(ce.ty(), spec, diagnostics);
+                                        typed_items
+                                            .push(crate::ir::TypedPrintItem::Expr(ce.expr, *spec));
                                     }
                                 }
                             }
@@ -22591,12 +22641,17 @@ fn check_expr(
                                         Vec::with_capacity(items.len());
                                     for item in items {
                                         match item {
-                                            crate::ast::PrintItem::Str(s) => typed_items
-                                                .push(crate::ir::TypedPrintItem::Str(s.clone())),
-                                            crate::ast::PrintItem::Expr(e) => {
-                                                let ce = check_expr(e, env, signatures, diagnostics);
+                                            crate::ast::PrintItem::Str(s, spec) => {
+                                                validate_print_item_spec(&Type::Str, spec, diagnostics);
                                                 typed_items.push(
-                                                    crate::ir::TypedPrintItem::Expr(ce.expr),
+                                                    crate::ir::TypedPrintItem::Str(s.clone(), *spec),
+                                                );
+                                            }
+                                            crate::ast::PrintItem::Expr(e, spec) => {
+                                                let ce = check_expr(e, env, signatures, diagnostics);
+                                                validate_print_item_spec(ce.ty(), spec, diagnostics);
+                                                typed_items.push(
+                                                    crate::ir::TypedPrintItem::Expr(ce.expr, *spec),
                                                 );
                                             }
                                         }
@@ -22613,12 +22668,17 @@ fn check_expr(
                                             Vec::with_capacity(items.len());
                                         for item in items {
                                             match item {
-                                                crate::ast::PrintItem::Str(s) => typed_items
-                                                    .push(crate::ir::TypedPrintItem::Str(s.clone())),
-                                                crate::ast::PrintItem::Expr(e) => {
-                                                    let ce = check_expr(e, env, signatures, diagnostics);
+                                                crate::ast::PrintItem::Str(s, spec) => {
+                                                    validate_print_item_spec(&Type::Str, spec, diagnostics);
                                                     typed_items.push(
-                                                        crate::ir::TypedPrintItem::Expr(ce.expr),
+                                                        crate::ir::TypedPrintItem::Str(s.clone(), *spec),
+                                                    );
+                                                }
+                                                crate::ast::PrintItem::Expr(e, spec) => {
+                                                    let ce = check_expr(e, env, signatures, diagnostics);
+                                                    validate_print_item_spec(ce.ty(), spec, diagnostics);
+                                                    typed_items.push(
+                                                        crate::ir::TypedPrintItem::Expr(ce.expr, *spec),
                                                     );
                                                 }
                                             }
@@ -26983,7 +27043,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                 }
                 Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                     for item in items {
-                        if let crate::ast::PrintItem::Expr(e) = item {
+                        if let crate::ast::PrintItem::Expr(e, _) = item {
                             walk_expr(e, param_names, locks);
                         }
                     }
@@ -26991,7 +27051,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                 Stmt::PrintBlock { groups, .. } => {
                     for items in groups {
                         for item in items {
-                            if let crate::ast::PrintItem::Expr(e) = item {
+                            if let crate::ast::PrintItem::Expr(e, _) = item {
                                 walk_expr(e, param_names, locks);
                             }
                         }
@@ -38573,7 +38633,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => items
             .iter()
             .filter_map(|i| match i {
-                crate::ir::TypedPrintItem::Expr(e) => Some(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => Some(e),
                 _ => None,
             })
             .collect(),
@@ -38615,7 +38675,7 @@ fn verify_pure_body(
                     let span = items
                         .iter()
                         .find_map(|i| match i {
-                            crate::ir::TypedPrintItem::Expr(e) => Some(e.span),
+                            crate::ir::TypedPrintItem::Expr(e, _) => Some(e.span),
                             _ => None,
                         })
                         .unwrap_or_default();

@@ -21,7 +21,7 @@
 //!    in the output, in document order, at the indent of the
 //!    surrounding context.
 
-use crate::ast::{Expr, ExprKind, Function, Param, PrintItem, Program, Stmt, UnaryOp};
+use crate::ast::{Expr, ExprKind, FormatSpec, Function, Param, PrintItem, Program, Stmt, UnaryOp};
 use crate::lexer::Comment;
 
 const INDENT: &str = "  ";
@@ -948,11 +948,15 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
                     out.push_str(", ");
                 }
                 match item {
-                    PrintItem::Expr(e) => format_expr(e, false, out),
-                    PrintItem::Str(s) => {
+                    PrintItem::Expr(e, spec) => {
+                        format_expr(e, false, out);
+                        format_print_spec(spec, out);
+                    }
+                    PrintItem::Str(s, spec) => {
                         out.push('"');
                         out.push_str(&escape_string(s));
                         out.push('"');
+                        format_print_spec(spec, out);
                     }
                 }
             }
@@ -969,11 +973,15 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
                         out.push_str(", ");
                     }
                     match item {
-                        PrintItem::Expr(e) => format_expr(e, false, out),
-                        PrintItem::Str(s) => {
+                        PrintItem::Expr(e, spec) => {
+                            format_expr(e, false, out);
+                            format_print_spec(spec, out);
+                        }
+                        PrintItem::Str(s, spec) => {
                             out.push('"');
                             out.push_str(&escape_string(s));
                             out.push('"');
+                            format_print_spec(spec, out);
                         }
                     }
                 }
@@ -1563,6 +1571,24 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
     }
 }
 
+/// #27: re-emits a `print`-item format spec exactly as `print x:03;`
+/// would round-trip -- `Option::None` is a silent no-op, matching
+/// every other optional-decoration formatter in this file.
+fn format_print_spec(spec: &Option<FormatSpec>, out: &mut String) {
+    let Some(spec) = spec else { return };
+    out.push(':');
+    if spec.zero_pad {
+        out.push('0');
+    }
+    if let Some(w) = spec.width {
+        out.push_str(&w.to_string());
+    }
+    if let Some(p) = spec.precision {
+        out.push('.');
+        out.push_str(&p.to_string());
+    }
+}
+
 fn escape_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -1799,8 +1825,18 @@ mod tests {
                 }
                 Stmt::Print { items, span } | Stmt::EPrint { items, span } => {
                     for it in items {
-                        if let PrintItem::Expr(e) = it {
-                            zero_expr(e);
+                        match it {
+                            PrintItem::Expr(e, spec) => {
+                                zero_expr(e);
+                                if let Some(s) = spec {
+                                    s.span = crate::span::Span::new(0, 0);
+                                }
+                            }
+                            PrintItem::Str(_, spec) => {
+                                if let Some(s) = spec {
+                                    s.span = crate::span::Span::new(0, 0);
+                                }
+                            }
                         }
                     }
                     *span = crate::span::Span::new(0, 0);
@@ -1808,8 +1844,18 @@ mod tests {
                 Stmt::PrintBlock { groups, span } => {
                     for items in groups {
                         for it in items {
-                            if let PrintItem::Expr(e) = it {
-                                zero_expr(e);
+                            match it {
+                                PrintItem::Expr(e, spec) => {
+                                    zero_expr(e);
+                                    if let Some(s) = spec {
+                                        s.span = crate::span::Span::new(0, 0);
+                                    }
+                                }
+                                PrintItem::Str(_, spec) => {
+                                    if let Some(s) = spec {
+                                        s.span = crate::span::Span::new(0, 0);
+                                    }
+                                }
                             }
                         }
                     }

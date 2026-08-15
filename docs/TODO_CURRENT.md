@@ -154,7 +154,7 @@ workarounds, and the exact design goal for each.
   parse_match_arms_block refactor; SOV match at stmt pos → helpful error;
   wired in top-level + module-body dispatchers; 3 new lib tests pass)
 
-- [ ] **27. Inline `print`-item format specs (Rust `{:03}` / `{:.2}` syntax)** —
+- [x] **27. Inline `print`-item format specs (Rust `{:03}` / `{:.2}` syntax)** ✅ done 2026-08-15 —
   `print` currently takes a flat comma-separated list of string-literal-or-expr
   items (`parser.rs::parse_print_item`, `PrintItem::{Str,Expr}`) — there's no
   template-string / placeholder mini-language. `f64_to_str_fixed(x, decimals)`
@@ -246,6 +246,86 @@ workarounds, and the exact design goal for each.
   guess into where the days actually go — checker duplication and the
   SSA-backend name-mangling plumbing are the two real risk/effort centers,
   not parsing or the tree backends).
+
+  **Shipped 2026-08-15**, per user request (explicitly confirmed via
+  `AskUserQuestion` that the syntax itself was wanted, not just a
+  pointer to the already-shipped `f64_to_str_fixed` capability). Went
+  through `EnterPlanMode` first specifically to re-verify this scoping
+  note against current code before touching anything — `checker.rs`
+  alone had grown ~7000 lines since 2026-07-25 — and that re-
+  verification found one real design gap the original note missed:
+  **the proposed grammar couldn't actually be parsed as described.**
+  `TokenKind::Int(i128)` only stores the parsed numeric *value*, not
+  the source spelling, and `Parser` has no reference back to the
+  source text — `:03` and `:3` both lex to `Colon, Int(3)`, so the
+  pad-with-zero-vs-space flag would already be lost by the time a
+  general-token-stream parser saw it. Fixed by giving the lexer a
+  dedicated `TokenKind::FormatSpec { zero_pad, width, precision }`,
+  emitted atomically whenever `:` is immediately followed (no
+  whitespace) by a digit or `.`+digit — safe unconditionally, not
+  just in "after a print item" context, since that exact byte pattern
+  is never legally produced anywhere else in vāṇी's grammar (verified
+  empirically: grepped the full corpus, the only 2 hits were inside
+  `//` comments).
+
+  Confirmed the doc's core architecture claim otherwise held up
+  exactly as scoped, just at different line numbers — EXCEPT the
+  checker duplication count was **6 real construction sites, not the
+  documented 2**: `check_expr`'s Block-expr arm (the "T-block MVP"
+  match-arm-body checker — the same function BUG-195 touched earlier
+  the same session) independently duplicates the fn-body handler's
+  Print/EPrint/PrintBlock construction, twice over (once for the
+  block's own stmts, once more for a nested `while`'s body inside
+  that block). One shared `validate_print_item_spec` helper, called
+  from all 6, avoided copy-pasting the new width/precision-vs-type
+  validation 6 times.
+
+  For the SSA backends' name-mangling scheme (`intent_print_item` →
+  `intent_print_item$z1w3p2`-shaped when a spec is present, decoded
+  by a shared `encode`/`decode` pair in `ssa.rs`), the SSA-LLVM half
+  turned out to need NO new plumbing at all: unlike tree-LLVM (fixed,
+  pre-declared `@.fmt.*` globals), the SSA-LLVM emitter already
+  synthesizes a **fresh** `@.str.<n>` global for its printf format
+  string on every single print call — building that string with the
+  spec's flags baked in was the entire change. Tree-LLVM needed the
+  more involved fix: reused the EXISTING `@.print_str.<n>` string-
+  literal interning pool for derived format-spec strings too (a
+  string like `"%03lld"` needs exactly the same "intern once, GEP by
+  index" treatment as any user string literal — no new pool, no new
+  `FnCtx` field, no new module-preamble emission loop).
+
+  **Real bug self-caught before shipping** (not a fuzzer finding):
+  the first draft of the "does this type need a derived format
+  string" predicate checked the file's GLOBAL print-lang-mode to
+  decide whether a signed int's width should route through the
+  Brahmi localized-digit helper (a real no-op case) or plain printf —
+  but `eprint` *always* renders integers as plain ASCII regardless of
+  the file's dialect (confirmed by reading `emit_eprint_expr_no_
+  newline`/`_llvm` — neither has the Brahmi-suffix branch `emit_
+  print_expr_no_newline` has). An `eprint x:03;` in a Devanagari-mode
+  file would have wrongly treated its own always-ASCII output as a
+  no-op. Fixed by threading `is_eprint` through the predicate; locked
+  in with a dedicated regression test
+  (`format_spec_on_eprint_applies_even_under_devanagari_print_lang_
+  mode` in `tests/run_end_to_end.rs`).
+
+  **Verification**: 8 new `src/lib.rs` unit tests (6 lexer-level
+  confirming the atomic-token design + 2 checker-level diagnostics),
+  4 new `tests/run_end_to_end.rs` real-subprocess tests (all-four-
+  backends exact-output match on the SSA fast path; the same on the
+  tree-forced path via the `#[no_mangle]`-marker-function trick;
+  the eprint/Devanagari fix; both new checker diagnostics). Full
+  corpus swept twice after each of the two codegen phases (tree,
+  then SSA): `tools/backend_crosscheck.py` (0 flagged/1056 both
+  times) and `tools/leak_sweep.py` (matches its 4-finding baseline
+  both times). Full `cargo test --release --workspace` clean: 2997
+  lib (2989 + 8 new) / 272 e2e (268 + 4 new), 0 failed. `mdbook
+  build` clean (only the same pre-existing, unrelated warnings).
+  Documented in `tutorials/src/beginner/06_strings.md` (replaces a
+  now-false claim there that `print` "has no format-string syntax of
+  its own" with the new inline-spec section, cross-referencing
+  `f64_to_str_fixed` for when the formatted text is needed as a
+  value rather than printed immediately).
 
   **27.1 (done 2026-07-23)**: `f64_to_str_fixed(x, decimals) -> OwnedStr` —
   the cheap half of this ask, shipped as an ordinary builtin. Checker

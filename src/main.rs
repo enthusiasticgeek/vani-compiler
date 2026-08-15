@@ -122,8 +122,8 @@ fn stmt_calls_f64_to_str_fixed(stmt: &TypedStmt) -> bool {
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => expr_calls_f64_to_str_fixed(expr),
         TypedStmt::Print { items } => items.iter().any(|i| match i {
-            TypedPrintItem::Expr(e) => expr_calls_f64_to_str_fixed(e),
-            TypedPrintItem::Str(_) => false,
+            TypedPrintItem::Expr(e, _) => expr_calls_f64_to_str_fixed(e),
+            TypedPrintItem::Str(_, _) => false,
         }),
         TypedStmt::If { cond, then_body, else_body } => {
             expr_calls_f64_to_str_fixed(cond)
@@ -223,8 +223,8 @@ fn stmt_calls_file_line_read(stmt: &TypedStmt) -> bool {
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => expr_calls_file_line_read(expr),
         TypedStmt::Print { items } => items.iter().any(|i| match i {
-            TypedPrintItem::Expr(e) => expr_calls_file_line_read(e),
-            TypedPrintItem::Str(_) => false,
+            TypedPrintItem::Expr(e, _) => expr_calls_file_line_read(e),
+            TypedPrintItem::Str(_, _) => false,
         }),
         TypedStmt::If { cond, then_body, else_body } => {
             expr_calls_file_line_read(cond)
@@ -319,8 +319,8 @@ fn stmt_calls_vec_with_capacity(stmt: &TypedStmt) -> bool {
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => expr_calls_vec_with_capacity(expr),
         TypedStmt::Print { items } => items.iter().any(|i| match i {
-            TypedPrintItem::Expr(e) => expr_calls_vec_with_capacity(e),
-            TypedPrintItem::Str(_) => false,
+            TypedPrintItem::Expr(e, _) => expr_calls_vec_with_capacity(e),
+            TypedPrintItem::Str(_, _) => false,
         }),
         TypedStmt::If { cond, then_body, else_body } => {
             expr_calls_vec_with_capacity(cond)
@@ -485,8 +485,8 @@ fn stmt_uses_vec_of_atomic_or_channel(stmt: &TypedStmt) -> bool {
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => expr_uses_vec_of_atomic_or_channel(expr),
         TypedStmt::Print { items } => items.iter().any(|i| match i {
-            TypedPrintItem::Expr(e) => expr_uses_vec_of_atomic_or_channel(e),
-            TypedPrintItem::Str(_) => false,
+            TypedPrintItem::Expr(e, _) => expr_uses_vec_of_atomic_or_channel(e),
+            TypedPrintItem::Str(_, _) => false,
         }),
         TypedStmt::If { cond, then_body, else_body } => {
             expr_uses_vec_of_atomic_or_channel(cond)
@@ -581,8 +581,8 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
     }
     match stmt {
         TypedStmt::Print { items } => items.iter().all(|i| match i {
-            TypedPrintItem::Expr(e) => expr_ssa_supported(e),
-            TypedPrintItem::Str(_) => true,
+            TypedPrintItem::Expr(e, _) => expr_ssa_supported(e),
+            TypedPrintItem::Str(_, _) => true,
         }),
         // eprint is not in the v1 SSA subset — always route to tree.
         TypedStmt::EPrint { .. } => false,
