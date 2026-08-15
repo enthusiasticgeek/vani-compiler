@@ -8519,3 +8519,12 @@ Repro: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260815-180157-backend-divergence-824731aaa2
+
+Repro: `tools/localfuzz/findings/20260815-180157-backend-divergence-824731aaa2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-180157-backend-divergence-824731aaa2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
