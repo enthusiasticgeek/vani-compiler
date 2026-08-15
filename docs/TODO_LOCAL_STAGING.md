@@ -8510,3 +8510,12 @@ The generated source code exhibits a `backend-divergence` error when compiled us
   "rc": 1,
   "stdout": "",
   "stderr": "cc failed while compiling '/tmp/vanic-candidate-510617-1786807215551095237.c' (left at this path for debugging):\n/tmp/vanic-candidate-510617-1786807215551095237.c: In function \u2018fn_traced\u2019:\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:58: error: redefinition of \u2018v_next\u2019\n  380 | int64_t v_next = (intent_check_i64_add(v_v, 7)); int64_t v_next = (intent_check_i64_add(v_v, 7));   fputs(\"  traced(): computed next=\", stdout);\n      |                                                          ^~~~~~\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:9: note: previous definition of \u2018v_next\u2019 with type \u2018int64_t\u
+
+---
+
+### Candidate: 20260815-163032-run-crash-334b12d50c
+
+Repro: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-163032-run-crash-334b12d50c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
