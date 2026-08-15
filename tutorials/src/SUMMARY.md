@@ -60,7 +60,7 @@
 - [FFI: `extern "C"` + `--link-with`](intermediate/09_ffi.md)
 - [Native file I/O -- intuition primer](intermediate/09b_file_io_primer.md)
 - [Native file I/O: `FileHandle` + `eprint`](intermediate/09c_file_io.md)
-- [Build-system integration: Makefile, CMake, Meson](intermediate/09d_build_systems.md)
+- [Build-system integration: Makefile, CMake, Meson, Ninja](intermediate/09d_build_systems.md)
 - [Result, `try`, and `?` -- intuition primer](intermediate/10a_result_try_primer.md)
 - [Runtime errors, panic-free design, the segfault-free guarantee -- intuition primer](intermediate/10b_runtime_errors_primer.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
@@ -78,6 +78,7 @@
 - [Compile time vs runtime -- intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Packages with Kosh](intermediate/16_packages.md)
+- [Testing your vāṇी code: #[test], vanic test, and assert_eq_*](intermediate/16a_testing_primer.md)
 - [Capstone: a terminal tic-tac-toe game](intermediate/17_tic_tac_toe_capstone.md)
 
 # Advanced

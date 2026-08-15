@@ -111,7 +111,11 @@ vanic fmt --check src/          # CI-style check for entire tree
 
 ---
 
-### `vanic test <file.vani | directory>`
+### `vanic test [<file.vani | directory>...]`
+
+Full tour with worked examples:
+[Intermediate 16a -- Testing your vāṇी code](../intermediate/16a_testing_primer.md).
+Quick reference:
 
 `vanic test` supports two modes:
 
@@ -121,7 +125,9 @@ Mark individual functions with `#[test]` and give the file no
 top-level `fn main`. `vanic test` collects the `#[test]` fns and
 gives each one its own synthesized `fn main() -> i64 { return
 <fn>(); }` driver, compiled and run as a separate process -- so
-one failing test doesn't take the rest of the suite down with it:
+one failing test doesn't take the rest of the suite down with it.
+A file with `#[test]` fns AND a real `fn main` still runs the
+tests, not `main` (`main` stays what `vanic run`/`build` use):
 
 ```vani
 #[test]
@@ -131,8 +137,9 @@ fn addition_works() -> i64 {
 }
 
 #[test]
-fn subtraction_works() -> i64 {
-  assert 5 - 3 == 2;
+#[should_panic]
+fn div_by_zero_panics() -> i64 {
+  let _ = 1 / 0;
   return 0;
 }
 ```
@@ -141,30 +148,51 @@ fn subtraction_works() -> i64 {
 vanic test math_test.vani
 # running 2 tests
 # test addition_works ... ok
-# test subtraction_works ... ok
+# test div_by_zero_panics ... ok (panicked as expected, 3 ms)
 # test result: ok. 2 passed; 0 failed
 ```
 
 Each test function must take no parameters and return `i64`
 (enforced by the ordinary type checker on the synthesized `main`).
 Passing is `return 0;` (or any code path that doesn't abort). A
-failing `assert` inside the test body aborts that test's process
-with a named diagnostic and counts as a failure; the rest of the
-suite still runs.
+failing `assert`/`assert_eq_*`/other runtime trap inside the test
+body aborts that test's process and counts as a failure; the rest
+of the suite still runs -- concurrently, by default (see
+`--test-threads` below).
+
+`#[should_panic]` (stackable with `#[test]`) inverts pass/fail:
+passes iff the process exits non-zero, fails with "did not panic as
+expected" on a clean exit. Checker-rejected if used without
+`#[test]`.
+
+`assert_eq_i64(a, b)` / `assert_eq_f64` / `assert_eq_bool` /
+`assert_eq_str` (builtins, usable anywhere, not just in tests) print
+both sides on a mismatch before the same `exit(3)` every other
+runtime trap uses -- `assert_eq_str` compares by content, not
+pointer identity.
 
 **Legacy mode**
 
-Once a file defines its own top-level `fn main`, `vanic test`
-always uses legacy mode for it -- `#[test]` attributes are not
-combined with an existing `main`. `main` is expected to return 0
-for pass, non-zero for fail:
+A file with no `#[test]` fns at all (just a `fn main`) falls back to
+legacy mode: `main` is expected to return 0 for pass, non-zero for
+fail:
 
 ```bash
 vanic test tests/
 vanic test tests/math_test.vani
+vanic test                         # no path: defaults to the enclosing
+                                    # vani.toml package root, recursively
+                                    # (error if no manifest is found)
 ```
 
-Prints `ok` / `FAIL` per file, exits 1 if any fail.
+Prints `ok` / `FAILED` per file/test, exits 1 if any fail.
+
+| Flag | Description |
+|------|-------------|
+| `--filter=<substring>` | Only run tests/files whose label contains the substring (plain substring match, not a glob -- matches `cargo test <substring>`). |
+| `--test-threads=<N>` | Worker count for the concurrent execution every discovered test runs under by default (bounded by available CPU parallelism). `=1` forces fully serial. Printed output stays grouped/ordered by file regardless. |
+| `--json` | One machine-readable `{"results":[...],"summary":{...}}` object on stdout instead of human-readable lines. |
+| `--smt-debug` | Dump every SMT query/response to stderr (also `VANIC_SMT_DEBUG=1`). |
 
 ---
 

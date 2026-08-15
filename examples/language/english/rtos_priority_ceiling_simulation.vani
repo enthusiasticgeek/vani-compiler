@@ -1,0 +1,264 @@
+// build & run:
+//   vanic run examples/language/english/rtos_priority_ceiling_simulation.vani                          # LLVM backend
+//   vanic run examples/language/english/rtos_priority_ceiling_simulation.vani --backend=c              # C backend
+//   vanic build examples/language/english/rtos_priority_ceiling_simulation.vani -o /tmp/rtos_pcp && /tmp/rtos_pcp
+
+intent "A discrete-tick simulation of the classic RTOS Priority Inversion scenario (the Mars Pathfinder bug, 1997) and its textbook fix, the Priority Ceiling Protocol: a low-priority task (L) holds a shared resource, a medium-priority task (M) preempts it, and a high-priority task (H) that needs the same resource ends up blocked far longer than its own critical section -- blocked, transitively, by a task with LOWER priority than itself, even though M never touches the resource at all. M's own priority additionally changes at random, unpredictable ticks (a real RTOS feature -- priority aging, application-driven reprioritization) to stress-test that the protocol's guarantee doesn't depend on knowing every other task's priority in advance. Runs the identical workload twice (naive locking vs. the priority-ceiling fix) under an identical random-priority-change schedule for a fair comparison, then re-runs both under 30 independently-seeded random schedules and asserts the protocol's bound holds on every single one.";
+
+// vāṇी's `task`/`join` has no OS-level thread-priority knob to turn
+// (see docs/v1_limitations.md) -- so this models the RTOS scheduler
+// ITSELF as a discrete-tick simulation, the same technique real-time
+// systems courses use to make the scenario deterministic and
+// reproducible instead of depending on the host OS's own scheduler
+// timing, which would make this example flaky by construction.
+// Lower `priority` number = more urgent, matching this project's own
+// `#[interrupt(priority=N)]` convention (see `docs/language_manual.md`
+// / the embedded tutorial's S-20 priority-inversion checker rule,
+// which catches a *static* version of this same class of bug between
+// ISRs -- this example demonstrates the *dynamic* scheduling version).
+
+enum Phase { NotArrived, Active, Done }
+
+struct Job {
+  id: i64,
+  name: Str,
+  priority: i64,       // lower = more urgent
+  arrival: i64,        // tick this task becomes ready
+  work: i64,           // remaining ticks of work needed
+  needs_mutex: bool,   // does this task's entire run hold the shared resource?
+  phase: Phase,
+}
+
+fn is_active(p: Phase) -> bool {
+  return match p {
+    Phase.Active then true,
+    _ then false,
+  };
+}
+
+fn is_not_arrived(p: Phase) -> bool {
+  return match p {
+    Phase.NotArrived then true,
+    _ then false,
+  };
+}
+
+// The priority a task effectively competes with THIS tick. Under
+// the Priority Ceiling Protocol, a task holding the mutex borrows
+// the mutex's ceiling -- the highest priority of any task that could
+// ever take it -- for as long as it holds it. That's the whole
+// mechanism: nothing that merely outranks the task's OWN priority
+// (but not the ceiling) can preempt it mid-critical-section.
+fn effective_priority(t: Job, mutex_holder: i64, use_ceiling: bool, ceiling: i64) -> i64 {
+  if use_ceiling {
+    if mutex_holder == t.id {
+      return ceiling;
+    }
+  }
+  return t.priority;
+}
+
+// Can this task make progress THIS tick? It must be active, and
+// either not need the mutex, already hold it, or find it free (in
+// which case running the task this tick acquires it).
+fn is_runnable(t: Job, mutex_holder: i64) -> bool {
+  if is_active(t.phase) == false {
+    return false;
+  }
+  if t.needs_mutex == false {
+    return true;
+  }
+  if mutex_holder == t.id {
+    return true;
+  }
+  return mutex_holder == -1;
+}
+
+// Index of the runnable job with the lowest (most urgent) effective
+// priority this tick, or -1 if nothing can make progress (every
+// active task is either done or blocked on the mutex).
+fn pick_next(jobs: ref Vec<Job>, mutex_holder: i64, use_ceiling: bool, ceiling: i64) -> i64 {
+  let n: i64 = len(jobs) as i64;
+  let best: i64 = -1;
+  let best_prio: i64 = 999999;
+  for i from 0 to n {
+    let t: Job = clone_at(jobs, i);
+    if is_runnable(t, mutex_holder) {
+      let p: i64 = effective_priority(t, mutex_holder, use_ceiling, ceiling);
+      if p < best_prio {
+        best_prio = p;
+        best = i;
+      }
+    }
+  }
+  return best;
+}
+
+fn all_done(jobs: ref Vec<Job>) -> bool {
+  let n: i64 = len(jobs) as i64;
+  for i from 0 to n {
+    let t: Job = clone_at(jobs, i);
+    if is_active(t.phase) {
+      return false;
+    }
+    if is_not_arrived(t.phase) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Runs the fixed 3-task workload (L=id0, M=id1, H=id2) once and
+// returns the tick H finished on. `ceiling` is the mutex's priority
+// ceiling -- the highest priority of any task that may ever lock
+// it, which for this scenario is always H's own priority (1),
+// whether or not boosting is actually applied this run. L's and H's
+// priorities stay fixed (they're what the scenario is ABOUT); M's
+// priority is randomly reassigned some ticks (inline below, right
+// after the arrivals check) -- M is deliberately the one whose
+// urgency is unpredictable,
+// since the Priority Ceiling Protocol's guarantee has to hold no
+// matter what M (or any other unrelated task) is doing.
+fn run_simulation(use_ceiling: bool, ceiling: i64, max_ticks: i64, verbose: bool) -> i64 {
+  let jobs: Vec<Job> = vec(
+    Job { id: 0, name: "L (low)",  priority: 3, arrival: 0, work: 6, needs_mutex: true,  phase: Phase.NotArrived },
+    Job { id: 1, name: "M (med)",  priority: 2, arrival: 1, work: 4, needs_mutex: false, phase: Phase.NotArrived },
+    Job { id: 2, name: "H (high)", priority: 1, arrival: 2, work: 2, needs_mutex: true,  phase: Phase.NotArrived }
+  );
+  let n: i64 = len(ref jobs) as i64;
+  let mutex_holder: i64 = -1;
+  let h_finish_tick: i64 = -1;
+
+  for tick from 0 to max_ticks {
+    // Arrivals: NotArrived -> Active once its tick comes.
+    for i from 0 to n {
+      let t: Job = clone_at(ref jobs, i);
+      if is_not_arrived(t.phase) {
+        if tick >= t.arrival {
+          jobs[i].phase = Phase.Active;
+        }
+      }
+    }
+
+    // Random priority change: M only, ~30% of ticks, kept in
+    // [2, 5] so it stays strictly less urgent than H's fixed
+    // priority 1 (M is "unpredictable middle management," not a
+    // second H) but can freely swing above or below L's fixed
+    // priority 3 from one tick to the next.
+    let m: Job = clone_at(ref jobs, 1);
+    if is_active(m.phase) {
+      if rand_in_range(0, 100) < 30 {
+        let new_prio: i64 = rand_in_range(2, 6);
+        jobs[1].priority = new_prio;
+      }
+    }
+
+    let chosen: i64 = pick_next(ref jobs, mutex_holder, use_ceiling, ceiling);
+
+    if chosen == -1 {
+      if verbose {
+        print "  tick", tick, ": idle -- every active task is blocked on the mutex";
+      }
+    } else {
+      let t: Job = clone_at(ref jobs, chosen);
+      if t.needs_mutex {
+        if mutex_holder == -1 {
+          mutex_holder = chosen;
+        }
+      }
+      let new_work: i64 = t.work - 1;
+      jobs[chosen].work = new_work;
+      if verbose {
+        print "  tick", tick, ": runs", t.name, " (priority", t.priority, ", work left:", new_work, ", mutex held by job", mutex_holder, ")";
+      }
+      if new_work == 0 {
+        jobs[chosen].phase = Phase.Done;
+        if mutex_holder == chosen {
+          mutex_holder = -1;
+        }
+        if chosen == 2 {
+          h_finish_tick = tick;
+        }
+      }
+    }
+
+    if all_done(ref jobs) {
+      break;
+    }
+  }
+  return h_finish_tick;
+}
+
+fn main() -> i64 {
+  // Fixed demo seed so the narrated trace below is reproducible --
+  // re-seeding to the SAME value before each of the two scenario
+  // runs makes M's random priority-change schedule IDENTICAL across
+  // both, so any difference in H's finish tick is caused only by
+  // the priority-ceiling fix, not by different randomness landing
+  // differently. `rand_in_range` without an explicit `seed_rng`
+  // call would default to seed 0 -- seeding explicitly here just
+  // makes that reproducibility intentional and visible, not implicit.
+  let demo_seed: i64 = 7;
+
+  print "=== Scenario 1: naive mutex (no priority ceiling) ===";
+  print "L arrives@0 needs 6 ticks + the mutex the whole time.";
+  print "M arrives@1 needs 4 ticks, never touches the mutex --";
+  print "  but its OWN priority randomly changes some ticks (~30% chance, in [2,5]).";
+  print "H arrives@2 needs 2 ticks + the same mutex L holds.";
+  seed_rng(demo_seed);
+  let h_naive: i64 = run_simulation(false, 1, 30, true);
+  print "-> H completed at tick", h_naive, "(arrived at tick 2)";
+  print "";
+
+  print "=== Scenario 2: Priority Ceiling Protocol (mutex ceiling = H's priority) ===";
+  print "Same three jobs, same random priority-change schedule for M (re-seeded";
+  print "identically). The only difference: whoever holds the mutex temporarily";
+  print "runs AT the ceiling priority while they hold it.";
+  seed_rng(demo_seed);
+  let h_ceiling: i64 = run_simulation(true, 1, 30, true);
+  print "-> H completed at tick", h_ceiling, "(arrived at tick 2)";
+  print "";
+
+  // The whole point of the protocol: it bounds H's wait to at most
+  // L's own remaining critical-section length, no matter how many
+  // unrelated jobs are ready to run or how their priorities happen
+  // to be fluctuating. Never worse than the naive scenario --
+  assert h_ceiling <= h_naive;
+  // -- and, for this specific seeded workload, strictly better: M
+  // really does cause a real inversion in Scenario 1 that the
+  // ceiling eliminates in Scenario 2.
+  assert h_ceiling < h_naive;
+
+  let ticks_saved: i64 = h_naive - h_ceiling;
+  print "Priority Ceiling Protocol bounded H's wait:", ticks_saved, "fewer ticks than the naive scenario.";
+  print "M (a job H never interacts with directly) caused exactly that much";
+  print "unbounded-looking delay by preempting L while L held the mutex H needed.";
+  print "";
+
+  // Stress test: the narrated demo above proves the protocol works
+  // for ONE random-priority-change schedule. The protocol's actual
+  // textbook claim is stronger -- it holds no matter what any other
+  // task's priority is doing. Re-run both scenarios, silently, under
+  // 30 independently-seeded schedules and confirm the bound holds
+  // on every single one.
+  print "=== Stress test: 30 independently-seeded random-priority trials ===";
+  let trials: i64 = 30;
+  let strict_wins: i64 = 0;
+  let trial: i64 = 0;
+  while trial < trials {
+    let trial_seed: i64 = 1000 + trial;
+    seed_rng(trial_seed);
+    let t_naive: i64 = run_simulation(false, 1, 30, false);
+    seed_rng(trial_seed);
+    let t_ceiling: i64 = run_simulation(true, 1, 30, false);
+    assert t_ceiling <= t_naive;
+    if t_ceiling < t_naive {
+      strict_wins = strict_wins + 1;
+    }
+    trial = trial + 1;
+  }
+  print "All", trials, "trials: priority ceiling never made H's wait worse.";
+  print strict_wins, "of", trials, "trials had a real inversion the ceiling actively prevented.";
+
+  return 0;
+}

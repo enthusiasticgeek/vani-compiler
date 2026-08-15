@@ -1659,6 +1659,18 @@ fn emit_instr(
             // -- no shared preamble helper needed since `l`/`r` are
             // already-evaluated SSA operands (plain `v_N` reads or
             // constants), safe to reference twice.
+            //
+            // All three arms below call `exit(3)`, not `abort()`,
+            // on trap -- found by #191's tools/backend_crosscheck.py
+            // corpus sweep (2026-08-14, its very first run):
+            // `examples/language/english/
+            // loop_carried_overflow_not_elided.vani` exited 134
+            // (128+SIGABRT) via this backend but 3 via LLVM's. Same
+            // bug class `TypedStmt::Assert`'s C codegen was already
+            // fixed for (2026-08-04); it just never got carried over
+            // to this file's own copy of the checked-arithmetic
+            // guards. backend_c.rs's equivalent helpers got the same
+            // fix in the same commit.
             let result_ty = instr.ty.clone();
             if *checked && result_ty.is_integer() {
                 let ty_c = c_type(&result_ty)?;
@@ -1678,7 +1690,7 @@ fn emit_instr(
                         };
                         writeln!(
                             out,
-                            "  if (__builtin_expect({}(({ty})({l}), ({ty})({r}), &v_{res}), 0)) {{ fprintf(stderr, \"integer overflow in {tyname} {op_name}\\n\"); fflush(stdout); abort(); }}",
+                            "  if (__builtin_expect({}(({ty})({l}), ({ty})({r}), &v_{res}), 0)) {{ fprintf(stderr, \"integer overflow in {tyname} {op_name}\\n\"); fflush(stdout); exit(3); }}",
                             builtin,
                             ty = ty_c,
                             l = c_operand(l),
@@ -1693,7 +1705,7 @@ fn emit_instr(
                     BinaryOp::Div | BinaryOp::Rem => {
                         writeln!(
                             out,
-                            "  if (({}) == 0) {{ fprintf(stderr, \"division by zero\\n\"); fflush(stdout); abort(); }}",
+                            "  if (({}) == 0) {{ fprintf(stderr, \"division by zero\\n\"); fflush(stdout); exit(3); }}",
                             c_operand(r)
                         )
                         .unwrap();
@@ -1714,7 +1726,7 @@ fn emit_instr(
                             let op_name = if matches!(op, BinaryOp::Div) { "div" } else { "rem" };
                             writeln!(
                                 out,
-                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); fflush(stdout); abort(); }}",
+                                "  if (({r}) == -1 && ({l}) == {min}) {{ fprintf(stderr, \"integer overflow in {ty} {op_name}\\n\"); fflush(stdout); exit(3); }}",
                                 r = c_operand(r),
                                 l = c_operand(l),
                                 min = min_macro,
@@ -1733,7 +1745,7 @@ fn emit_instr(
                         };
                         writeln!(
                             out,
-                            "  if {} {{ fprintf(stderr, \"shift amount out of range\\n\"); fflush(stdout); abort(); }}",
+                            "  if {} {{ fprintf(stderr, \"shift amount out of range\\n\"); fflush(stdout); exit(3); }}",
                             range_check
                         )
                         .unwrap();

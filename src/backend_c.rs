@@ -21731,8 +21731,57 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // unchanged (memcpy semantics).
             c_element_deep_clone(&slot, element_ty)
         }
+        "assert_eq_i64" | "assert_eq_f64" | "assert_eq_bool" | "assert_eq_str" => {
+            // Test-fw Phase F (2026-08-14): print both sides on
+            // mismatch, then the exact same exit(3) trap convention
+            // every other runtime guard already uses. Inline GCC
+            // statement-expression (not a separate static helper) --
+            // matches the trie_insert/hashmap_insert shape above.
+            // `assert_eq_str` compares by CONTENT (`strcmp`), not
+            // pointer identity -- two distinct `Str`/`OwnedStr`
+            // values with the same text (e.g. two string literals,
+            // or a literal vs. a freshly concatenated OwnedStr) are
+            // different pointers but must still compare equal; a
+            // naive `_l != _r` would almost always report a false
+            // mismatch.
+            let l = emit_expr(&args[0]);
+            let r = emit_expr(&args[1]);
+            match name {
+                "assert_eq_i64" => format!(
+                    "({{ int64_t _l = ({l}); int64_t _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %lld\\n right: %lld\\n\", (long long)_l, (long long)_r); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_f64" => format!(
+                    "({{ double _l = ({l}); double _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %g\\n right: %g\\n\", _l, _r); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_bool" => format!(
+                    "({{ int64_t _l = ({l}); int64_t _r = ({r}); if (_l != _r) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %s\\n right: %s\\n\", _l ? \"true\" : \"false\", _r ? \"true\" : \"false\"); fflush(stdout); exit(3); }} (int64_t)0; }})"
+                ),
+                "assert_eq_str" => {
+                    // Same fresh-OwnedStr-argument leak class BUG-193
+                    // fixed for the ordinary-call default path -- this
+                    // arm bypasses that path entirely (it's its own
+                    // match arm, not the `_ =>` fallback), so it needs
+                    // its own free-after-use. Only frees on the
+                    // no-mismatch path: the mismatch path calls
+                    // exit(3) unconditionally and never returns, so
+                    // there's nothing to free there (the process is
+                    // terminating regardless -- matches every other
+                    // trap site in this file, none of which bother
+                    // freeing locals right before exit()).
+                    let l_fresh = crate::ir::is_fresh_owned_str(&args[0])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[0]);
+                    let r_fresh = crate::ir::is_fresh_owned_str(&args[1])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[1]);
+                    let free_l = if l_fresh { "free((void*)_l); " } else { "" };
+                    let free_r = if r_fresh { "free((void*)_r); " } else { "" };
+                    format!(
+                        "({{ const char* _l = ({l}); const char* _r = ({r}); if (strcmp(_l, _r) != 0) {{ fprintf(stderr, \"assertion failed: left != right\\n  left: %s\\n right: %s\\n\", _l, _r); fflush(stdout); exit(3); }} {free_l}{free_r}(int64_t)0; }})"
+                    )
+                }
+                _ => unreachable!(),
+            }
+        }
         _ => {
-            let rendered_args = args.iter().map(emit_expr).collect::<Vec<_>>().join(", ");
             // Closure #269: extern "C" fns emit a bare C-ABI
             // call (no `fn_` prefix). The C_EXTERN_FN_REGISTRY
             // gets populated at backend entry from the
@@ -21747,7 +21796,81 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             } else {
                 function_name(name)
             };
-            format!("{}({})", symbol, rendered_args)
+            // BUG-193 (2026-08-14): a fresh, never-bound OwnedStr
+            // argument passed into an ordinary user-function call has
+            // no owner to free it after the call returns -- same
+            // shape BUG-159/160/161 fixed for specific builtin call
+            // sites (hashmap_*/trie_*, see those sites' own comments
+            // a few hundred lines up), generalized here to the
+            // default/fallback path every ordinary user-fn call goes
+            // through. ONLY `is_fresh_owned_str_via_str_cast` --
+            // NOT the bare `is_fresh_owned_str` check BUG-160 used
+            // for hashmap_get/_contains_key/_remove -- is safe here.
+            // BUG-160's bare check was a hand-verified judgment call
+            // about THOSE SPECIFIC builtins' contracts (lookup-only,
+            // never stores the key); it does not generalize. An
+            // ORDINARY user function's `OwnedStr`-typed (by value)
+            // parameter takes real OWNERSHIP -- the callee may move
+            // it into a returned struct/tuple/closure capture and
+            // hand it back to the caller, who then owns and frees it
+            // through a completely different scope-exit Drop. Freeing
+            // it again here after the call is a double-free. The
+            // implicit `Str`-borrow cast is the only reliable signal
+            // that a `Str`-typed parameter never took ownership in
+            // the first place -- first version of this fix included
+            // the bare check by analogy with BUG-160 and caused a
+            // real double-free (`examples/edge_cases/
+            // mix_tuple_non_copy.vani`'s `make_pair(msg: OwnedStr, ..)`
+            // moving `msg` straight into the returned tuple), caught
+            // by `tools/leak_sweep.py`'s corpus-wide ASan sweep, not
+            // by the plain (non-sanitized) test suite.
+            let fresh_positions: Vec<usize> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| crate::ir::is_fresh_owned_str_via_str_cast(a))
+                .map(|(i, _)| i)
+                .collect();
+            if fresh_positions.is_empty() {
+                let rendered_args = args.iter().map(emit_expr).collect::<Vec<_>>().join(", ");
+                format!("{}({})", symbol, rendered_args)
+            } else {
+                // Bind each fresh arg to its own named temp (in
+                // argument order -- a strict superset of C's own
+                // unspecified argument-evaluation order, not a
+                // reordering), call using the temps (or the plain
+                // expression for non-fresh args), then free every
+                // temp after the call, yielding the result. Mirrors
+                // the trie_insert/hashmap_insert statement-expression
+                // shape above, generalized to N arguments instead of
+                // 1-2 hardcoded positions.
+                let mut prelude = String::new();
+                let mut call_args: Vec<String> = Vec::with_capacity(args.len());
+                for (i, a) in args.iter().enumerate() {
+                    if fresh_positions.contains(&i) {
+                        let tmp = format!("_intent_arg_str_{}", i);
+                        prelude.push_str(&format!(
+                            "const char* {} = ({}); ",
+                            tmp,
+                            emit_expr(a)
+                        ));
+                        call_args.push(tmp);
+                    } else {
+                        call_args.push(emit_expr(a));
+                    }
+                }
+                let mut frees = String::new();
+                for i in &fresh_positions {
+                    frees.push_str(&format!("free((void*)_intent_arg_str_{}); ", i));
+                }
+                format!(
+                    "({{ {}{} _intent_call_r = {}({}); {}_intent_call_r; }})",
+                    prelude,
+                    c_type_name(result_ty),
+                    symbol,
+                    call_args.join(", "),
+                    frees
+                )
+            }
         }
     }
 }
@@ -22915,6 +23038,14 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     // and Clang 3.8+. The builtin returns true if the operation overflowed.
     // Both signed and unsigned overflow are trapped (unsigned wrapping is
     // defined C behavior but still undesired in ASIL-D / DO-178C contexts).
+    // Found by #191's new tools/backend_crosscheck.py sweep (2026-08-14,
+    // its very first run): these three arms still raised SIGABRT instead
+    // of the clean `exit(3)` the LLVM backend's overflow-trap path already
+    // uses -- the exact same bug class `TypedStmt::Assert` was fixed for
+    // (2026-08-04, see that match arm's own comment) just never migrated
+    // here. `vanic run examples/language/english/
+    // loop_carried_overflow_not_elided.vani --backend=c` exited 134
+    // (128+SIGABRT) while the LLVM backend exited 3 for the same program.
     for ((ty, c_ty, _signed), op) in &used_overflows {
         let builtin = match *op {
             "add" => "__builtin_add_overflow",
@@ -22928,7 +23059,7 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect({bl}(a, b, &r), 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     return r;\n\
 }}\n",
@@ -22945,7 +23076,9 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     // "divisor is zero" that the old divisor-only check (still used
     // for unsigned/float below) never covered, so a raw `sdiv`/
     // `srem` reached the hardware and SIGFPE'd instead of hitting
-    // vani's own clean abort message.
+    // vani's own clean abort message. Both branches below also
+    // switched from `abort()` to `exit(3)` for the same reason as the
+    // overflow helpers just above (#191, 2026-08-14).
     for ((ty, c_ty, min_macro), op) in &used_div_rem {
         let c_op = if *op == "div" { "/" } else { "%" };
         out.push_str(&format!(
@@ -22953,12 +23086,12 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     if (__builtin_expect(b == 0, 0)) {{\n\
         fprintf(stderr, \"division by zero\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     if (__builtin_expect(b == -1 && a == {min}, 0)) {{\n\
         fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
         fflush(stdout);\n\
-        abort();\n\
+        exit(3);\n\
     }}\n\
     return a {c_op} b;\n\
 }}\n",

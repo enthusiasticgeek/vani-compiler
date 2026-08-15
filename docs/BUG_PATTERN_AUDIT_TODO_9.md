@@ -52,24 +52,24 @@ confirmed via direct ASan testing, 2026-08-10.
   unwraps exactly that cast. `examples/language/english/trie.vani`
   uses `Str` literals only and was never affected.
 
-### Confirmed leaking, NOT fixed
+### FIXED (2026-08-14, BUG-193 -- see docs/TODO_CURRENT.md)
 
 - **Ordinary user-defined functions taking a `Str` parameter** -- the
   general, pervasive case, confirmed via:
   ```vani
   fn takes_str(s: Str) -> i64 { return len(s) as i64; }
   fn main() -> i64 {
-    let n: i64 = takes_str(i64_to_str(12345));   // leaks
+    let n: i64 = takes_str(i64_to_str(12345));   // used to leak
     ...
   }
   ```
-  This is almost certainly the highest-impact instance by sheer
-  frequency of occurrence in real code, and the reason a "narrow
-  hashmap_insert-only" framing understates the problem -- but fixing
-  it means touching every function-call-argument codegen site in the
-  compiler (both backends), a change with a much larger blast radius
-  than anything fixed this round. Needs its own scoping discussion,
-  not a quick pickup.
+  Was expected to need touching every function-call-argument codegen
+  site in the compiler; turned out to be exactly ONE default/fallback
+  match arm per backend once actually scoped (`TypedExprKind::Call`'s
+  ordinary-user-function path) -- the blast-radius worry below
+  overstated it. A real double-free regression was found and fixed
+  in the same pass (copying BUG-160's bare `is_fresh_owned_str` check
+  by analogy is unsafe here -- see BUG-193's own write-up).
 
 ### Confirmed NOT affected (checked so a future session doesn't
 ### re-derive this)

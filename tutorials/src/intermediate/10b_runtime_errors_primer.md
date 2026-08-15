@@ -267,46 +267,54 @@ actually touched, and only on the paths those fixes covered:
    https://github.com/llvm/llvm-project/issues/` crash banner
    for what was actually an ordinary, expected language-level
    trap.
-2. **C backend (`--backend=c`)**: `assert` and `requires`
-   ALWAYS exit cleanly with code `3` -- verified both for a
-   scalar `requires` clause and for a `requires` clause on a
-   function taking a `ref Vec<T>` parameter. (The `ref Vec<T>`
-   case used to hit a different, older code path and raise a
-   real `SIGABRT` via a raw glibc `assert()` macro instead;
-   fixed 2026-08-07 -- see Row 5 below.)
-   Bounds / overflow / divide-by-zero / shift are DIFFERENT --
-   the C backend still calls a raw libc `abort()` for these
-   (never converted to `exit(3)`; the BUG-106-class fixes were
-   scoped to the LLVM backend specifically, since the misleading-
-   crash-banner problem they fixed is an `lli`-JIT artifact that
-   the C backend's plain `SIGABRT` termination never had). A
-   directly-executed `vanic build`-and-run binary shows this as
-   the shell's familiar `Aborted` message and exit code `134`
-   (128 + `SIGABRT`'s signal number 6). Going through `vanic run
-   --backend=c`, the reported exit code now also reads `134` --
-   earlier builds reported a masked, generic `1` instead,
-   because `vanic`'s own process wrapper couldn't represent
-   "child was killed by a signal" as a plain exit code and fell
-   back to `status.code().unwrap_or(1)`, losing the signal
-   information; fixed 2026-08-07 (`src/main.rs`'s
+2. **C backend (`--backend=c`)**: `assert`, `requires`, and --
+   as of #191's compiler-testing-tooling pass (2026-08-14) --
+   overflow / divide-by-zero / shift ALL exit cleanly with code
+   `3` now too, matching the LLVM backend exactly. (The `ref
+   Vec<T>` `requires` case used to hit a different, older code
+   path and raise a real `SIGABRT` via a raw glibc `assert()`
+   macro instead; fixed 2026-08-07 -- see Row 5 below. Overflow /
+   divide-by-zero / shift used to call a raw libc `abort()`
+   instead of `exit(3)` -- deliberately left that way when the
+   BUG-106-class fixes converted `assert`/`requires`, since those
+   fixes targeted a misleading-crash-banner problem specific to
+   `lli`-JIT on the LLVM side that the C backend's plain `SIGABRT`
+   never had. It turned out to be a real backend-divergence bug
+   anyway -- the two backends disagreeing on exit code for the
+   identical trap -- caught automatically by
+   `tools/backend_crosscheck.py`'s corpus-wide sweep on its very
+   first run and fixed the same day.)
+   **Bounds-check is the one remaining exception**: index
+   out-of-bounds still calls a raw libc `abort()` on the C
+   backend, a separate helper family from the other three, with
+   no confirmed divergence found for it (yet -- see the note
+   below on scope). A directly-executed `vanic build`-and-run
+   binary shows this as the shell's familiar `Aborted` message
+   and exit code `134` (128 + `SIGABRT`'s signal number 6). Going
+   through `vanic run --backend=c`, the reported exit code also
+   reads `134` -- earlier builds reported a masked, generic `1`
+   instead, because `vanic`'s own process wrapper couldn't
+   represent "child was killed by a signal" as a plain exit code
+   and fell back to `status.code().unwrap_or(1)`, losing the
+   signal information; fixed 2026-08-07 (`src/main.rs`'s
    `child_exit_code` helper now reports `128 + signal` instead).
-   Both numbers that remain (`3` on LLVM, `134` on C whether run
-   directly or via `vanic run --backend=c`) can show up for the
-   SAME source-level trap depending on which check fired and
-   which backend compiled it -- check the STDERR MESSAGE TEXT
-   (present on BOTH backends as of BUG-162 -- see the wording
-   caveat above for why the exact text can still differ), not
-   just the exit code, if you need to detect which check
-   actually fired.
+   `3` (bounds on LLVM, and everything else on both backends) vs.
+   `134` (bounds only, C backend only) can still show up for the
+   SAME source-level trap category depending on which backend
+   compiled it -- check the STDERR MESSAGE TEXT (present on BOTH
+   backends as of BUG-162 -- see the wording caveat above for why
+   the exact text can still differ), not just the exit code, if
+   you need to detect which check actually fired.
    One more wrinkle, fixed 2026-08-07: raw `abort()` does NOT
    flush stdio the way `exit()` does, so any `print` output your
    program had already buffered before one of these 4 traps fired
    used to vanish on the C backend -- LLVM's `exit(3)` preserved
    it, making the two backends' crash output look like it
    disagreed even when the underlying trap was identical. The C
-   backend now calls `fflush(stdout)` immediately before each of
-   these 4 `abort()` calls, so buffered `print` output survives
-   the crash on both backends.
+   backend calls `fflush(stdout)` immediately before each of
+   these 4 traps (whether the trap itself is now `exit(3)` or,
+   for bounds, still `abort()`), so buffered `print` output
+   survives the crash on both backends either way.
 3. The process terminates immediately in every case above. No
    destructors run. No `finally` blocks. No cleanup beyond what
    the OS does on process exit.
@@ -729,12 +737,13 @@ named contract."
   backend for ALL of assert / requires / bounds / overflow /
   div-by-zero / shift, as of BUG-162 (2026-08-10; before that,
   bounds/overflow/div-by-zero/shift exited clean but silent);
-  on the C backend, `assert`/`requires` also exit(3) with a
-  message, but bounds/overflow/div-by-zero/shift still raise a
-  raw `SIGABRT` -- see "Row 2" above for the verified details,
-  the exact numbers each path produces, and why the message
-  WORDING can still differ between backends even though both
-  now print something. `ensures` AND `invariant` now both fall back to a
+  on the C backend, `assert` / `requires` / overflow /
+  div-by-zero / shift all exit(3) with a message too (the last
+  three joined as of #191, 2026-08-14), but **bounds** is the one
+  exception that still raises a raw `SIGABRT` -- see "Row 2"
+  above for the verified details, the exact numbers each path
+  produces, and why the message WORDING can still differ between
+  backends even though both now print something. `ensures` AND `invariant` now both fall back to a
   runtime guard on an undecidable clause, same as `requires`
   (2026-08-07). The surface is small and named: assert / prove /
   requires / ensures / invariant / index OOB / overflow /

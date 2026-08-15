@@ -6,6 +6,7 @@ Out-of-tree utilities that do not ship with the compiler binary.
 - [`regen_vani_translate_keywords.py`](#regen_vani_translate_keywordspy) — regenerates `vani_translate.py`'s keyword tables from `src/lexer.rs`; run this after any lexer.rs keyword edit
 - [`test_vani_translate.py`](#test_vani_translatepy) — regression suite for `vani_translate.py`, run in CI
 - [`leak_sweep.py`](#leak_sweeppy) — ASan + LeakSanitizer + UBSan sweep over the example corpus, run in CI
+- [`backend_crosscheck.py`](#backend_crosscheckpy) — LLVM-vs-C exit-code differential sweep over the example corpus, run in CI
 - [`install-cross-qemu.sh`](#install-cross-qemush) — set up AArch64 / RISC-V 64 QEMU user-mode emulation + cross-compilers for local `--target=` testing
 - [`llm_context/`](llm_context/README.md) — prompt-engineering bundle and MCP server for AI agents (Phase ML-2)
 
@@ -373,6 +374,30 @@ python3 tools/leak_sweep.py --update-baseline
 ```
 
 Full methodology writeup, and the reasoning behind each currently-baselined finding, is in `docs/BUG_PATTERN_AUDIT_TODO_8.md`.
+
+---
+
+## `backend_crosscheck.py`
+
+**Status**: Production; runs in CI on every push/PR to `main` (the `backend-crosscheck` job in `.github/workflows/ci.yml`)
+
+Runs every `.vani` file under `examples/` that passes `vanic check` through BOTH `vanic run` (LLVM, the default backend) and `vanic run --backend=c` (the tree/SSA-C backend), and asserts their exit codes agree — the same bar `tests/ssa_backend_c_crosscheck.rs` already uses for its own small curated snippet list, extended to the entire real corpus. Added for #191 (2026-08-14, "improve internal compiler-testing tooling") specifically to catch the class of bug BUG-192 turned out to be: two backends silently disagreeing on a trap's exit code, previously only found by a human manually diffing LLVM IR side by side. Its very first run caught a real one on its own — an overflow/divide-by-zero/shift trap that exited `3` on LLVM but `134` (SIGABRT) on the C backend — fixed the same day.
+
+```bash
+# Build vanic first, then sweep the corpus against the checked-in baseline.
+# Exits 0 if every finding matches the baseline exactly, 1 otherwise.
+cargo build --release --bin vanic
+python3 tools/backend_crosscheck.py
+```
+
+Compares exit codes only, not stdout — HashMap iteration order, RNG, concurrency interleaving, and wall-clock timestamps make full stdout comparison unsafe across a corpus this broad. Runs the corpus in parallel (`--jobs N`, default `os.cpu_count()`) since each file's two `vanic run` invocations are the dominant cost.
+
+Baseline workflow is identical to `leak_sweep.py`'s: known/accepted divergences would live in `tools/backend_crosscheck_baseline.json` with a `reason` field (that file doesn't currently exist — there's nothing to baseline as of 2026-08-14). To create or refresh it after a deliberate, reviewed change in what's expected to be flagged:
+
+```bash
+python3 tools/backend_crosscheck.py --update-baseline
+# then edit tools/backend_crosscheck_baseline.json to fill in each entry's "reason"
+```
 
 ---
 

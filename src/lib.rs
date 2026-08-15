@@ -23748,6 +23748,103 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn assert_eq_all_four_variants_typecheck_and_compile() {
+        // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/str.
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(2 + 2, 4);
+              let _ = assert_eq_f64(1.5 + 1.5, 3.0);
+              let _ = assert_eq_bool(1 == 1, true);
+              let _ = assert_eq_str("hello", "hel" + "lo");
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("assert_eq_* must type-check for C");
+        compile_to_llvm(source).expect("assert_eq_* must compile to LLVM");
+    }
+
+    #[test]
+    fn assert_eq_wrong_arity_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(1);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("1-arg assert_eq_i64 must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("assert_eq_i64")
+                && e.message.contains("2 argument")),
+            "expected an arity diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn assert_eq_i64_emits_dprintf_and_exit3_on_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_i64(1, 2);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("assert_eq_i64 must compile to C");
+        assert!(
+            c.contains("assertion failed: left != right") && c.contains("exit(3)"),
+            "expected the assert_eq trap message + exit(3) in C, got:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("assert_eq_i64 must compile to LLVM");
+        assert!(
+            ll.contains("call void @exit(i32 3)") && ll.contains(".msg.assert_eq.i64"),
+            "expected the assert_eq trap message global + exit(3) in LLVM, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn assert_eq_str_frees_fresh_arg_but_not_var_bound_arg() {
+        // Same leak/double-free class BUG-193 fixed for the general
+        // call-argument path -- assert_eq_str is its own dedicated
+        // codegen arm, not that path, so it needed its own fix.
+        let fresh_source = r#"
+            fn main() -> i64 {
+              let _ = assert_eq_str(i64_to_str(1), "1");
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(fresh_source).expect("fresh-arg assert_eq_str must compile");
+        assert!(
+            c.contains("free((void*)_l)"),
+            "expected the fresh left arg to be freed, got:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(fresh_source).expect("fresh-arg assert_eq_str must compile to LLVM");
+        assert!(
+            ll.contains("call void @free(i8*"),
+            "expected a free call for the fresh left arg, got:\n{}",
+            ll
+        );
+
+        let var_source = r#"
+            fn main() -> i64 {
+              let a: OwnedStr = i64_to_str(1);
+              let b: OwnedStr = i64_to_str(1);
+              let _ = assert_eq_str(a, b);
+              return 0;
+            }
+        "#;
+        let c2 = compile_to_c(var_source).expect("var-bound assert_eq_str must compile");
+        assert!(
+            !c2.contains("free((void*)_l)") && !c2.contains("free((void*)_r)"),
+            "a Var-sourced argument must not go through the fresh-arg \
+             free path (that would double-free the binding's own \
+             scope-exit drop):\n{}",
+            c2
+        );
+    }
+
+    #[test]
     fn hash_pair_triple_typecheck_and_compile() {
         // Closures #499/#500: hash_pair / hash_triple — i64 tuple sugar.
         let source = r#"
@@ -35235,23 +35332,32 @@ fn main() -> i64 {
 
     // BUG-136 (2026-08-07): found via localfuzz's `graph_algo2.vani`
     // backend-divergence finding. The bounds / overflow / divide-by-zero
-    // / shift traps on the C backend are deliberately still raw
-    // `abort()` (out of scope for the BUG-106/113/116/120/129/135
-    // `exit(3)` conversions -- see `tutorials/src/intermediate/
-    // 10b_runtime_errors_primer.md`'s Row 2). But `abort()` does NOT
-    // flush stdio, unlike `exit()` -- so any `print` output buffered
-    // before the trap fired was silently discarded on the C backend
-    // while the LLVM backend's `exit(3)` preserved it, making the two
-    // backends' crash diagnostics look like they disagreed (a "backend
-    // divergence") even when the underlying trap condition matched
-    // exactly. Fixed by adding `fflush(stdout);` immediately before
-    // each `abort()` at these 4 trap categories, on both C codegen
-    // paths (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
-    // Deliberately NOT touching the many OOM-guard `abort()` calls
-    // (`if (!ptr) abort();`) scattered through the runtime helpers --
-    // a different class, out of scope here.
+    // / shift traps on the C backend used to be raw `abort()`, which
+    // does NOT flush stdio, unlike `exit()` -- so any `print` output
+    // buffered before the trap fired was silently discarded on the C
+    // backend while the LLVM backend's `exit(3)` preserved it, making
+    // the two backends' crash diagnostics look like they disagreed (a
+    // "backend divergence") even when the underlying trap condition
+    // matched exactly. Fixed by adding `fflush(stdout);` immediately
+    // before each trap at these 4 categories, on both C codegen paths
+    // (tree-C in `backend_c.rs`, SSA-C in `ssa_backend_c.rs`).
+    //
+    // At the time, overflow/divide-by-zero/shift stayed on raw
+    // `abort()` after that flush (only the *lost output* half of the
+    // divergence was fixed, the *differing exit code* half -- SIGABRT
+    // (128+6=134) vs. LLVM's `exit(3)` -- was left as documented,
+    // deliberate out-of-scope). #191's tools/backend_crosscheck.py
+    // corpus sweep (2026-08-14) caught that remaining half on its very
+    // first run (`examples/language/english/
+    // loop_carried_overflow_not_elided.vani` exited 134 on `--backend=c`
+    // vs. 3 on LLVM) and it was fixed then: overflow, divide-by-zero,
+    // and shift all now call `exit(3)` too, on both C backends,
+    // matching LLVM exactly. Bounds-check traps (`index out of
+    // bounds`) were NOT part of that fix -- a separate helper family,
+    // no divergence found for it, still raw `abort()` (with the
+    // `fflush(stdout)` from the original BUG-136 fix still in place).
     #[test]
-    fn c_backend_flushes_stdout_before_abort_on_all_four_row2_traps() {
+    fn c_backend_flushes_stdout_before_trapping_on_all_four_row2_traps() {
         let overflow_source = r#"
             fn add_it(a: i64, b: i64) -> i64 { return a + b; }
             fn main() -> i64 { return add_it(9223372036854775807, 1); }
@@ -35261,8 +35367,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("integer overflow in") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("integer overflow in") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              overflow trap in SSA-C output, got:\n{c}"
         );
 
@@ -35275,8 +35381,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("division by zero") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("division by zero") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              divide-by-zero trap in SSA-C output, got:\n{c}"
         );
 
@@ -35289,8 +35395,8 @@ fn main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
         assert!(
-            c.contains("shift amount out of range") && c.contains("fflush(stdout); abort();"),
-            "expected fflush(stdout) immediately before abort() on the \
+            c.contains("shift amount out of range") && c.contains("fflush(stdout); exit(3);"),
+            "expected fflush(stdout) immediately before exit(3) on the \
              shift trap in SSA-C output, got:\n{c}"
         );
 
@@ -35329,16 +35435,16 @@ fn main() -> i64 {
             }
         "#;
         let c = compile_to_c(tree_c_source).expect("tree-C compiles");
-        for (needle, label) in [
-            ("index out of bounds", "bounds"),
-            ("integer overflow in", "overflow"),
-            ("division by zero", "division by zero"),
+        for (needle, label, trap_call) in [
+            ("index out of bounds", "bounds", "abort()"),
+            ("integer overflow in", "overflow", "exit(3)"),
+            ("division by zero", "division by zero", "exit(3)"),
         ] {
             let idx = c.find(needle).unwrap_or_else(|| panic!("expected {label} guard in tree-C output, got:\n{c}"));
             let window = &c[idx..(idx + 200).min(c.len())];
             assert!(
-                window.contains("fflush(stdout)") && window.contains("abort()"),
-                "expected fflush(stdout) before abort() near the {label} guard in tree-C output, got:\n{window}"
+                window.contains("fflush(stdout)") && window.contains(trap_call),
+                "expected fflush(stdout) before {trap_call} near the {label} guard in tree-C output, got:\n{window}"
             );
         }
     }
@@ -46194,6 +46300,81 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug192_llvm_bare_assert_after_await_still_emits_dprintf() {
+        // BUG-192 (2026-08-14): the tree-LLVM backend's `TypedStmt::
+        // Assert` codegen only emitted the `dprintf(2, "assertion
+        // failed: %s\n", <msg>)` call when `message` was `Some(_)` --
+        // a bare `assert expr;` (no `, "msg"` clause, so `message` is
+        // `None`) skipped the whole print block, leaving `exit(3)`
+        // with NO diagnostic at all. Found via localfuzz on a program
+        // using `await(...)` (which forces the tree backend, since
+        // async isn't SSA-supported), but the root cause was
+        // backend-wide, not async-specific -- any tree-LLVM program
+        // with a message-less assert was affected; async just
+        // happened to be the first repro. `collect_assert_messages`
+        // now interns `message.clone().unwrap_or_default()`
+        // unconditionally (mirroring `ssa.rs::lower_stmt`'s own
+        // `unwrap_or_default()` fix for the identical gap), so a
+        // `@.assert_msg.N` global always exists for the empty-string
+        // case too.
+        let source = r#"
+            async fn delay(ms: i64, v: i64) -> i64 {
+              sleep_ms(ms);
+              return v;
+            }
+            fn main() -> i64 {
+              let a: i64 = await(delay(5, 42));
+              assert a == 99;
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("await + bare assert should compile");
+        assert!(
+            llvm.contains("call i32 (i32, i8*, ...) @dprintf(i32 2,"),
+            "expected a dprintf call emitted before exit(3) even for a \
+             message-less assert, got:\n{llvm}"
+        );
+    }
+
+    #[test]
+    fn bug192_llvm_parallel_for_range_overflow_trap_has_a_message() {
+        // BUG-192 (2026-08-14): `parallel for`'s own internal range/
+        // chunk-size overflow guard (`end - start` computed via
+        // `llvm.ssub.with.overflow.i64` inside the outlined
+        // `__intent_par_<id>` worker) called a bare `exit(3)` with NO
+        // message at all -- a third, independent silent-trap site
+        // from the same bug class as the assert case above, but in a
+        // completely different codegen path (parallel-for's own
+        // range setup, not ordinary checked-arithmetic or assert).
+        // Fixed by routing through the shared `@__intent_trap`
+        // helper, reusing the `.msg.ovf.i64.sub` message global
+        // that's already unconditionally emitted for every program.
+        let source = r#"
+            fn main() -> i64 {
+              let product: i64 = 1;
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              parallel for i from -9223372036854775808 to 4
+              reduce product with *;
+              {
+                product = product * xs[i];
+              }
+              print product;
+              return 0;
+            }
+        "#;
+        let llvm = compile_to_llvm(source).expect("parallel for should compile");
+        assert!(
+            llvm.contains("par_range_fail:"),
+            "expected the range-overflow guard block, got:\n{llvm}"
+        );
+        assert!(
+            llvm.contains("call void @__intent_trap(i8*"),
+            "expected par_range_fail to route through @__intent_trap with a \
+             message instead of a bare exit(3), got:\n{llvm}"
+        );
+    }
+
+    #[test]
     fn rejects_bad_constant_shift_count() {
         let source = r#"
             fn main() -> i64 {
@@ -52294,6 +52475,120 @@ função main() -> i64 {
             "a Var-sourced key must not go through the fresh-arg free \
              path (that would double-free the binding's own scope-exit \
              drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_frees_fresh_owned_str_str_param() {
+        // BUG-193 (2026-08-14): the general case BUG-159/160/161
+        // deliberately left open (docs/BUG_PATTERN_AUDIT_TODO_9.md
+        // Category 1) -- a fresh, never-bound OwnedStr expression
+        // passed as a `Str`-typed argument to an ORDINARY user-
+        // defined function (not a builtin like hashmap_*/trie_*) has
+        // no owner to free it after the call returns. Same
+        // is_fresh_owned_str_via_str_cast check, generalized from
+        // hardcoded 1-2 argument positions to the default call-
+        // codegen path every user-fn call goes through.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              let n: i64 = takes_str(i64_to_str(12345));
+              return n;
+            }
+        "#;
+        let c = compile_to_c(source).expect("ordinary fn call with fresh Str arg → C");
+        assert!(
+            c.contains("_intent_arg_str_0") && c.contains("free((void*)_intent_arg_str_0)"),
+            "expected the fresh arg bound to a temp and freed after the \
+             call:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("ordinary fn call with fresh Str arg → LLVM");
+        assert!(
+            ll.contains("call void @free(i8*"),
+            "expected a free call after the ordinary fn call:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_frees_multiple_fresh_owned_str_args() {
+        // Two fresh args in the same call -- both must be bound to
+        // their own temp and both freed, not just the first/last.
+        let source = r#"
+            fn takes_two(a: Str, b: Str) -> i64 { return len(a) as i64 + len(b) as i64; }
+            fn main() -> i64 {
+              return takes_two(i64_to_str(1), i64_to_str(22));
+            }
+        "#;
+        let c = compile_to_c(source).expect("two fresh Str args → C");
+        assert!(
+            c.contains("_intent_arg_str_0") && c.contains("_intent_arg_str_1"),
+            "expected both fresh args bound to distinct temps:\n{}",
+            c
+        );
+        assert_eq!(
+            c.matches("free((void*)_intent_arg_str_").count(),
+            2,
+            "expected exactly 2 frees, one per fresh arg:\n{}",
+            c
+        );
+        let ll = compile_to_llvm(source).expect("two fresh Str args → LLVM");
+        // >=, not ==: the module preamble's runtime helpers
+        // (i64_to_str/intent_str_concat internals) also contain
+        // unrelated `call void @free(i8*` sites -- matches the `>=`
+        // style the pre-existing hashmap/trie LLVM tests already use
+        // for the same reason, rather than an exact whole-module
+        // count.
+        assert!(
+            ll.matches("call void @free(i8*").count() >= 2,
+            "expected at least 2 frees on the LLVM side (one per fresh \
+             arg):\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_does_not_double_free_owned_var_arg() {
+        // Regression guard mirroring hashmap_insert/trie's own: a
+        // Var-sourced OwnedStr argument (bound to a `let`, still
+        // owned by that binding) must NOT go through the fresh-arg
+        // free path -- that binding's own scope-exit Drop already
+        // frees it, so an extra free-after-call would double-free.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              let bound: OwnedStr = i64_to_str(1);
+              let n: i64 = takes_str(bound);
+              return n;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Var-sourced Str arg → C");
+        assert!(
+            !c.contains("_intent_arg_str_0"),
+            "a Var-sourced argument must not go through the fresh-arg \
+             free path (that would double-free the binding's own \
+             scope-exit drop):\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn bug193_ordinary_fn_call_str_literal_not_freed() {
+        // A plain string literal argument is never heap-owned --
+        // must not be routed through the fresh-arg free path either.
+        let source = r#"
+            fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+            fn main() -> i64 {
+              return takes_str("hello");
+            }
+        "#;
+        let c = compile_to_c(source).expect("literal Str arg → C");
+        assert!(
+            !c.contains("_intent_arg_str_0"),
+            "a plain string literal must not go through the fresh-arg \
+             free path:\n{}",
             c
         );
     }
@@ -62123,6 +62418,59 @@ fn main() -> i64 { return leak_check(); }
         assert!(f.no_heap, "no_heap must be true");
     }
 
+    /// Test-fw Phase C (2026-08-14): #[should_panic] parses and sets
+    /// is_should_panic = true when stacked with #[test].
+    #[test]
+    fn should_panic_attribute_sets_is_should_panic_flag() {
+        let source = r#"
+            #[test]
+            #[should_panic]
+            fn expects_a_panic() -> i64 {
+              assert false;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] + #[should_panic] must compile");
+        let f = checked.ir.functions.iter().find(|f| f.name == "expects_a_panic").unwrap();
+        assert!(f.is_test, "is_test must be true");
+        assert!(f.is_should_panic, "is_should_panic must be true");
+    }
+
+    /// Test-fw Phase C: #[should_panic] without #[test] is a checker
+    /// error -- the attribute is meaningless on its own.
+    #[test]
+    fn should_panic_without_test_is_rejected() {
+        let source = r#"
+            #[should_panic]
+            fn ordinary_fn() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("#[should_panic] without #[test] must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("should_panic")
+                && e.message.contains("without")
+                && e.message.contains("test")),
+            "expected a should_panic-without-test diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    /// Test-fw Phase C: a plain #[test] fn (no #[should_panic]) is
+    /// completely unaffected -- is_should_panic defaults to false.
+    #[test]
+    fn plain_test_attribute_leaves_should_panic_false() {
+        let source = r#"
+            #[test]
+            fn ordinary_test() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] alone must compile");
+        let f = checked.ir.functions.iter().find(|f| f.name == "ordinary_test").unwrap();
+        assert!(f.is_test, "is_test must be true");
+        assert!(!f.is_should_panic, "is_should_panic must default to false");
+    }
+
     /// XL2: resolve_combined_source returns the source text for a single file.
     #[test]
     fn resolve_combined_source_returns_source() {
@@ -63610,5 +63958,159 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// Cross-language "did you mean" syntax hints (parser.rs's
+    /// `common_syntax_mistake_hint` + the `for`-loop-specific
+    /// detectors inside `parse_for_stmt_inner`). Each case below
+    /// was confirmed, before this feature existed, to produce an
+    /// opaque message (bare "expected identifier" / "expected
+    /// statement" / a downstream checker "unknown variable") that
+    /// named no fix. Every assertion here checks the diagnostic
+    /// both names the correct vāṇी construct AND shows a concrete,
+    /// syntactically valid replacement snippet.
+    fn parse_only_errors(source: &str) -> Vec<String> {
+        let tokens = crate::lexer::lex(source).expect("lex ok");
+        let (_program, errs) = crate::parser::parse(tokens);
+        errs.into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn hint_c_style_for_loop() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { for (let i: i64 = 0; i < 10; i = i + 1) { print(i); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("C-style") && m.contains("for i from 0 to 10")),
+            "expected a C-style-for hint naming the range-form replacement, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_old_rust_style_range_for() {
+        let errs = parse_only_errors("fn main() -> i64 { for i in 0..10 { print(i); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("LOW..HIGH") && m.contains("for i from 0 to 10")),
+            "expected an old-range-dots hint naming the range-form replacement, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_pascal_style_for_equals() {
+        let errs = parse_only_errors("fn main() -> i64 { for i = 0 to 10 { print(i); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `for i from") && m.contains("needs `from`")),
+            "expected a missing-`from` hint for Pascal-style `for i = LO to HI`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_foreach_keyword() {
+        let errs =
+            parse_only_errors("fn main() -> i64 { let xs: Vec<i64> = vec(1); foreach x in xs { print(x); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `for`?") && m.contains("for x in xs")),
+            "expected a `foreach` hint naming `for`, got: {:?}",
+            errs
+        );
+    }
+
+    /// Regression guard for the bug this feature shipped with: a
+    /// zero-token-consumption `Err` returned while sitting exactly
+    /// on `TokenKind::Let` made `parse_block`'s error-recovery loop
+    /// (`sync_to_stmt`, which treats `Let` as a boundary token it
+    /// stops at WITHOUT consuming) spin forever, since every normal
+    /// dispatch branch consumes its leading keyword before any
+    /// error can occur but this pre-dispatch hint didn't. Fixed by
+    /// unconditionally bumping one token at the hint call site in
+    /// `parse_stmt`. This test completing at all (under the crate's
+    /// normal test timeout) is the actual regression guard; the
+    /// message assertion just confirms the hint fired.
+    #[test]
+    fn hint_let_mut_does_not_hang_and_names_the_fix() {
+        let errs = parse_only_errors("fn main() -> i64 { let mut x: i64 = 5; print(x); return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `let mut`") && m.contains("Drop `mut`")),
+            "expected a `let mut` hint naming plain `let` + reassignment, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_var_declaration() {
+        let errs = parse_only_errors("fn main() -> i64 { var x = 5; print(x); return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `let`?") && m.contains("not `var`")),
+            "expected a `var` hint naming `let`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_switch_case() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 1; switch (x) { case 1: print(1); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `switch`/`case`") && m.contains("match")),
+            "expected a `switch` hint naming `match`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_do_while_loop() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 0; do { print(x); } while (x < 5); return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("do { ... } while") && m.contains("while cond")),
+            "expected a `do-while` hint naming `while`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_elif_keyword() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 1; if x == 1 { print(1); } elif x == 2 { print(2); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `elif`") && m.contains("else if")),
+            "expected an `elif` hint naming `else if`, got: {:?}",
+            errs
+        );
+    }
+
+    /// The hints above are heuristic lookaheads gated on the full
+    /// mistake SHAPE (not just a bare keyword-like identifier) so
+    /// real vāṇी code using `var`/`switch`/`do` as ordinary
+    /// identifiers, or the legitimate `else if` chain, doesn't get
+    /// misdiagnosed. This test is the false-positive guard for that
+    /// gating.
+    #[test]
+    fn hints_do_not_misfire_on_legitimate_code() {
+        let errs = parse_only_errors(
+            r#"
+            fn main() -> i64 {
+                let x: i64 = 1;
+                if x == 1 {
+                    print(1);
+                } else if x == 2 {
+                    print(2);
+                }
+                let var: i64 = 5;
+                var = var + 1;
+                return 0;
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "legitimate `else if` + a real binding named `var` (reassigned, not redeclared) must not trigger any cross-language hint: {:?}",
+            errs
+        );
+    }
 }
 

@@ -1029,6 +1029,16 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 // stdin_ready_within_ms_does_not_wait_past_its_timeout
                 // in tests/run_end_to_end.rs.
                 || name == "stdin_ready_within_ms"
+                // Test-fw Phase F (2026-08-14): same gap the
+                // `stdin_ready_within_ms` comment above already
+                // documents -- no SSA-backend lowering for these,
+                // tree-C/tree-LLVM only (see backend_c.rs's
+                // `emit_call`/backend_llvm.rs's `TypedExprKind::Call`
+                // arm). Without this exclusion these would silently
+                // fall through to the SSA backend's "unrecognized
+                // builtin -> treat as a user fn" path.
+                || name == "assert_eq_i64" || name == "assert_eq_f64"
+                || name == "assert_eq_bool" || name == "assert_eq_str"
             {
                 return false;
             }
@@ -1288,18 +1298,51 @@ COMMANDS:
                                           any file is not canonical;
                                           --in-place rewrites each file
                                           (mtime stable when canonical).
-    test <path>... [--json] [--smt-debug] Compile + run each path via the
-                                          LLVM backend, treating exit 0 as
-                                          pass. Paths may be files or
+    test [<path>...] [--json] [--smt-debug] Compile + run each path via the
+        [--filter=<substring>]             LLVM backend, treating exit 0 as
+        [--test-threads=<N>]               pass. Paths may be files or
                                           directories (the latter expand
                                           recursively to *.vani
                                           descendants; dot-dirs skipped).
-                                          Output per file plus a summary;
-                                          exits 1 if any failed.
-                                          With --json, a machine-readable
-                                          results object is printed on
-                                          stdout instead of human lines.
-                                          With --smt-debug, every SMT query
+                                          With no path at all, defaults to
+                                          the enclosing vani.toml package
+                                          root (error if none found) --
+                                          `cd`-and-run like `cargo test`.
+                                          A file with one or more #[test]
+                                          fns runs harness mode instead:
+                                          each fn in its own process
+                                          (`test NAME ... ok`/`FAILED`),
+                                          so one failing assert doesn't
+                                          kill the rest of the file's
+                                          suite -- works even if the file
+                                          also has a real fn main (fn main
+                                          stays what `vanic run`/`build`
+                                          use). A harness fn also marked
+                                          `#[should_panic]` passes iff it
+                                          exits non-zero (fails with `did
+                                          not panic as expected` on a
+                                          clean exit). Every discovered
+                                          test/file across every path runs
+                                          concurrently (bounded by
+                                          available CPU parallelism, or
+                                          --test-threads=<N> to force a
+                                          specific worker count -- =1 for
+                                          fully serial); output is still
+                                          grouped and ordered by file
+                                          exactly as if run serially, only
+                                          the actual compiling+running
+                                          happens in parallel. Output per
+                                          file plus a summary; exits 1 if
+                                          any failed. With --json, a
+                                          machine-readable results object
+                                          is printed on stdout instead of
+                                          human lines. With
+                                          --filter=<substring>, only runs
+                                          tests/files whose label contains
+                                          the substring (plain substring
+                                          match, not a glob; matches
+                                          `cargo test <substring>`). With
+                                          --smt-debug, every SMT query
                                           and z3 response is dumped to
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
@@ -2628,33 +2671,215 @@ fn run() -> Result<ExitCode, String> {
             // (see `walk_intent_files`). A file with no top-level
             // `fn main` and at least one `#[test]` fn runs in
             // harness mode instead (see `detect_harness_test_fns`).
-            if args.len() < 3 {
-                return Err("test requires at least one source file\n\n".to_string() + HELP);
-            }
-            // Split flags from path args. Supported: --smt-debug
-            // and --json. The JSON form is machine-readable for CI;
-            // a single object on stdout, no per-file lines.
+            // Test-fw Phase E (2026-08-14): no explicit path arg is
+            // also allowed now -- see the `path_args.is_empty()`
+            // manifest fallback below, mirroring `cargo test`'s own
+            // "just works" behavior inside a project root. The old
+            // hard `args.len() < 3` gate would have rejected that
+            // before the flag loop even ran, so it's removed here;
+            // the real "nothing to test" check now happens after
+            // path expansion (still an error either way, just a
+            // later one with a message that mentions the manifest
+            // fallback).
+            // Split flags from path args. Supported: --smt-debug,
+            // --json, --filter=<substring>. The JSON form is
+            // machine-readable for CI; a single object on stdout, no
+            // per-file lines. --filter (Test-fw Phase B, 2026-08-14)
+            // matches `cargo test <substring>`'s own default filter
+            // semantics: a plain substring match against each test's
+            // `path::name` label (harness mode) or the bare file path
+            // (legacy mode), not a glob/regex.
             let mut path_args: Vec<String> = Vec::new();
             let mut json = false;
+            let mut filter: Option<String> = None;
+            let mut test_threads: Option<usize> = None;
             for arg in args.iter().skip(2) {
                 match arg.as_str() {
                     "--smt-debug" => {
                         std::env::set_var("VANIC_SMT_DEBUG", "1");
                     }
                     "--json" => json = true,
+                    other if other.starts_with("--filter=") => {
+                        filter = Some(other["--filter=".len()..].to_string());
+                    }
+                    other if other.starts_with("--test-threads=") => {
+                        let raw = &other["--test-threads=".len()..];
+                        let n: usize = raw.parse().map_err(|_| {
+                            format!(
+                                "--test-threads expects a positive integer, got '{}'",
+                                raw
+                            )
+                        })?;
+                        if n == 0 {
+                            return Err("--test-threads must be at least 1".to_string());
+                        }
+                        test_threads = Some(n);
+                    }
                     other if other.starts_with('-') => {
                         return Err(format!(
-                            "unknown flag for 'test': '{}' (expected --smt-debug, --json)",
+                            "unknown flag for 'test': '{}' (expected --smt-debug, --json, --filter=<substring>, --test-threads=<N>)",
                             other
                         ));
                     }
                     other => path_args.push(other.to_string()),
                 }
             }
+            // Test-fw Phase E (2026-08-14): `vanic test` with no path
+            // args at all defaults to the enclosing Kosh package root
+            // (the same `vani.toml` `find_manifest`/`load_manifest`
+            // already used by `vanic publish`/`add`/etc.), recursing
+            // over the whole package the same way an explicit
+            // directory arg would (via the existing
+            // `walk_intent_files`/`expand_intent_paths`, unchanged --
+            // note this does NOT specially exclude `vendor/`, matching
+            // every other recursive command in this CLI, none of
+            // which filter vendored deps out either; only dot-
+            // directories are skipped). `detect_harness_test_fns` only
+            // ever picks up genuine `#[test]`-containing, main-less
+            // files, so this is safe even if a dependency happens to
+            // ship one.
+            if path_args.is_empty() {
+                let cwd = std::env::current_dir()
+                    .map_err(|e| format!("failed to read cwd: {}", e))?;
+                let manifest_path = vani::manifest::find_manifest(&cwd).ok_or_else(|| {
+                    "test requires at least one source file, or a vani.toml \
+                     manifest in the current directory or a parent (found \
+                     neither)\n\n"
+                        .to_string()
+                        + HELP
+                })?;
+                let manifest = vani::manifest::load_manifest(&manifest_path)
+                    .map_err(|e| format!("failed to load '{}': {:?}", manifest_path.display(), e))?;
+                path_args.push(manifest.root_dir.display().to_string());
+            }
             let files = expand_intent_paths(&path_args)?;
             if files.is_empty() {
                 return Err("no .vani files to test".into());
             }
+
+            // Test-fw Phase D (2026-08-14): each test already runs in
+            // its own isolated OS process (see run_test_function/
+            // run_program_llvm_capture) -- the sequential `for` loop
+            // this replaced left that isolation on the table, one
+            // process at a time. Three-pass design instead of just
+            // parallelizing the loop in place: (1) sequentially
+            // decide, per file, harness-vs-legacy-vs-skipped (cheap,
+            // no compiling) and flatten every actual unit of work
+            // (one harness test, or one legacy file) into one global
+            // queue; (2) run that queue through a bounded worker pool
+            // (`--test-threads`, default = available parallelism),
+            // each worker pulling the next queue index and sending its
+            // (elapsed, result) back over a channel; (3) walk the
+            // files in their ORIGINAL order and print EXACTLY the same
+            // per-file/per-test lines the old sequential version did,
+            // just reading pre-computed results instead of computing
+            // them inline. This keeps output byte-for-byte identical
+            // in structure/order to before (every existing e2e test
+            // that string-matches this output keeps working
+            // unchanged) while the actual compiling+running happens
+            // concurrently -- completion order across tests is
+            // nondeterministic (matches `cargo test`'s own default
+            // behavior) but each PRINTED line is still grouped and
+            // ordered by file exactly as before, since printing is a
+            // separate, sequential pass over the pre-computed results.
+            enum FileTestPlan {
+                Harness(Vec<HarnessTestFn>),
+                Legacy,
+                Skip,
+            }
+            let mut plans: Vec<FileTestPlan> = Vec::with_capacity(files.len());
+            for path in &files {
+                let harness_fns_all = detect_harness_test_fns(path);
+                let mut harness_fns = harness_fns_all.clone();
+                if let Some(f) = &filter {
+                    harness_fns.retain(|t| {
+                        format!("{}::{}", path.display(), t.name).contains(f.as_str())
+                    });
+                }
+                if !harness_fns_all.is_empty() && harness_fns.is_empty() {
+                    // Had #[test] fns, but --filter matched none of
+                    // them -- skip the file entirely (no output).
+                    plans.push(FileTestPlan::Skip);
+                } else if !harness_fns.is_empty() {
+                    plans.push(FileTestPlan::Harness(harness_fns));
+                } else if filter
+                    .as_ref()
+                    .is_some_and(|f| !path.display().to_string().contains(f.as_str()))
+                {
+                    plans.push(FileTestPlan::Skip);
+                } else {
+                    plans.push(FileTestPlan::Legacy);
+                }
+            }
+
+            enum WorkUnit {
+                Harness(usize, String),
+                Legacy(usize),
+            }
+            let mut queue: Vec<WorkUnit> = Vec::new();
+            for (i, plan) in plans.iter().enumerate() {
+                match plan {
+                    FileTestPlan::Harness(fns) => {
+                        for t in fns {
+                            queue.push(WorkUnit::Harness(i, t.name.clone()));
+                        }
+                    }
+                    FileTestPlan::Legacy => queue.push(WorkUnit::Legacy(i)),
+                    FileTestPlan::Skip => {}
+                }
+            }
+
+            type ExecResult = (u128, Result<(i32, String, String), String>);
+            let mut exec_results: Vec<Option<ExecResult>> =
+                (0..queue.len()).map(|_| None).collect();
+            if !queue.is_empty() {
+                let n_threads = test_threads
+                    .unwrap_or_else(|| {
+                        std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(1)
+                    })
+                    .min(queue.len())
+                    .max(1);
+                let queue_arc = std::sync::Arc::new(queue);
+                let files_arc = std::sync::Arc::new(files.clone());
+                let next_idx = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let (tx, rx) = std::sync::mpsc::channel::<(usize, ExecResult)>();
+                let mut handles = Vec::with_capacity(n_threads);
+                for _ in 0..n_threads {
+                    let queue_arc = std::sync::Arc::clone(&queue_arc);
+                    let files_arc = std::sync::Arc::clone(&files_arc);
+                    let next_idx = std::sync::Arc::clone(&next_idx);
+                    let tx = tx.clone();
+                    handles.push(std::thread::spawn(move || loop {
+                        let idx = next_idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        if idx >= queue_arc.len() {
+                            break;
+                        }
+                        let start = std::time::Instant::now();
+                        let result = match &queue_arc[idx] {
+                            WorkUnit::Harness(file_idx, name) => {
+                                run_test_function(&files_arc[*file_idx], name)
+                            }
+                            WorkUnit::Legacy(file_idx) => {
+                                run_program_llvm_capture(&files_arc[*file_idx])
+                            }
+                        };
+                        let elapsed = start.elapsed().as_millis();
+                        if tx.send((idx, (elapsed, result))).is_err() {
+                            break;
+                        }
+                    }));
+                }
+                drop(tx);
+                for (idx, result) in rx {
+                    exec_results[idx] = Some(result);
+                }
+                for h in handles {
+                    let _ = h.join();
+                }
+            }
+
             let mut passed = 0usize;
             let mut failed = 0usize;
             // For --json mode we collect per-file outcomes and emit
@@ -2664,42 +2889,143 @@ fn run() -> Result<ExitCode, String> {
             // stdout/stderr in the JSON to keep the payload small —
             // the human-readable form prints them on FAILED.
             let mut json_results: Vec<String> = Vec::new();
-            for path in &files {
-                let harness_fns = detect_harness_test_fns(path);
-                if !harness_fns.is_empty() {
-                    if !json {
-                        println!(
-                            "running {} test{} ({})",
-                            harness_fns.len(),
-                            if harness_fns.len() == 1 { "" } else { "s" },
-                            path.display()
-                        );
+            let mut next_result = exec_results.into_iter();
+            for (i, path) in files.iter().enumerate() {
+                match &plans[i] {
+                    FileTestPlan::Skip => continue,
+                    FileTestPlan::Harness(harness_fns) => {
+                        if !json {
+                            println!(
+                                "running {} test{} ({})",
+                                harness_fns.len(),
+                                if harness_fns.len() == 1 { "" } else { "s" },
+                                path.display()
+                            );
+                        }
+                        let mut file_passed = 0usize;
+                        let mut file_failed = 0usize;
+                        for t in harness_fns {
+                            let name = &t.name;
+                            let (elapsed, result) = next_result
+                                .next()
+                                .flatten()
+                                .expect("exec_results must have one entry per queued work unit");
+                            let label_json =
+                                json_escape(&format!("{}::{}", path.display(), name));
+                            // Test-fw Phase C: `#[should_panic]` inverts
+                            // the exit-0-vs-not rule for this one test --
+                            // any non-zero exit counts as PASS (mirrors
+                            // Rust's own "any panic counts" semantics), a
+                            // clean exit 0 is a FAILED "did not panic as
+                            // expected". A compile error is still always
+                            // a failure regardless of should_panic -- a
+                            // broken test isn't "panicking as expected".
+                            match result {
+                                Ok((0, _, _)) if t.should_panic => {
+                                    if !json {
+                                        println!(
+                                            "test {} ... FAILED (did not panic as expected, {} ms)",
+                                            name, elapsed
+                                        );
+                                    }
+                                    json_results.push(format!(
+                                        "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"reason\":\"did_not_panic\"}}",
+                                        label_json, elapsed
+                                    ));
+                                    failed += 1;
+                                    file_failed += 1;
+                                }
+                                Ok((0, _, _)) => {
+                                    if !json {
+                                        println!("test {} ... ok", name);
+                                    }
+                                    json_results.push(format!(
+                                        "{{\"path\":\"{}\",\"ok\":true,\"ms\":{}}}",
+                                        label_json, elapsed
+                                    ));
+                                    passed += 1;
+                                    file_passed += 1;
+                                }
+                                Ok((_, _, _)) if t.should_panic => {
+                                    if !json {
+                                        println!("test {} ... ok (panicked as expected, {} ms)", name, elapsed);
+                                    }
+                                    json_results.push(format!(
+                                        "{{\"path\":\"{}\",\"ok\":true,\"ms\":{}}}",
+                                        label_json, elapsed
+                                    ));
+                                    passed += 1;
+                                    file_passed += 1;
+                                }
+                                Ok((code, stdout, stderr)) => {
+                                    if !json {
+                                        println!(
+                                            "test {} ... FAILED (exit {}, {} ms)",
+                                            name, code, elapsed
+                                        );
+                                        if !stdout.is_empty() {
+                                            eprintln!("--- stdout ---\n{}", stdout);
+                                        }
+                                        let stderr = trim_lli_backtrace(&stderr);
+                                        if !stderr.is_empty() {
+                                            eprintln!("--- stderr ---\n{}", stderr);
+                                        }
+                                    }
+                                    json_results.push(format!(
+                                        "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"exit\":{},\"reason\":\"runtime\"}}",
+                                        label_json, elapsed, code
+                                    ));
+                                    failed += 1;
+                                    file_failed += 1;
+                                }
+                                Err(msg) => {
+                                    if !json {
+                                        println!("test {} ... FAILED (compile, {} ms)", name, elapsed);
+                                        eprintln!("{}", msg);
+                                    }
+                                    json_results.push(format!(
+                                        "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"reason\":\"compile\"}}",
+                                        label_json, elapsed
+                                    ));
+                                    failed += 1;
+                                    file_failed += 1;
+                                }
+                            }
+                        }
+                        if !json {
+                            println!();
+                            println!(
+                                "test result: {}. {} passed; {} failed",
+                                if file_failed == 0 { "ok" } else { "FAILED" },
+                                file_passed,
+                                file_failed
+                            );
+                        }
                     }
-                    let mut file_passed = 0usize;
-                    let mut file_failed = 0usize;
-                    for name in &harness_fns {
-                        let start = std::time::Instant::now();
-                        let result = run_test_function(path, name);
-                        let elapsed = start.elapsed().as_millis();
-                        let label_json =
-                            json_escape(&format!("{}::{}", path.display(), name));
+                    FileTestPlan::Legacy => {
+                        let (elapsed, result) = next_result
+                            .next()
+                            .flatten()
+                            .expect("exec_results must have one entry per queued work unit");
+                        let path_str = json_escape(&path.display().to_string());
                         match result {
                             Ok((0, _, _)) => {
                                 if !json {
-                                    println!("test {} ... ok", name);
+                                    println!("{}: ok ({} ms)", path.display(), elapsed);
                                 }
                                 json_results.push(format!(
                                     "{{\"path\":\"{}\",\"ok\":true,\"ms\":{}}}",
-                                    label_json, elapsed
+                                    path_str, elapsed
                                 ));
                                 passed += 1;
-                                file_passed += 1;
                             }
                             Ok((code, stdout, stderr)) => {
                                 if !json {
                                     println!(
-                                        "test {} ... FAILED (exit {}, {} ms)",
-                                        name, code, elapsed
+                                        "{}: FAILED (exit {}, {} ms)",
+                                        path.display(),
+                                        code,
+                                        elapsed
                                     );
                                     if !stdout.is_empty() {
                                         eprintln!("--- stdout ---\n{}", stdout);
@@ -2711,83 +3037,22 @@ fn run() -> Result<ExitCode, String> {
                                 }
                                 json_results.push(format!(
                                     "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"exit\":{},\"reason\":\"runtime\"}}",
-                                    label_json, elapsed, code
+                                    path_str, elapsed, code
                                 ));
                                 failed += 1;
-                                file_failed += 1;
                             }
                             Err(msg) => {
                                 if !json {
-                                    println!("test {} ... FAILED (compile, {} ms)", name, elapsed);
+                                    println!("{}: FAILED (compile, {} ms)", path.display(), elapsed);
                                     eprintln!("{}", msg);
                                 }
                                 json_results.push(format!(
                                     "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"reason\":\"compile\"}}",
-                                    label_json, elapsed
+                                    path_str, elapsed
                                 ));
                                 failed += 1;
-                                file_failed += 1;
                             }
                         }
-                    }
-                    if !json {
-                        println!();
-                        println!(
-                            "test result: {}. {} passed; {} failed",
-                            if file_failed == 0 { "ok" } else { "FAILED" },
-                            file_passed,
-                            file_failed
-                        );
-                    }
-                    continue;
-                }
-                let start = std::time::Instant::now();
-                let result = run_program_llvm_capture(path);
-                let elapsed = start.elapsed().as_millis();
-                let path_str = json_escape(&path.display().to_string());
-                match result {
-                    Ok((0, _, _)) => {
-                        if !json {
-                            println!("{}: ok ({} ms)", path.display(), elapsed);
-                        }
-                        json_results.push(format!(
-                            "{{\"path\":\"{}\",\"ok\":true,\"ms\":{}}}",
-                            path_str, elapsed
-                        ));
-                        passed += 1;
-                    }
-                    Ok((code, stdout, stderr)) => {
-                        if !json {
-                            println!(
-                                "{}: FAILED (exit {}, {} ms)",
-                                path.display(),
-                                code,
-                                elapsed
-                            );
-                            if !stdout.is_empty() {
-                                eprintln!("--- stdout ---\n{}", stdout);
-                            }
-                            let stderr = trim_lli_backtrace(&stderr);
-                            if !stderr.is_empty() {
-                                eprintln!("--- stderr ---\n{}", stderr);
-                            }
-                        }
-                        json_results.push(format!(
-                            "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"exit\":{},\"reason\":\"runtime\"}}",
-                            path_str, elapsed, code
-                        ));
-                        failed += 1;
-                    }
-                    Err(msg) => {
-                        if !json {
-                            println!("{}: FAILED (compile, {} ms)", path.display(), elapsed);
-                            eprintln!("{}", msg);
-                        }
-                        json_results.push(format!(
-                            "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"reason\":\"compile\"}}",
-                            path_str, elapsed
-                        ));
-                        failed += 1;
                     }
                 }
             }
@@ -4036,7 +4301,16 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
 /// `#[test]` fn runs in harness mode (each test gets its own
 /// synthesized driver, see `run_test_function`); a file that already
 /// defines `main` keeps running in legacy mode unchanged.
-fn detect_harness_test_fns(path: &Path) -> Vec<String> {
+/// One discovered `#[test]` fn: its name plus whether it's also
+/// `#[should_panic]` (Test-fw Phase C) -- inverts pass/fail for that
+/// one test in the caller's loop.
+#[derive(Clone)]
+struct HarnessTestFn {
+    name: String,
+    should_panic: bool,
+}
+
+fn detect_harness_test_fns(path: &Path) -> Vec<HarnessTestFn> {
     let Ok(source) = fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -4044,18 +4318,23 @@ fn detect_harness_test_fns(path: &Path) -> Vec<String> {
         return Vec::new();
     };
     let (program, _parse_errors) = vani::parser::parse(tokens);
-    let has_main = program
-        .functions
-        .iter()
-        .any(|f| f.name == "main" && f.params.is_empty());
-    if has_main {
-        return Vec::new();
-    }
+    // Test-fw Phase A (2026-08-14): a file may define `#[test]` fns
+    // alongside a real `fn main` -- mirrors Rust's own `#[cfg(test)]
+    // mod tests` coexisting with a binary crate's `fn main`. Used to
+    // silently skip harness mode entirely whenever `fn main` was
+    // present, so the `#[test]` fns were never discovered or run --
+    // no error, just silence. `run_test_function` now strips the
+    // original `main` before synthesizing its own, so this can
+    // report every `#[test]` fn regardless of whether `fn main` is
+    // also there.
     program
         .functions
         .iter()
         .filter(|f| f.is_test)
-        .map(|f| f.name.clone())
+        .map(|f| HarnessTestFn {
+            name: f.name.clone(),
+            should_panic: f.is_should_panic,
+        })
         .collect()
 }
 
@@ -4070,10 +4349,34 @@ fn detect_harness_test_fns(path: &Path) -> Vec<String> {
 fn run_test_function(path: &Path, fn_name: &str) -> Result<(i32, String, String), String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read '{}': {}", path.display(), error))?;
-    let synth_source = format!(
-        "{}\n\nfn main() -> i64 {{\n  return {}();\n}}\n",
-        source, fn_name
-    );
+    // Test-fw Phase A (2026-08-14): the source may already define a
+    // real `fn main` alongside its `#[test]` fns -- appending a
+    // second `fn main` verbatim would be a duplicate-definition
+    // compile error. Re-parse and drop the original `main` (if any)
+    // via the existing formatter round-trip (src/format.rs) rather
+    // than fragile string surgery (a textual search for "fn main"
+    // could match inside a comment or string literal), then append
+    // the synthesized one. If lexing/parsing fails here, fall back to
+    // the raw source unchanged -- the eventual compile step already
+    // surfaces real parse errors cleanly as a "FAILED (compile)"
+    // result, same as before this change.
+    let synth_source = match vani::lexer::lex(&source) {
+        Ok(tokens) => {
+            let (mut program, _parse_errors) = vani::parser::parse(tokens);
+            program
+                .functions
+                .retain(|f| !(f.name == "main" && f.params.is_empty()));
+            let stripped = vani::format::format_program(&program);
+            format!(
+                "{}\n\nfn main() -> i64 {{\n  return {}();\n}}\n",
+                stripped, fn_name
+            )
+        }
+        Err(_) => format!(
+            "{}\n\nfn main() -> i64 {{\n  return {}();\n}}\n",
+            source, fn_name
+        ),
+    };
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())

@@ -3870,6 +3870,170 @@ fn intentc_test_legacy_mode_unaffected_by_harness_detection() {
 }
 
 #[test]
+fn intentc_test_harness_mode_runs_alongside_a_real_fn_main() {
+    // Test-fw Phase A (2026-08-14): a file with BOTH a real `fn main`
+    // AND `#[test]` fns must run harness mode for `vanic test` (the
+    // `#[test]` fns), not silently fall back to legacy single-test
+    // mode and skip them -- mirrors Rust's `#[cfg(test)] mod tests`
+    // coexisting with a binary crate's `fn main`. `vanic run` on the
+    // SAME file must still use the real `fn main`, unaffected.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_coexist_with_main_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"fn double(x: i64) -> i64 { return x * 2; }\n\n\
+          #[test]\n\
+          fn double_works() -> i64 {\n  assert double(21) == 42;\n  return 0;\n}\n\n\
+          fn main() -> i64 {\n  print \"real output:\", double(10);\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let test_run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <file with main + #[test]>");
+    let test_stdout = String::from_utf8_lossy(&test_run.stdout);
+    assert!(
+        test_run.status.success(),
+        "expected the #[test] fn to pass, got:\n{test_stdout}\n{}",
+        String::from_utf8_lossy(&test_run.stderr)
+    );
+    assert!(
+        test_stdout.contains("running 1 test"),
+        "expected harness mode to trigger despite fn main being present, got:\n{test_stdout}"
+    );
+    assert!(
+        test_stdout.contains("test double_works ... ok"),
+        "got:\n{test_stdout}"
+    );
+
+    let run_run = Command::new(binary)
+        .args(["run", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic run <same file>");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(run_run.status.success());
+    let run_stdout = String::from_utf8_lossy(&run_run.stdout);
+    assert!(
+        run_stdout.contains("real output: 20"),
+        "vanic run must still use the real fn main, got:\n{run_stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_filter_runs_only_matching_tests() {
+    // Test-fw Phase B (2026-08-14): --filter=<substring> matches
+    // `cargo test <substring>`'s own default filter semantics -- a
+    // plain substring match against each test's `path::name` label,
+    // skipping the rest without printing them.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_filter_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn addition_works() -> i64 {\n  assert 2 + 2 == 4;\n  return 0;\n}\n\n\
+          #[test]\nfn subtraction_works() -> i64 {\n  assert 10 - 3 == 7;\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let filtered = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--filter=addition"])
+        .output()
+        .expect("vanic test --filter=addition");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(filtered.status.success());
+    let stdout = String::from_utf8_lossy(&filtered.stdout);
+    assert!(
+        stdout.contains("running 1 test") && stdout.contains("test addition_works ... ok"),
+        "got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("subtraction_works"),
+        "filtered-out test must not appear, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_should_panic_inverts_pass_fail() {
+    // Test-fw Phase C (2026-08-14): #[should_panic] passes iff the
+    // test process exits non-zero, fails with "did not panic as
+    // expected" if it exits 0 -- mirrors Rust's own "any panic
+    // counts" semantics.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_should_panic_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\n#[should_panic]\nfn panics_as_expected() -> i64 {\n  assert false;\n  return 0;\n}\n\n\
+          #[test]\n#[should_panic]\nfn does_not_panic_but_should() -> i64 {\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <should_panic file>");
+    let _ = std::fs::remove_file(&tmp);
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        !run.status.success(),
+        "expected overall failure (one test didn't panic), got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("test panics_as_expected ... ok"),
+        "got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("test does_not_panic_but_should ... FAILED (did not panic as expected"),
+        "got:\n{stdout}"
+    );
+    assert!(stdout.contains("1 passed; 1 failed"), "got:\n{stdout}");
+}
+
+#[test]
 #[ignore = "echo_with_timeout.vani LLVM IR has undefined value for async TCP locals; lli rejects it"]
 fn intentc_test_passes_for_all_examples_and_fails_on_violated_assertion() {
     // Two-part check:
@@ -4079,6 +4243,218 @@ fn intentc_test_json_emits_machine_readable_results() {
     assert!(
         stdout.contains("\"passed\":1") && stdout.contains("\"failed\":1"),
         "summary counts off, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn intentc_test_multi_file_output_grouped_and_ordered_by_file() {
+    // Test-fw Phase D (2026-08-14): every discovered test/file across
+    // every path now runs concurrently, but the PRINTED output must
+    // still be grouped and ordered by file exactly as if run
+    // serially (a separate, sequential printing pass over
+    // pre-computed results) -- this pins that structural guarantee
+    // with 3 files passed in a specific order: a harness file, a
+    // legacy file, then another harness file.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let pid = std::process::id();
+    let dir = std::env::temp_dir();
+    let a = dir.join(format!("intentc_test_order_a_{pid}.vani"));
+    let b = dir.join(format!("intentc_test_order_b_{pid}.vani"));
+    let c = dir.join(format!("intentc_test_order_c_{pid}.vani"));
+    std::fs::write(
+        &a,
+        b"#[test]\nfn a_one() -> i64 {\n  assert 1 == 1;\n  return 0;\n}\n\
+          #[test]\nfn a_two() -> i64 {\n  assert 2 == 2;\n  return 0;\n}\n",
+    )
+    .expect("write a");
+    std::fs::write(&b, b"fn main() -> i64 {\n  return 0;\n}\n").expect("write b");
+    std::fs::write(
+        &c,
+        b"#[test]\nfn c_one() -> i64 {\n  assert 3 == 3;\n  return 0;\n}\n",
+    )
+    .expect("write c");
+
+    let run = Command::new(binary)
+        .args([
+            "test",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            c.to_str().unwrap(),
+        ])
+        .output()
+        .expect("vanic test <a> <b> <c>");
+    let _ = std::fs::remove_file(&a);
+    let _ = std::fs::remove_file(&b);
+    let _ = std::fs::remove_file(&c);
+
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    // Every file's block must appear, and file A's block (both of
+    // its tests) must appear entirely before file B's line, which
+    // must appear entirely before file C's block -- pins ordering
+    // even though execution itself was concurrent.
+    let pos_a_header = stdout.find("running 2 tests").expect("file a header");
+    let pos_a_two = stdout.find("test a_two").expect("a_two line");
+    let pos_b = stdout.find(": ok (").expect("file b legacy line");
+    let pos_c_header = stdout.find("running 1 test (").expect("file c header");
+    assert!(pos_a_header < pos_a_two, "got:\n{stdout}");
+    assert!(pos_a_two < pos_b, "file a must fully precede file b, got:\n{stdout}");
+    assert!(pos_b < pos_c_header, "file b must precede file c, got:\n{stdout}");
+    // 2 tests from file a + 1 legacy pass from file b + 1 test from
+    // file c = 4 total pass units.
+    assert!(stdout.contains("4 passed; 0 failed"), "got:\n{stdout}");
+}
+
+#[test]
+fn intentc_test_threads_flag_accepts_one_and_rejects_zero() {
+    // Test-fw Phase D: --test-threads=1 forces fully serial
+    // execution (still correct, just not concurrent);
+    // --test-threads=0 is rejected with a clear error rather than
+    // silently spawning zero workers.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_test_threads_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn works() -> i64 {\n  assert 1 == 1;\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let serial = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--test-threads=1"])
+        .output()
+        .expect("vanic test --test-threads=1");
+    assert!(
+        serial.status.success(),
+        "got:\n{}",
+        String::from_utf8_lossy(&serial.stdout)
+    );
+
+    let zero = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap(), "--test-threads=0"])
+        .output()
+        .expect("vanic test --test-threads=0");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(!zero.status.success(), "--test-threads=0 must be rejected");
+    let stderr = String::from_utf8_lossy(&zero.stderr);
+    assert!(
+        stderr.contains("--test-threads must be at least 1"),
+        "got:\n{stderr}"
+    );
+}
+
+#[test]
+fn intentc_test_no_args_defaults_to_manifest_package_root() {
+    // Test-fw Phase E (2026-08-14): `vanic test` with no path args at
+    // all, run from inside a directory with a vani.toml, defaults to
+    // scanning that package's root recursively -- mirrors `cargo
+    // test`'s own "just works" behavior inside a project. Outside
+    // any package (no vani.toml in cwd or any parent) it's still a
+    // clear error, not a panic or a confusing "no .vani files".
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let pkg_dir = std::env::temp_dir().join(format!(
+        "intentc_test_pkg_default_{}",
+        std::process::id()
+    ));
+    let tests_dir = pkg_dir.join("tests");
+    std::fs::create_dir_all(&tests_dir).expect("mkdir package/tests");
+    std::fs::write(
+        pkg_dir.join("vani.toml"),
+        b"[package]\nname = \"pkg_default_test\"\nversion = \"0.1.0\"\nentry = \"main.vani\"\n",
+    )
+    .expect("write vani.toml");
+    std::fs::write(
+        pkg_dir.join("main.vani"),
+        b"fn main() -> i64 {\n  return 0;\n}\n",
+    )
+    .expect("write main.vani");
+    std::fs::write(
+        tests_dir.join("basic.vani"),
+        b"#[test]\nfn basic_math() -> i64 {\n  assert 2 + 2 == 4;\n  return 0;\n}\n",
+    )
+    .expect("write tests/basic.vani");
+
+    let run = Command::new(binary)
+        .args(["test"])
+        .current_dir(&pkg_dir)
+        .output()
+        .expect("vanic test (no args) inside package");
+    let _ = std::fs::remove_dir_all(&pkg_dir);
+    assert!(
+        run.status.success(),
+        "got:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("test basic_math ... ok"),
+        "expected the package's tests/ file to be discovered, got:\n{stdout}"
+    );
+    assert!(stdout.contains("2 passed; 0 failed"), "got:\n{stdout}");
+}
+
+#[test]
+fn intentc_test_no_args_outside_package_is_a_clear_error() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    // A fresh empty temp dir has no vani.toml in it or any of its
+    // ancestors reachable purely through it (relies on /tmp itself
+    // never containing one, true for this project's own CI/dev
+    // environments).
+    let empty_dir = std::env::temp_dir().join(format!(
+        "intentc_test_no_manifest_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&empty_dir).expect("mkdir empty dir");
+    let run = Command::new(binary)
+        .args(["test"])
+        .current_dir(&empty_dir)
+        .output()
+        .expect("vanic test (no args) outside any package");
+    let _ = std::fs::remove_dir_all(&empty_dir);
+    assert!(!run.status.success(), "must fail outside any package");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("vani.toml manifest"),
+        "expected a manifest-aware error message, got:\n{stderr}"
     );
 }
 
@@ -10675,6 +11051,110 @@ fn main() -> i64 {
     }
 }
 
+#[test]
+fn assert_eq_builtins_print_both_sides_and_match_across_backends() {
+    // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/str print
+    // both the actual left and right values on mismatch (unlike
+    // plain `assert a == b;`, which shows neither unless the caller
+    // wrote a custom message by hand), then exit(3) -- same
+    // convention as every other runtime trap. Also confirms the
+    // happy path (all four types, values equal) exits 0 cleanly.
+    let passing = write_tmp_vani(
+        "assert_eq_passing",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_i64(2 + 2, 4);
+  let _ = assert_eq_f64(1.5 + 1.5, 3.0);
+  let _ = assert_eq_bool(1 == 1, true);
+  let _ = assert_eq_str("hello", "hel" + "lo");
+  print "all passed";
+  return 0;
+}
+"#,
+    );
+    let failing_i64 = write_tmp_vani(
+        "assert_eq_failing_i64",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_i64(2 + 2, 5);
+  return 0;
+}
+"#,
+    );
+    let failing_str = write_tmp_vani(
+        "assert_eq_failing_str",
+        r#"
+fn main() -> i64 {
+  let _ = assert_eq_str("hello", "world");
+  return 0;
+}
+"#,
+    );
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    for backend_args in [
+        vec!["run", passing.to_str().unwrap()],
+        vec!["run", passing.to_str().unwrap(), "--backend=c"],
+    ] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "{:?} should pass, got status {:?}, stderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("all passed"),
+            "{:?}: expected the happy-path print, got:\n{}",
+            backend_args,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    for (src, expect_lines) in [
+        (&failing_i64, vec!["left: 4", "right: 5"]),
+        (&failing_str, vec!["left: hello", "right: world"]),
+    ] {
+        for backend_args in [
+            vec!["run", src.to_str().unwrap()],
+            vec!["run", src.to_str().unwrap(), "--backend=c"],
+        ] {
+            let output = Command::new(binary)
+                .args(&backend_args)
+                .output()
+                .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{:?}: assert_eq mismatch must exit 3 on both backends, got {:?}, stderr: {}",
+                backend_args,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+            assert!(
+                stderr.contains("assertion failed: left != right"),
+                "{:?}: got:\n{}",
+                backend_args,
+                stderr
+            );
+            for line in &expect_lines {
+                assert!(
+                    stderr.contains(line),
+                    "{:?}: expected stderr to contain {:?}, got:\n{}",
+                    backend_args,
+                    line,
+                    stderr
+                );
+            }
+        }
+    }
+}
+
 // Feature-combination gap audit (2026-08-03), category 9 row 3:
 // Box<T> through a generic function boundary, both a struct T and a
 // scalar T, round-tripped through `identity<T>(b: Box<T>) -> Box<T>`.
@@ -11822,11 +12302,12 @@ fn loop_carried_overflow_not_elided_example_traps_instead_of_hanging_on_both_bac
 
     for (backend_args, expect_code) in [
         (vec!["run", &example], 3),
-        // 134 = 128 + SIGABRT (6): the C-backend overflow trap still
-        // raises a raw `abort()`, and BUG-130 (2026-08-07) fixed
-        // `vanic run` to report the shell convention for a signal-
-        // killed child instead of masking it as a bare `1`.
-        (vec!["run", &example, "--backend=c"], 134),
+        // Was 134 (128 + SIGABRT) before #191 (2026-08-14): the
+        // C-backend overflow trap used to raise a raw `abort()`,
+        // caught as a genuine backend-divergence bug by
+        // tools/backend_crosscheck.py's very first corpus sweep and
+        // fixed the same day to `exit(3)`, matching LLVM.
+        (vec!["run", &example, "--backend=c"], 3),
     ] {
         let mut cmd_args = vec!["10", binary];
         cmd_args.extend(backend_args.iter().copied());
@@ -11903,28 +12384,33 @@ fn requires_guard_survives_tree_c_fallback_example_traps_cleanly_with_exit3() {
 // `status.code().unwrap_or(1)` at every call site, which silently
 // converts a signal-killed child into a generic exit code `1` --
 // indistinguishable from a program that legitimately called
-// `exit(1)`, and losing which signal it actually was. Integer
-// overflow on the C backend still raises a real `SIGABRT`
-// (deliberately out of scope for the BUG-106-class `exit(3)`
-// conversions, which were scoped to the LLVM backend's misleading-
-// `lli`-crash-report problem -- see the "What actually happens"
-// section of `tutorials/src/intermediate/10b_runtime_errors_primer.md`),
-// making it a reliable way to produce a signal-killed child for this
-// test. (The `#[bounded(N)]` guard used to serve this same role, but
-// itself moved to a clean `exit(3)` on both C codegen paths as a
-// follow-up cleanup after BUG-130 -- see the "Aside (not fixed, out
-// of scope)" note this test's own history carries in
-// `docs/TODO_CURRENT.md`'s BUG-130 entry.) Expects the shell
-// convention `128 + signal` (134 = 128 + SIGABRT's 6), matching what
-// a directly-executed binary's own shell would show.
+// `exit(1)`, and losing which signal it actually was. Originally used
+// integer overflow on the C backend as the SIGABRT vehicle, since it
+// deliberately still raised a raw `abort()` at the time; #191
+// (2026-08-14) converted overflow (along with divide-by-zero and
+// shift) to a clean `exit(3)` on both C backends after
+// tools/backend_crosscheck.py's corpus sweep caught it as a genuine
+// backend-divergence bug, so this test switched to an out-of-bounds
+// Vec index instead -- bounds-check traps are a separate helper
+// family that #191 deliberately did NOT touch (no divergence was
+// found for it), so it's still a real `abort()`/SIGABRT source. See
+// the "What actually happens" section of `tutorials/src/intermediate/
+// 10b_runtime_errors_primer.md` for the current, up-to-date picture
+// of which trap categories are exit(3) vs. abort() on each backend.
+// Expects the shell convention `128 + signal` (134 = 128 + SIGABRT's
+// 6), matching what a directly-executed binary's own shell would
+// show.
 #[test]
 fn signal_killed_child_reports_128_plus_signal_not_a_bare_1() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let src = write_tmp_vani(
         "bug130-signal-exit-code",
         r#"
-fn add_it(a: i64, b: i64) -> i64 { return a + b; }
-fn main() -> i64 { return add_it(9223372036854775807, 1); }
+fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  return read(ref xs, 99);
+}
 "#,
     );
     let output = Command::new(binary)
@@ -12528,6 +13014,11 @@ fn main() -> i64 { return 0; }
 // program. Verifies both the pathological case now traps identically
 // on both backends, AND that a normal, non-pathological `parallel for`
 // still computes the correct answer (no false-positive regression).
+// The C-backend trap here goes through the same shared overflow-check
+// helper #191 (2026-08-14) converted from `abort()` to `exit(3)` --
+// was 134 (128+SIGABRT), now 3, matching LLVM's own exit code exactly
+// (it already used exit(3) before this fix, so only the C-backend
+// expectation changed).
 #[test]
 fn parallel_for_extreme_start_bound_traps_instead_of_silently_skipping_on_c() {
     let binary = env!("CARGO_BIN_EXE_intentc");
@@ -12553,8 +13044,8 @@ fn main() -> i64 {
         .unwrap_or_else(|e| panic!("intentc run --backend=c should execute: {e}"));
     assert_eq!(
         output_c.status.code(),
-        Some(134),
-        "BUG-140 regression: C backend should trap (134) on this extreme \
+        Some(3),
+        "BUG-140 regression: C backend should trap (3) on this extreme \
          loop range instead of silently skipping the loop, got status {:?}, \
          stdout: {}, stderr: {}",
         output_c.status,
@@ -14403,12 +14894,16 @@ fn main() -> i64 {
         "expected an overflow message on LLVM's stderr, got: {:?}",
         String::from_utf8_lossy(&llvm_out.stderr)
     );
-    // C: unchanged reference behavior (rc=134, its own message).
+    // C: was rc=134 (128+SIGABRT) here; #191 (2026-08-14) converted
+    // this trap from `abort()` to `exit(3)` after
+    // tools/backend_crosscheck.py's corpus sweep caught the two
+    // backends disagreeing on exit code for this exact trap category
+    // -- now matches LLVM's own rc=3 exactly, message unchanged.
     let c_out = Command::new(binary)
         .args(["run", src.to_str().unwrap(), "--backend=c"])
         .output()
         .expect("intentc run (C) should execute");
-    assert_eq!(c_out.status.code(), Some(134), "C exit code must stay 134");
+    assert_eq!(c_out.status.code(), Some(3), "C exit code must now match LLVM's 3");
     assert!(
         String::from_utf8_lossy(&c_out.stderr).contains("integer overflow in int64_t add"),
         "expected an overflow message on C's stderr, got: {:?}",

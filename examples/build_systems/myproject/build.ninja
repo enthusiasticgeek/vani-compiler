@@ -1,0 +1,53 @@
+# Hand-written Ninja build file -- no CMake/Meson generator involved
+# (see CMakeLists.txt / meson.build in this same directory for the
+# "Ninja as someone else's generator" versions; this one is Ninja on
+# its own, the way you'd write it for a project with no other build
+# system in front of it). Produces the identical `myproject` binary
+# as Makefile / CMakeLists.txt / meson.build from the same sources.
+#
+#   ninja
+
+vanic = vanic
+cc = cc
+objcopy = objcopy
+cflags = -O2 -Wall
+
+builddir = build-ninja
+
+rule vani_emit
+  command = $vanic emit $in --backend=c -o $out
+  description = vani-emit $out
+
+rule cc_compile
+  command = $cc $cflags -c $in -o $out
+  description = cc $out
+
+rule strip_main
+  command = $objcopy -N main $in $out
+  description = strip-main $out
+
+rule cc_link
+  command = $cc $in -o $out
+  description = link $out
+
+# Step 1 -- vāṇी -> C. The `|` marks src/math.vani as an implicit
+# input: it doesn't appear on vanic's command line (main.vani's own
+# `use "math.vani";` pulls it in), but a change to it should still
+# trigger re-emit.
+build $builddir/main_vani.c: vani_emit src/main.vani | src/math.vani
+
+# Step 2 -- C -> object
+build $builddir/main_vani.o: cc_compile $builddir/main_vani.c
+
+# Step 3 -- strip vāṇी's own `main` so it doesn't collide with
+# c_helper.c's (vanic emit always lowers `fn main()` to a literal
+# `int main(void)`; see src/main.vani's own comment).
+build $builddir/main_vani_nomain.o: strip_main $builddir/main_vani.o
+
+# Step 4 -- compile the C helper
+build $builddir/c_helper.o: cc_compile c_helper.c
+
+# Step 5 -- link everything
+build $builddir/myproject: cc_link $builddir/main_vani_nomain.o $builddir/c_helper.o
+
+default $builddir/myproject

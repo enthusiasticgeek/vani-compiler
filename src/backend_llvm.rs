@@ -1025,6 +1025,22 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         ".msg.shift",
         "shift amount out of range\n",
     ));
+    // Test-fw Phase F (2026-08-14): assert_eq_* trap messages.
+    // `.msg.assert_eq.str` is shared by assert_eq_bool (each side
+    // resolved to a "true"/"false" i8* before formatting) and
+    // assert_eq_str (already an i8*) -- same two-%s shape either way.
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.i64",
+        "assertion failed: left != right\n  left: %lld\n right: %lld\n",
+    ));
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.f64",
+        "assertion failed: left != right\n  left: %g\n right: %g\n",
+    ));
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.assert_eq.str",
+        "assertion failed: left != right\n  left: %s\n right: %s\n",
+    ));
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -4349,28 +4365,39 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 c, ok, fail
             ));
             out.push_str(&format!("{}:\n", fail));
-            if let Some(msg) = message {
-                // Look up the message's global index, then
-                //   dprintf(2, "assertion failed: %s\n", <msg-ptr>)
-                // before aborting. The format string global is
-                // `@.fmt.assert`, layout `[22 x i8]`.
-                if let Some(&idx) = ctx.assert_msg_indices.get(msg) {
-                    let bytes = msg.len() + 1;
-                    let fmt_p = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [22 x i8], [22 x i8]* @.fmt.assert, i64 0, i64 0\n",
-                        fmt_p
-                    ));
-                    let msg_p = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [{} x i8], [{} x i8]* @.assert_msg.{}, i64 0, i64 0\n",
-                        msg_p, bytes, bytes, idx
-                    ));
-                    out.push_str(&format!(
-                        "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
-                        fmt_p, msg_p
-                    ));
-                }
+            // BUG-192: always print, even for a bare `assert expr;`
+            // with no `, "msg"` clause -- `message` is `None` there,
+            // treated as an empty string (mirrors ssa.rs's
+            // `lower_stmt` fix for the identical gap). Previously
+            // this whole block was gated on `if let Some(msg) =
+            // message`, so a message-less assert emitted NOTHING
+            // before `exit(3)` -- the exit code was still correct,
+            // but the failure was completely silent, unlike every
+            // other assert path (tree-C falls back to a plain C
+            // `assert()` diagnostic; SSA-LLVM already prints an
+            // empty message via this same fallback). Look up the
+            // message's global index, then
+            //   dprintf(2, "assertion failed: %s\n", <msg-ptr>)
+            // before aborting. The format string global is
+            // `@.fmt.assert`, layout `[22 x i8]`.
+            let default_msg = String::new();
+            let msg = message.as_ref().unwrap_or(&default_msg);
+            if let Some(&idx) = ctx.assert_msg_indices.get(msg) {
+                let bytes = msg.len() + 1;
+                let fmt_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [22 x i8], [22 x i8]* @.fmt.assert, i64 0, i64 0\n",
+                    fmt_p
+                ));
+                let msg_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [{} x i8], [{} x i8]* @.assert_msg.{}, i64 0, i64 0\n",
+                    msg_p, bytes, bytes, idx
+                ));
+                out.push_str(&format!(
+                    "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
+                    fmt_p, msg_p
+                ));
             }
             // exit(3) rather than abort(): see the matching comment in
             // ssa_backend_llvm.rs's `intent_assert_fail` lowering (MATH-3) --
@@ -6225,6 +6252,142 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             //   err: tag = 1 (Err); no payload; load result;
             //        br merge
             //   merge: phi
+            // Test-fw Phase F (2026-08-14): assert_eq_i64/f64/bool/
+            // str -- print both sides on mismatch (unlike plain
+            // `assert a == b;`, which never shows what `a`/`b`
+            // actually were), then the same `exit(3)` trap
+            // convention every other runtime guard already uses.
+            // Tree-LLVM only (see `expr_ssa_supported`'s matching
+            // exclusion in main.rs). Every path either falls through
+            // to `ok` (values equal, no divergence -- no phi needed)
+            // or calls `exit(3)` + `unreachable` in `fail` (never
+            // returns), so the whole expression's value is just the
+            // constant `0` once past this block.
+            if name == "assert_eq_i64" || name == "assert_eq_f64"
+                || name == "assert_eq_bool" || name == "assert_eq_str"
+            {
+                let l = emit_expr(&args[0], ctx, out);
+                let r = emit_expr(&args[1], ctx, out);
+                let ok = ctx.fresh_label("assert_eq_ok");
+                let fail = ctx.fresh_label("assert_eq_fail");
+                match name.as_str() {
+                    "assert_eq_i64" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {}, i64 {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.i64",
+                                "assertion failed: left != right\n  left: %lld\n right: %lld\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    "assert_eq_f64" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = fcmp oeq double {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {}, double {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.f64",
+                                "assertion failed: left != right\n  left: %g\n right: %g\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    "assert_eq_bool" => {
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i1 {}, {}\n", cmp, l, r));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        // Reuse the print/eprint `@.fmt.true`/
+                        // `@.fmt.false` globals (already unconditionally
+                        // emitted) as i8* string values, not as whole
+                        // format strings -- `select` picks the right
+                        // one per side, then both feed %s placeholders
+                        // in `.msg.assert_eq.str`.
+                        let l_t = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.true, i64 0, i64 0\n", l_t
+                        ));
+                        let l_f = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [6 x i8], [6 x i8]* @.fmt.false, i64 0, i64 0\n", l_f
+                        ));
+                        let l_str = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = select i1 {}, i8* {}, i8* {}\n", l_str, l, l_t, l_f));
+                        let r_t = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.true, i64 0, i64 0\n", r_t
+                        ));
+                        let r_f = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = getelementptr [6 x i8], [6 x i8]* @.fmt.false, i64 0, i64 0\n", r_f
+                        ));
+                        let r_str = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = select i1 {}, i8* {}, i8* {}\n", r_str, r, r_t, r_f));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {}, i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.str",
+                                "assertion failed: left != right\n  left: %s\n right: %s\n"
+                            ),
+                            l_str, r_str
+                        ));
+                    }
+                    "assert_eq_str" => {
+                        // strcmp, not pointer equality -- two distinct
+                        // Str/OwnedStr values with the same text (e.g.
+                        // a literal vs. a freshly concatenated
+                        // OwnedStr) are different pointers but must
+                        // still compare equal.
+                        let sc = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = call i32 @strcmp(i8* {}, i8* {})\n", sc, l, r
+                        ));
+                        let cmp = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, sc));
+                        out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", cmp, ok, fail));
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str(&format!(
+                            "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {}, i8* {})\n",
+                            crate::ssa_backend_llvm::trap_msg_ref(
+                                ".msg.assert_eq.str",
+                                "assertion failed: left != right\n  left: %s\n right: %s\n"
+                            ),
+                            l, r
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+                out.push_str("  call void @exit(i32 3)\n");
+                out.push_str("  unreachable\n");
+                out.push_str(&format!("{}:\n", ok));
+                ctx.current_block = ok;
+                // Same fresh-OwnedStr-argument leak class BUG-193
+                // fixed for the ordinary-call default path -- this
+                // is its own dedicated `if name ==` branch, not that
+                // path, so it needs its own free-after-use. Only on
+                // the ok path: the fail path calls exit(3) and never
+                // returns.
+                if name == "assert_eq_str" {
+                    if crate::ir::is_fresh_owned_str(&args[0])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[0])
+                    {
+                        out.push_str(&format!("  call void @free(i8* {})\n", l));
+                    }
+                    if crate::ir::is_fresh_owned_str(&args[1])
+                        || crate::ir::is_fresh_owned_str_via_str_cast(&args[1])
+                    {
+                        out.push_str(&format!("  call void @free(i8* {})\n", r));
+                    }
+                }
+                return "0".to_string();
+            }
             if name == "try_vec" {
                 let n_v = emit_expr(&args[0], ctx, out);
                 let result_enum = match &expr.ty {
@@ -17240,42 +17403,65 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // to its System V x86-64 packed-register form
             // (i64 / {i64, i64}) before the call. Mirrors the
             // declare-site lowering.
-            let arg_strs: Vec<String> = args
-                .iter()
-                .map(|a| {
-                    let v = emit_expr(a, ctx, out);
-                    if is_extern {
-                        if let Some(lowered) = llvm_ffi_struct_lowered_ty(&a.ty) {
-                            // Spill the struct to an alloca,
-                            // bitcast to the lowered ptr type,
-                            // load. The loaded value matches
-                            // cc's System V x86-64 ABI for the
-                            // call.
-                            let struct_ty = llvm_type_string(&a.ty);
-                            let spill = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = alloca {}\n", spill, struct_ty
-                            ));
-                            out.push_str(&format!(
-                                "  store {} {}, {}* {}\n",
-                                struct_ty, v, struct_ty, spill
-                            ));
-                            let cast_ptr = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = bitcast {}* {} to {}*\n",
-                                cast_ptr, struct_ty, spill, lowered
-                            ));
-                            let loaded = ctx.fresh_tmp();
-                            out.push_str(&format!(
-                                "  {} = load {}, {}* {}\n",
-                                loaded, lowered, lowered, cast_ptr
-                            ));
-                            return format!("{} {}", lowered, loaded);
-                        }
+            // BUG-193 (2026-08-14): a fresh, never-bound OwnedStr
+            // argument passed into an ordinary user-function call has
+            // no owner to free it after the call returns -- same
+            // shape BUG-159/160/161 fixed for specific builtin call
+            // sites (hashmap_*/trie_*), generalized here to the
+            // default/fallback path every ordinary user-fn call goes
+            // through. ONLY `is_fresh_owned_str_via_str_cast` -- NOT
+            // the bare `is_fresh_owned_str` check BUG-160 used for
+            // hashmap_get/_contains_key/_remove -- is safe here; see
+            // the matching comment in backend_c.rs's identical fix
+            // for the full explanation (a bare fresh OwnedStr passed
+            // to an ordinary `OwnedStr`-typed BY-VALUE parameter
+            // transfers real ownership -- the callee may move it into
+            // a returned struct/tuple/closure and hand it back to the
+            // caller, who frees it through a different scope-exit
+            // Drop; freeing it again here double-frees. First version
+            // of this fix included the bare check by analogy with
+            // BUG-160 and caused a real double-free, caught by
+            // `tools/leak_sweep.py`'s ASan sweep, not the plain test
+            // suite).
+            let mut owned_str_frees: Vec<String> = Vec::new();
+            let mut arg_strs: Vec<String> = Vec::with_capacity(args.len());
+            for a in args {
+                let v = emit_expr(a, ctx, out);
+                if crate::ir::is_fresh_owned_str_via_str_cast(a) {
+                    owned_str_frees.push(v.clone());
+                }
+                if is_extern {
+                    if let Some(lowered) = llvm_ffi_struct_lowered_ty(&a.ty) {
+                        // Spill the struct to an alloca,
+                        // bitcast to the lowered ptr type,
+                        // load. The loaded value matches
+                        // cc's System V x86-64 ABI for the
+                        // call.
+                        let struct_ty = llvm_type_string(&a.ty);
+                        let spill = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = alloca {}\n", spill, struct_ty
+                        ));
+                        out.push_str(&format!(
+                            "  store {} {}, {}* {}\n",
+                            struct_ty, v, struct_ty, spill
+                        ));
+                        let cast_ptr = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast {}* {} to {}*\n",
+                            cast_ptr, struct_ty, spill, lowered
+                        ));
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}, {}* {}\n",
+                            loaded, lowered, lowered, cast_ptr
+                        ));
+                        arg_strs.push(format!("{} {}", lowered, loaded));
+                        continue;
                     }
-                    format!("{} {}", llvm_type_string(&a.ty), v)
-                })
-                .collect();
+                }
+                arg_strs.push(format!("{} {}", llvm_type_string(&a.ty), v));
+            }
             let dest = ctx.fresh_tmp();
             let symbol = if is_extern || is_no_mangle {
                 format!("@{}", name)
@@ -17297,6 +17483,13 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 symbol,
                 arg_strs.join(", ")
             ));
+            // BUG-193: free every fresh OwnedStr argument AFTER the
+            // call (the value is still a live, valid pointer for the
+            // call itself -- freeing beforehand would use-after-free
+            // the very argument being passed).
+            for v in &owned_str_frees {
+                out.push_str(&format!("  call void @free(i8* {})\n", v));
+            }
             // BUG-77: the call above correctly uses the System V
             // x86-64 packed-register LOWERED type (`ret_ll`, e.g.
             // `i64`) for the `call` instruction itself, matching
@@ -45557,10 +45750,21 @@ fn collect_assert_messages(
     idx: &mut HashMap<String, usize>,
 ) {
     match stmt {
-        TypedStmt::Assert { message: Some(m), .. } => {
-            if !idx.contains_key(m) {
+        // BUG-192: intern EVERY assert's message, including a bare
+        // `assert expr;` with no `, "msg"` clause -- `message` is
+        // `None` there, treated the same as an explicit empty
+        // string (mirrors ssa.rs's `lower_stmt` fix for the same
+        // gap: "Always call the runtime abort helper, even when the
+        // assertion carries no user-facing message"). Previously
+        // only `Some(m)` was interned, so a message-less assert had
+        // no `@.assert_msg.N` global at all and the emitter below
+        // silently skipped printing anything before `exit(3)` --
+        // exit code still correct, but no diagnostic whatsoever.
+        TypedStmt::Assert { message, .. } => {
+            let m = message.clone().unwrap_or_default();
+            if !idx.contains_key(&m) {
                 idx.insert(m.clone(), msgs.len());
-                msgs.push(m.clone());
+                msgs.push(m);
             }
         }
         TypedStmt::If { then_body, else_body, .. } => {
@@ -47437,7 +47641,22 @@ fn emit_parallel_for_via_gomp(
             "  br i1 %range_no_of, label %par_range_ok, label %par_range_fail\n",
         );
         deferred.push_str("par_range_fail:\n");
-        deferred.push_str("  call void @exit(i32 3)\n");
+        // BUG-192: this trap called a bare `exit(3)` with no
+        // diagnostic at all -- exit code correct, but completely
+        // silent, unlike every sibling checked-arithmetic trap in
+        // this file (which all route through `@__intent_trap` with
+        // a message). Reuses the `.msg.ovf.i64.sub` global that's
+        // already unconditionally emitted for every program (see
+        // the top-level preamble's "8 int types x 5 ops" loop) --
+        // this failure IS conceptually an i64 subtraction overflow
+        // (`end - start`), so no new message text is needed.
+        deferred.push_str(&format!(
+            "  call void @__intent_trap(i8* {})\n",
+            crate::ssa_backend_llvm::trap_msg_ref(
+                ".msg.ovf.i64.sub",
+                "integer overflow in i64 sub\n"
+            )
+        ));
         deferred.push_str("  unreachable\n");
         deferred.push_str("par_range_ok:\n");
     } else {

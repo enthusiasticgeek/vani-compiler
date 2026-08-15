@@ -138,6 +138,13 @@ pub struct TypedFunction {
     /// `vanic test` includes this function in the synthesised
     /// test-runner main. Not used by the codegen backends.
     pub is_test: bool,
+    /// Test-fw Phase C: forwarded from
+    /// `ast::Function::is_should_panic`. Not used by the codegen
+    /// backends -- `vanic test` inverts pass/fail for this function
+    /// working from the AST directly (see `main.rs`'s
+    /// `detect_harness_test_fns`/`run_test_function`), same as
+    /// `is_test` itself.
+    pub is_should_panic: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

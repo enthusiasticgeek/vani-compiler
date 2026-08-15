@@ -10,6 +10,40 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-08-14 (BUG-185 through BUG-193; async Executor/cancel, vani-language test framework, compiler-testing tooling)
+
+**State**: one long session, 9 bugs (BUG-185–193), no release cut this
+window (still `0.9.4-dev`, last tagged `v0.9.3` 2026-08-12). Covers
+three sequenced arcs from a plan saved at
+[`docs/TODO_NEXT_SESSIONS.md`](docs/TODO_NEXT_SESSIONS.md) (now
+marked DONE there): the tail of the async `Executor`/`cancel` work,
+then a `#[test]`/`vanic test` redesign, then a compiler-testing-
+tooling pass. Full writeups in
+[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) (search `BUG-NNN` or
+`#191`/`#189`-style task numbers — those are this session's internal
+task-tracker IDs, NOT bug numbers; they coincide in range with
+BUG-188/189/190 by pure numeric accident, unrelated bugs).
+
+### Shipped this window (2026-08-14)
+
+| Item | What shipped |
+|------|-------------|
+| `Pollable`/`Executor` pattern + `cancel <name>;` | A reusable user-space `interface Pollable { fn poll(mut ref self) -> bool; }` + `Executor` idiom for driving heterogeneous `Task__<fn>` state machines without a hand-rolled loop per shape, plus signal-based cancellation (`EINTR`/`CancelSynchronousIo`) for BLOCKING task threads stuck in a syscall (`tcp_accept`/`tcp_recv`). See [Advanced 1 -- Async](tutorials/src/advanced/01_async.md#an-executor-not-a-hand-rolled-driver-pollable--executor) and [Advanced 3 -- Concurrency](tutorials/src/advanced/03_concurrency.md#cancel). |
+| BUG-185/186/187 | Three real bugs found building a 2nd tic-tac-toe example: `print <bool>;` followed by a phi-consuming construct corrupting LLVM codegen; `task`/`join` inside any loop body crashing the checker outright; `implement` blocks never checked against their `interface`'s declared parameter types. |
+| 2nd tic-tac-toe capstone (`tic_tac_toe_networked_timed.vani`) | Real loopback-TCP two-player game using `task`+`cancel` for the one turn that needs a bounded timeout, applying `cancel` to a domain it actually supports (stdin can't use it). Surfaced L30 (`docs/v1_limitations.md`): `tcp_recv`'s buffer has no byte-accessor builtin, worked around by encoding a value as message *length*. |
+| Localfuzz refresh + audit round 13 | Refreshed the stale localfuzz worktree, combined its findings with `docs/v1_limitations.md`'s open items and `docs/BUG_PATTERN_AUDIT_TODO_9.md`'s not-started candidates into one prioritized list (`docs/BUG_PATTERN_AUDIT_TODO_13.md`). Found and fixed BUG-192 (two independent LLVM-only silent-trap bugs, root-caused by diffing SSA-vs-tree IR naming conventions side by side) and BUG-193 (a general `OwnedStr` call-argument leak whose first-draft fix introduced a genuine double-free regression, caught by `tools/leak_sweep.py`'s ASan sweep, not the plain test suite -- narrowed to the safe signal and re-verified clean). |
+| `#[test]` / `vanic test` redesign (Phases A-G) | The harness already existed (since 2026-07-28) but was under-polished -- researched first, then shipped via `AskUserQuestion`-confirmed "full audit + redesign" scope: `#[test]` fns now run even in a file with a real `fn main`; `--filter=<substring>`; `#[should_panic]`; parallel test execution by default + `--test-threads`; no-args defaults to the enclosing `vani.toml` package root; `assert_eq_i64`/`_f64`/`_bool`/`_str` builtins. First worked example (`examples/language/english/testing_primer.vani` -- previously zero example files used `#[test]`) + new tutorial chapter ([Intermediate 16a](tutorials/src/intermediate/16a_testing_primer.md)). |
+| Compiler-testing tooling audit | `tests/ssa_examples.rs`'s `ssa_lowers_every_example` had checked ZERO files since the project's first commit (non-recursive `read_dir` on a directory with no direct files) -- fixed, no genuine SSA-lowerer bugs surfaced. New `tools/backend_crosscheck.py`: runs the full 1053-file corpus through both `vanic run` (LLVM) and `--backend=c`, diffing exit codes -- the exact automation BUG-192 showed was missing. **Found a real bug on its first-ever run**: overflow/divide-by-zero/shift traps exited `3` on LLVM but `134` (SIGABRT) on the C backend, because both C backends (`backend_c.rs` tree path, `ssa_backend_c.rs` SSA path) still called a raw `abort()` for those three trap categories -- the same anti-pattern `assert`'s C codegen was already fixed for (2026-08-04) but never migrated here. Fixed on both backends; new `backend-crosscheck` CI job. |
+
+### Key numbers (2026-08-14)
+- **Compiler version**: `0.9.4-dev` (last tagged release: `v0.9.3`, 2026-08-12 -- no release cut this window)
+- **Bugs fixed this window**: 9 (BUG-185 through BUG-193)
+- **`cargo test`**: 2979 lib tests + 268 e2e tests + 11 other suites, 0 failures (2 new CI jobs added this window: `backend-crosscheck`; the vani-language test framework's own harness changes are covered by the e2e suite, not a separate CI job)
+- **`vanic check` example corpus**: 1053 files total, 18 non-ok (17 known pre-existing xfail/embedded-gated files + `testing_primer.vani` itself, which intentionally has no `fn main` by design as a `#[test]`-only file)
+- **`tools/backend_crosscheck.py`** (new): 0 findings across the full corpus, matching its own empty baseline
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-08-12 (BUG-81 through BUG-184; v0.9.1, v0.9.2, v0.9.3 releases)
 
 **State**: ten days, ~104 bugs (BUG-81 through BUG-184), and three patch

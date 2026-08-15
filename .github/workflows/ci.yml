@@ -118,6 +118,111 @@ jobs:
       - name: Run leak sweep against the checked-in baseline
         run: python3 tools/leak_sweep.py
 
+  # ── Backend cross-check: LLVM vs. C exit-code differential over the corpus
+  #
+  # Added for #191 (2026-08-14, "improve internal compiler-testing
+  # tooling"). Every example under examples/ that passes `vanic check` is
+  # run via BOTH `vanic run` (LLVM, the default) and `vanic run
+  # --backend=c`, and their exit codes must agree. Targets the exact bug
+  # class BUG-192 turned out to be: a silent LLVM-vs-tree-backend
+  # divergence found only by a human manually diffing IR. This sweep's
+  # very first local run caught a real one on its own (an overflow/
+  # divide-by-zero/shift trap that exited 3 on LLVM but 134/SIGABRT on
+  # C), fixed the same day -- see docs/TODO_CURRENT.md's #191 entry. A
+  # NEW finding not already tracked in
+  # tools/backend_crosscheck_baseline.json (if that file exists -- there
+  # is currently nothing to baseline) fails the job.
+  backend-crosscheck:
+    name: Backend cross-check (LLVM vs. C exit codes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM tools and SMT solver
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y llvm clang z3
+
+      - name: Build vanic (release)
+        run: cargo build --release --bin vanic
+
+      - name: Run backend cross-check against the checked-in baseline
+        run: python3 tools/backend_crosscheck.py
+
+  # ── Build-system integration example: Make, CMake, Meson, Ninja ─────────
+  #
+  # tutorials/src/intermediate/09d_build_systems.md documents a mixed
+  # C+vāṇी project built four different ways. Before this job existed,
+  # every snippet on that page was untested markdown -- confirmed by
+  # actually building it directly, the Meson version linked against a
+  # static_library() of the raw vāṇī output and failed with "multiple
+  # definition of 'main'" (fixed in the same pass that added this job).
+  # examples/build_systems/myproject/ is the real, buildable project the
+  # tutorial's snippets are now copied from; this job builds it with all
+  # four tools and checks each produces the same correct output, so a
+  # future change to `vanic emit`'s output shape (or to any of the four
+  # build files) gets caught here instead of silently rotting docs again.
+  build-systems-example:
+    name: Build-system integration example (Make/CMake/Meson/Ninja)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y cmake ninja-build meson binutils
+
+      - name: Build vanic (release)
+        run: cargo build --release --bin vanic
+
+      - name: Build and run with Make
+        working-directory: examples/build_systems/myproject
+        run: |
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          make run | tee /tmp/out-make.txt
+          grep -q "square(4) = 16" /tmp/out-make.txt
+          grep -q "cube(3) = 27" /tmp/out-make.txt
+          make clean
+
+      - name: Build and run with CMake
+        working-directory: examples/build_systems/myproject
+        run: |
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          cmake -B build-cmake
+          cmake --build build-cmake
+          ./build-cmake/myproject | tee /tmp/out-cmake.txt
+          grep -q "square(4) = 16" /tmp/out-cmake.txt
+          grep -q "cube(3) = 27" /tmp/out-cmake.txt
+          rm -rf build-cmake
+
+      - name: Build and run with Meson
+        working-directory: examples/build_systems/myproject
+        run: |
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          meson setup build-meson
+          ninja -C build-meson
+          ./build-meson/myproject | tee /tmp/out-meson.txt
+          grep -q "square(4) = 16" /tmp/out-meson.txt
+          grep -q "cube(3) = 27" /tmp/out-meson.txt
+          rm -rf build-meson
+
+      - name: Build and run with hand-written Ninja
+        working-directory: examples/build_systems/myproject
+        run: |
+          export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
+          ninja
+          ./build-ninja/myproject | tee /tmp/out-ninja.txt
+          grep -q "square(4) = 16" /tmp/out-ninja.txt
+          grep -q "cube(3) = 27" /tmp/out-ninja.txt
+          rm -rf build-ninja
+
   # ── vani_translate.py regression suite ───────────────────────────────────
   #
   # Added 2026-08-12 after confirming this tool's hand-maintained ALIASES

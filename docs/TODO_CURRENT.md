@@ -14292,3 +14292,397 @@ Executor section for the "why not Executor" explanation.
 attempt a 3rd stdin-cancellation-based implementation, since `cancel`
 still doesn't reach `stdin_read_line` (see L18/the Phase D writeup
 above). `tcp_buf_byte_at` (L30) not implemented.
+
+## Task #186 -- localfuzz refresh + combined bug/limitations audit (2026-08-14)
+
+Refreshed the localfuzz worktree (7 commits merged, rebuilt), ran a
+full `digest.py --all` re-scan (341 findings, 41 signatures), and
+re-verified a representative sample from EVERY signature directly
+against the fresh binary rather than trusting the digest's keyword-
+match heuristics. Combined with a re-check of
+`docs/BUG_PATTERN_AUDIT_TODO_9.md`'s leftover candidate and
+`docs/v1_limitations.md`'s open items into one prioritized document:
+**`docs/BUG_PATTERN_AUDIT_TODO_13.md`**.
+
+Headline result: found one genuinely new, previously-undocumented,
+isolated-to-a-minimal-repro bug -- **the LLVM backend silently drops
+a runtime-trap's diagnostic message (exit code still correct, but
+stdout/stderr both empty) in at least two outlined/transformed
+codegen contexts: after an `await(...)` call, and inside `parallel
+for`'s reduction-worker body.** Candidate bug number **BUG-192**,
+handed to #187 with a working hypothesis (likely the same
+`ctx.current_block`-not-propagated shape this project has hit 3
+times already this month in unrelated features) and two ready-to-use
+minimal repros. See the audit doc for both.
+
+Everything else investigated turned out to be either already fixed
+(stale repros predating recent landed fixes -- BUG-76, BUG-88, and
+one unlabeled cluster), an already-EXPLICITLY-accepted design
+decision from BUG-177's own 2026-08-11 triage (the `abort()`-vs-
+`exit(3)` divergence between the C and LLVM backends' overflow/
+bounds/division traps -- ~103 of the 341 findings, roughly a third,
+all the same accepted pattern), or a fuzzer-mutator quality artifact
+(83 of 341 findings are "both backends time out" on a fuzzer-injected
+`i64::MIN`/`i64::MAX` literal sitting in a `sleep_ms` argument or loop
+bound -- genuinely, correctly very slow, not broken). Two cheap
+`tools/localfuzz` tooling improvements suggested (a persistent
+accepted-non-bug allow-list in `digest.py`; biasing the mutator away
+from extreme literals in timing/loop-bound positions) but not acted
+on -- optional, doesn't touch the compiler.
+
+## BUG-192 -- LLVM backend silently dropped runtime-trap messages in two codegen sites, FIXED (2026-08-14)
+
+Task #187, root-causing the Priority 1 finding from
+`docs/BUG_PATTERN_AUDIT_TODO_13.md`. Turned out to be TWO independent
+bugs in two completely unrelated codegen paths, both sharing the same
+observable symptom (exit code correct, stdout/stderr both empty) --
+the `await(...)`/`parallel for` framing in the audit doc was a red
+herring for the second one; root cause tracing (comparing IR for a
+constant-folded SSA-eligible assert, a tree-forced-via-`task` assert,
+and the actual async repro side by side) showed the two triggers
+don't share a common cause at all.
+
+1. **`TypedStmt::Assert` (tree-LLVM, `src/backend_llvm.rs`)**: the
+   `dprintf(2, "assertion failed: %s\n", <msg>)` call was only
+   emitted `if let Some(msg) = message` -- a bare `assert expr;` (no
+   `, "msg"` clause) parses with `message: None`
+   (`src/parser.rs::parse_assert_stmt` never synthesizes a default),
+   so the whole print block was skipped, straight to `exit(3)`.
+   `ssa.rs::lower_stmt` already had the identical fix for the SSA-
+   LLVM path (`message.clone().unwrap_or_default()`, with a comment
+   explaining it was itself a fix for a worse bug -- a bare
+   `Terminator::Unreachable` reached at runtime, real LLVM UB) --
+   tree-LLVM just never got the same treatment. Two-part fix: (a)
+   `collect_assert_messages`'s pre-scan now interns
+   `message.clone().unwrap_or_default()` for every assert (was
+   `Some(m)`-only, so a message-less assert had no `@.assert_msg.N`
+   global allocated at all), (b) the codegen arm now always looks up
+   `message.as_ref().unwrap_or(&default_msg)` instead of gating the
+   whole block on `Some`. Confirmed this affects ANY tree-LLVM
+   program with a message-less assert, not just `await`-adjacent
+   code -- async was just the first repro to surface it (a plain
+   `task{}` block doesn't force tree-LLVM the way `await` does,
+   since basic task-spawn IS SSA-supported; had to use `detach`/
+   `cancel` or an actual `await` to get a genuine tree-LLVM
+   comparison).
+2. **`parallel for`'s own internal range/chunk-size overflow guard**
+   (`src/backend_llvm.rs`, the `__intent_par_<id>` worker preamble):
+   a completely separate, pre-existing checked-subtraction guard
+   (`end - start` via `llvm.ssub.with.overflow.i64`, originally added
+   to fix a real SIGSEGV -- see that code's own surrounding comment)
+   called a bare `exit(3)` with no message at all -- this one was
+   never wired to any diagnostic, not a regression of anything that
+   used to work. Fixed by routing through the already-unconditionally
+   -emitted `@__intent_trap` helper, reusing the `.msg.ovf.i64.sub`
+   message global every program already carries (the failure IS
+   conceptually an i64 subtraction overflow, so no new message text
+   needed -- and it now matches the C backend's own independent
+   wording for the identical condition exactly).
+
+Added 2 new `src/lib.rs` unit tests
+(`bug192_llvm_bare_assert_after_await_still_emits_dprintf`,
+`bug192_llvm_parallel_for_range_overflow_trap_has_a_message`), both
+asserting on the emitted LLVM IR text directly. **Verification**:
+2968/2968 lib tests (2966 + 2 new, 0 regressions); 260/260 e2e tests
+(unchanged, no new e2e test this pass); 1051-file example corpus
+check matches the known 17-file baseline exactly; `valgrind
+--leak-check=full` clean on both repros' LLVM AOT builds (the
+`parallel for` repro's "912 bytes possibly lost" valgrind line is a
+pre-existing `libgomp`/glibc thread-pool TLS artifact, confirmed via
+an unrelated clean `parallel for` program showing the byte-for-byte
+identical line -- not introduced by this fix); ASan/UBSan clean on
+both repros via the C backend.
+
+## BUG-193 -- general `OwnedStr`-arg leak into ordinary function calls, FIXED (2026-08-14)
+
+Task #187, closing `docs/BUG_PATTERN_AUDIT_TODO_13.md`'s Priority 2
+(carried over from `docs/BUG_PATTERN_AUDIT_TODO_9.md`'s Category 1
+"general case", left explicitly unscoped there). A fresh, never-bound
+`OwnedStr` expression passed as a `Str`-typed argument to an ordinary
+user-defined function had no owner to free it after the call --
+BUG-159/160/161 fixed the identical shape for specific builtin call
+sites (`hashmap_*`/`trie_*`) but deliberately left the general,
+every-user-function-call case open, since it "touches every function-
+call-argument codegen site in both backends" (turned out to be exactly
+ONE default/fallback match arm per backend, not many -- the scoping
+worry was bigger than the actual change).
+
+```vani
+fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+fn main() -> i64 {
+  let n: i64 = takes_str(i64_to_str(12345));   // used to leak
+  return n;
+}
+```
+
+Fixed in both backends' default `TypedExprKind::Call` codegen (the
+path every ordinary, non-builtin function call goes through):
+`src/backend_c.rs` binds each fresh arg to a named temp inside a GCC
+statement-expression (generalizing the existing 1-2-hardcoded-
+argument `hashmap_insert`/`trie_insert` shape to N arguments), calls
+using the temps, frees them all after, yields the result;
+`src/backend_llvm.rs` (already imperative -- no statement-expression
+trick needed) just emits `call void @free(i8* %v)` for each qualifying
+arg right after the `call` instruction.
+
+**A real regression found and fixed the same session, before
+shipping**: the first version of this fix (matching BUG-160's OWN
+check exactly, `is_fresh_owned_str(a) || is_fresh_owned_str_via_str_cast(a)`)
+caused a genuine double-free, caught by `tools/leak_sweep.py`'s
+corpus-wide ASan sweep (NOT by the plain, non-sanitized test suite --
+`examples/edge_cases/mix_tuple_non_copy.vani`'s `make_pair(msg:
+OwnedStr, val: i64) -> (OwnedStr, i64) { return (msg, val); }` moves
+`msg` straight into the returned tuple; the caller's tuple binding
+then owns and frees it through its own scope-exit Drop -- freeing it
+a second time right after the call is a double-free). Root cause:
+BUG-160's bare `is_fresh_owned_str` check was a hand-verified judgment
+call about THOSE SPECIFIC builtins' contracts (`hashmap_get`/
+`_contains_key`/`_remove` never store the key, lookup-only), not a
+generally-safe rule -- an ordinary user function's `OwnedStr`-typed
+(by-value) parameter really does take ownership, and the callee may
+hand that same heap value straight back to the caller through a
+struct/tuple/closure. The implicit `Str`-borrow cast
+(`is_fresh_owned_str_via_str_cast`, alone, no bare-`OwnedStr` OR) is
+the only reliable "this parameter never took ownership" signal for
+the general case -- narrowed the fix to that alone, re-verified
+clean.
+
+Added 4 `src/lib.rs` unit tests: single fresh arg, two fresh args in
+one call, a Var-sourced (non-fresh) `OwnedStr` arg does NOT get freed
+(the double-free regression guard), a plain string literal arg does
+NOT get freed. **Verification**: 2972/2972 lib tests (2966 + 2
+BUG-192 + 4 BUG-193 new, 0 regressions); 260/260 e2e tests (1 flaky
+failure on the first full-suite run, `concurrent_pipeline_dashboard_
+example_produces_correct_output_on_both_backends` -- confirmed
+pre-existing/unrelated via 5/5 clean reruns in isolation, same
+concurrent-print-interleaving-under-load class as `docs/TODO_CURRENT.
+md`'s own prior documented flakiness for this exact test, not caused
+by this fix); full `tools/leak_sweep.py` corpus sweep (1052 files)
+matches its baseline exactly, 0 new findings, both before AND after
+the double-free was caught and fixed; ASan/UBSan clean on the
+original repro, a 6-case edge-case stress test (nested calls, two
+fresh args in one call, Var-sourced OwnedStr arg, plain literal arg,
+discard-position call), and the double-free repro specifically;
+`valgrind --leak-check=full` clean (0 errors) on both the LLVM AOT
+repro and the stress test.
+
+**Still open**: Category 2 and Category 3 of
+`docs/BUG_PATTERN_AUDIT_TODO_9.md` remain as documented there (no
+action needed -- already-triaged non-fixes / fully resolved).
+`docs/BUG_PATTERN_AUDIT_TODO_13.md`'s Priorities 3-4 (localfuzz
+tooling improvements) remain optional, not acted on.
+
+## Test framework redesign, Phase G -- docs/examples (2026-08-14, #189/#198 DONE)
+
+Closes out #188/#189 (the `#[test]`/`vanic test` "full audit +
+redesign" the user chose, see the approved plan at
+`/home/virgo/.claude/plans/synchronous-leaping-puffin.md`). Phases
+A-F (in prior commits this session) fixed `#[test]`+`fn main`
+coexistence, added `--filter`, `#[should_panic]`, parallel test
+execution + `--test-threads`, package-level default discovery (no
+path args -> `vani.toml` root via `manifest::find_manifest`), and
+`assert_eq_i64`/`_f64`/`_bool`/`_str` builtins (BUG-192, BUG-193
+found and fixed along the way). Phase G shipped the missing
+discoverability/docs layer the audit itself flagged (zero example
+files used `#[test]` despite the core feature existing since
+2026-07-28):
+
+- `examples/language/english/testing_primer.vani` (new): 5 `#[test]`
+  fns covering `assert_eq_bool`, `#[should_panic]`, `assert_eq_str`'s
+  content-not-pointer comparison, `assert_eq_f64` -- deliberately no
+  top-level `fn main`, live-verified all pass, `--filter=div`
+  correctly narrows to 2 of 5.
+- `tutorials/src/intermediate/16a_testing_primer.md` (new): full
+  tutorial chapter, worked examples for every Phase A-F piece, a
+  "Try it yourself" section, wired into `SUMMARY.md` and the
+  `16_packages.md`/`17_tic_tac_toe_capstone.md` nav footers.
+- `tutorials/src/beginner/00_cli_reference.md`'s `vanic test` section
+  rewritten -- it still described the PRE-Phase-A behavior (claimed a
+  file with `fn main` always fell back to legacy mode, i.e. exactly
+  what Phase A fixed) and was missing `--filter`, `#[should_panic]`,
+  `--test-threads`, and the no-args package-default-discovery
+  behavior entirely.
+
+**Verification**: full `cargo test --release --workspace`: 2979 lib
+(+7 vs. the pre-Phase-A 2972 baseline, matching the new Phase A/C/F
+unit tests) / 268 e2e (+8, matching new e2e tests), 0 failed, exit
+code 0 (captured directly, not through a `tail` pipe, to avoid
+masking `cargo test`'s own exit code). `vanic check examples`
+file-set diff: the known 17-file bad baseline plus
+`testing_primer.vani` itself (intentionally has no `fn main` by
+design, as a `#[test]`-only file) -- 18 total, exactly the expected
+delta, no regressions. Pushed as `8a74d66a`; all 3 CI workflows green
+(`CI`, `CodeQL`, `Deploy Tutorials to GitHub Pages`).
+
+#188 and #189 are now both fully DONE. Next up per
+`docs/TODO_NEXT_SESSIONS.md`: #191 (internal compiler-testing tooling
+-- property-based testing / codegen snapshot diffing, explicitly
+distinct from and sequenced after the vani-language framework), then
+#190 (final documentation/tutorial consistency sweep, blocked on
+#185/#187/#189/#191 -- #185/#187/#189 are done, only #191 remains).
+
+## #191 -- internal compiler-testing tooling (2026-08-14, DONE)
+
+Scoped via `EnterPlanMode` after researching the existing tooling
+first rather than assuming the "property-based testing / codegen
+snapshot diffing" suggestion from `docs/TODO_NEXT_SESSIONS.md` needed
+to be built from scratch. Two concrete, grounded gaps found (same
+audit instinct that found BUG-192/193 during Phase F), both fixed the
+same day:
+
+**Task A -- `tests/ssa_examples.rs`'s `ssa_lowers_every_example` test
+checked ZERO files.** `fs::read_dir(examples/)` is non-recursive;
+every real `.vani` file lives in a subdirectory
+(`examples/language/*/`, `examples/edge_cases/`, `examples/embedded/`)
+-- none directly in `examples/` itself. `git log --follow` shows this
+has been true since the very first commit; the CI log's `0.00s`
+runtime against a 1053-file corpus was the tell. Fixed with a small
+recursive walk mirroring `src/main.rs`'s own `walk_intent_files`.
+Running it against the real corpus surfaced 9 failures across 8
+files, all legitimate, already-documented SSA v1 subset gates (struct
+field-borrows, `mut ref vec[i]`, `eprint`, `detach`/`cancel`,
+non-Copy reassign) whose `LowerError` text just didn't match the
+test's original single `"not yet supported"` substring filter --
+confirmed each by reading `src/ssa.rs` directly (every one has an
+explanatory comment and routes to the tree backend by design).
+Broadened the filter to 4 known gate-message markers that together
+cover every current `LowerError` in `src/ssa.rs`. No genuine bugs
+found; the fixed test itself now runs in ~27s (vs. 0.00s) and passes.
+Pushed as `a224984f`, CI green.
+
+**Task B -- no automated cross-backend differential test over the
+full corpus.** `tests/ssa_backend_c_crosscheck.rs` /
+`ssa_backend_llvm_crosscheck.rs` only cover ~15-20 hand-curated
+snippets; `tools/leak_sweep.py` runs the full corpus but only through
+the C backend. New `tools/backend_crosscheck.py` (mirroring
+`leak_sweep.py`'s proven shape: recursive glob, `vanic check` gate,
+JSON baseline diffing, `--update-baseline`) runs every corpus file
+through both `vanic run` (LLVM) and `vanic run --backend=c`, comparing
+exit codes (not stdout -- HashMap iteration order / RNG / concurrency
+interleaving make that unsafe across 1000+ files). Parallelized via a
+thread pool (default `os.cpu_count()`); full local sweep ~8-9 min on
+this 4-core dev machine (contended by the localfuzz `llama-server`
+process). New CI job `backend-crosscheck` in `ci.yml`, documented in
+`tools/README.md`.
+
+**This tool found a real bug on its very first run**: overflow /
+divide-by-zero / shift traps exited `3` on LLVM but `134`
+(128+SIGABRT) on the C backend for the identical program
+(`examples/language/english/loop_carried_overflow_not_elided.vani`,
+the BUG-127 regression-test example). Root cause: both C backends
+(`backend_c.rs` tree path, `ssa_backend_c.rs` SSA path) still called a
+raw `abort()` for these three trap categories -- the exact same
+anti-pattern `TypedStmt::Assert`'s C codegen was already fixed for
+(2026-08-04) but never migrated to the checked-arithmetic guards.
+Fixed by switching all six call sites (three per backend) from
+`abort()` to `exit(3)`, matching LLVM exactly. Deliberately did NOT
+touch the separate bounds-check helper family (`index out of
+bounds`) -- a different code path, no divergence found for it, still
+intentionally `abort()`-based.
+
+Fixing it required updating 4 pre-existing tests that hard-coded the
+old 134-on-C exit code for overflow/div/shift specifically (grep
+confirmed all other `Some(134)` sites in the suite are bounds-check
+tests, correctly untouched): a `src/lib.rs` unit test (renamed
+`..._before_abort_...` -> `..._before_trapping_...`, since 3 of its 4
+checks are `exit(3)` now), and three `tests/run_end_to_end.rs`
+subprocess tests. `signal_killed_child_reports_128_plus_signal_not_a_
+bare_1` needed a different SIGABRT vehicle entirely since overflow no
+longer raises a signal -- switched to an out-of-bounds Vec read.
+Also rewrote the affected sections of `tutorials/src/intermediate/
+10b_runtime_errors_primer.md`'s "Row 2: the abort surface", which made
+detailed, backend-specific exit-code claims now stale by this fix.
+
+**Verification**: full `cargo test --release --workspace` clean
+(2979 lib / 268 e2e, 0 failed -- exactly the pre-#191 baseline, since
+the trap-category fix didn't add or remove tests, only updated 4
+existing ones' expectations); `tools/leak_sweep.py` matches its own
+baseline exactly (0 new findings -- `exit(3)` vs. `abort()` doesn't
+change ASan's classification); `tools/backend_crosscheck.py` itself
+now reports 0 findings across the full 1053-file corpus (was 1 before
+the fix); `mdbook build` clean for the edited tutorial page. Pushed
+as `63027442`, CI green including the new `backend-crosscheck` job's
+first real run.
+
+**Explicitly out of scope this round** (documented in the approved
+plan, not silently dropped): `proptest`/generative property-based
+testing (real lift -- a generator for a language with structs/enums/
+generics/affine ownership that produces only *valid* programs is a
+project of its own; no concrete gap identified beyond what localfuzz
+already covers at a different layer); golden-file codegen snapshot
+diffing (rejected in favor of Task B's differential-execution
+approach, which catches the same divergence class without the
+constant re-approval churn snapshot files impose on every legitimate
+codegen change). Both remain candidates for a future round if the
+corpus-based tooling here turns out insufficient.
+
+#191 is now DONE. #190 (final documentation/tutorial consistency
+sweep) is now fully unblocked -- all of #185/#187/#189/#191 are
+complete.
+
+## Cross-language "did you mean" syntax hints (2026-08-15)
+
+User request, prompted directly by probing several common
+cross-language syntax mistakes against `vanic check` and finding
+every one bottomed out in an unhelpful message: a bare "expected
+identifier" / "expected statement" naming no fix, or worse, a
+downstream checker error ("unknown variable 'x'") that points nowhere
+near the real mistake (`let mut x` fails inside `let`'s ident parse,
+then the checker reports `x` itself as unknown two lines later).
+
+Added a parser-level "did you mean" hint layer covering the most
+common shapes from mainstream languages that don't exist in vāṇी:
+
+- **`for`-loop family** (inside `parse_for_stmt_inner`, since by
+  that point the `for` keyword has already committed the parse --
+  no ambiguity risk): C-style `for (init; cond; incr) { ... }`; the
+  old Rust-style `for i in LOW..HIGH` range shape (removed by T0.0,
+  still the single most likely mistake for anyone who's seen an
+  older vāṇी snippet or Rust); Pascal-style `for i = LO to HI`
+  and the bare "forgot `from`" shape `for i LO to HI` (both detected
+  by a bounded forward scan for a `to`/`downto` token before the
+  loop body's `{`).
+- **Statement-level** (`common_syntax_mistake_hint`, checked once at
+  the very top of `parse_stmt`, before the normal dispatch chain):
+  `foreach IDENT in ...`; `do { ... } while (cond);`;
+  `switch (EXPR) { case ... }` / `switch EXPR { ... }`;
+  `let mut IDENT`; `var IDENT = ...` (JS/Java/C#, NOT `const` --
+  that's real vāṇी syntax for module-level constants, a distinct
+  keyword token, so it was deliberately left alone); `elif` /
+  `elseif`.
+
+Every detector is a pure, zero-consumption lookahead, gated on the
+full mistake SHAPE (not a bare keyword-like identifier) so a real
+binding or function literally named `var`/`switch`/`do`/`foreach` in
+ordinary use isn't misdiagnosed -- confirmed by a dedicated
+`hints_do_not_misfire_on_legitimate_code` test using a real `var`
+binding, reassigned (not redeclared), plus a legitimate `else if`
+chain.
+
+**Real bug found and fixed while building this**: `hint_let_mut`
+fires while sitting exactly on `TokenKind::Let` -- which is one of
+`parse_block`'s own `sync_to_stmt` error-recovery boundary tokens.
+`sync_to_stmt` stops there WITHOUT consuming (it expects a normal
+statement dispatch to consume `Let` next), so a zero-consumption
+error at that exact position made `parse_block`'s recovery loop call
+`parse_stmt` again at the identical spot forever -- confirmed via
+`timeout 10 vanic check let_mut.vani` hanging (exit 124). Every
+pre-existing dispatch branch consumes its leading keyword before any
+error can occur, so this trap never fired before this feature
+existed. Fixed by unconditionally bumping one token at the single
+`common_syntax_mistake_hint` call site in `parse_stmt`, guaranteeing
+forward progress regardless of which detector matched -- root-caused
+and fixed the same session, not worked around.
+
+**Verification**: 10 new `src/lib.rs` unit tests (one per hint shape
++ the false-positive guard; `hint_let_mut_does_not_hang_and_names_
+the_fix` doubles as the regression guard for the hang bug -- the test
+completing at all under the crate's normal test timeout is the real
+assertion). Full corpus swept for both (a) any `vanic check` timeout
+across all 1056 example files (none -- confirms no other detector has
+the same trap) and (b) any failing file whose message contains one of
+the new hint strings (none -- confirms zero false positives against
+real code, including the 40+ non-English dialect trees where
+identifiers like "do"/"var" could plausibly appear as real names).
+Full `cargo test --release --workspace` clean: 2989 lib (2979 + 10
+new) / 268 e2e, 0 failed.

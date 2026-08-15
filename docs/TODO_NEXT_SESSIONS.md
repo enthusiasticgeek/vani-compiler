@@ -1,10 +1,20 @@
-# Next-sessions plan (created 2026-08-14, not started)
+# Next-sessions plan (created 2026-08-14, DONE 2026-08-14)
 
 > Saved before starting so the plan survives a session boundary.
 > Task IDs below refer to the harness's own TaskCreate/TaskList
 > tracker (not GitHub issues) -- re-create them from this file if
 > the tracker state is ever lost. Status as of this writing:
 > **everything below is pending, nothing in progress.**
+>
+> **Update (end of the same day, 2026-08-14): all 7 tasks are
+> DONE.** #185 (Phase F), #186+#187 (audit + fixes, BUG-192/193),
+> #188+#189 (test framework, Phases A-G), and #191 (compiler-testing
+> tooling, incl. the real abort()-vs-exit(3) bug
+> `tools/backend_crosscheck.py` found on its first run) all shipped
+> and are CI-green. #190 (this plan's own final sweep item) is the
+> task this edit is part of. See `docs/TODO_CURRENT.md`'s entries
+> for each task's full writeup -- this file is kept as the historical
+> planning record, not updated play-by-play.
 
 ## Context
 
