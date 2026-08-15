@@ -8180,3 +8180,25 @@ Fix attempt: `tools/localfuzz/findings/20260815-022812-run-crash-653f1b0742/fix_
   "affects_backend": ["llvm", "c"]
 }
 ```
+
+---
+
+### Candidate: 20260815-030823-check-crash-12e964aafd
+
+Repro: `tools/localfuzz/findings/20260815-030823-check-crash-12e964aafd/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-030823-check-crash-12e964aafd/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "check-crash",
+  "check": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
