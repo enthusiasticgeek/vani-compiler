@@ -8126,3 +8126,12 @@ Raw result data:
     "stdout": "",
     "stderr": "aborting due to runtime error\n",
     "timed_out
+
+---
+
+### Candidate: 20260815-021242-run-crash-7233b6a88d
+
+Repro: `tools/localfuzz/findings/20260815-021242-run-crash-7233b6a88d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-021242-run-crash-7233b6a88d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
