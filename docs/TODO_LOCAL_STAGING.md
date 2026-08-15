@@ -8428,3 +8428,62 @@ Fix attempt: `tools/localfuzz/findings/20260815-093446-backend-divergence-ecc6a4
 }
 ```
 
+
+---
+
+### Candidate: 20260815-114233-run-crash-97d95cec20
+
+Repro: `tools/localfuzz/findings/20260815-114233-run-crash-97d95cec20/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-114233-run-crash-97d95cec20/fix_attempt.md`
+
+STAGING ENTRY:
+
+**Compiler: vani-compiler**
+**Branch: localfuzz**
+**Commit: 4567890a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6**
+**Date: N/A**
+**Fuzz Target: vani-compiler/examples/language/russian/control_flow.vani**
+**Mutant Generated Source (Base Corpus):**
+```vani
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/control_flow.vani              # LLVM
+//   vanic run examples/language/russian/control_flow.vani --backend=c  # C
+
+цель "if/else and while control flow";
+
+функция sign(x: i64) -> i64 {
+  если x > 0 {
+    вернуть 1;
+  } иначе {
+    если x < 0 {
+      вернуть 0 - 1;
+    } иначо {
+      вернуть 0;
+    }
+  }
+}
+
+функция main() -> i64 {
+  утверждать sign(5) == 1;
+  утверждать sign(0 - 3) == 0 - 1;
+  утверждать sign(0) == 0;
+
+  пусть i: i64 = 0;
+  пока i < 9223372036854775807 {
+    i = i + 1;
+  }
+  утверждать i == 5;
+
+  печатать sign(42);
+  вернуть 0;
+}
+```
+
+**Finding Kind: run-crash**
+**Raw Result Data:**
+```json
+{
+  "kind": "run-crash",
+
