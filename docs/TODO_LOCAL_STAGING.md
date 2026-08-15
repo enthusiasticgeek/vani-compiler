@@ -8202,3 +8202,18 @@ Fix attempt: `tools/localfuzz/findings/20260815-030823-check-crash-12e964aafd/fi
 }
 ```
 
+
+---
+
+### Candidate: 20260815-040936-check-crash-c0078f2383
+
+Repro: `tools/localfuzz/findings/20260815-040936-check-crash-c0078f2383/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-040936-check-crash-c0078f2383/fix_attempt.md`
+
+Staging Entry:
+```
+Test Case: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/tasks.vani (Mutant/generated source)
+Backends Affected: C, LLVM
+
+Status: needs human/frontier root-cause review.
+```
