@@ -8570,3 +8570,12 @@ Repro: `tools/localfuzz/findings/20260815-233651-run-crash-69d5ba39fb/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260815-233651-run-crash-69d5ba39fb/fix_attempt.md`
 
 VANIC-4589 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260815-234355-run-crash-81ce6b7e82
+
+Repro: `tools/localfuzz/findings/20260815-234355-run-crash-81ce6b7e82/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-234355-run-crash-81ce6b7e82/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
