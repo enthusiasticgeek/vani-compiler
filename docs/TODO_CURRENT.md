@@ -14520,3 +14520,102 @@ delta, no regressions. Pushed as `8a74d66a`; all 3 CI workflows green
 distinct from and sequenced after the vani-language framework), then
 #190 (final documentation/tutorial consistency sweep, blocked on
 #185/#187/#189/#191 -- #185/#187/#189 are done, only #191 remains).
+
+## #191 -- internal compiler-testing tooling (2026-08-14, DONE)
+
+Scoped via `EnterPlanMode` after researching the existing tooling
+first rather than assuming the "property-based testing / codegen
+snapshot diffing" suggestion from `docs/TODO_NEXT_SESSIONS.md` needed
+to be built from scratch. Two concrete, grounded gaps found (same
+audit instinct that found BUG-192/193 during Phase F), both fixed the
+same day:
+
+**Task A -- `tests/ssa_examples.rs`'s `ssa_lowers_every_example` test
+checked ZERO files.** `fs::read_dir(examples/)` is non-recursive;
+every real `.vani` file lives in a subdirectory
+(`examples/language/*/`, `examples/edge_cases/`, `examples/embedded/`)
+-- none directly in `examples/` itself. `git log --follow` shows this
+has been true since the very first commit; the CI log's `0.00s`
+runtime against a 1053-file corpus was the tell. Fixed with a small
+recursive walk mirroring `src/main.rs`'s own `walk_intent_files`.
+Running it against the real corpus surfaced 9 failures across 8
+files, all legitimate, already-documented SSA v1 subset gates (struct
+field-borrows, `mut ref vec[i]`, `eprint`, `detach`/`cancel`,
+non-Copy reassign) whose `LowerError` text just didn't match the
+test's original single `"not yet supported"` substring filter --
+confirmed each by reading `src/ssa.rs` directly (every one has an
+explanatory comment and routes to the tree backend by design).
+Broadened the filter to 4 known gate-message markers that together
+cover every current `LowerError` in `src/ssa.rs`. No genuine bugs
+found; the fixed test itself now runs in ~27s (vs. 0.00s) and passes.
+Pushed as `a224984f`, CI green.
+
+**Task B -- no automated cross-backend differential test over the
+full corpus.** `tests/ssa_backend_c_crosscheck.rs` /
+`ssa_backend_llvm_crosscheck.rs` only cover ~15-20 hand-curated
+snippets; `tools/leak_sweep.py` runs the full corpus but only through
+the C backend. New `tools/backend_crosscheck.py` (mirroring
+`leak_sweep.py`'s proven shape: recursive glob, `vanic check` gate,
+JSON baseline diffing, `--update-baseline`) runs every corpus file
+through both `vanic run` (LLVM) and `vanic run --backend=c`, comparing
+exit codes (not stdout -- HashMap iteration order / RNG / concurrency
+interleaving make that unsafe across 1000+ files). Parallelized via a
+thread pool (default `os.cpu_count()`); full local sweep ~8-9 min on
+this 4-core dev machine (contended by the localfuzz `llama-server`
+process). New CI job `backend-crosscheck` in `ci.yml`, documented in
+`tools/README.md`.
+
+**This tool found a real bug on its very first run**: overflow /
+divide-by-zero / shift traps exited `3` on LLVM but `134`
+(128+SIGABRT) on the C backend for the identical program
+(`examples/language/english/loop_carried_overflow_not_elided.vani`,
+the BUG-127 regression-test example). Root cause: both C backends
+(`backend_c.rs` tree path, `ssa_backend_c.rs` SSA path) still called a
+raw `abort()` for these three trap categories -- the exact same
+anti-pattern `TypedStmt::Assert`'s C codegen was already fixed for
+(2026-08-04) but never migrated to the checked-arithmetic guards.
+Fixed by switching all six call sites (three per backend) from
+`abort()` to `exit(3)`, matching LLVM exactly. Deliberately did NOT
+touch the separate bounds-check helper family (`index out of
+bounds`) -- a different code path, no divergence found for it, still
+intentionally `abort()`-based.
+
+Fixing it required updating 4 pre-existing tests that hard-coded the
+old 134-on-C exit code for overflow/div/shift specifically (grep
+confirmed all other `Some(134)` sites in the suite are bounds-check
+tests, correctly untouched): a `src/lib.rs` unit test (renamed
+`..._before_abort_...` -> `..._before_trapping_...`, since 3 of its 4
+checks are `exit(3)` now), and three `tests/run_end_to_end.rs`
+subprocess tests. `signal_killed_child_reports_128_plus_signal_not_a_
+bare_1` needed a different SIGABRT vehicle entirely since overflow no
+longer raises a signal -- switched to an out-of-bounds Vec read.
+Also rewrote the affected sections of `tutorials/src/intermediate/
+10b_runtime_errors_primer.md`'s "Row 2: the abort surface", which made
+detailed, backend-specific exit-code claims now stale by this fix.
+
+**Verification**: full `cargo test --release --workspace` clean
+(2979 lib / 268 e2e, 0 failed -- exactly the pre-#191 baseline, since
+the trap-category fix didn't add or remove tests, only updated 4
+existing ones' expectations); `tools/leak_sweep.py` matches its own
+baseline exactly (0 new findings -- `exit(3)` vs. `abort()` doesn't
+change ASan's classification); `tools/backend_crosscheck.py` itself
+now reports 0 findings across the full 1053-file corpus (was 1 before
+the fix); `mdbook build` clean for the edited tutorial page. Pushed
+as `63027442`, CI green including the new `backend-crosscheck` job's
+first real run.
+
+**Explicitly out of scope this round** (documented in the approved
+plan, not silently dropped): `proptest`/generative property-based
+testing (real lift -- a generator for a language with structs/enums/
+generics/affine ownership that produces only *valid* programs is a
+project of its own; no concrete gap identified beyond what localfuzz
+already covers at a different layer); golden-file codegen snapshot
+diffing (rejected in favor of Task B's differential-execution
+approach, which catches the same divergence class without the
+constant re-approval churn snapshot files impose on every legitimate
+codegen change). Both remain candidates for a future round if the
+corpus-based tooling here turns out insufficient.
+
+#191 is now DONE. #190 (final documentation/tutorial consistency
+sweep) is now fully unblocked -- all of #185/#187/#189/#191 are
+complete.
