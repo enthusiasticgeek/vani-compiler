@@ -8487,3 +8487,26 @@ STAGING ENTRY:
 {
   "kind": "run-crash",
 
+
+---
+
+### Candidate: 20260815-152016-backend-divergence-55c0946cb5
+
+Repro: `tools/localfuzz/findings/20260815-152016-backend-divergence-55c0946cb5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260815-152016-backend-divergence-55c0946cb5/fix_attempt.md`
+
+```plaintext
+vani-compiler-localfuzz/examples/language/english/try_keyword.vani - backend-divergence
+
+Running with:
+- Backend: LLVM (LLVM backend, JIT via lli)
+- Backend: C (C backend, gcc)
+
+The generated source code exhibits a `backend-divergence` error when compiled using the LLVM and C backends. Specifically:
+
+**Backend: LLVM**
+```json
+{
+  "rc": 1,
+  "stdout": "",
+  "stderr": "cc failed while compiling '/tmp/vanic-candidate-510617-1786807215551095237.c' (left at this path for debugging):\n/tmp/vanic-candidate-510617-1786807215551095237.c: In function \u2018fn_traced\u2019:\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:58: error: redefinition of \u2018v_next\u2019\n  380 | int64_t v_next = (intent_check_i64_add(v_v, 7)); int64_t v_next = (intent_check_i64_add(v_v, 7));   fputs(\"  traced(): computed next=\", stdout);\n      |                                                          ^~~~~~\n/tmp/vanic-candidate-510617-1786807215551095237.c:380:9: note: previous definition of \u2018v_next\u2019 with type \u2018int64_t\u
