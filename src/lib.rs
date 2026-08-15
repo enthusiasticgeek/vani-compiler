@@ -63958,5 +63958,159 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    /// Cross-language "did you mean" syntax hints (parser.rs's
+    /// `common_syntax_mistake_hint` + the `for`-loop-specific
+    /// detectors inside `parse_for_stmt_inner`). Each case below
+    /// was confirmed, before this feature existed, to produce an
+    /// opaque message (bare "expected identifier" / "expected
+    /// statement" / a downstream checker "unknown variable") that
+    /// named no fix. Every assertion here checks the diagnostic
+    /// both names the correct vāṇी construct AND shows a concrete,
+    /// syntactically valid replacement snippet.
+    fn parse_only_errors(source: &str) -> Vec<String> {
+        let tokens = crate::lexer::lex(source).expect("lex ok");
+        let (_program, errs) = crate::parser::parse(tokens);
+        errs.into_iter().map(|d| d.message).collect()
+    }
+
+    #[test]
+    fn hint_c_style_for_loop() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { for (let i: i64 = 0; i < 10; i = i + 1) { print(i); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("C-style") && m.contains("for i from 0 to 10")),
+            "expected a C-style-for hint naming the range-form replacement, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_old_rust_style_range_for() {
+        let errs = parse_only_errors("fn main() -> i64 { for i in 0..10 { print(i); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("LOW..HIGH") && m.contains("for i from 0 to 10")),
+            "expected an old-range-dots hint naming the range-form replacement, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_pascal_style_for_equals() {
+        let errs = parse_only_errors("fn main() -> i64 { for i = 0 to 10 { print(i); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `for i from") && m.contains("needs `from`")),
+            "expected a missing-`from` hint for Pascal-style `for i = LO to HI`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_foreach_keyword() {
+        let errs =
+            parse_only_errors("fn main() -> i64 { let xs: Vec<i64> = vec(1); foreach x in xs { print(x); } return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `for`?") && m.contains("for x in xs")),
+            "expected a `foreach` hint naming `for`, got: {:?}",
+            errs
+        );
+    }
+
+    /// Regression guard for the bug this feature shipped with: a
+    /// zero-token-consumption `Err` returned while sitting exactly
+    /// on `TokenKind::Let` made `parse_block`'s error-recovery loop
+    /// (`sync_to_stmt`, which treats `Let` as a boundary token it
+    /// stops at WITHOUT consuming) spin forever, since every normal
+    /// dispatch branch consumes its leading keyword before any
+    /// error can occur but this pre-dispatch hint didn't. Fixed by
+    /// unconditionally bumping one token at the hint call site in
+    /// `parse_stmt`. This test completing at all (under the crate's
+    /// normal test timeout) is the actual regression guard; the
+    /// message assertion just confirms the hint fired.
+    #[test]
+    fn hint_let_mut_does_not_hang_and_names_the_fix() {
+        let errs = parse_only_errors("fn main() -> i64 { let mut x: i64 = 5; print(x); return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `let mut`") && m.contains("Drop `mut`")),
+            "expected a `let mut` hint naming plain `let` + reassignment, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_var_declaration() {
+        let errs = parse_only_errors("fn main() -> i64 { var x = 5; print(x); return 0; }");
+        assert!(
+            errs.iter().any(|m| m.contains("did you mean `let`?") && m.contains("not `var`")),
+            "expected a `var` hint naming `let`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_switch_case() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 1; switch (x) { case 1: print(1); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `switch`/`case`") && m.contains("match")),
+            "expected a `switch` hint naming `match`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_do_while_loop() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 0; do { print(x); } while (x < 5); return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("do { ... } while") && m.contains("while cond")),
+            "expected a `do-while` hint naming `while`, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hint_elif_keyword() {
+        let errs = parse_only_errors(
+            "fn main() -> i64 { let x: i64 = 1; if x == 1 { print(1); } elif x == 2 { print(2); } return 0; }",
+        );
+        assert!(
+            errs.iter().any(|m| m.contains("doesn't have `elif`") && m.contains("else if")),
+            "expected an `elif` hint naming `else if`, got: {:?}",
+            errs
+        );
+    }
+
+    /// The hints above are heuristic lookaheads gated on the full
+    /// mistake SHAPE (not just a bare keyword-like identifier) so
+    /// real vāṇी code using `var`/`switch`/`do` as ordinary
+    /// identifiers, or the legitimate `else if` chain, doesn't get
+    /// misdiagnosed. This test is the false-positive guard for that
+    /// gating.
+    #[test]
+    fn hints_do_not_misfire_on_legitimate_code() {
+        let errs = parse_only_errors(
+            r#"
+            fn main() -> i64 {
+                let x: i64 = 1;
+                if x == 1 {
+                    print(1);
+                } else if x == 2 {
+                    print(2);
+                }
+                let var: i64 = 5;
+                var = var + 1;
+                return 0;
+            }
+            "#,
+        );
+        assert!(
+            errs.is_empty(),
+            "legitimate `else if` + a real binding named `var` (reassigned, not redeclared) must not trigger any cross-language hint: {:?}",
+            errs
+        );
+    }
 }
 

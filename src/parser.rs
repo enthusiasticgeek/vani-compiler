@@ -2776,7 +2776,237 @@ impl Parser {
         Ok(ty)
     }
 
+    /// Bounded forward scan from token index `i`: `true` if a `{`
+    /// is reached before a statement-ending token, tracking
+    /// paren/bracket depth so an intervening call/index expression
+    /// (`switch f(x, y) { ... }`) doesn't trip the end-check early.
+    /// Shared by the cross-language "did you mean" detectors below,
+    /// which key off "this looks like a C-family block-taking
+    /// construct" (`switch EXPR { ... }`, `switch (EXPR) { ... }`).
+    /// Bounded to keep a non-matching prefix (e.g. a long
+    /// expression statement that happens to start with a
+    /// coincidentally-named identifier) cheap to reject.
+    fn brace_follows(&self, mut i: usize) -> bool {
+        let mut depth = 0i32;
+        let limit = i + 60;
+        while i < limit {
+            match self.tokens.get(i).map(|t| &t.kind) {
+                Some(TokenKind::LParen) | Some(TokenKind::LBracket) => depth += 1,
+                Some(TokenKind::RParen) | Some(TokenKind::RBracket) => depth -= 1,
+                Some(TokenKind::LBrace) if depth <= 0 => return true,
+                Some(TokenKind::Semicolon) | Some(TokenKind::RBrace) | Some(TokenKind::Eof)
+                    if depth <= 0 =>
+                {
+                    return false;
+                }
+                None => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// "Did you mean ...?" hints for statement-shaped syntax that's
+    /// valid in a mainstream language (C/C++/Java/JS/Python/Rust)
+    /// but not in vāṇी. Checked once at the very top of
+    /// `parse_stmt`, before the normal dispatch chain, so a
+    /// newcomer's (or an LLM's, see
+    /// `tutorials/src/advanced/11_llm_workflows.md`) very first
+    /// parse error on these shapes names the correct vāṇी syntax
+    /// directly instead of bottoming out in the opaque "expected
+    /// statement" -- or, worse, a downstream checker error like
+    /// "unknown variable 'console'" that points nowhere near the
+    /// real mistake. Every detector is a pure, zero-consumption
+    /// lookahead over `self.tokens`; a non-match falls through to
+    /// the existing dispatch with no side effects. The `for`-loop
+    /// family's own hints (C-style `for(...)`, old `LOW..HIGH`
+    /// ranges, Pascal-style `for i = LO to HI`) live inside
+    /// `parse_for_stmt_inner` instead, since by the time that's
+    /// running the `for` keyword has already committed the parse
+    /// to a loop -- no ambiguity risk there, unlike the bare
+    /// identifiers (`foreach`, `do`, `switch`, `var`) checked here.
+    fn common_syntax_mistake_hint(&self) -> Option<Diagnostic> {
+        self.hint_foreach()
+            .or_else(|| self.hint_do_while())
+            .or_else(|| self.hint_switch())
+            .or_else(|| self.hint_let_mut())
+            .or_else(|| self.hint_var_decl())
+            .or_else(|| self.hint_elif())
+    }
+
+    /// `elif cond { ... }` / `elseif cond { ... }` (Python, shell,
+    /// PHP one-word spelling) -- vāṇी spells this `else if`, two
+    /// keywords, same as C/Rust. Gated on `brace_follows` so a real
+    /// function named `elif`/`elseif` called as a statement isn't
+    /// misdiagnosed.
+    fn hint_elif(&self) -> Option<Diagnostic> {
+        let is_elif_spelling =
+            matches!(&self.current().kind, TokenKind::Ident(n) if n == "elif" || n == "elseif");
+        if !is_elif_spelling {
+            return None;
+        }
+        if !self.brace_follows(self.pos + 1) {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.current().span,
+            "vāṇी doesn't have `elif` -- use `else if`:\n\n\
+             \x20   } else if cond {\n\
+             \x20       ...\n\
+             \x20   }",
+        ))
+    }
+
+    /// `foreach IDENT in ...` (C#/PHP/JS) -- vāṇी has one loop
+    /// keyword for collection-iter, `for`. Requires the full
+    /// `foreach IDENT in` shape (not just the bare word) so a real
+    /// function or variable literally named `foreach` isn't
+    /// misdiagnosed on ordinary use (`foreach();`, `foreach = 1;`).
+    fn hint_foreach(&self) -> Option<Diagnostic> {
+        if !matches!(&self.current().kind, TokenKind::Ident(n) if n == "foreach") {
+            return None;
+        }
+        let mut i = self.pos + 1;
+        if matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::LParen)) {
+            i += 1;
+        }
+        let ident_next = matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Ident(_)));
+        let in_after = matches!(self.tokens.get(i + 1).map(|t| &t.kind), Some(TokenKind::In));
+        if !(ident_next && in_after) {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.current().span,
+            "did you mean `for`? vāṇी iterates collections with \
+             `for VAR in COLLECTION { ... }` -- there's no separate \
+             `foreach` keyword.\n\n\
+             \x20   for x in xs { ... }",
+        ))
+    }
+
+    /// `do { ... } while (cond);` -- vāṇी has no do-while; only
+    /// `while`. Requires `do` immediately followed by `{` (no
+    /// bounded scan needed -- the shape is unambiguous at that
+    /// point, and "do" as a real identifier immediately followed by
+    /// a block is not a pattern any other vāṇी construct produces).
+    fn hint_do_while(&self) -> Option<Diagnostic> {
+        if !matches!(&self.current().kind, TokenKind::Ident(n) if n == "do") {
+            return None;
+        }
+        if !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::LBrace)) {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.current().span,
+            "vāṇी doesn't have `do { ... } while (cond);`. Run the body \
+             once before the loop, then use a regular `while`:\n\n\
+             \x20   <body once>\n\
+             \x20   while cond {\n\
+             \x20       <body>\n\
+             \x20   }",
+        ))
+    }
+
+    /// `switch (EXPR) { case ... }` / `switch EXPR { case ... }`
+    /// (C/C++/Java/JS) -- vāṇी has `match` instead, with `then`
+    /// arms rather than `case`/`break`. Gated on a `{` actually
+    /// following (via `brace_follows`) so a real function named
+    /// `switch` called as a statement (`switch(x);`) isn't
+    /// misdiagnosed.
+    fn hint_switch(&self) -> Option<Diagnostic> {
+        if !matches!(&self.current().kind, TokenKind::Ident(n) if n == "switch") {
+            return None;
+        }
+        if !self.brace_follows(self.pos + 1) {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.current().span,
+            "vāṇी doesn't have `switch`/`case` -- use `match`:\n\n\
+             \x20   match x {\n\
+             \x20       1 then ...,\n\
+             \x20       2 then ...,\n\
+             \x20       _ then ...,\n\
+             \x20   }",
+        ))
+    }
+
+    /// `let mut IDENT ...` (Rust) -- every `let` binding in vāṇी
+    /// can already be reassigned in the same scope; there's no
+    /// separate mutable-binding syntax to opt into (L5 of
+    /// `docs/v1_limitations.md`).
+    fn hint_let_mut(&self) -> Option<Diagnostic> {
+        if !matches!(self.current().kind, TokenKind::Let) {
+            return None;
+        }
+        let next_is_mut = matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Mut)
+        );
+        if !next_is_mut {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.tokens[self.pos + 1].span,
+            "vāṇी doesn't have `let mut` -- every `let` binding can \
+             already be reassigned in the same scope, so there's no \
+             separate mutable form. Drop `mut`:\n\n\
+             \x20   let x: i64 = 0;\n\
+             \x20   x = x + 1;   // reassignment just works",
+        ))
+    }
+
+    /// `var IDENT = ...` / `var IDENT: T = ...` (JS/Java/C#) --
+    /// vāṇी declares bindings with `let`. Requires the full
+    /// declaration shape (`var` then an identifier then `=` or
+    /// `:`) so ordinary use of a real variable literally named
+    /// `var` (reassignment `var = 5;`, a call `var(x);`) isn't
+    /// misdiagnosed. (`const` is intentionally NOT covered here --
+    /// unlike `var`, `const` is real vāṇी syntax for module-level
+    /// constants, lexed as its own keyword; see `parse_stmt`'s
+    /// `TokenKind::Const` handling.)
+    fn hint_var_decl(&self) -> Option<Diagnostic> {
+        if !matches!(&self.current().kind, TokenKind::Ident(n) if n == "var") {
+            return None;
+        }
+        if !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Ident(_))) {
+            return None;
+        }
+        if !matches!(
+            self.tokens.get(self.pos + 2).map(|t| &t.kind),
+            Some(TokenKind::Equal) | Some(TokenKind::Colon)
+        ) {
+            return None;
+        }
+        Some(Diagnostic::new(
+            self.current().span,
+            "did you mean `let`? vāṇी declares bindings with `let`, \
+             not `var`:\n\n\
+             \x20   let x: i64 = 0;",
+        ))
+    }
+
     fn parse_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        if let Some(hint) = self.common_syntax_mistake_hint() {
+            // Every `hint_*` detector is a zero-consumption
+            // lookahead (by design -- see `common_syntax_mistake_
+            // hint`'s doc comment). That's a problem specifically
+            // for `hint_let_mut`: it fires while sitting exactly on
+            // `TokenKind::Let`, which is one of `sync_to_stmt`'s own
+            // recovery boundary tokens (it stops there WITHOUT
+            // consuming, expecting a normal statement dispatch to
+            // consume it next). Left alone, `parse_block`'s error-
+            // recovery loop would call `parse_stmt` again at the
+            // identical position forever. Every normal dispatch
+            // branch below consumes its leading keyword before any
+            // error can occur, so this is only a risk for these
+            // pre-dispatch hints -- bump one token here,
+            // unconditionally, so `sync_to_stmt` always makes
+            // progress no matter which detector matched.
+            self.bump();
+            return Err(hint);
+        }
         if self.check(|kind| matches!(kind, TokenKind::Let)) {
             self.parse_let_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Return)) {
@@ -4031,6 +4261,33 @@ impl Parser {
             }
         }
 
+        // Cross-language "did you mean" hint: C-style
+        // `for (init; cond; incr) { ... }` has no equivalent in
+        // vāṇी -- without this check the parser would walk into
+        // the `(` and fail deep inside on an unrelated "expected
+        // identifier"/"expected statement" with no hint that the
+        // whole SHAPE is the problem, not a token. Handled here
+        // (rather than as a `parse_stmt`-level lookahead) so it
+        // also covers `parallel for (...)` and the `for await`
+        // dispatch above for free.
+        if matches!(self.current().kind, TokenKind::LParen) {
+            return Err(Diagnostic::new(
+                start_tok.span.merge(self.current().span),
+                "vāṇी doesn't have C-style `for (init; cond; incr) { ... }` \
+                 loops. Did you mean a range-form `for`?\n\n\
+                 \x20   for i from 0 to 10 {\n\
+                 \x20       ...\n\
+                 \x20   }\n\n\
+                 For a condition that isn't a simple counted range, use \
+                 `while` instead:\n\n\
+                 \x20   let i: i64 = 0;\n\
+                 \x20   while i < 10 {\n\
+                 \x20       ...\n\
+                 \x20       i = i + 1;\n\
+                 \x20   }",
+            ));
+        }
+
         let var_tok = self.expect_ident()?;
         let var = ident_text(var_tok);
         // The two `for` shapes are now disambiguated by the
@@ -4050,6 +4307,50 @@ impl Parser {
                     span,
                     "use `for VAR in ref XS { --¦ }` to iterate by borrow (T0.0)",
                 ));
+            }
+            // Cross-language "did you mean" hint: the old
+            // `for i in LO..HI` range shape (Rust-style, and how
+            // vāṇी itself used to spell ranges before T0.0) is
+            // gone -- `in` now always means collection-iter, so
+            // without this check `0` would fail `expect_ident()`
+            // just below with the generic "expected identifier",
+            // naming no fix. Detected by scanning ahead (bounded
+            // by the loop body's `{`) for a `..` at bracket depth
+            // 0.
+            if !matches!(self.current().kind, TokenKind::Ident(_)) {
+                let mut i = self.pos;
+                let mut depth = 0i32;
+                let mut found_dotdot = false;
+                while let Some(tok) = self.tokens.get(i) {
+                    match &tok.kind {
+                        TokenKind::LParen | TokenKind::LBracket => depth += 1,
+                        TokenKind::RParen | TokenKind::RBracket => depth -= 1,
+                        TokenKind::DotDot if depth <= 0 => {
+                            found_dotdot = true;
+                            break;
+                        }
+                        TokenKind::LBrace | TokenKind::Semicolon | TokenKind::Eof
+                            if depth <= 0 =>
+                        {
+                            break;
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                if found_dotdot {
+                    return Err(Diagnostic::new(
+                        self.current().span,
+                        format!(
+                            "vāṇी doesn't use `LOW..HIGH` ranges in `for` \
+                             loops -- that Rust-style shape was replaced by \
+                             the range-form `for`. Did you mean:\n\n\
+                             \x20   for {var} from LOW to HIGH {{ ... }}\n\n\
+                             Example: `for {var} from 0 to 10 {{ ... }}`",
+                            var = var
+                        ),
+                    ));
+                }
             }
             let consumes = !self
                 .match_token(|k| matches!(k, TokenKind::Ref))
@@ -4088,6 +4389,46 @@ impl Parser {
                 body,
                 span: start_tok.span.merge(end_span),
             });
+        }
+        // Cross-language "did you mean" hint: Pascal-style
+        // `for i = LO to HI` (and the plain "forgot `from`" shape
+        // `for i LO to HI`) both land here with `from`/`in`
+        // missing. Scan ahead (bounded by the loop body's `{`) for
+        // a `to`/`downto` at depth 0 -- if one shows up, this is
+        // almost certainly a range-form for that's missing `from`,
+        // so say so directly instead of the generic "expected
+        // 'from' --¦ or 'in' --¦".
+        if !matches!(self.current().kind, TokenKind::From | TokenKind::In) {
+            let mut i = self.pos;
+            let mut depth = 0i32;
+            let mut found_to = false;
+            while let Some(tok) = self.tokens.get(i) {
+                match &tok.kind {
+                    TokenKind::LParen | TokenKind::LBracket => depth += 1,
+                    TokenKind::RParen | TokenKind::RBracket => depth -= 1,
+                    TokenKind::To | TokenKind::DownTo if depth <= 0 => {
+                        found_to = true;
+                        break;
+                    }
+                    TokenKind::LBrace | TokenKind::Semicolon | TokenKind::Eof if depth <= 0 => {
+                        break;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if found_to {
+                return Err(Diagnostic::new(
+                    self.current().span,
+                    format!(
+                        "did you mean `for {var} from ...`? the range-form \
+                         `for` needs `from` before the starting value \
+                         (there's no `for {var} = LOW to HIGH` shape).\n\n\
+                         \x20   for {var} from 0 to 10 {{ ... }}",
+                        var = var
+                    ),
+                ));
+            }
         }
         // Range form: `for i from LO to HI invariant ...; { body }`.
         // The lower bound expression follows `from`, the upper

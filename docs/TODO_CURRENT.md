@@ -14619,3 +14619,70 @@ corpus-based tooling here turns out insufficient.
 #191 is now DONE. #190 (final documentation/tutorial consistency
 sweep) is now fully unblocked -- all of #185/#187/#189/#191 are
 complete.
+
+## Cross-language "did you mean" syntax hints (2026-08-15)
+
+User request, prompted directly by probing several common
+cross-language syntax mistakes against `vanic check` and finding
+every one bottomed out in an unhelpful message: a bare "expected
+identifier" / "expected statement" naming no fix, or worse, a
+downstream checker error ("unknown variable 'x'") that points nowhere
+near the real mistake (`let mut x` fails inside `let`'s ident parse,
+then the checker reports `x` itself as unknown two lines later).
+
+Added a parser-level "did you mean" hint layer covering the most
+common shapes from mainstream languages that don't exist in vāṇी:
+
+- **`for`-loop family** (inside `parse_for_stmt_inner`, since by
+  that point the `for` keyword has already committed the parse --
+  no ambiguity risk): C-style `for (init; cond; incr) { ... }`; the
+  old Rust-style `for i in LOW..HIGH` range shape (removed by T0.0,
+  still the single most likely mistake for anyone who's seen an
+  older vāṇी snippet or Rust); Pascal-style `for i = LO to HI`
+  and the bare "forgot `from`" shape `for i LO to HI` (both detected
+  by a bounded forward scan for a `to`/`downto` token before the
+  loop body's `{`).
+- **Statement-level** (`common_syntax_mistake_hint`, checked once at
+  the very top of `parse_stmt`, before the normal dispatch chain):
+  `foreach IDENT in ...`; `do { ... } while (cond);`;
+  `switch (EXPR) { case ... }` / `switch EXPR { ... }`;
+  `let mut IDENT`; `var IDENT = ...` (JS/Java/C#, NOT `const` --
+  that's real vāṇी syntax for module-level constants, a distinct
+  keyword token, so it was deliberately left alone); `elif` /
+  `elseif`.
+
+Every detector is a pure, zero-consumption lookahead, gated on the
+full mistake SHAPE (not a bare keyword-like identifier) so a real
+binding or function literally named `var`/`switch`/`do`/`foreach` in
+ordinary use isn't misdiagnosed -- confirmed by a dedicated
+`hints_do_not_misfire_on_legitimate_code` test using a real `var`
+binding, reassigned (not redeclared), plus a legitimate `else if`
+chain.
+
+**Real bug found and fixed while building this**: `hint_let_mut`
+fires while sitting exactly on `TokenKind::Let` -- which is one of
+`parse_block`'s own `sync_to_stmt` error-recovery boundary tokens.
+`sync_to_stmt` stops there WITHOUT consuming (it expects a normal
+statement dispatch to consume `Let` next), so a zero-consumption
+error at that exact position made `parse_block`'s recovery loop call
+`parse_stmt` again at the identical spot forever -- confirmed via
+`timeout 10 vanic check let_mut.vani` hanging (exit 124). Every
+pre-existing dispatch branch consumes its leading keyword before any
+error can occur, so this trap never fired before this feature
+existed. Fixed by unconditionally bumping one token at the single
+`common_syntax_mistake_hint` call site in `parse_stmt`, guaranteeing
+forward progress regardless of which detector matched -- root-caused
+and fixed the same session, not worked around.
+
+**Verification**: 10 new `src/lib.rs` unit tests (one per hint shape
++ the false-positive guard; `hint_let_mut_does_not_hang_and_names_
+the_fix` doubles as the regression guard for the hang bug -- the test
+completing at all under the crate's normal test timeout is the real
+assertion). Full corpus swept for both (a) any `vanic check` timeout
+across all 1056 example files (none -- confirms no other detector has
+the same trap) and (b) any failing file whose message contains one of
+the new hint strings (none -- confirms zero false positives against
+real code, including the 40+ non-English dialect trees where
+identifiers like "do"/"var" could plausibly appear as real names).
+Full `cargo test --release --workspace` clean: 2989 lib (2979 + 10
+new) / 268 e2e, 0 failed.
