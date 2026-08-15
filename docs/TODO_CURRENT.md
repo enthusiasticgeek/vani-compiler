@@ -14895,3 +14895,89 @@ both backends correctly hang on forever, not a backend defect); all 3
 binary (re-ran directly, all exit clean) -- stale, predating the
 digest's own 07:03 UTC refresh boundary, already fixed on main before
 today. Neither cluster needed a fix.
+
+## Cache precompiled sort_runtime.c / parallel_runtime.c objects (2026-08-15, DONE)
+
+User question: "parallel vani build possible for faster compilation?
+e.g. j flag for make." Measured a real single-file `vanic build`
+phase by phase before answering rather than guessing: `vanic check`
+0.19s, LLVM emit 0.24s, `gcc -O3 -c` on `sort_runtime.c` alone
+**0.94s (55% of the total 1.7s build)**, `gcc -O2 -c` on
+`parallel_runtime.c` 0.07s, `opt -O3` 0.17s, `llc` 0.16s. A `-j`-style
+flag doesn't map cleanly onto vāṇी's architecture -- the whole
+program flattens into one `Program`/one LLVM module
+(`flatten_modules_in_program`), and there's no multi-package
+workspace build yet (kosh is still a design doc, no CLI command).
+But `sort_runtime.c`/`parallel_runtime.c` are static, unchanging C
+sources embedded via `include_str!` -- recompiling them from scratch
+on literally every single build, even for programs that never call
+`sort()`, is pure waste with nothing to do with parallelism at all.
+
+User's explicit design directive before implementing: **"correctness
+is most important than speed of compilation. design such that
+staleness is auto detected and fast compilation only applied bearing
+that condition."** Design followed accordingly -- new
+`compile_runtime_helper_cached` (`src/main.rs`) wraps both call
+sites:
+
+- **Cache key** = a hash over the exact source text, the resolved
+  `cc` path, that compiler's OWN `--version` output (so a system
+  compiler upgrade invalidates old entries instead of silently
+  reusing objects from a possibly ABI-incompatible toolchain), the
+  exact flags passed (host vs. cross-target already differ here, so
+  cross builds get their own cache entries for free), and a
+  best-effort **host identity** (`$HOSTNAME`/`$COMPUTERNAME`/
+  `hostname`) -- added specifically because `-march=native` bakes in
+  the HOST CPU's instruction set at compile time, so a cached object
+  is only valid on the machine that produced it; without this, a
+  shared cache directory (NFS home, copied `~/.cache`) could silently
+  reuse a `-march=native` object built for a different CPU and
+  `SIGILL` at runtime.
+- **Every cache HIT is double-checked** against a plaintext `.key`
+  sidecar holding those same inputs verbatim, byte-for-byte, before
+  the cached `.o` is trusted -- defense against a hash collision,
+  astronomically unlikely for this non-adversarial input space but
+  cheap enough to rule out entirely rather than hope against.
+- **Fails OPEN, never closed**: no cache directory available (`$HOME`
+  unset), an unwritable cache dir, a racing writer, a corrupt/
+  mismatched entry -- every one of these falls back to a normal,
+  correct compile rather than erroring the build or (worse) silently
+  trusting something unverified.
+- **Concurrency-safe without a lock file**: two `vanic build`
+  invocations racing on the identical cache key both compute
+  byte-identical objects (same deterministic compile of the same
+  inputs) and install via write-to-temp-then-`rename` (atomic on the
+  same filesystem) -- whichever rename lands last still leaves a
+  fully valid file, never a torn one.
+- Cache location: `$XDG_CACHE_HOME` / `$HOME/.cache` / `%LOCALAPPDATA%`
+  (in that priority order) under `vanic/runtime-objs/`.
+
+**Verification**: measured directly, not assumed -- cold build
+(empty cache) 1.46-1.61s, warm build (cache hit) 0.50s, a **~66%
+reduction**, larger than the naive 55% estimate since
+`parallel_runtime.c` is cached too. Confirmed correctness explicitly
+at each failure mode: (a) cold-vs-warm program OUTPUT is
+byte-identical (binaries themselves differ -- expected, embedded
+build-path/timestamp metadata -- but that's irrelevant to
+correctness); (b) manually corrupted a cached `.key` sidecar and
+confirmed the next build correctly detected the mismatch, fell back
+to a full real recompile (same 1.5s+ wall time as a cold build, not
+the cache-hit 0.5s), and repaired the cache entry -- the staleness
+check the user asked for, proven to actually fire; (c) ran with
+`HOME`/`XDG_CACHE_HOME`/`LOCALAPPDATA` all unset and confirmed the
+build still succeeds with correct output (fail-open path); (d)
+`sort()`-calling and `parallel for`-using example programs both
+produce identical output across a cold-then-warm build pair, so the
+cache doesn't corrupt the actual runtime helper functionality it's
+caching, not just the build wrapper. 4 new unit tests in
+`src/main.rs` (`compile_runtime_helper_cached` now takes its cache
+directory as an explicit `Option<&Path>` parameter specifically so
+these tests don't need to mutate process-global env vars under
+`cargo test`'s parallel execution): cache-hit avoids a real compile
+(proven by pointing the scratch `.c` path at a nonexistent directory
+on the second call and confirming it still succeeds), different
+flags produce distinct cache entries (never collide), a mismatched
+sidecar is never trusted, and `cache_dir: None` still compiles
+correctly every time. Full `cargo test --release --workspace` clean:
+2989 lib / 14 `vanic`-bin unit tests (10 pre-existing + 4 new) / 268
+e2e, 0 failed.

@@ -1132,6 +1132,7 @@ fn emit_llvm_via_ssa(ir: &TypedProgram) -> String {
 }
 use std::env;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -4440,41 +4441,33 @@ fn build_program_llvm(
     // compile-time string so the binary remains self-contained.
     // Skip for bare-metal targets (no libc / stdint.h) — those binaries will
     // get a linker error if sort() is called, which is the correct signal.
+    let helper_cache_dir = runtime_obj_cache_dir();
     let sort_compiled = if !is_bare_metal_triple(target.unwrap_or("")) {
-        let sort_c_src = include_str!("sort_runtime.c");
-        let write_ok = fs::write(&sort_c_path, sort_c_src).is_ok();
-        if write_ok {
-            // Use the cross compiler for cross targets; host CC otherwise.
-            let cc_for_sort = if let Some(triple) = target {
-                cross_cc_for_triple(triple)
-            } else {
-                env::var("CC").unwrap_or_else(|_| "gcc".to_string())
-            };
-            // -march=native only makes sense for host builds.
-            let mut sort_cmd = Command::new(&cc_for_sort);
-            sort_cmd.args(["-O3", "-c"]);
-            if target.is_none() {
-                sort_cmd.arg("-march=native");
-            }
-            let sort_cc_out = sort_cmd
-                .arg(&sort_c_path)
-                .arg("-o").arg(&sort_obj_path)
-                .output();
-            let _ = fs::remove_file(&sort_c_path);
-            match sort_cc_out {
-                Ok(o) if o.status.success() => true,
-                Ok(o) => {
-                    eprintln!(
-                        "warning: sort runtime compilation failed (sort may be unresolved):\n{}",
-                        String::from_utf8_lossy(&o.stderr).trim_end()
-                    );
-                    false
-                }
-                Err(_) => false,
-            }
+        // Use the cross compiler for cross targets; host CC otherwise.
+        let cc_for_sort = if let Some(triple) = target {
+            cross_cc_for_triple(triple)
         } else {
-            false
+            env::var("CC").unwrap_or_else(|_| "gcc".to_string())
+        };
+        // -march=native only makes sense for host builds -- and
+        // since it's part of `extra_args` below, host vs. cross
+        // builds naturally get distinct cache entries with no
+        // special-casing needed in compile_runtime_helper_cached.
+        let mut sort_args: Vec<&str> = vec!["-O3", "-c"];
+        if target.is_none() {
+            sort_args.push("-march=native");
         }
+        compile_runtime_helper_cached(
+            "sort_runtime",
+            "sort",
+            "sort",
+            include_str!("sort_runtime.c"),
+            &cc_for_sort,
+            &sort_args,
+            &sort_c_path,
+            &sort_obj_path,
+            helper_cache_dir.as_deref(),
+        )
     } else {
         false
     };
@@ -4484,30 +4477,18 @@ fn build_program_llvm(
     // the definition lives in src/parallel_runtime.c.
     // Skip for bare-metal (no pthreads) and cross (non-trivial path).
     let par_compiled = if !is_bare_metal_triple(target.unwrap_or("")) && target.is_none() {
-        let par_c_src = include_str!("parallel_runtime.c");
-        let write_ok = fs::write(&par_c_path, par_c_src).is_ok();
-        if write_ok {
-            let cc_for_par = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
-            let par_cc_out = Command::new(&cc_for_par)
-                .args(["-O2", "-c", "-march=native"])
-                .arg(&par_c_path)
-                .arg("-o").arg(&par_obj_path)
-                .output();
-            let _ = fs::remove_file(&par_c_path);
-            match par_cc_out {
-                Ok(o) if o.status.success() => true,
-                Ok(o) => {
-                    eprintln!(
-                        "warning: parallel runtime compilation failed (parallel-for may be unresolved):\n{}",
-                        String::from_utf8_lossy(&o.stderr).trim_end()
-                    );
-                    false
-                }
-                Err(_) => false,
-            }
-        } else {
-            false
-        }
+        let cc_for_par = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+        compile_runtime_helper_cached(
+            "parallel_runtime",
+            "parallel",
+            "parallel-for",
+            include_str!("parallel_runtime.c"),
+            &cc_for_par,
+            &["-O2", "-c", "-march=native"],
+            &par_c_path,
+            &par_obj_path,
+            helper_cache_dir.as_deref(),
+        )
     } else {
         false
     };
@@ -4751,6 +4732,201 @@ fn apply_embedded_cc_hardening(cmd: &mut Command) {
     if env::var("INTENT_TARGET_MTE").ok().as_deref() == Some("1") {
         cmd.arg("-march=armv8.5-a+memtag");
     }
+}
+
+/// Cache directory for precompiled runtime-helper objects
+/// (`sort_runtime.c`, `parallel_runtime.c`). These are static,
+/// unchanging C sources embedded in the vanic binary itself
+/// (`include_str!`) -- recompiling them from scratch on every
+/// single `vanic build` is pure waste: measured directly, `gcc -O3`
+/// on `sort_runtime.c` alone takes ~0.94s, roughly 55% of a typical
+/// single-file build's ~1.7s wall time, even for programs that never
+/// call `sort()`.
+///
+/// Correctness comes first here, per explicit instruction: this is
+/// a cache, never a shortcut that can silently reuse a stale or
+/// wrong object. `$XDG_CACHE_HOME` / `$HOME/.cache` / `%LOCALAPPDATA%`
+/// (in that order) is where the cache lives; if none of those
+/// resolve (e.g. `$HOME` unset in a stripped-down container), caching
+/// is simply unavailable and every caller falls back to compiling
+/// fresh every time -- fail OPEN to "always correct, possibly slow",
+/// never fail closed to "fast but maybe wrong."
+fn runtime_obj_cache_dir() -> Option<PathBuf> {
+    if let Ok(xdg) = env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("vanic").join("runtime-objs"));
+        }
+    }
+    if let Ok(home) = env::var("HOME") {
+        if !home.is_empty() {
+            return Some(PathBuf::from(home).join(".cache").join("vanic").join("runtime-objs"));
+        }
+    }
+    // Windows fallback -- $HOME isn't reliably set there.
+    if let Ok(local) = env::var("LOCALAPPDATA") {
+        if !local.is_empty() {
+            return Some(PathBuf::from(local).join("vanic").join("runtime-objs"));
+        }
+    }
+    None
+}
+
+/// Compile a static runtime-helper C source (`sort_runtime.c` /
+/// `parallel_runtime.c`) into `out_obj_path`, transparently reusing
+/// a cached object from a prior build when one exists for the exact
+/// same (source content, compiler, compiler version, flags) tuple --
+/// see `runtime_obj_cache_dir`'s doc comment for the correctness
+/// contract this staleness check is built on.
+///
+/// The cache key is a hash over ALL of: the source text itself, the
+/// resolved `cc` path, that compiler's own `--version` output (so a
+/// system compiler upgrade invalidates old entries instead of
+/// silently reusing objects from a different, possibly ABI-
+/// incompatible toolchain), and the exact flags passed (which already
+/// differ by host-vs-cross-target, so cross builds naturally get
+/// their own cache entries with zero extra logic here). Every cache
+/// HIT is double-checked against a plaintext `.key` sidecar holding
+/// those same inputs verbatim, byte-for-byte, before the cached `.o`
+/// is trusted -- belt-and-suspenders against a hash collision, which
+/// is astronomically unlikely for this non-adversarial, low-
+/// cardinality input space but cheap enough to rule out entirely
+/// rather than merely hope against.
+///
+/// Any failure touching the cache itself (unwritable directory, a
+/// racing writer, a partial file) falls back to a normal, correct
+/// compile rather than erroring the build -- the cache is purely an
+/// optimization, never a dependency. Concurrent `vanic build`
+/// invocations computing the identical cache key can't corrupt it:
+/// each writer independently produces a byte-identical object (same
+/// deterministic compile of the same inputs) and installs it via
+/// write-to-temp-then-`rename` (atomic on the same filesystem), so
+/// whichever writer's rename lands last still leaves a fully valid
+/// file, never a torn one.
+///
+/// `label` names this helper for the on-failure warning message
+/// (matching the pre-caching wording exactly: "sort" /
+/// "parallel-for"); `src_c_path` is a scratch path to write the
+/// source into for the `cc` invocation (removed afterward). Returns
+/// whether a usable object now exists at `out_obj_path`.
+/// A best-effort machine identifier folded into the runtime-helper
+/// cache key. Exists specifically to defend `-march=native` builds:
+/// that flag bakes in the HOST CPU's instruction set at compile
+/// time, so a cached object is only valid on the machine that
+/// produced it -- if the cache directory were ever shared across
+/// machines with different CPUs (a shared-home-dir fleet, a copied
+/// `~/.cache`), reusing another machine's `-march=native` object
+/// could crash with `SIGILL` on an unsupported instruction. Neither
+/// `cc --version` nor the flags string capture that risk (two
+/// different CPUs can easily run the identical compiler build). Not
+/// a precise CPU fingerprint -- just enough to make "different
+/// machine" reliably produce "different cache key" so a genuinely
+/// wrong reuse can't happen; a false cache MISS here only costs one
+/// extra compile, never correctness.
+fn host_identity() -> String {
+    if let Ok(h) = env::var("HOSTNAME") {
+        if !h.is_empty() {
+            return h;
+        }
+    }
+    if let Ok(h) = env::var("COMPUTERNAME") {
+        if !h.is_empty() {
+            return h;
+        }
+    }
+    if let Ok(out) = Command::new("hostname").output() {
+        let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !h.is_empty() {
+            return h;
+        }
+    }
+    // No identity available -- degrades to "no cross-machine
+    // protection" rather than failing; the cache still stays
+    // correct on a single machine, which is the common case this
+    // exists for.
+    String::new()
+}
+
+fn compile_runtime_helper_cached(
+    name: &str,
+    label: &str,
+    unresolved_desc: &str,
+    source: &str,
+    cc: &str,
+    extra_args: &[&str],
+    src_c_path: &Path,
+    out_obj_path: &Path,
+    cache_dir: Option<&Path>,
+) -> bool {
+    let cc_version = Command::new(cc)
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let key_plain = format!(
+        "name={name}\ncc={cc}\ncc_version={cc_version}\nflags={}\nhost={}\nsource_len={}\nsource={source}\n",
+        extra_args.join(" "),
+        host_identity(),
+        source.len(),
+    );
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key_plain.hash(&mut hasher);
+    let key_hash = hasher.finish();
+
+    if let Some(dir) = cache_dir {
+        let obj_cache = dir.join(format!("{name}-{key_hash:016x}.o"));
+        let key_cache = dir.join(format!("{name}-{key_hash:016x}.key"));
+        if obj_cache.is_file() {
+            if let Ok(cached_key) = fs::read_to_string(&key_cache) {
+                if cached_key == key_plain && fs::copy(&obj_cache, out_obj_path).is_ok() {
+                    return true;
+                }
+            }
+            // Sidecar missing/mismatched, or the copy failed --
+            // treat as a miss and fall through to a real compile
+            // rather than trust an unverified object.
+        }
+    }
+
+    let write_ok = fs::write(src_c_path, source).is_ok();
+    if !write_ok {
+        return false;
+    }
+    let cc_out = Command::new(cc)
+        .args(extra_args)
+        .arg(src_c_path)
+        .arg("-o")
+        .arg(out_obj_path)
+        .output();
+    let _ = fs::remove_file(src_c_path);
+    let ok = match cc_out {
+        Ok(o) if o.status.success() => true,
+        Ok(o) => {
+            eprintln!(
+                "warning: {label} runtime compilation failed ({unresolved_desc} may be unresolved):\n{}",
+                String::from_utf8_lossy(&o.stderr).trim_end()
+            );
+            false
+        }
+        Err(_) => false,
+    };
+    if ok {
+        if let Some(dir) = &cache_dir {
+            if fs::create_dir_all(dir).is_ok() {
+                let pid = std::process::id();
+                let obj_cache = dir.join(format!("{name}-{key_hash:016x}.o"));
+                let key_cache = dir.join(format!("{name}-{key_hash:016x}.key"));
+                let tmp_o = dir.join(format!("{name}-{key_hash:016x}.o.tmp-{pid}"));
+                if fs::copy(out_obj_path, &tmp_o).is_ok() {
+                    let _ = fs::rename(&tmp_o, &obj_cache);
+                }
+                let tmp_key = dir.join(format!("{name}-{key_hash:016x}.key.tmp-{pid}"));
+                if fs::write(&tmp_key, &key_plain).is_ok() {
+                    let _ = fs::rename(&tmp_key, &key_cache);
+                }
+            }
+        }
+    }
+    ok
 }
 
 /// Returns true for target triples that target bare-metal / no-OS environments.
@@ -5064,6 +5240,152 @@ mod tests {
             cross_cc_for_triple("riscv32-unknown-none-elf"),
             "riscv32-none-elf-gcc"
         );
+    }
+
+    /// Unique per-test scratch dir under the system temp dir --
+    /// avoids cross-test interference under `cargo test`'s default
+    /// parallel execution without needing any env-var mutation
+    /// (`compile_runtime_helper_cached` takes its cache dir as an
+    /// explicit parameter for exactly this reason).
+    fn fresh_test_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "vanic-runtime-cache-test-{}-{}-{}",
+            label,
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    const TINY_C_SRC: &str = "int vanic_cache_test_fn(void) { return 0; }\n";
+
+    #[test]
+    fn runtime_helper_cache_hit_avoids_recompiling() {
+        let scratch = fresh_test_dir("hit");
+        let cache_dir = scratch.join("cache");
+        let out1 = scratch.join("out1.o");
+        let src1 = scratch.join("src1.c");
+        let ok1 = compile_runtime_helper_cached(
+            "t", "t", "t", TINY_C_SRC, "gcc", &["-O0", "-c"], &src1, &out1,
+            Some(&cache_dir),
+        );
+        assert!(ok1, "first (cold) compile should succeed");
+        let cached_bytes = fs::read(&out1).expect("out1 written");
+        assert!(!cached_bytes.is_empty(), "compiled object must be non-empty");
+
+        // Second call: identical inputs, but `src_c_path` now points
+        // inside a directory that doesn't exist. If this falls
+        // through to a real compile it MUST fail (fs::write to a
+        // missing directory errors) -- a `true` result here can only
+        // mean the cache-hit path was taken and the real compiler
+        // was never invoked.
+        let out2 = scratch.join("out2.o");
+        let broken_src2 = scratch.join("no-such-dir").join("src2.c");
+        let ok2 = compile_runtime_helper_cached(
+            "t", "t", "t", TINY_C_SRC, "gcc", &["-O0", "-c"], &broken_src2, &out2,
+            Some(&cache_dir),
+        );
+        assert!(
+            ok2,
+            "second call must succeed via cache hit even though its \
+             src_c_path is unwritable -- a real compile attempt here \
+             would have failed"
+        );
+        assert_eq!(
+            fs::read(&out2).expect("out2 written"),
+            cached_bytes,
+            "cache-hit object must be byte-identical to the original compile"
+        );
+
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn runtime_helper_cache_key_differs_by_flags() {
+        let scratch = fresh_test_dir("flags");
+        let cache_dir = scratch.join("cache");
+        for (i, opt) in ["-O0", "-O2"].iter().enumerate() {
+            let ok = compile_runtime_helper_cached(
+                "t",
+                "t",
+                "t",
+                TINY_C_SRC,
+                "gcc",
+                &[opt, "-c"],
+                &scratch.join(format!("src{i}.c")),
+                &scratch.join(format!("out{i}.o")),
+                Some(&cache_dir),
+            );
+            assert!(ok, "compile with {opt} should succeed");
+        }
+        let cached_objs: Vec<_> = fs::read_dir(&cache_dir)
+            .expect("cache dir exists")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "o").unwrap_or(false))
+            .collect();
+        assert_eq!(
+            cached_objs.len(),
+            2,
+            "different flags must produce two DISTINCT cache entries, \
+             never collide/reuse each other's object: {:?}",
+            cached_objs.iter().map(|e| e.path()).collect::<Vec<_>>()
+        );
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn runtime_helper_cache_rejects_mismatched_sidecar() {
+        let scratch = fresh_test_dir("mismatch");
+        let cache_dir = scratch.join("cache");
+        let out1 = scratch.join("out1.o");
+        let src1 = scratch.join("src1.c");
+        assert!(compile_runtime_helper_cached(
+            "t", "t", "t", TINY_C_SRC, "gcc", &["-O0", "-c"], &src1, &out1,
+            Some(&cache_dir),
+        ));
+        // Corrupt every .key sidecar in the cache dir so it can never
+        // match a freshly-computed key_plain again.
+        for entry in fs::read_dir(&cache_dir).expect("cache dir exists") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().map(|x| x == "key").unwrap_or(false) {
+                fs::write(&path, "corrupted-does-not-match-anything\n")
+                    .expect("overwrite sidecar");
+            }
+        }
+        // Same cache dir, same key-relevant inputs, but src_c_path
+        // now points at an unwritable location -- if the corrupted
+        // sidecar is (correctly) NOT trusted, this call falls through
+        // to a real compile attempt, which fails, so the overall
+        // result must be `false`.
+        let out2 = scratch.join("out2.o");
+        let broken_src2 = scratch.join("no-such-dir").join("src2.c");
+        let ok2 = compile_runtime_helper_cached(
+            "t", "t", "t", TINY_C_SRC, "gcc", &["-O0", "-c"], &broken_src2, &out2,
+            Some(&cache_dir),
+        );
+        assert!(
+            !ok2,
+            "a mismatched .key sidecar must never be trusted, even \
+             when a same-named .o file exists in the cache"
+        );
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn runtime_helper_cache_none_falls_back_to_direct_compile() {
+        // cache_dir = None (the "$HOME unset, no cache location"
+        // case) must still compile correctly every time -- fail
+        // OPEN to always-correct, never silently skip compiling.
+        let scratch = fresh_test_dir("none");
+        let out1 = scratch.join("out1.o");
+        let src1 = scratch.join("src1.c");
+        let ok = compile_runtime_helper_cached(
+            "t", "t", "t", TINY_C_SRC, "gcc", &["-O0", "-c"], &src1, &out1, None,
+        );
+        assert!(ok, "compile without a cache dir must still succeed");
+        assert!(!fs::read(&out1).expect("out1 written").is_empty());
+        let _ = fs::remove_dir_all(&scratch);
     }
 
     #[test]

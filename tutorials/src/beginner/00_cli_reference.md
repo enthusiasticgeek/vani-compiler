@@ -66,6 +66,22 @@ vanic build hello.vani --link-with helper.c -lm
 
 **Environment variables**: `CC`, `LLC`, `OPT`, `CROSS_CC` (cross-linker override), `QEMU_<ARCH>` (QEMU binary override).
 
+**Runtime-helper object cache**: `sort_runtime.c` and
+`parallel_runtime.c` (the C implementations backing `sort()` and
+`parallel for`) are static, unchanging sources embedded in `vanic`
+itself -- compiling them from scratch on every single build wastes
+most of a typical build's wall time for no reason (measured: ~55% of
+it). `vanic build` caches their compiled objects under
+`$XDG_CACHE_HOME/vanic/runtime-objs/` (falling back to
+`$HOME/.cache/vanic/runtime-objs/`, then `%LOCALAPPDATA%\vanic\
+runtime-objs\` on Windows) and reuses one only when the source,
+compiler, compiler version, flags, and host machine all match
+exactly -- anything else is treated as a cache miss and recompiled
+normally, so this is purely a speedup, never a correctness
+trade-off. Delete that directory any time to force a clean rebuild of
+both helpers; there's no flag needed to disable it since a stale or
+missing entry always safely falls back to compiling fresh.
+
 ---
 
 ### `vanic check <file.vani>`
