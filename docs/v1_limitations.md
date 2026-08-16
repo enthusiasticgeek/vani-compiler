@@ -610,6 +610,18 @@ BUG-105/106 (2026-08-04), it just wasn't called at every site.
 - `echo_loop_windows_byte_count_matches_c` e2e test de-ignored and
   green after the WSAECONNRESET fix.
 
+**Update (2026-07-28)**: a later, more specific finding narrows the
+above -- `async_showcase.vani` under `vanic run` (the LLVM `lli` JIT
+path specifically, not `vanic build`/`--backend=c`) hits an
+undefined-SSA-value error from `lli` on Windows. This wasn't caught
+by the 2026-06-16 pass above (which may not have exercised this
+exact file through the `lli`-JIT path specifically). See
+[Advanced 1's async chapter](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/advanced/01_async.md)
+for the current, tutorial-side note. Not independently re-verified
+since (no Windows hardware available to this session) -- flagged
+here so the two docs don't silently contradict each other. If you
+hit this, `--backend=c` is the documented workaround.
+
 **macOS status**: still deferred — no Darwin host available.
 `#elif defined(__APPLE__)` branches (kqueue, `EVFILT_TIMER`,
 `__error()`, `pipe+pthread` timer) are compiled-in but unrun.
