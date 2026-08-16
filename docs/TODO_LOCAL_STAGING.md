@@ -8653,3 +8653,12 @@ Fix attempt: `tools/localfuzz/findings/20260816-163227-backend-divergence-3b9b2a
 }
 ```
 
+
+---
+
+### Candidate: 20260816-192633-run-crash-3127119dac
+
+Repro: `tools/localfuzz/findings/20260816-192633-run-crash-3127119dac/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260816-192633-run-crash-3127119dac/fix_attempt.md`
+
+ STATUS: needs human/frontier root-cause review.
