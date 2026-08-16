@@ -92,6 +92,7 @@
 - [`task` / `join` / `detach` / `cancel` + atomics / mutexes / channels / barriers / rwlocks](advanced/03_concurrency.md)
 - [Capstone: timed tic-tac-toe (stdin_ready_within_ms)](advanced/03c_timed_tic_tac_toe_capstone.md)
 - [Capstone: a concurrent sensor-dashboard pipeline](advanced/03d_concurrent_pipeline_capstone.md)
+- [Capstone: a job scheduler (Executor + cooperative cancel + real-thread cancel)](advanced/03e_job_scheduler_capstone.md)
 - [Condition variables: wait-until-predicate -- intuition primer](advanced/03b_condvar_primer.md)
 - [Embedded, `unsafe`, and regions -- intuition primer](advanced/04a_embedded_primer.md)
 - [Cross-compilation and bare-metal targets -- intuition primer](advanced/04b_cross_compile_primer.md)

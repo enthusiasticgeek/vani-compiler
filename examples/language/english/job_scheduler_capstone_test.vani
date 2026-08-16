@@ -1,0 +1,259 @@
+// `vanic test` harness for job_scheduler_capstone.vani -- asserts the
+// scheduler's observable behavior programmatically instead of just
+// eyeballing printed output. No top-level `fn main` (a file with at
+// least one `#[test]` fn and no zero-param `fn main` runs in harness
+// mode -- see testing_primer.vani / Intermediate 16a).
+//
+// Each #[test] fn is self-contained (its own Executor/listener/ports,
+// same "copy-paste-able pattern, not a shared module" convention
+// async_executor.vani documents) so they're safe to run in any order,
+// including in parallel under `vanic test`'s own parallel execution.
+// Every listener uses `tcp_listen(0)` (OS-assigned ephemeral port),
+// so concurrently-running tests never collide on a fixed port.
+//
+// build & run:
+//   vanic test examples/language/english/job_scheduler_capstone_test.vani
+//   vanic test examples/language/english/job_scheduler_capstone_test.vani --filter=cancel
+
+intent "vanic test harness: asserts the job-scheduler capstone's Executor + CancelToken + cancel<name> behavior programmatically";
+
+interface Pollable {
+  fn poll(self: mut ref Self) -> i64;
+}
+
+struct Executor {
+  ep: i64,
+  tasks: Vec<Box<dyn Pollable>>,
+}
+
+fn executor_new(ep: i64) -> Executor {
+  let empty: Vec<Box<dyn Pollable>> = vec();
+  return Executor { ep: ep, tasks: empty };
+}
+
+fn executor_spawn(ex: mut ref Executor, t: Box<dyn Pollable>) -> i64 {
+  push(mut ref ex.tasks, t);
+  return 0;
+}
+
+fn executor_run_to_completion(ex: mut ref Executor) -> i64 {
+  let done: i64 = 0;
+  while len(ref ex.tasks) > 0 as u64 {
+    let round_size: u64 = len(ref ex.tasks);
+    let i: u64 = 0;
+    let remaining: Vec<Box<dyn Pollable>> = vec();
+    while i < round_size {
+      let t: Box<dyn Pollable> = pop(mut ref ex.tasks);
+      let r: i64 = t.poll();
+      if r == 0 - 2 {
+        push(mut ref remaining, t);
+      } else {
+        done = done + 1;
+      }
+      i = i + 1 as u64;
+    }
+    ex.tasks = remaining;
+    if len(ref ex.tasks) > 0 as u64 {
+      let _ = epoll_wait_one(ex.ep, 100);
+    }
+  }
+  return done;
+}
+
+async fn collect_quick_result(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n * 10;
+}
+
+async fn collect_abandoned_result(fd: i64, token: ref CancelToken) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let m: i64 = io_recv_async(fd, 64);
+  return n + m;
+}
+
+implement Pollable for Task__collect_quick_result {
+  fn poll(self: mut ref Task__collect_quick_result) -> i64 {
+    return __poll_collect_quick_result(self);
+  }
+}
+
+implement Pollable for Task__collect_abandoned_result {
+  fn poll(self: mut ref Task__collect_abandoned_result) -> i64 {
+    return __poll_collect_abandoned_result(self);
+  }
+}
+
+fn accept_one(server: i64, ep: i64) -> i64 {
+  let fd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(fd);
+  let _ = epoll_add_read(ep, fd);
+  return fd;
+}
+
+// Edge case: an Executor that never receives a single spawned job
+// must return 0 immediately -- exercises the zero-iteration path of
+// `executor_run_to_completion`'s outer `while len(...) > 0` loop
+// without ever touching epoll_wait_one at all.
+#[test]
+fn executor_with_zero_tasks_returns_zero_immediately() -> i64 {
+  let ep: i64 = epoll_new();
+  let mut_ex: Executor = executor_new(ep);
+  let ex: Executor = mut_ex;
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  let _ = assert_eq_i64(done, 0);
+  let _ = epoll_close(ep);
+  return 0;
+}
+
+// Two heterogeneous jobs (different Task__<fn> shapes), driven
+// through the same Executor via dynamic dispatch, both complete
+// normally -- confirms the round-robin loop reaches "every task
+// accounted for" and reports the right count, not just "doesn't
+// crash".
+#[test]
+fn executor_drives_two_heterogeneous_jobs_to_completion() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task peers {
+    let i: i64 = 0;
+    while i < 2 {
+      let c: i64 = tcp_connect_local(port);
+      let _ = tcp_send_str(c, "ab");
+      let _ = sleep_ms(50);
+      let _ = tcp_close(c);
+      i = i + 1;
+    }
+  }
+
+  let fd_a: i64 = accept_one(server, ep);
+  let fd_b: i64 = accept_one(server, ep);
+  let _ = sleep_ms(30);
+
+  let mut_ex: Executor = executor_new(ep);
+  let ex: Executor = mut_ex;
+  let ta: Task__collect_quick_result = collect_quick_result(fd_a);
+  let tb: Task__collect_quick_result = collect_quick_result(fd_b);
+  let _ = executor_spawn(mut ref ex, box(ta as dyn Pollable));
+  let _ = executor_spawn(mut ref ex, box(tb as dyn Pollable));
+
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  let _ = assert_eq_i64(done, 2);
+
+  let _ = tcp_close(fd_a);
+  let _ = tcp_close(fd_b);
+  join peers;
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
+
+// A job cooperatively cancelled mid-flight (via CancelToken, between
+// its two suspend points) still gets reaped by the Executor -- the
+// round trip counts it as "accounted for" exactly like a normally
+// completed job, from the caller's point of view.
+#[test]
+fn executor_reaps_a_cooperatively_cancelled_job() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task peer {
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(150);
+    let _ = tcp_close(c);
+  }
+
+  let fd: i64 = accept_one(server, ep);
+  let _ = sleep_ms(30);
+
+  let mut_ex: Executor = executor_new(ep);
+  let ex: Executor = mut_ex;
+  let tok: CancelToken = CancelToken { cancelled: false };
+  let mut_ta: Task__collect_abandoned_result = collect_abandoned_result(fd, ref tok);
+  let ta: Task__collect_abandoned_result = mut_ta;
+  let _ = __poll_collect_abandoned_result(mut ref ta);
+  tok.cancelled = true;
+  let _ = executor_spawn(mut ref ex, box(ta as dyn Pollable));
+
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  let _ = assert_eq_i64(done, 1);
+
+  let _ = tcp_close(fd);
+  join peer;
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
+
+// `cancel <name>;` interrupts a REAL blocking syscall (tcp_accept) on
+// a real OS thread -- the -2 "cancelled while blocked" sentinel is
+// distinct from -1 (a real socket error) and any non-negative fd.
+#[test]
+fn cancel_makes_blocked_accept_return_cancelled_sentinel() -> i64 {
+  let server: i64 = tcp_listen(0);
+
+  task blocked {
+    let fd: i64 = tcp_accept(server);
+    assert fd == 0 - 2;
+  }
+
+  let _ = sleep_ms(100);
+  cancel blocked;
+  join blocked;
+
+  let _ = tcp_close(server);
+  return 0;
+}
+
+// The actual combination this capstone is about: an Executor driving
+// a job to completion on the main thread at the SAME TIME as a
+// separate OS thread sits blocked inside a real tcp_accept() on a
+// different listener. Confirms the two don't interfere with each
+// other -- the Executor's result is exactly what it would be without
+// the concurrently-blocked thread, and the blocked thread is still
+// cleanly cancellable afterward.
+#[test]
+fn executor_and_a_concurrently_blocked_cancel_thread_do_not_interfere() -> i64 {
+  let watchdog_server: i64 = tcp_listen(0);
+  task watchdog {
+    let fd: i64 = tcp_accept(watchdog_server);
+    assert fd == 0 - 2;
+  }
+
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+
+  task peer {
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let fd: i64 = accept_one(server, ep);
+  let _ = sleep_ms(30);
+
+  let mut_ex: Executor = executor_new(ep);
+  let ex: Executor = mut_ex;
+  let ta: Task__collect_quick_result = collect_quick_result(fd);
+  let _ = executor_spawn(mut ref ex, box(ta as dyn Pollable));
+
+  // `watchdog` is still blocked in accept() right now, while this
+  // runs on the main thread.
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  let _ = assert_eq_i64(done, 1);
+
+  let _ = tcp_close(fd);
+  join peer;
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+
+  cancel watchdog;
+  join watchdog;
+  let _ = tcp_close(watchdog_server);
+  return 0;
+}

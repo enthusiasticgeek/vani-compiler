@@ -1,0 +1,229 @@
+// Capstone: a job scheduler combining THREE concurrency mechanisms
+// that no earlier example puts together in one program:
+//
+//   1. The Pollable/Executor pattern (see async_executor.vani) --
+//      drives heterogeneous async `Task__<fn>` state machines to
+//      completion via cooperative polling, no per-program hand-rolled
+//      driver loop.
+//   2. Cooperative CancelToken cancellation (see async_cancel_auto.vani)
+//      -- an in-flight async Task abandoned mid-suspend, still reaped
+//      cleanly by the Executor with no leaked heap state.
+//   3. Real-thread `cancel <name>;` (see cancel_blocking_task.vani) --
+//      a genuine OS thread stuck inside a real blocking `tcp_accept()`
+//      syscall, running CONCURRENTLY with the Executor's own
+//      single-threaded cooperative loop, interrupted on a bounded
+//      timeout instead of hanging forever.
+//
+// The scenario: a job scheduler polls THREE worker connections for
+// results (two complete normally, one is abandoned mid-flight and
+// cancelled cooperatively) while a SEPARATE watchdog thread waits for
+// a health-check probe that never arrives -- bounded by `cancel`
+// rather than left to block indefinitely. Both halves run at the same
+// time: the watchdog thread is already sitting inside `tcp_accept()`
+// while the main thread drives the Executor to completion, and only
+// afterward do we bound the watchdog's worst case.
+//
+// All connections are local loopback (`tcp_listen(0)` picks an
+// ephemeral OS-assigned port), and every peer's timing is controlled
+// by this program's own `sleep_ms` calls -- the same deterministic,
+// already-proven-reliable pattern `async_executor.vani` and
+// `cancel_blocking_task.vani` each use individually. No real network,
+// no wall-clock races against an external party.
+//
+// build & run:
+//   vanic run examples/language/english/job_scheduler_capstone.vani                # LLVM
+//   vanic run examples/language/english/job_scheduler_capstone.vani --backend=c    # C
+//
+// See also: examples/language/english/job_scheduler_capstone_test.vani
+// (a `vanic test` harness asserting the scheduler's observable
+// behavior programmatically -- run tasks completed, cancel sentinel,
+// and that the Executor and the watchdog thread genuinely don't
+// interfere with each other) and tutorials/src/advanced/13_job_scheduler_capstone.md
+// (the full walking-tour chapter).
+
+intent "Capstone: Pollable/Executor + cooperative CancelToken cancellation + real-thread cancel<name>, running concurrently";
+
+interface Pollable {
+  fn poll(self: mut ref Self) -> i64;
+}
+
+struct Executor {
+  ep: i64,
+  tasks: Vec<Box<dyn Pollable>>,
+}
+
+fn executor_new(ep: i64) -> Executor {
+  let empty: Vec<Box<dyn Pollable>> = vec();
+  return Executor { ep: ep, tasks: empty };
+}
+
+fn executor_spawn(ex: mut ref Executor, t: Box<dyn Pollable>) -> i64 {
+  push(mut ref ex.tasks, t);
+  return 0;
+}
+
+// Drives every registered job, round-robin, until each has either
+// completed or been cancelled. Returns how many jobs reached that
+// point -- the caller's own poll() bodies are responsible for
+// surfacing their actual result, since a heterogeneous
+// `Vec<Box<dyn Pollable>>` can't carry per-job result types back out
+// through one uniform return value.
+fn executor_run_to_completion(ex: mut ref Executor) -> i64 {
+  let done: i64 = 0;
+  while len(ref ex.tasks) > 0 as u64 {
+    let round_size: u64 = len(ref ex.tasks);
+    let i: u64 = 0;
+    let remaining: Vec<Box<dyn Pollable>> = vec();
+    while i < round_size {
+      let t: Box<dyn Pollable> = pop(mut ref ex.tasks);
+      let r: i64 = t.poll();
+      if r == 0 - 2 {
+        push(mut ref remaining, t);
+      } else {
+        done = done + 1;
+      }
+      i = i + 1 as u64;
+    }
+    ex.tasks = remaining;
+    if len(ref ex.tasks) > 0 as u64 {
+      let _ = epoll_wait_one(ex.ep, 100);
+    }
+  }
+  return done;
+}
+
+// Two chunks of a worker's result arrive back to back -- a normal,
+// two-suspend-point job that always completes.
+async fn collect_result(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let m: i64 = io_recv_async(fd, 64);
+  return n + m;
+}
+
+// A single-chunk worker -- completes after just one suspend point.
+async fn collect_quick_result(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n * 10;
+}
+
+// This worker's peer never sends a second chunk -- always cancelled
+// cooperatively mid-flight, between its two suspend points, to
+// exercise the Executor's leak-safety for an abandoned job.
+async fn collect_abandoned_result(fd: i64, token: ref CancelToken) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let m: i64 = io_recv_async(fd, 64);
+  return n + m;
+}
+
+implement Pollable for Task__collect_result {
+  fn poll(self: mut ref Task__collect_result) -> i64 {
+    return __poll_collect_result(self);
+  }
+}
+
+implement Pollable for Task__collect_quick_result {
+  fn poll(self: mut ref Task__collect_quick_result) -> i64 {
+    return __poll_collect_quick_result(self);
+  }
+}
+
+implement Pollable for Task__collect_abandoned_result {
+  fn poll(self: mut ref Task__collect_abandoned_result) -> i64 {
+    return __poll_collect_abandoned_result(self);
+  }
+}
+
+fn accept_one(server: i64, ep: i64) -> i64 {
+  let fd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(fd);
+  let _ = epoll_add_read(ep, fd);
+  return fd;
+}
+
+fn main() -> i64 {
+  // --- Watchdog half: a real OS thread, blocked in a real blocking
+  // tcp_accept(), on its OWN listener that no peer will ever connect
+  // to. It starts here and keeps running concurrently through the
+  // entire Executor section below -- this is genuine two-thread
+  // concurrency, not two sequential phases.
+  let watchdog_server: i64 = tcp_listen(0);
+  task watchdog {
+    let fd: i64 = tcp_accept(watchdog_server);
+    // -2 is the "cancelled while blocked" sentinel -- distinct from
+    // -1 (a real socket error) and any non-negative fd.
+    assert fd == 0 - 2;
+  }
+
+  // --- Scheduler half: three worker connections on a separate
+  // listener, driven by the Executor while `watchdog` sits blocked
+  // above.
+  let ep: i64 = epoll_new();
+  let jobs_server: i64 = tcp_listen(0);
+  let jobs_port: i64 = tcp_socket_port(jobs_server);
+
+  // Peer sends "ab" immediately to every connection. Job #1 (the
+  // two-chunk collect_result) follows up with "cd" after a short
+  // delay so it completes for real. Job #2 (the abandoned one) never
+  // gets a second chunk.
+  task peers {
+    let i: i64 = 0;
+    while i < 3 {
+      let c: i64 = tcp_connect_local(jobs_port);
+      let _ = tcp_send_str(c, "ab");
+      if i == 1 {
+        let _ = sleep_ms(30);
+        let _ = tcp_send_str(c, "cd");
+      }
+      let _ = sleep_ms(150);
+      let _ = tcp_close(c);
+      i = i + 1;
+    }
+  }
+
+  let fd_quick: i64 = accept_one(jobs_server, ep);
+  let fd_full: i64 = accept_one(jobs_server, ep);
+  let fd_abandoned: i64 = accept_one(jobs_server, ep);
+  let _ = sleep_ms(60);
+
+  let ex: Executor = executor_new(ep);
+  let t_quick: Task__collect_quick_result = collect_quick_result(fd_quick);
+  let t_full: Task__collect_result = collect_result(fd_full);
+  let _ = executor_spawn(mut ref ex, box(t_quick as dyn Pollable));
+  let _ = executor_spawn(mut ref ex, box(t_full as dyn Pollable));
+
+  // The abandoned job is polled by hand once (guaranteed past its
+  // first suspend point by the sleep above), cancelled cooperatively,
+  // then handed to the Executor already carrying a live heap-owning
+  // state -- proven ASan-clean by the standalone leak audit this
+  // pattern is drawn from (see async_executor.vani).
+  let tok: CancelToken = CancelToken { cancelled: false };
+  let mut_ta: Task__collect_abandoned_result = collect_abandoned_result(fd_abandoned, ref tok);
+  let ta: Task__collect_abandoned_result = mut_ta;
+  let _ = __poll_collect_abandoned_result(mut ref ta);
+  tok.cancelled = true;
+  let _ = executor_spawn(mut ref ex, box(ta as dyn Pollable));
+
+  // While this runs, `watchdog` (started above) is STILL sitting
+  // inside its blocking tcp_accept() call -- two genuinely concurrent
+  // things happening on two different threads.
+  let done: i64 = executor_run_to_completion(mut ref ex);
+  assert done == 3;
+  print "scheduler jobs accounted for:", done;
+
+  let _ = tcp_close(fd_quick);
+  let _ = tcp_close(fd_full);
+  let _ = tcp_close(fd_abandoned);
+  join peers;
+  let _ = tcp_close(jobs_server);
+  let _ = epoll_close(ep);
+
+  // Only now do we bound the watchdog's worst case -- it's been
+  // blocked in accept() this whole time, and no peer was ever going
+  // to show up on `watchdog_server`.
+  cancel watchdog;
+  join watchdog;
+  print "watchdog cancelled cleanly -- no hang, no lingering client wait";
+  let _ = tcp_close(watchdog_server);
+
+  return 0;
+}

@@ -263,6 +263,11 @@ own exit-code check without parsing human-readable lines at all.
    from inside it -- confirm it finds your tests with zero path
    arguments.
 
+For a larger, realistic use of `#[test]` -- asserting concurrent
+scheduler behavior across multiple threads, not just a single
+function's return value -- see [Advanced 3e's job scheduler
+capstone](../advanced/03e_job_scheduler_capstone.md).
+
 ---
 
 ## Summary
