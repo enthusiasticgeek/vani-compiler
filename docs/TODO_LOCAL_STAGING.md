@@ -8662,3 +8662,12 @@ Repro: `tools/localfuzz/findings/20260816-192633-run-crash-3127119dac/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260816-192633-run-crash-3127119dac/fix_attempt.md`
 
  STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260816-193855-run-crash-2cf7804a7e
+
+Repro: `tools/localfuzz/findings/20260816-193855-run-crash-2cf7804a7e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260816-193855-run-crash-2cf7804a7e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
