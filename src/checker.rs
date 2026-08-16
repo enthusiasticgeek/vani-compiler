@@ -13521,6 +13521,14 @@ fn check_one_stmt(
             };
 
             diagnose_partial_then_whole_move(expr, &checked, env, diagnostics);
+            // BUG-198 fix: invalidate stale smt_facts about any
+            // Vec/collection passed by `mut ref` in this statement's
+            // RHS -- see `drop_facts_for_mut_ref_call_args`'s own doc
+            // comment for the confirmed real repro (a stale post-push
+            // length fact surviving a `pop(mut ref zs)` wrongly elided
+            // a bounds check on `zs[2]`, producing a silent OOB read
+            // on the C backend).
+            drop_facts_for_mut_ref_call_args(expr, smt_facts);
 
             // Nested-path move of a non-Copy field isn't
             // tracked yet (`moved_fields` is one level deep).
@@ -13976,6 +13984,14 @@ fn check_one_stmt(
                 return false;
             };
             diagnose_partial_then_whole_move(expr, &coerced, env, diagnostics);
+            // BUG-198 fix: invalidate stale smt_facts about any
+            // Vec/collection passed by `mut ref` in this statement's
+            // RHS -- see `drop_facts_for_mut_ref_call_args`'s own doc
+            // comment for the confirmed real repro (a stale post-push
+            // length fact surviving a `pop(mut ref zs)` wrongly elided
+            // a bounds check on `zs[2]`, producing a silent OOB read
+            // on the C backend).
+            drop_facts_for_mut_ref_call_args(expr, smt_facts);
             consume_if_moved_var(expr, &coerced, env);
             // BUG-36 fix (2026-08-02): `x = ...;` writes directly to
             // `x`'s own storage -- if `x` is NOT itself a ref binding
@@ -14117,6 +14133,14 @@ fn check_one_stmt(
                 )
             };
             diagnose_partial_then_whole_move(expr, &checked, env, diagnostics);
+            // BUG-198 fix: invalidate stale smt_facts about any
+            // Vec/collection passed by `mut ref` in this statement's
+            // RHS -- see `drop_facts_for_mut_ref_call_args`'s own doc
+            // comment for the confirmed real repro (a stale post-push
+            // length fact surviving a `pop(mut ref zs)` wrongly elided
+            // a bounds check on `zs[2]`, producing a silent OOB read
+            // on the C backend).
+            drop_facts_for_mut_ref_call_args(expr, smt_facts);
             consume_if_moved_var(expr, &checked, env);
 
             // Materialize the return expression into a fresh temp
@@ -15610,6 +15634,39 @@ fn check_one_stmt(
                                 );
                             }
                         }
+                    }
+                }
+            }
+            // BUG-199 fix: `obj.field = value;` must invalidate any
+            // stale `struct_literal_fields`-derived SMT fact for THIS
+            // field -- sibling of BUG-198's Vec-mutation case, same
+            // underlying shape (a mutation that doesn't invalidate a
+            // previously-established fact). `prove_with_calls_extra`'s
+            // struct-field SMT plumbing re-derives `<obj>__<field> ==
+            // <original-literal-value>` from `env`'s
+            // `struct_literal_fields` on EVERY subsequent proof query,
+            // for the entire remaining life of the binding, regardless
+            // of any `FieldAssign` since construction. Confirmed
+            // exploitable, not just theoretical: `let c = Counter { n:
+            // 0 }; c.n = 5; if c.n == 5 { prove c.n == 0; }` -- the
+            // `prove` (a demonstrably FALSE claim) was silently
+            // accepted with zero diagnostics, because the fact base
+            // became directly contradictory (`c__n == 5` from the `if`
+            // condition AND the stale `c__n == 0` from construction,
+            // simultaneously), and a contradictory fact base makes
+            // every subsequent query vacuously "provable" -- not a
+            // narrow missed-optimization gap like a mere failure to
+            // prove something true, but a real path to proving
+            // arbitrary false claims. This is also the confirmed
+            // origin of an `(assert false)`-prefixed SMT query
+            // observed while auditing `__poll_*` async state-machine
+            // bodies (every `t.state_tag = N;` is a `FieldAssign`),
+            // though that specific instance happened not to enable an
+            // observable unsound elision in the cases tested.
+            if let Some(obj_root) = root_var_of_expr(object) {
+                if let Some(obj_info) = env.lookup_mut(&obj_root) {
+                    if let Some(fields) = &mut obj_info.struct_literal_fields {
+                        fields.retain(|(fname, _)| fname != field);
                     }
                 }
             }
@@ -39130,6 +39187,62 @@ fn verify_pure_body(
 
 fn drop_facts_mentioning(smt_facts: &mut Vec<Expr>, name: &str) {
     smt_facts.retain(|f| !expr_mentions(f, name));
+}
+
+/// BUG-198 fix: `smt_facts` tracks length/element facts about a Vec
+/// binding (e.g. `len(zs) == 3` from a prior `push(xs, v)`-rebind, or
+/// per-slot facts from an array-literal init), but nothing previously
+/// invalidated those facts when the SAME Vec was later mutated
+/// in-place through a `mut ref` builtin call (`pop(mut ref zs)`,
+/// `push(mut ref zs, v)`, `set(mut ref zs, i, v)`,
+/// `vec_remove_at(mut ref zs, i)`, `clear(mut ref zs)`, ...) used as
+/// a statement's RHS (`let _popped: i64 = pop(mut ref zs);` --
+/// or discarded entirely, `push(mut ref zs, v);`, which desugars to
+/// `let _ = push(mut ref zs, v);`, T1's parser-level sugar for a
+/// bare call statement).
+///
+/// Confirmed exploitable, not just theoretical: build `zs` via a
+/// `push`-rebind chain (`let zs = push(push(vec(1), 2), 3);`, which
+/// DOES get a real growing `len(zs) == 3` SMT fact via
+/// `record_vec_builtin_facts`), `pop(mut ref zs)` once (shrinking
+/// `zs` to length 2 at runtime, without touching the stale `len(zs)
+/// == 3` fact), then index `zs[2]`. The bounds-check elision pass
+/// proves (correctly, GIVEN the stale fact) that `2 < len(zs)`, so
+/// the C backend emits a raw unchecked `zs.data[2]` with no runtime
+/// guard at all -- confirmed via direct compilation: the program
+/// silently prints `3` (the just-popped, still-allocated-but-
+/// logically-removed value) instead of trapping, on the C backend.
+/// AddressSanitizer does NOT catch this class of bug -- the read is
+/// within the Vec's allocated CAPACITY, just past its logical
+/// length, so no allocator-level sanitizer sees anything wrong; only
+/// a language-level bounds check (the one this bug elides) can catch
+/// it. The LLVM backend happens to still trap correctly here (it
+/// re-derives its own bounds check independently of this elision
+/// decision in this repro), so the confirmed blast radius is the C
+/// backend specifically -- `--backend=c` / `vanic build` without
+/// `--backend` defaulting to llvm.
+///
+/// Fix: scan `expr`'s top-level `Call` arguments for any argument
+/// syntactically passed as `mut ref` (`ExprKind::RefMut`) and drop
+/// every smt_facts entry mentioning that argument's root variable
+/// (`root_var_of_expr`, already used by `check_push_builtin`'s own
+/// scope-escape check for exactly this "what variable does this
+/// `mut ref` argument actually alias" question). Deliberately
+/// conservative/coarse -- drops ALL facts about the aliased
+/// variable, not just length-specific ones, same tradeoff
+/// `drop_facts_mentioning` already makes at every other call site.
+/// Safe to call unconditionally: a call with no `mut ref` arguments
+/// (the overwhelming majority) is a no-op here.
+fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>) {
+    if let ExprKind::Call { args, .. } = &expr.kind {
+        for arg in args {
+            if let ExprKind::RefMut { inner } = &arg.kind {
+                if let Some(name) = root_var_of_expr(inner) {
+                    drop_facts_mentioning(smt_facts, &name);
+                }
+            }
+        }
+    }
 }
 
 /// BUG-33 fix follow-up. Recognizes exactly the synthetic

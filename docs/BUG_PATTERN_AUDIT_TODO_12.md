@@ -21,6 +21,62 @@ the `if let` site until `clear_constants_for` was added there too.
 Full writeup: `docs/TODO_CURRENT.md`'s BUG-183 entry. Items 2–4 below
 are still open for a follow-up round.
 
+**Status update 2026-08-16**: item 1's own loop/branch-merge restore
+sites are confirmed fully closed (all 10 `*smt_facts = pre_facts`
+sites in `checker.rs` carry a BUG-181/182/183 fix comment). Item 2's
+follow-up audit found and fixed **BUG-198**: no code path ever
+invalidated `smt_facts` for a Vec mutated via a `mut ref` builtin
+argument (`pop(mut ref zs)`, `push(mut ref zs, v)`, ...) used as a
+statement's RHS — confirmed exploitable (a stale post-push length
+fact survived a `pop`, letting the elision pass prove a now-OOB index
+safe, producing a real unguarded `zs.data[2]` on the C backend that
+silently read stale-but-still-allocated memory instead of trapping).
+Full writeup: `docs/TODO_CURRENT.md`'s BUG-198 entry. The "match-arm
+merging" and `try`/`?` phrasing in item 1 above turned out to be N/A
+(this language has no `match` statement, and `try`/`?` desugars to
+plain `Stmt::If`/`Return`/`Let` before `check_one_stmt` ever runs, so
+both already flow through the already-audited paths). Item 4 (Vec/str
+length-specific facts) is now covered by BUG-198's fix. **Still open**:
+async suspend-point (`__poll_*`) state-machine transforms — not yet
+tested with a targeted repro combining a suspend point inside a loop
+with a bounds-check-eligible access.
+
+**Status update 2026-08-16, later same day**: the async suspend-point
+item was picked up. Bounds/overflow elision inside an async loop with a
+real suspend point (`echo_loop.vani`'s exact shape) is confirmed safely
+conservative — the transform's synthesized `while true { if
+state_tag==N {...} ... }` wrapper means `inside_loop` is true for the
+whole poll-fn body, so BUG-127/181's existing blanket guard already
+covers every state segment. While chasing an `(assert false)` anomaly
+noticed in `--smt-debug` output for these repros, found and fixed a
+DIFFERENT, more severe bug: **BUG-199**, `Stmt::FieldAssign` never
+invalidated `struct_literal_fields`-derived SMT facts (the sibling gap
+to BUG-198, for struct fields instead of Vec mutation) — confirmed to
+let the checker `prove` a demonstrably FALSE claim about a field's
+value right after reassignment (`c.n = 5; prove c.n == 0;` was silently
+accepted). Full writeup: `docs/TODO_CURRENT.md`'s BUG-199 entry.
+
+**Status update 2026-08-16, same day, follow-up**: the `(assert false)`
+anomaly itself — which persisted in every `__poll_*` function's
+first-branch queries even after the BUG-199 fix — is now RESOLVED as
+sound, non-buggy behavior, not a defect. Root cause: it's `negate(cond)`
+for the transform's own synthesized `while true { ... }` wrapper
+(`Stmt::While`'s existing, correct `if !contains_break(body_stmts) {
+smt_facts.push(negate(cond)); }` logic, long-predating this session),
+applying to the transform's own "Defensive trailing return after the
+while (unreachable -- while-true exits only via return inside)" tail
+statement — which really is unreachable by construction (no `break`
+anywhere in the cascade), so treating everything about it as vacuously
+provable is correct verifier behavior, the same as for any hand-written
+`while true { ... no break ... }`. Confirmed via `prove_expr`'s own span
+(not just the facts) matching the trailing return's synthesized span
+exactly, and via the generated C showing the SAME `0-1` sentinel
+computation appearing twice (once reachable, inside the loop; once in
+the dead tail) with only the dead one's query ever contaminated. Full
+writeup: `docs/TODO_CURRENT.md`'s "Async suspend-point audit" section,
+item 3. This closes out the async suspend-point item entirely — no
+remaining open threads from round 12.
+
 ## The pattern, in one sentence
 
 `checker.rs`'s SMT-based elision passes (overflow-guard elision AND
