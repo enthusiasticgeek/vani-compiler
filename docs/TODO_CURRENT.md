@@ -15229,3 +15229,65 @@ Full `cargo test --release --workspace` clean: 2997 lib / 272 e2e (1
 flaky, pre-existing `concurrent_pipeline_dashboard` pthread/JIT
 concurrency race, confirmed unrelated via 5 isolated reruns before
 and after the fix).
+
+## BUG-197 -- `vanic publish`/`registry-approve-publisher` silently drop a registry-index entry under rapid repeated publishes (2026-08-16, FIXED)
+
+Found while publishing vani-ml through its full v0.1.0-v0.6.0 roadmap
+in one session (4 back-to-back `vanic publish` calls). After the
+v0.6.0 publish, `kosh-index/index/ml.json` was missing the v0.5.0
+entry entirely -- even though its GitHub Release
+(`ml-v0.5.0`) existed and its own publish had printed "index updated."
+with no error.
+
+Root cause (`src/manifest.rs`'s `fetch_index_file`, and the identical
+pattern in `fetch_governance_with_sha`): both fetch a file's current
+content for a read-modify-write cycle via `gh api
+repos/.../contents/<path>`, which returns metadata including a `sha`
+AND a `download_url`. The code used the `download_url`
+(`raw.githubusercontent.com`) for the actual content -- but that URL
+is served through a CDN that can lag several minutes behind a
+just-pushed commit. When two publishes of the same package happen
+within that lag window (exactly what four back-to-back version bumps
+in one session produces), the second publish's "existing content"
+fetch returns a CDN-cached copy from BEFORE the first publish's
+commit. Appending the new version to that stale base and pushing it
+(using the metadata call's `sha`, which IS fresh, since Contents API
+metadata isn't CDN-cached the same way) succeeds -- the `sha`-based
+optimistic-concurrency check only confirms "this content matches
+what's on `main`", not "the content you're about to overwrite it with
+was based on that up-to-date state" -- so the PUT silently overwrites
+the real file with one missing every entry added since the stale
+fetch.
+
+Fixed by decoding the base64 `content` field ALREADY present in the
+SAME metadata response the `sha` comes from, instead of a second
+request to `download_url` -- eliminates the CDN entirely from this
+read path. Added a hand-rolled `base64_decode` (matching the existing
+hand-rolled `base64_encode`, no new dependency) and applied the fix to
+both `fetch_index_file` (publish) and `fetch_governance_with_sha`
+(governance/publisher-approval updates -- same failure mode, lower
+frequency, not yet observed but the same bug). Left `registry_search`
+(`vanic search`) on `download_url` deliberately -- it's read-only
+display data with an explicit documented "avoids base64 decode"
+tradeoff already in its own comment; a few minutes of stale search
+results has no data-loss consequence, unlike the two write paths.
+
+**Verification**: the actual corruption was confirmed by diffing
+`kosh-index`'s git history (`git show <commit> -- index/ml.json`) --
+the v0.6.0 commit's diff showed the v0.5.0 line being REMOVED and the
+v0.6.0 line added in its place, not a clean append. The fix's
+`content`-field approach was validated against live data before
+trusting it: decoding the metadata response's `content` field
+independently (a small Python script) reproduced the exact same
+(correct, un-cached) current state my local git clone already showed.
+The missing `ml` v0.5.0 index entry was manually restored via a
+corrective `gh api ... --method PUT` (same shape the fixed code now
+produces, using the exact checksum recorded from the original v0.5.0
+publish output) -- `index/ml.json` now correctly lists all 5 published
+versions (0.1.0, 0.3.0, 0.4.0, 0.5.0, 0.6.0) in order. Re-checked
+`calculus`/`sparse`/`complex`/`probability`'s index files (each
+published once, not back-to-back, in the same session) -- all correct,
+this bug only manifests on repeated publishes of the same package
+within the CDN's cache-lag window. Full `cargo build --release --bin
+vanic` clean; full `cargo test --release --workspace` re-run after the
+fix.
