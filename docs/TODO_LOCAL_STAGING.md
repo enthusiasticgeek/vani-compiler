@@ -8616,3 +8616,12 @@ Fix attempt: `tools/localfuzz/findings/20260816-060552-backend-divergence-33d82c
 }
 ```
 
+
+---
+
+### Candidate: 20260816-081549-run-crash-63490d4e49
+
+Repro: `tools/localfuzz/findings/20260816-081549-run-crash-63490d4e49/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260816-081549-run-crash-63490d4e49/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
