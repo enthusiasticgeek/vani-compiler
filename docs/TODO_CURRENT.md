@@ -15291,3 +15291,146 @@ this bug only manifests on repeated publishes of the same package
 within the CDN's cache-lag window. Full `cargo build --release --bin
 vanic` clean; full `cargo test --release --workspace` re-run after the
 fix.
+
+## BUG-198 -- `mut ref` Vec mutation (`pop`/`push`/`set`/...) doesn't invalidate stale SMT length/element facts, silently eliding a real bounds check (2026-08-16, FIXED)
+
+Found while auditing `docs/BUG_PATTERN_AUDIT_TODO_12.md`'s still-open
+items 2-4 (round 12, filed 2026-08-12 after BUG-181/182/183) at the
+user's direction, in the same SMT-elision-soundness bug family as
+BUG-127/181/182/183: `checker.rs`'s `smt_facts: &mut Vec<Expr>`
+tracks facts like `len(zs) == 3` (from `record_vec_builtin_facts`,
+fired for the *consuming* `let r = push(xs, v);` rebind style) or
+per-slot equality facts (array-literal inits), and those facts feed
+the bounds-check elision pass (`try_elide_bounds_in_typed_expr`) that
+decides whether to skip emitting a runtime index check at all.
+
+Items 1 of round 12 (loop-exit/branch-merge `*smt_facts = pre_facts`
+restore sites) were already confirmed fully fixed by BUG-182/183 --
+every one of the 10 restore sites in `checker.rs` carries a
+BUG-181/182/183 comment. Items 2-4 asked to audit the REMAINING
+`smt_facts`-mutation sites (`drop_facts_mentioning` call sites and
+their guards, and any length-specific fact-tracking sibling of the
+already-fixed index-fact bugs) for the same staleness shape. That
+audit found a real, previously-undocumented gap: **no code path ever
+called `drop_facts_mentioning` for a variable mutated via a `mut ref`
+argument to a builtin call used as a statement's RHS** -- e.g.
+`pop(mut ref zs)`, `push(mut ref zs, v)`, `set(mut ref zs, i, v)`.
+`check_one_stmt`'s three statement-level RHS-checking arms
+(`Stmt::Let` -- including the `let _ = <call>;` desugar every bare
+call-statement like `push(mut ref xs, v);` produces, per `parser.rs`'s
+documented "last-chance fallback" -- `Stmt::Assign`, `Stmt::Return`)
+all call `check_expr` on the RHS and then move straight to
+move/consume bookkeeping; none of them ever inspected the RHS's own
+`Call` arguments for a `mut ref`-passed Vec whose PRE-EXISTING facts
+needed dropping.
+
+**Confirmed exploitable, not just theoretical**, via direct
+`--smt-debug` + generated-C inspection + execution:
+
+```vani
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1);
+    let ys: Vec<i64> = push(xs, 2);   // consuming rebind: len(ys) == len(xs)+1, a REAL tracked fact
+    let zs: Vec<i64> = push(ys, 3);   // len(zs) == len(ys)+1 == 3, tracked
+    let _popped: i64 = pop(mut ref zs);   // in-place mutation shrinks zs to length 2 at runtime
+    let x: i64 = zs[2];               // index 2 is now OOB (len 2) -- but len(zs)==3 is still "true" per stale facts
+    print x;
+    return 0;
+}
+```
+
+Before the fix, `--smt-debug` showed the elision pass querying
+`(assert (not (bvult (_ bv2 64) v_zs_len)))` against a fact set still
+containing `v_zs_len == (v_xs_len + 1) + 1 == 3` (the STALE pre-pop
+value, `pop(mut ref zs)` never having dropped it) -- **UNSAT**, i.e.
+"proven": index 2 is always in bounds. Confirmed in the generated C:
+`v_x = (v_zs.data[(uint64_t)(2)]);` -- a raw, completely unchecked
+index, no guard at all. Compiling and running that C directly (not
+via `vanic run`, to rule out any independent LLVM-side re-check)
+printed `3` -- the just-popped, still-allocated-but-logically-removed
+value -- instead of trapping. **AddressSanitizer does NOT catch this
+class of bug**: the read is within the Vec's allocated malloc
+capacity, just past its logical length, so no allocator-level
+sanitizer sees anything wrong; only the language's own bounds check
+(the one this bug elides) can catch it -- confirmed by compiling with
+`-fsanitize=address,leak,undefined` directly and observing a clean
+exit, no report. The LLVM backend (`vanic run`'s default) happened to
+still trap correctly on this exact repro (`index out of bounds: 2,
+len 2`, exit 3) -- it re-derives its own bounds check independently of
+this particular elision decision here -- so the confirmed blast radius
+in this repro is `--backend=c` / `vanic build` specifically, not both
+backends; not yet checked whether some OTHER shape reaches the same
+elided-check codepath on LLVM too.
+
+Two more angles checked and confirmed NOT to independently trigger
+unsoundness (documented so a future round doesn't re-derive these):
+straight-line in-place `push(mut ref xs, v)` calls (the dominant
+push idiom in every kosh-index package) never grow ANY tracked
+length fact at all (`v_xs_len` stays frozen at its construction-time
+value throughout the whole function, confirmed via `--smt-debug` on
+a 2-push repro) -- asymmetrically conservative, not unsound, just a
+missed-optimization gap (a real runtime check is always kept after
+any in-place push, since the compiler never learns the Vec grew).
+Only the SHRINK direction, combined with a PRE-EXISTING, already
+real/tracked growing-length fact from the consuming-rebind style,
+produces an actual over-claim of safety.
+
+**Fix**: new `drop_facts_for_mut_ref_call_args(expr, smt_facts)` in
+`checker.rs` -- scans a statement's RHS `Expr` for `ExprKind::Call`
+arguments syntactically wrapped in `ExprKind::RefMut` (`mut ref`),
+resolves each one's root variable via the existing `root_var_of_expr`
+helper (already used by `check_push_builtin`'s own scope-escape
+check for the identical "what variable does this `mut ref` argument
+alias" question), and calls the existing `drop_facts_mentioning` for
+each. Wired into all three statement-level RHS sites
+(`Stmt::Let`/`Stmt::Assign`/`Stmt::Return`) right after
+`diagnose_partial_then_whole_move` -- these three arms turned out to
+be another instance of `checker.rs`'s duplicated-per-statement-kind
+walker pattern (same shape as the `ctx.current_block` LLVM bug family
+needing fixes "in tandem" across duplicate copies, 2026-08-14),
+confirmed by grep: `diagnose_partial_then_whole_move(expr, &checked,
+env, diagnostics);` (or `&coerced` for Assign) appears at all three
+arms with near-identical surrounding structure. Deliberately
+coarse/conservative -- drops ALL facts mentioning the aliased
+variable, not just length-specific ones, matching every other
+`drop_facts_mentioning` call site's own tradeoff; safe to call
+unconditionally since a call with no `mut ref` arguments (the
+overwhelming majority of calls) is a no-op.
+
+**Verification**: repro now traps correctly on BOTH backends
+(`index out of bounds: 2, len 2`, exit 3) after the fix, confirmed via
+`--smt-debug` (the stale `zs_len==3` fact no longer appears in the
+elision query; the solver now returns SAT for the "index 2 could be
+OOB" query, so the check is kept) and via the generated C
+(`v_zs.data[intent_check_bounds((int64_t)(2), (int64_t)v_zs.len)]`,
+a real guarded index). Two sibling repros (plain 2x in-place push
+with no rebind; pop-to-empty with no stale fact at all) re-verified
+unaffected -- correct pre-fix and post-fix behavior identical. Full
+regression sweep, git-stash-compared against the pre-fix binary to
+rule out any test-run contamination from a concurrent rebuild:
+`vanic check examples` produces the IDENTICAL 20-file error set
+before and after (zero new failures, zero fixed-by-accident); full
+`cargo test --release --workspace` clean (3564 lines of output, 0
+FAILED/panicked, all 13 top-level `test result:` summaries show `0
+failed`); `tools/backend_crosscheck.py` reports 1035/1036 clean, the
+1 flagged file (`concurrent_pipeline_dashboard.vani`) reproducing
+the already-documented pre-existing flaky pthread/JIT concurrency
+race (confirmed via 3 clean isolated reruns), not a new divergence;
+`tools/leak_sweep.py` reports all 4 flagged findings match the
+existing baseline exactly, zero new leak/UB findings.
+
+Round 12's item 1 (loop/branch-merge restore sites) was already
+fully closed by BUG-182/183. This closes item 2's "verify every
+`smt_facts`-mutating site" for the `mut ref` call-argument case
+specifically. Not yet audited: `match`-arm merging (N/A -- this
+language has no `match` statement, only `IfLet`/`WhileLet`/`Select`,
+all already covered), `try`/`?` desugaring (traced: `parser.rs`'s
+`try_v31_transform`... no -- `desugar_try_let_in_program` runs as a
+pre-pass at parse-adjacent time, BEFORE `check_one_stmt` ever walks
+the tree, and only ever produces plain `Stmt::If`/`Stmt::Return`/
+`Stmt::Let` nodes in its v1-supported shape, which already flow
+through the already-audited paths above -- not a distinct gap), and
+async suspend-point (`__poll_*`) state-machine transforms (not yet
+empirically tested with a targeted repro combining a suspend point
+inside a loop with a bounds-check-eligible access; flagged for a
+follow-up round, not ruled out).

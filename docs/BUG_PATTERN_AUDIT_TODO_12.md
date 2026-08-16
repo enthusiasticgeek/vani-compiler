@@ -21,6 +21,26 @@ the `if let` site until `clear_constants_for` was added there too.
 Full writeup: `docs/TODO_CURRENT.md`'s BUG-183 entry. Items 2–4 below
 are still open for a follow-up round.
 
+**Status update 2026-08-16**: item 1's own loop/branch-merge restore
+sites are confirmed fully closed (all 10 `*smt_facts = pre_facts`
+sites in `checker.rs` carry a BUG-181/182/183 fix comment). Item 2's
+follow-up audit found and fixed **BUG-198**: no code path ever
+invalidated `smt_facts` for a Vec mutated via a `mut ref` builtin
+argument (`pop(mut ref zs)`, `push(mut ref zs, v)`, ...) used as a
+statement's RHS — confirmed exploitable (a stale post-push length
+fact survived a `pop`, letting the elision pass prove a now-OOB index
+safe, producing a real unguarded `zs.data[2]` on the C backend that
+silently read stale-but-still-allocated memory instead of trapping).
+Full writeup: `docs/TODO_CURRENT.md`'s BUG-198 entry. The "match-arm
+merging" and `try`/`?` phrasing in item 1 above turned out to be N/A
+(this language has no `match` statement, and `try`/`?` desugars to
+plain `Stmt::If`/`Return`/`Let` before `check_one_stmt` ever runs, so
+both already flow through the already-audited paths). Item 4 (Vec/str
+length-specific facts) is now covered by BUG-198's fix. **Still open**:
+async suspend-point (`__poll_*`) state-machine transforms — not yet
+tested with a targeted repro combining a suspend point inside a loop
+with a bounds-check-eligible access.
+
 ## The pattern, in one sentence
 
 `checker.rs`'s SMT-based elision passes (overflow-guard elision AND
