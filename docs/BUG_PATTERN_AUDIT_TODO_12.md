@@ -54,15 +54,28 @@ invalidated `struct_literal_fields`-derived SMT facts (the sibling gap
 to BUG-198, for struct fields instead of Vec mutation) — confirmed to
 let the checker `prove` a demonstrably FALSE claim about a field's
 value right after reassignment (`c.n = 5; prove c.n == 0;` was silently
-accepted). Full writeup: `docs/TODO_CURRENT.md`'s BUG-199 entry. The
-`(assert false)` anomaly itself persists in every `__poll_*` function's
-first-branch queries even after the BUG-199 fix — traced its span to
-the function's own `fn_name_span` (used pervasively by
-`try_v31_transform`'s synthesized code) but not fully root-caused;
-empirically confirmed NOT exploitable across every case tested this
-round (the contaminated query is independently, trivially true
-regardless), flagged for a dedicated follow-up round with better
-tooling rather than continued span-matching guesswork.
+accepted). Full writeup: `docs/TODO_CURRENT.md`'s BUG-199 entry.
+
+**Status update 2026-08-16, same day, follow-up**: the `(assert false)`
+anomaly itself — which persisted in every `__poll_*` function's
+first-branch queries even after the BUG-199 fix — is now RESOLVED as
+sound, non-buggy behavior, not a defect. Root cause: it's `negate(cond)`
+for the transform's own synthesized `while true { ... }` wrapper
+(`Stmt::While`'s existing, correct `if !contains_break(body_stmts) {
+smt_facts.push(negate(cond)); }` logic, long-predating this session),
+applying to the transform's own "Defensive trailing return after the
+while (unreachable -- while-true exits only via return inside)" tail
+statement — which really is unreachable by construction (no `break`
+anywhere in the cascade), so treating everything about it as vacuously
+provable is correct verifier behavior, the same as for any hand-written
+`while true { ... no break ... }`. Confirmed via `prove_expr`'s own span
+(not just the facts) matching the trailing return's synthesized span
+exactly, and via the generated C showing the SAME `0-1` sentinel
+computation appearing twice (once reachable, inside the loop; once in
+the dead tail) with only the dead one's query ever contaminated. Full
+writeup: `docs/TODO_CURRENT.md`'s "Async suspend-point audit" section,
+item 3. This closes out the async suspend-point item entirely — no
+remaining open threads from round 12.
 
 ## The pattern, in one sentence
 

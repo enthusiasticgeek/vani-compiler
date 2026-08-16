@@ -15435,7 +15435,7 @@ empirically tested with a targeted repro combining a suspend point
 inside a loop with a bounds-check-eligible access; flagged for a
 follow-up round, not ruled out).
 
-## Async suspend-point audit (2026-08-16) -- found and fixed BUG-199; one characterized-but-unresolved anomaly remains
+## Async suspend-point audit (2026-08-16) -- CLOSED: found and fixed BUG-199; the one remaining anomaly resolved as sound, non-buggy behavior
 
 Continuation of the round-12 async item above, at the user's explicit
 request. Three things came out of this pass:
@@ -15508,10 +15508,11 @@ condition fact) AND `(assert (= v_c__n (_ bv0 64)))` (the STALE
 construction, never invalidated by `c.n = 5;`) asserted simultaneously
 -- a directly contradictory fact base makes every subsequent query
 vacuously "provable," including proving the negation of the field's
-actual current value. This is the general form of what was observed
-polluting every `__poll_*` function's queries (there, `t.state_tag = N;`
-is the `FieldAssign` and `t__state_tag`'s stale construction-time value
-is `0`).
+actual current value. (This bug's own repro is unrelated to the
+`(assert false)` anomaly noticed in every `__poll_*` function's
+queries below, despite both surfacing the same symptom -- see the
+"RESOLVED: not a bug" section further down for that anomaly's actual,
+different, non-buggy cause.)
 
 Fixed by clearing the mutated field's entry from `struct_literal_fields`
 in `Stmt::FieldAssign`'s checker handling (`root_var_of_expr(object)` to
@@ -15534,47 +15535,58 @@ lines, 0 FAILED/panicked, all 13 `test result:` summaries `0 failed`);
 time, not even the usual flaky concurrency test triggered);
 `tools/leak_sweep.py`'s 4 findings match the existing baseline exactly.
 
-**3. Characterized but NOT fully root-caused: the `(assert false)`
-anomaly itself, independent of the FieldAssign fix, still reproduces in
-every io-async `__poll_*` function's first-branch queries.** After the
-BUG-199 fix, the SAME `(assert false)`-prefixed query from finding (2)
-above is STILL present verbatim in the minimal
-`async fn probe2(fd: i64) -> i64 { let n: i64 = io_recv_async(fd, 64);
-return n; }` repro -- meaning `struct_literal_fields` staleness was NOT
-its (sole) source here; something else independently injects a bare
-`Bool(false)` fact into every `__poll_*` function's very first reachable
-branch. Traced its span (via the same temporary instrumentation,
-removed before this fix was finalized) to `Span { start: 6, end: 15 }`
-in the minimal repro -- the literal source text `"fn probe2"`, i.e. the
-function's own `fn_name_span`, used as a placeholder span by whatever
-code constructs this fact (`fn_name_span` is threaded pervasively
-through `parser.rs`'s `try_v31_transform`, used for many synthesized-
-code spans there, including the `synth_i64_sub(0, 1, fn_name_span)`
-sentinel-value construction visible in the generated C's fallback tail
--- not yet narrowed further than that). Confirmed this is NOT the
-general `while true { ... }` mechanism itself (a plain, non-async
-`while true { ... }` loop produces ZERO SMT queries for an identical
-in-loop Vec-index pattern, since the Binary/Index elision arms bail out
-before ever calling z3 whenever `inside_loop` is true -- so there's no
-query at all to contaminate in the general case). Whatever this is, it
-appears SPECIFIC to the v3.1 async transform's own synthesized code.
+**3. RESOLVED: the `(assert false)` anomaly is NOT a bug.** Root-caused
+in a follow-up pass via temporary `eprintln` instrumentation at
+`prove_with_calls_extra`'s entry (printing both `smt_facts` and
+`prove_expr`'s spans whenever a raw `Bool(false)` fact is present,
+removed again before finalizing -- `git diff --stat src/checker.rs`
+confirmed zero stray debug lines left behind both times). The `false`
+fact IS `negate(cond)` for the transform's own synthesized `while true
+{ ... }` wrapper (`Stmt::While`'s checker handling, `check_one_stmt`
+~line 15022: `if !contains_break(body_stmts) { smt_facts.push(negate(
+cond)); }`, correct and long-standing logic, nothing new here) --
+`negate(Bool(true))` folds to `Bool(false)` via `negate`'s own literal-
+Bool arm, keeping the input's span. Since `try_v31_transform`
+(`parser.rs`) constructs the wrapper as `while true { <cascade> }`
+followed immediately by a **"Defensive trailing return after the while
+(unreachable -- while-true exits only via return inside)"** (the
+transform's own comment), and the cascade genuinely has no `break`
+anywhere (every exit is a `return`, loop-continuation uses `continue`),
+this fact push is 100% correct: reaching that trailing return statement
+really is impossible by construction, so the checker legitimately
+treats everything about it as vacuously provable -- the same "dead code
+has trivially provable properties" behavior any sound verifier gives
+unreachable code, not a soundness hole.
 
-**Empirically confirmed NOT (yet) exploitable**, across every case
-constructed this round: the query it contaminates (proving `0 - 1`/`0 -
-2` -- the sentinel-value computation -- doesn't overflow) is ALSO
-independently, trivially true regardless of any facts (both are small
-compile-time literals), so a contradictory premise doesn't change the
-outcome there. Every OTHER check tested inside a `__poll_*` body in this
-round (the trivial `xs[0]`, the loop-grown-then-indexed `xs[count-1]`,
-and the genuinely-overflow-eligible `n + i64_max_value()`) correctly
-kept its runtime guard -- none of them were near enough to the
-contaminated query to be affected by it, or the `inside_loop`
-conservatism protected them independently regardless. Flagged as a real,
-reproducible, but currently-inert finding for a dedicated follow-up
-round with proper tooling (a debug build with persistent fact-provenance
-tracking, or bisecting `try_v31_transform`'s synthesized-code
-construction directly, rather than more span-matching guesswork) --
-stopped here after reasonable effort rather than continuing indefinitely
-on a lead that hasn't yet demonstrated actual unsoundness.
+Confirmed via the `prove_expr.span` in the same debug pass: the
+contaminated query's GOAL (not just its facts) also carries the exact
+same `fn_name_span` the transform gives the trailing return's own
+`synth_i64_sub(0, 1, fn_name_span)` overflow check -- direct proof the
+contamination is scoped to that one dead statement, not to any
+REACHABLE code. Independently corroborated: the generated C for the
+minimal `async fn probe2(fd: i64) -> i64 { let n: i64 =
+io_recv_async(fd, 64); return n; }` repro contains the `0 - 1`
+sentinel-overflow check TWICE -- once inside `while (true) { ... }`
+(the real, reachable `n < 0` error path) and once after it (the dead
+fallback) -- and only the second location's query ever showed the
+contamination. This also explains why every "is this exploitable"
+probe this round came back negative: `xs[0]`, the loop-grown-then-
+indexed `xs[count-1]`, and `n + i64_max_value()` all live INSIDE the
+loop body, checked during `check_stmt_list(body_stmts, ...)` -- i.e.
+strictly BEFORE `smt_facts.push(negate(cond))` even runs (that push
+happens AFTER the body-checking call returns, as part of computing
+what's known for code AFTER the while statement). There was never a
+timing window for it to reach reachable code in this shape.
+
+No code change needed -- `negate(cond)` for a break-free `while true`
+correctly encoding "nothing after this is reachable" is exactly the
+intended behavior, matching how the same push already behaves for any
+other `while true { ... no break ... }` a user might write by hand
+(untouched by the async transform at all). This closes out the async
+suspend-point item from round 12 entirely: item (1) confirmed safe by
+construction (`inside_loop` blanket conservatism), item (2) fixed as
+BUG-199 (a real, separate, more severe bug found along the way, for
+struct-field mutation rather than async specifically), and this
+anomaly resolved as expected, sound behavior, not a defect.
 
 Next free bug number is **BUG-200**.
