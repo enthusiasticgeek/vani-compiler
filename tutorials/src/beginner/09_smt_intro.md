@@ -1,8 +1,11 @@
 # Beginner 9 -- First contract: `assert` / `prove` / `requires`
 
 > **Learning goal**: state preconditions with `requires`, write
-> runtime invariants with `assert`, and ask the SMT verifier to
-> *prove* arithmetic facts at compile time with `prove`.
+> runtime invariants with `assert`, and ask the **SMT verifier**
+> (SMT = "Satisfiability Modulo Theories" -- see the
+> [glossary](../glossary.md#smt-verification) if you want the formal
+> name spelled out; you don't need to remember it to use this
+> chapter) to *prove* arithmetic facts at compile time with `prove`.
 
 Imagine a vending machine with a small sign: "Insert GBP1 or more."
 That sign is a *precondition* -- it tells you what's required
@@ -12,8 +15,23 @@ way: you're documenting "this function only makes sense when
 a self-check mid-function: "at this point in my recipe, the
 dough MUST have risen -- crash loudly if it hasn't." `prove`
 goes further: instead of checking at runtime, it asks a
-mathematical solver to verify the claim is ALWAYS true, before
-the code ever runs.
+mathematical solver -- the "SMT solver" mentioned above, a program
+that can answer yes/no questions about arithmetic with total
+certainty, the same way a calculator answers "what's 2+2" but for
+questions shaped like "can this ever overflow?" -- to verify the
+claim is ALWAYS true, before the code ever runs.
+
+**Why bother with a solver instead of just testing the code?**
+Testing can only show a bug exists (by triggering it); it can never
+show one *doesn't*, because there's always one more input you didn't
+try. An SMT solver instead reasons about every possible input at
+once, mathematically -- if it says a claim holds, that's not "it
+held for the 500 cases I tried," it's "it holds for all of them,
+proven, the same way you'd prove a fact in a geometry class." See
+[Intermediate 12a](../intermediate/12a_smt_primer.md#the-building-inspector-and-the-blueprint)
+for a fuller analogy (a building inspector checking blueprints
+before construction starts, instead of after) if you want the
+deeper "why" before diving into the code below.
 
 ## The program
 
@@ -95,7 +113,10 @@ job:
   Asks the verifier to prove the predicate using everything it
   knows so far (parameters, prior `assert`s, prior `let`s). If
   the proof fails at compile time, you get a "proof failed" error
-  with an SMT counterexample. If the proof succeeds, no runtime
+  with an SMT **counterexample** -- a concrete set of values for
+  which the claim is false, the solver's way of showing its work
+  (see the [glossary](../glossary.md#smt-verification) for more
+  terms like this one). If the proof succeeds, no runtime
   code is emitted -- `assert` is *free at runtime* when the SMT
   pass discharges it.
 - **`prove <bool>;`** -- same shape as `assert` but for pure
