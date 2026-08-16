@@ -70,6 +70,8 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     "tcp_listen", "tcp_socket_port", "tcp_accept",
     "tcp_connect_local", "tcp_send_str", "tcp_recv",
     "tcp_send_buf", "tcp_close",
+    // L30 fix (2026-08-16): inspect tcp_recv's own scratch buffer.
+    "tcp_buf_byte_at",
     // Arc 8 v2 runtime â€” epoll-driven single-threaded
     // cooperative scheduling. Linux-only in v2 (kqueue/IOCP
     // queued). Plus non-blocking variants of the TCP primitives
@@ -25544,7 +25546,12 @@ fn check_call(
         // arity + arg-coercion rules.
         "tcp_listen" | "tcp_socket_port" | "tcp_accept"
         | "tcp_connect_local" | "tcp_send_str" | "tcp_recv"
-        | "tcp_send_buf" | "tcp_close" => {
+        | "tcp_send_buf" | "tcp_close"
+        // L30 fix (2026-08-16): tcp_buf_byte_at(i: i64) -> i64,
+        // reading a byte out of tcp_recv's own scratch buffer --
+        // see `check_tcp_builtin`'s own doc comment above its
+        // `want_args` match for the full rationale.
+        | "tcp_buf_byte_at" => {
             return check_tcp_builtin(
                 name, args, env, signatures, span, diagnostics,
             );
@@ -34991,7 +34998,9 @@ fn check_tcp_builtin(
 ) -> CheckedExpr {
     let want_args: usize = match name {
         "tcp_listen" | "tcp_socket_port" | "tcp_accept"
-        | "tcp_connect_local" | "tcp_close" => 1,
+        | "tcp_connect_local" | "tcp_close"
+        // L30 fix: tcp_buf_byte_at(i: i64) -> i64.
+        | "tcp_buf_byte_at" => 1,
         "tcp_send_str" | "tcp_recv" | "tcp_send_buf" => 2,
         _ => unreachable!("unknown tcp builtin: {}", name),
     };

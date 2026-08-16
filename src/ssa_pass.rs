@@ -200,6 +200,7 @@ fn try_fold(instr: &Instruction) -> Option<Const> {
         InstrKind::Cast {
             x: Operand::Const(Const::Int(v)),
             to,
+            checked: _,
         } => fold_int_cast(*v, to),
         _ => None,
     }

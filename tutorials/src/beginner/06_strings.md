@@ -278,18 +278,21 @@ fn main() -> i64 {
 }
 ```
 
-### Passing a fresh `OwnedStr` into a container builtin
+### Passing a fresh `OwnedStr` into a container builtin — or an ordinary function
 
 `hashmap_insert(mut ref m, k, v)`, `hashmap_get`/`hashmap_contains_key`/
-`hashmap_remove`'s key argument, and `Trie`'s `.insert(...)`/
-`.contains(...)`/`.starts_with(...)`/`.delete(...)` methods all accept
-a **freshly-computed** `OwnedStr` argument correctly — passing an
+`hashmap_remove`'s key argument, `Trie`'s `.insert(...)`/
+`.contains(...)`/`.starts_with(...)`/`.delete(...)` methods, and **any
+ordinary user-defined function taking a `Str` parameter** all accept a
+**freshly-computed** `OwnedStr` argument correctly — passing an
 already-owned binding just moves (or borrows) it as usual, and a
 freshly-computed value (e.g. `i64_to_str(1)` called directly, not
 through a `let`) is freed right after the call once nothing else needs
 it:
 
 ```vani
+fn takes_str(s: Str) -> i64 { return len(s) as i64; }
+
 fn main() -> i64 {
   let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
   let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));  // fine
@@ -297,18 +300,21 @@ fn main() -> i64 {
 
   let t: Trie = trie_new();
   let _ = t.insert(i64_to_str(2));                                   // fine
+
+  let n: i64 = takes_str(i64_to_str(12345));                         // fine
+  print n;
   return 0;
 }
 ```
 
-> **Known gap**: this same "fresh value, no owning binding" pattern
-> still leaks (not crashes — just leaks, safely) in one broader spot
-> that hasn't been fixed yet: passing a freshly-computed `OwnedStr`
-> directly as an argument to an **ordinary function** that takes `Str`
-> (`my_fn(i64_to_str(5))`). Bind the value to a `let` first if you want
-> to be sure it's freed (`let k: OwnedStr = i64_to_str(5); my_fn(k);`
-> — this form is always correct, since `k` keeps its own scope-exit
-> Drop). Tracked in `docs/BUG_PATTERN_AUDIT_TODO_9.md`.
+> **Fixed 2026-08-14 (BUG-193)**: this same "fresh value, no owning
+> binding" pattern used to leak (never crash — always safely, just an
+> unreclaimed allocation) when passed directly as an argument to an
+> **ordinary function** taking `Str` (`my_fn(i64_to_str(5))`). Confirmed
+> fixed via a direct LeakSanitizer check on the exact repro above — no
+> workaround needed anymore, though binding to a `let` first
+> (`let k: OwnedStr = i64_to_str(5); my_fn(k);`) is still fine too, if
+> you'd rather keep the value around afterward.
 
 ### Copying a `Str` literal into an `OwnedStr`
 

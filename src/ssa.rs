@@ -145,7 +145,18 @@ pub enum InstrKind {
     /// Source-typed numeric cast. The lowerer doesn't yet split
     /// trunc / sext / zext / fpext etc. — that's a backend
     /// concern when the backends switch over.
-    Cast { x: Operand, to: Type },
+    ///
+    /// `checked`: L28 fix (2026-08-16) — true for a float→int
+    /// narrowing cast (the source `Operand`'s type is F32/F64 and
+    /// `to` is an integer type). A bare `(int64_t)(some_double)` is
+    /// undefined behavior in C (and LLVM's `fptosi`/`fptoui`
+    /// produce a poison value) whenever the float doesn't fit the
+    /// target's range — backends route a `checked` cast through a
+    /// runtime range check + defined trap instead of a raw cast.
+    /// int-to-int casts stay `checked: false` (deliberate two's-
+    /// complement wrapping, unaffected — see `explicit_cast`'s own
+    /// comment in checker.rs).
+    Cast { x: Operand, to: Type, checked: bool },
     /// String literal: emitted as an interned constant pointer
     /// at the backend boundary.
     StrLit(String),
@@ -322,7 +333,7 @@ impl fmt::Display for Instruction {
                 }
                 f.write_str(")")
             }
-            InstrKind::Cast { x, to } => write!(f, "cast {} to {}", x, to),
+            InstrKind::Cast { x, to, .. } => write!(f, "cast {} to {}", x, to),
             InstrKind::StrLit(s) => write!(f, "str_lit {:?}", s),
             InstrKind::ArrayLit { elements } => {
                 f.write_str("array_lit [")?;
@@ -2426,6 +2437,9 @@ fn lower_expr_to_operand(
             Ok(Operand::Value(v))
         }
         TypedExprKind::Cast { expr: inner, ty } => {
+            // L28 fix: float->int narrowing casts need a runtime
+            // range check (see InstrKind::Cast's own doc comment).
+            let checked = matches!(inner.ty, Type::F32 | Type::F64) && ty.is_integer();
             let x = lower_expr_to_operand(inner, b, locals)?;
             let v = b.emit(
                 expr.ty.clone(),
@@ -2433,6 +2447,7 @@ fn lower_expr_to_operand(
                 InstrKind::Cast {
                     x,
                     to: ty.clone(),
+                    checked,
                 },
             );
             Ok(Operand::Value(v))

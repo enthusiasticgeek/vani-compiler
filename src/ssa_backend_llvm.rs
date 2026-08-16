@@ -284,6 +284,28 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         }
     }
 
+    // L28 fix (2026-08-16): scan for `InstrKind::Cast { checked:
+    // true, .. }` -- a float->int narrowing cast needing a runtime
+    // range check (see `InstrKind::Cast`'s own doc comment in
+    // ssa.rs). Same "only emit what's used" gating as the overflow
+    // scan just above -- one helper per TARGET int type, shared by
+    // both f32 and f64 sources (the call site always widens to
+    // `double` first, an exact/lossless promotion for f32).
+    let mut checked_float_cast_tys: std::collections::BTreeSet<&'static str> =
+        std::collections::BTreeSet::new();
+    for f in &module.functions {
+        for block in &f.blocks {
+            for instr in &block.instructions {
+                let InstrKind::Cast { checked: true, to, .. } = &instr.kind else {
+                    continue;
+                };
+                if let Some(tyname) = int_type_name(to) {
+                    checked_float_cast_tys.insert(tyname);
+                }
+            }
+        }
+    }
+
     // Build a function-name → (param types, return type)
     // table so Call instructions can recover the per-param
     // LLVM type for Const operands (whose `operand_type`
@@ -564,6 +586,64 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
             ty = tyname,
             range_check = range_check,
             msg = shift_msg.as_deref().unwrap(),
+        ));
+    }
+    // L28 fix: checked float-to-int cast helpers. One per TARGET
+    // integer type, taking `double` -- an f32 source is widened via
+    // `fpext` at the call site (exact/lossless), so f32 and f64
+    // sources share the same 8 helpers. Boundary constants are all
+    // exact powers of two, so they're bit-for-bit exact `double`
+    // literals -- no rounding hazard at the boundary itself (unlike
+    // e.g. the double value of `INT64_MAX`, which rounds UP past the
+    // real max). The upper bound is a strict `<` against
+    // 2^(width[-1 for signed]), not `<=` against the type's literal
+    // MAX. `fcmp` against NaN is always false, so `%ok` is false and
+    // the trap fires on NaN too -- no separate `isnan` check needed.
+    // See `backend_c.rs::emit_runtime_helpers`'s `float_int_kinds`
+    // for the identical boundary-constant table on the C side.
+    let float_cast_bounds: &[(&str, &str, &str)] = &[
+        ("i8", "-128.0", "128.0"),
+        ("i16", "-32768.0", "32768.0"),
+        ("i32", "-2147483648.0", "2147483648.0"),
+        ("i64", "-9223372036854775808.0", "9223372036854775808.0"),
+        ("u8", "0.0", "256.0"),
+        ("u16", "0.0", "65536.0"),
+        ("u32", "0.0", "4294967296.0"),
+        ("u64", "0.0", "18446744073709551616.0"),
+    ];
+    let float_cast_msg = if !checked_float_cast_tys.is_empty() {
+        Some(emit_trap_msg_global(
+            &mut out,
+            ".msg.floatcast",
+            "float-to-int cast out of range\n",
+        ))
+    } else {
+        None
+    };
+    for tyname in &checked_float_cast_tys {
+        let (llvm_w, signed, _bits) = int_type_info(tyname);
+        let (_, lo, hi) = float_cast_bounds
+            .iter()
+            .find(|(t, _, _)| t == tyname)
+            .expect("checked_float_cast_tys only contains int_type_name results");
+        let conv = if signed { "fptosi" } else { "fptoui" };
+        out.push_str(&format!(
+            "define internal {w} @__intent_check_float_to_{ty}(double %x) alwaysinline {{\n\
+             entry:\n  \
+               %lo = fcmp oge double %x, {lo}\n  \
+               %hi = fcmp olt double %x, {hi}\n  \
+               %ok = and i1 %lo, %hi\n  \
+               br i1 %ok, label %cont, label %oob, !prof !{{!\"branch_weights\", i32 1048576, i32 1}}\n\
+             oob:\n  call void @__intent_trap(i8* {msg})\n  unreachable\n\
+             cont:\n  \
+               %r = {conv} double %x to {w}\n  \
+               ret {w} %r\n}}\n",
+            w = llvm_w,
+            ty = tyname,
+            lo = lo,
+            hi = hi,
+            conv = conv,
+            msg = float_cast_msg.as_deref().unwrap(),
         ));
     }
     // Empty string global used by the per-element Vec
@@ -3418,7 +3498,7 @@ fn emit_instr(
             let rhs_ty = operand_type(r, value_types);
             emit_binary(*op, l, r, &lhs_ty, rhs_ty.as_ref(), &instr.ty, instr.result, *checked, out)?;
         }
-        InstrKind::Cast { x, to } => {
+        InstrKind::Cast { x, to, checked } => {
             // BUG-111: `operand_type` returns `None` for a bare
             // `Operand::Const` (it has no `ValueId` to look up in
             // `value_types`), so the old fallback here defaulted
@@ -3435,7 +3515,36 @@ fn emit_instr(
             // derive `from_ty` from that instead of guessing `to`.
             let from_ty = operand_type(x, value_types)
                 .unwrap_or_else(|| const_operand_natural_type(x));
-            emit_cast(x, &from_ty, to, instr.result, out)?;
+            if *checked {
+                // L28 fix: float->int narrowing routes through the
+                // checked `@__intent_check_float_to_<ty>` helper
+                // instead of a bare (poison-on-out-of-range) `fptosi`/
+                // `fptoui`. The helper always takes `double`; an f32
+                // source widens via `fpext` first (exact, lossless).
+                let x_str = if matches!(from_ty, Type::F32) {
+                    let widened = format!("%v_{}.f64", instr.result.0);
+                    out.push_str(&format!(
+                        "  {} = fpext float {} to double\n",
+                        widened,
+                        operand_str(x)
+                    ));
+                    widened
+                } else {
+                    operand_str(x)
+                };
+                let tyname = int_type_name(to).ok_or_else(|| EmitError {
+                    message: format!("checked float cast to non-integer type {:?}", to),
+                })?;
+                out.push_str(&format!(
+                    "  %v_{} = call {} @__intent_check_float_to_{}(double {})\n",
+                    instr.result.0,
+                    llvm_type(to)?,
+                    tyname,
+                    x_str
+                ));
+            } else {
+                emit_cast(x, &from_ty, to, instr.result, out)?;
+            }
         }
         InstrKind::Call { name, args } => {
             // `intent_print` / `intent_assert_fail` are

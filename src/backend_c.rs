@@ -16436,6 +16436,17 @@ fn emit_expr(expr: &TypedExpr) -> String {
         }
         TypedExprKind::Call { name, args, .. } => emit_call(name, args, &expr.ty),
         TypedExprKind::Cast { expr, ty } => {
+            // L28 fix (2026-08-16): float-to-int narrowing casts route
+            // through a checked runtime helper instead of a bare C
+            // cast -- `(int64_t)(some_double)` is undefined behavior
+            // in C (and LLVM's `fptosi`/`fptoui` produce a poison
+            // value) whenever the float doesn't fit the target
+            // integer's range. int-to-int casts are unaffected and
+            // keep their existing, deliberate two's-complement
+            // wrapping behavior (see `explicit_cast`'s own comment).
+            if matches!(expr.ty, Type::F32 | Type::F64) && ty.is_integer() {
+                return format!("({}({}))", float_to_int_helper(ty), emit_expr(expr));
+            }
             // Raw-pointer-target casts (`&x as *const T`,
             // `&mut x as *mut T`) — Layer 1.1+ of `unsafe.md`.
             // The target type's C spelling has a `*` after the
@@ -20376,6 +20387,18 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[1])
             )
         }
+        // L30 fix (2026-08-16): tcp_buf_byte_at(i: i64) -> i64.
+        // Reads the i-th byte of intent_tcp_buf directly -- no
+        // bounds check, mirroring str_byte_at's own "caller must
+        // ensure 0 <= i < <actual byte count>" convention. The cast
+        // to (int64_t) widens the unsigned char read, matching
+        // str_byte_at's own 0..255 range.
+        "tcp_buf_byte_at" => {
+            format!(
+                "((int64_t)intent_tcp_buf[(size_t)({})])",
+                emit_expr(&args[0])
+            )
+        }
         "tcp_close" => {
             format!("intent_tcp_close(({}))", emit_expr(&args[0]))
         }
@@ -22989,6 +23012,36 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         ("u64", "uint64_t", false),
     ];
     let overflow_ops: &[&str] = &["add", "sub", "mul"];
+    // L28 fix (2026-08-16): checked float-to-int narrowing casts.
+    // `(int64_t)(some_double)` is UB in C (and LLVM's `fptosi`/
+    // `fptoui` produce a poison value) whenever the float doesn't fit
+    // the target integer type's range -- confirmed via a fuzzer-found
+    // minimal repro (`docs/v1_limitations.md`'s L28) where the two
+    // backends silently disagreed on exit code for the identical
+    // out-of-range cast, each inheriting a DIFFERENT flavor of UB.
+    // One helper per TARGET integer type, taking `double` -- an f32
+    // source promotes to `double` automatically and losslessly at the
+    // call site (C's usual argument conversion for a `double`-typed
+    // parameter), so f32 and f64 sources share the same 8 helpers
+    // rather than needing 16. Boundary constants below are all exact
+    // powers of two (2^N or -2^N), so they're bit-for-bit exact as
+    // `double` literals -- no rounding hazard at the boundary itself,
+    // unlike e.g. `(double)INT64_MAX` (which rounds UP past the real
+    // max). The upper bound is therefore a strict `<` against
+    // 2^(width[-1 for signed]), not `<=` against the type's literal
+    // MAX. A NaN input compares false against both bounds, so
+    // `!(v >= lo && v < hi)` correctly traps on NaN too, with no
+    // separate `isnan` check needed.
+    let float_int_kinds: &[(&str, &str, &str, &str)] = &[
+        ("i8", "int8_t", "-128.0", "128.0"),
+        ("i16", "int16_t", "-32768.0", "32768.0"),
+        ("i32", "int32_t", "-2147483648.0", "2147483648.0"),
+        ("i64", "int64_t", "-9223372036854775808.0", "9223372036854775808.0"),
+        ("u8", "uint8_t", "0.0", "256.0"),
+        ("u16", "uint16_t", "0.0", "65536.0"),
+        ("u32", "uint32_t", "0.0", "4294967296.0"),
+        ("u64", "uint64_t", "0.0", "18446744073709551616.0"),
+    ];
     // BUG-119: combined divide-by-zero + `MIN / -1`-overflow helpers
     // for signed integer Div/Rem (see `div_rem_overflow_helper`).
     // Unsigned/float Div/Rem still route through `divisor_kinds`
@@ -23018,12 +23071,17 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         .flat_map(|k| div_rem_ops.iter().map(move |op| (k, *op)))
         .filter(|(k, op)| body.contains(&format!("intent_checked_{}_{op}(", k.0)))
         .collect();
+    let used_float_casts: Vec<&(&str, &str, &str, &str)> = float_int_kinds
+        .iter()
+        .filter(|(ty, _, _, _)| body.contains(&format!("intent_check_float_to_{}(", ty)))
+        .collect();
 
     if !needs_bounds
         && used_divisors.is_empty()
         && used_shifts.is_empty()
         && used_overflows.is_empty()
         && used_div_rem.is_empty()
+        && used_float_casts.is_empty()
     {
         return;
     }
@@ -23119,6 +23177,26 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
             t = ty,
             op = op,
             bl = builtin,
+        ));
+    }
+
+    // L28 fix: checked float-to-int cast helpers. See `float_int_kinds`'s
+    // own comment above for why one `double`-parameter helper per
+    // TARGET type suffices for both f32 and f64 sources.
+    for (ty, c_ty, lo, hi) in &used_float_casts {
+        out.push_str(&format!(
+            "static INTENT_UNUSED inline {c} intent_check_float_to_{t}(double v) {{\n\
+    if (__builtin_expect(!(v >= {lo} && v < {hi}), 0)) {{\n\
+        fprintf(stderr, \"float-to-int cast out of range: value does not fit {t}\\n\");\n\
+        fflush(stdout);\n\
+        exit(3);\n\
+    }}\n\
+    return ({c})v;\n\
+}}\n",
+            c = c_ty,
+            t = ty,
+            lo = lo,
+            hi = hi,
         ));
     }
 
@@ -23269,6 +23347,23 @@ fn overflow_helper(op: BinaryOp, ty: &Type) -> String {
         _ => unreachable!("overflow_helper called on non-arithmetic op"),
     };
     format!("intent_check_{ty_name}_{op_name}")
+}
+
+/// L28 fix: name of the checked float-to-int cast helper for a given
+/// TARGET integer type (shared by both f32 and f64 sources -- see
+/// `emit_runtime_helpers`'s `float_int_kinds` comment).
+pub(crate) fn float_to_int_helper(target: &Type) -> &'static str {
+    match target {
+        Type::I8 => "intent_check_float_to_i8",
+        Type::I16 => "intent_check_float_to_i16",
+        Type::I32 => "intent_check_float_to_i32",
+        Type::I64 => "intent_check_float_to_i64",
+        Type::U8 => "intent_check_float_to_u8",
+        Type::U16 => "intent_check_float_to_u16",
+        Type::U32 => "intent_check_float_to_u32",
+        Type::U64 => "intent_check_float_to_u64",
+        _ => unreachable!("float_to_int_helper called on non-integer target"),
+    }
 }
 
 pub(crate) fn function_name(name: &str) -> String {

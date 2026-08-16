@@ -2714,15 +2714,45 @@ fn emit_instr(
             )
             .unwrap();
         }
-        InstrKind::Cast { x, to } => {
-            writeln!(
-                out,
-                "  v_{} = ({})({});",
-                instr.result.0,
-                c_type(to)?,
-                c_operand(x)
-            )
-            .unwrap();
+        InstrKind::Cast { x, to, checked } => {
+            // L28 fix: float->int narrowing gets an inline range-check
+            // guard before the cast, matching this backend's own
+            // established convention for checked ops (bounds checks
+            // are inlined the same way here, unlike tree-C's
+            // `backend_c.rs`, which factors checks into named helper
+            // functions) — see `InstrKind::Cast`'s own doc comment in
+            // ssa.rs. Boundary constants are exact powers of two, so
+            // no double-precision rounding hazard at the boundary
+            // itself; see `float_cast_bounds`'s own comment.
+            if *checked {
+                let (lo, hi) = float_cast_bounds(to);
+                let operand = c_operand(x);
+                writeln!(
+                    out,
+                    "  if (!({op} >= {lo} && {op} < {hi})) {{ fprintf(stderr, \"float-to-int cast out of range\\n\"); fflush(stdout); exit(3); }}",
+                    op = operand,
+                    lo = lo,
+                    hi = hi,
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "  v_{} = ({})({});",
+                    instr.result.0,
+                    c_type(to)?,
+                    operand
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    out,
+                    "  v_{} = ({})({});",
+                    instr.result.0,
+                    c_type(to)?,
+                    c_operand(x)
+                )
+                .unwrap();
+            }
         }
         InstrKind::Hint(_) => {
             // Pure structural markers (parallel-for / task
@@ -3176,6 +3206,29 @@ fn c_type(ty: &Type) -> Result<&'static str, EmitError> {
             })
         }
     })
+}
+
+/// L28 fix: (lower, upper) bound literals for a checked float->int
+/// cast's inline guard, keyed by the TARGET integer type. Both
+/// bounds are exact powers of two (2^N or -2^N), so they're bit-
+/// for-bit exact `double` literals -- no rounding hazard at the
+/// boundary itself (unlike e.g. the double value of `INT64_MAX`,
+/// which rounds UP past the real max). The upper bound is a strict
+/// `<` against 2^(width[-1 for signed]), not `<=` against the
+/// type's literal MAX. Mirrors `backend_c::emit_runtime_helpers`'s
+/// `float_int_kinds` table exactly.
+fn float_cast_bounds(ty: &Type) -> (&'static str, &'static str) {
+    match ty {
+        Type::I8 => ("-128.0", "128.0"),
+        Type::I16 => ("-32768.0", "32768.0"),
+        Type::I32 => ("-2147483648.0", "2147483648.0"),
+        Type::I64 => ("-9223372036854775808.0", "9223372036854775808.0"),
+        Type::U8 => ("0.0", "256.0"),
+        Type::U16 => ("0.0", "65536.0"),
+        Type::U32 => ("0.0", "4294967296.0"),
+        Type::U64 => ("0.0", "18446744073709551616.0"),
+        other => unreachable!("float_cast_bounds called on non-integer target {other:?}"),
+    }
 }
 
 /// Leaf integer/bool spelling for an atomic cell's element
