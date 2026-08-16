@@ -15175,3 +15175,57 @@ clean. 2 new `src/lib.rs` unit tests. Full `cargo test --release
 --workspace` clean: 2991 lib (2989 + 2 new) / 268 e2e, 0 failed.
 Marked FIXED in both this file and the localfuzz worktree's
 `docs/TODO_LOCAL_STAGING.md`, per the project's closeout convention.
+
+## BUG-196 -- LLVM `While` codegen left `ctx.current_block` stale, corrupting short-circuit `&&`/`||` PHI nodes (2026-08-16)
+
+Found while validating a new `vani-calculus` package feature (BDF2
+ODE solver): `vanic run` (default LLVM backend) crashed with `PHI
+node entries do not match predecessors!` on `backward_euler_step`
+and other pre-existing Newton-iteration-style functions -- an `if
+abs(gp) < eps { return y; }`-shaped guard as the first statement of
+a `while` loop body. Confirmed not a regression from the new code:
+reproduces identically on the unmodified pre-existing
+`backward_euler_step`/`crank_nicolson_step` and on a from-scratch
+minimal repro; `--backend=c` was unaffected and produced correct
+results throughout.
+
+Root cause (`src/backend_llvm.rs`, `TypedStmt::While` codegen):
+opening the `header:` and `loop_body:` blocks never updated
+`ctx.current_block` to match -- unlike the loop's own `exit:` block,
+which already carries an explicit fix for exactly this (see its
+"Closure #238" comment). The `&&`/`||` short-circuit codegen (added
+2026-08-13, its own comment cites "BUG-185-class") reads
+`ctx.current_block` right after evaluating its left operand to
+record the PHI's incoming-edge label; with a loop condition or the
+first block-reading construct in a loop body left unset, that read
+saw whatever block was current *before* the loop (e.g. an outer
+`if`'s merge block) instead of `header`/`loop_body`, producing a PHI
+whose recorded predecessor didn't match the actual `br` instruction
+-- exactly the failure LLVM's verifier reported. This is the same
+recurring bug class as BUG-185 and Closure #238, just two more sites
+in the same function that never got the treatment when those fixes
+landed.
+
+Fixed by adding `ctx.current_block = header.clone();` right after
+opening the header block (before evaluating `cond`) and
+`ctx.current_block = body_lbl.clone();` right after opening the body
+block (before emitting the body's statements), mirroring the
+existing `exit`-block fix.
+
+**Verification**: original repro and a minimal from-scratch repro
+both now run correctly on LLVM, matching `--backend=c`. All 7
+`vani-calculus` implicit-ODE tests (previously all 7 crashing on
+LLVM, `--backend=c` unaffected) now pass on both backends via
+`vanic test`, as do all 59 tests and 8 examples across that package.
+Full corpus swept: `tools/backend_crosscheck.py` (0 new findings /
+1056) and `tools/leak_sweep.py` (0 new findings, matches the
+existing 4-entry baseline exactly -- a first sweep pass spuriously
+flagged 28 files as `ASAN_EXIT_99_UNCLASSIFIED`, traced to
+`LeakSanitizer does not work under ptrace` self-failures caused by
+manual `strace -p <pid>` progress-checking during that run; a clean
+re-run with no `strace` attached matched the baseline exactly,
+confirming the fix introduces no new memory-safety regressions).
+Full `cargo test --release --workspace` clean: 2997 lib / 272 e2e (1
+flaky, pre-existing `concurrent_pipeline_dashboard` pthread/JIT
+concurrency race, confirmed unrelated via 5 isolated reruns before
+and after the fix).

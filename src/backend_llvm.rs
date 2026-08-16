@@ -4429,6 +4429,16 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str(&format!("  br label %{}\n", header));
             // Header re-evaluates the condition each iteration.
             out.push_str(&format!("{}:\n", header));
+            // Same "phi predecessor tracking" class of bug as BUG-185 /
+            // Closure #238 (this loop's own `exit` block below): a `cond`
+            // that itself contains a short-circuit `&&`/`||` reads
+            // `ctx.current_block` to build its phi's incoming-edge label.
+            // Without this update, that read sees whatever block was
+            // current *before* the loop (e.g. an outer `if`'s merge
+            // block), not `header` -- corrupting the phi and producing
+            // "PHI node entries do not match predecessors!" as soon as a
+            // `while` condition uses `&&`/`||`.
+            ctx.current_block = header.clone();
             let c = emit_expr(cond, ctx, out);
             out.push_str(&format!(
                 "  br i1 {}, label %{}, label %{}\n",
@@ -4436,6 +4446,14 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
             // Body.
             out.push_str(&format!("{}:\n", body_lbl));
+            // Same fix as above, for the loop body: a short-circuit
+            // `&&`/`||` as (or at the start of) the body's first statement
+            // must see `body_lbl` as the current block, not whatever was
+            // current before the loop -- this is the exact shape that
+            // crashed `backward_euler_step`-style Newton loops (an `if
+            // abs(gp) < eps || ... { return y; }`-style guard as the first
+            // statement in a `while` body).
+            ctx.current_block = body_lbl.clone();
             ctx.loops.push(LoopFrame {
                 header: header.clone(),
                 exit: exit.clone(),
