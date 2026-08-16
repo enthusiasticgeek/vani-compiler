@@ -563,6 +563,73 @@ impl fmt::Display for LowerError {
     }
 }
 
+/// #27: encodes an inline `print` format spec into the mangled
+/// `intent_print_item` call name both SSA backends dispatch on.
+/// `InstrKind::Call`'s `name` is a plain `String` shared by every
+/// builtin/user-fn call in the SSA IR -- adding a dedicated spec
+/// field there would ripple through every one of those sites for a
+/// feature only this one callee uses, so the spec rides along in
+/// the name instead. Deliberately terse (`z1`/`w<N>`/`p<N>`, no
+/// separators beyond the leading `$`) since this string only ever
+/// exists to be decoded right back by `decode_print_item_spec` --
+/// never surfaced to a user, never round-tripped through source.
+/// Must stay in exact sync with that decoder.
+pub fn encode_print_item_spec(spec: &crate::ast::FormatSpec) -> String {
+    let mut suffix = String::new();
+    if spec.zero_pad {
+        suffix.push_str("z1");
+    }
+    if let Some(w) = spec.width {
+        suffix.push_str(&format!("w{}", w));
+    }
+    if let Some(p) = spec.precision {
+        suffix.push_str(&format!("p{}", p));
+    }
+    format!("intent_print_item${}", suffix)
+}
+
+/// Reverse of `encode_print_item_spec`. Returns `None` for the
+/// plain `"intent_print_item"` name (the ordinary, spec-less case --
+/// by far the common one) or any other callee name entirely, so
+/// call sites can write `if let Some((zero_pad, width, precision)) =
+/// decode_print_item_spec(name) { /* spec'd path */ } else { /*
+/// existing unspec'd path, byte-identical to before this feature
+/// existed */ }`.
+pub fn decode_print_item_spec(name: &str) -> Option<(bool, Option<u32>, Option<u32>)> {
+    let suffix = name.strip_prefix("intent_print_item$")?;
+    let mut zero_pad = false;
+    let mut width = None;
+    let mut precision = None;
+    let mut chars = suffix.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            'z' => {
+                chars.next(); // consume the '1' flag digit
+                zero_pad = true;
+            }
+            'w' | 'p' => {
+                let mut digits = String::new();
+                while let Some(d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        digits.push(*d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let value = digits.parse().ok();
+                if c == 'w' {
+                    width = value;
+                } else {
+                    precision = value;
+                }
+            }
+            _ => {}
+        }
+    }
+    Some((zero_pad, width, precision))
+}
+
 /// Lower an entire typed program to SSA. Functions that hit the
 /// unsupported subset are skipped — their `LowerError` is
 /// returned alongside the partial `Module` so callers can show a
@@ -1156,8 +1223,8 @@ fn lower_stmt(
             let span = items
                 .iter()
                 .find_map(|it| match it {
-                    crate::ir::TypedPrintItem::Expr(e) => Some(e.span),
-                    crate::ir::TypedPrintItem::Str(_) => None,
+                    crate::ir::TypedPrintItem::Expr(e, _) => Some(e.span),
+                    crate::ir::TypedPrintItem::Str(_, _) => None,
                 })
                 .unwrap_or_default();
             for (i, item) in items.iter().enumerate() {
@@ -1173,16 +1240,16 @@ fn lower_stmt(
                 // the heap) — freeing after print would
                 // double-free. Closure #135.
                 let needs_drop_after_print = match item {
-                    crate::ir::TypedPrintItem::Expr(e) => {
+                    crate::ir::TypedPrintItem::Expr(e, _) => {
                         crate::ir::is_fresh_owned_str(e)
                     }
-                    crate::ir::TypedPrintItem::Str(_) => false,
+                    crate::ir::TypedPrintItem::Str(_, _) => false,
                 };
                 let op = match item {
-                    crate::ir::TypedPrintItem::Expr(e) => {
+                    crate::ir::TypedPrintItem::Expr(e, _) => {
                         lower_expr_to_operand(e, b, locals)?
                     }
-                    crate::ir::TypedPrintItem::Str(text) => {
+                    crate::ir::TypedPrintItem::Str(text, _) => {
                         let v = b.emit(
                             Type::Str,
                             span,
@@ -1191,11 +1258,27 @@ fn lower_stmt(
                         Operand::Value(v)
                     }
                 };
+                // #27: a format spec on this item mangles the call
+                // NAME rather than adding an `InstrKind::Call` arg
+                // slot -- `Call.args` is a plain `Vec<Operand>` used
+                // by every other builtin/user-fn call in the SSA IR,
+                // and adding a spec field there would ripple through
+                // every one of those sites for a feature only this
+                // one callee ever uses. A `Str` item's spec is
+                // always `None` by the time lowering runs (the
+                // checker rejects any spec on `Str` before this
+                // point), so only `Expr` items can carry one.
+                let callee = match item {
+                    crate::ir::TypedPrintItem::Expr(_, Some(spec)) => {
+                        encode_print_item_spec(spec)
+                    }
+                    _ => "intent_print_item".to_string(),
+                };
                 b.emit(
                     Type::I64,
                     span,
                     InstrKind::Call {
-                        name: "intent_print_item".to_string(),
+                        name: callee,
                         args: vec![op.clone()],
                     },
                 );
@@ -1583,7 +1666,7 @@ fn modified_in_body(body: &[TypedStmt]) -> std::collections::BTreeSet<String> {
                 | TypedStmt::Prove { expr } => walk_expr_reads(expr, out),
                 TypedStmt::Print { items } => {
                     for it in items {
-                        if let crate::ir::TypedPrintItem::Expr(e) = it {
+                        if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                             walk_expr_reads(e, out);
                         }
                     }

@@ -1669,11 +1669,27 @@ impl fmt::Display for Type {
     }
 }
 
+/// #27: an inline format spec attached to a `print` item --
+/// `print x:03;` (zero_pad=true, width=Some(3)), `print y:.2;`
+/// (precision=Some(2)), `print z:08.3;` (both). Lexed as a single
+/// atomic `TokenKind::FormatSpec` token (see its doc comment in
+/// `lexer.rs` for why) and carried through unchanged from parser to
+/// codegen -- width/precision are compile-time literal digits only,
+/// never runtime-substituted, so every backend can bake a literal
+/// printf format string at the call site.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FormatSpec {
+    pub zero_pad: bool,
+    pub width: Option<u32>,
+    pub precision: Option<u32>,
+    pub span: Span,
+}
+
 /// One item in a `print` statement's comma-separated list.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PrintItem {
-    Expr(Expr),
-    Str(String),
+    Expr(Expr, Option<FormatSpec>),
+    Str(String, Option<FormatSpec>),
 }
 
 /// Operators allowed in a reduction clause. A superset of the

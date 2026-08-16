@@ -6316,7 +6316,7 @@ pub(crate) fn program_uses_str_split(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body, .. } => {
@@ -6478,7 +6478,7 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body, .. } => {
@@ -8528,7 +8528,7 @@ fn collect_vec_elements_in_stmt(
         | TypedStmt::Prove { expr } => collect_vec_elements_in_expr(expr, seen, out),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_vec_elements_in_expr(e, seen, out);
                 }
             }
@@ -8711,7 +8711,7 @@ fn collect_tuple_shapes_in_stmt(
         | TypedStmt::Prove { expr } => collect_tuple_shapes_in_expr(expr, seen, out),
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_tuple_shapes_in_expr(e, seen, out);
                 }
             }
@@ -9279,7 +9279,7 @@ pub(crate) fn program_uses_vec_chunks(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body, .. } => {
@@ -11281,7 +11281,7 @@ pub(crate) fn collect_rwlock_specs_in_stmt(
         | TypedStmt::Prove { expr } => collect_rwlock_specs_in_expr(expr, seen, out),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_rwlock_specs_in_expr(e, seen, out);
                 }
             }
@@ -11443,7 +11443,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
         | TypedStmt::Prove { expr } => collect_channel_specs_in_expr(expr, seen, out),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_channel_specs_in_expr(e, seen, out);
                 }
             }
@@ -11577,7 +11577,7 @@ pub(crate) fn collect_mutex_specs_in_stmt(
         | TypedStmt::Prove { expr } => collect_mutex_specs_in_expr(expr, seen, out),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_mutex_specs_in_expr(e, seen, out);
                 }
             }
@@ -16200,14 +16200,15 @@ fn emit_print_items(items: &[crate::ir::TypedPrintItem], out: &mut String) {
     use crate::ir::TypedPrintItem;
     for (i, item) in items.iter().enumerate() {
         match item {
-            TypedPrintItem::Str(s) => {
+            TypedPrintItem::Str(s, _) => {
                 // fputs doesn't append a newline; perfect for the
-                // mid-line case.
+                // mid-line case. A spec is never valid on Str (the
+                // checker rejects it), so there's nothing to apply.
                 out.push_str("  fputs(\"");
                 out.push_str(&escape_c_string(s));
                 out.push_str("\", stdout);\n");
             }
-            TypedPrintItem::Expr(expr) => emit_print_expr_no_newline(expr, out),
+            TypedPrintItem::Expr(expr, spec) => emit_print_expr_no_newline(expr, spec, out),
         }
         if i + 1 < items.len() {
             out.push_str("  fputs(\" \", stdout);\n");
@@ -16216,7 +16217,27 @@ fn emit_print_items(items: &[crate::ir::TypedPrintItem], out: &mut String) {
     out.push_str("  putchar('\\n');\n");
 }
 
-fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
+/// #27: builds the printf flags+width portion of a format
+/// conversion (`"03"` for zero-padded width 3, `""` for no spec) --
+/// shared by every numeric branch below so the width/zero-pad
+/// encoding lives in exactly one place. Width/precision are
+/// compile-time literal digits only (never runtime-substituted), so
+/// this always produces a literal format-string fragment, never a
+/// `%*d`-style runtime-width conversion.
+fn printf_width_flags(spec: &Option<crate::ast::FormatSpec>) -> String {
+    let mut flags = String::new();
+    if let Some(s) = spec {
+        if s.zero_pad {
+            flags.push('0');
+        }
+        if let Some(w) = s.width {
+            flags.push_str(&w.to_string());
+        }
+    }
+    flags
+}
+
+fn emit_print_expr_no_newline(expr: &TypedExpr, spec: &Option<crate::ast::FormatSpec>, out: &mut String) {
     match &expr.ty {
         Type::Bool => {
             out.push_str("  fputs(");
@@ -16224,12 +16245,17 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
             out.push_str(" ? \"true\" : \"false\", stdout);\n");
         }
         Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-            out.push_str("  printf(\"%llu\", (unsigned long long)(");
+            out.push_str(&format!("  printf(\"%{}llu\", (unsigned long long)(", printf_width_flags(spec)));
             out.push_str(&emit_expr(expr));
             out.push_str("));\n");
         }
         Type::F32 | Type::F64 => {
-            out.push_str("  printf(\"%g\", (double)(");
+            let flags = printf_width_flags(spec);
+            let conv = match spec.as_ref().and_then(|s| s.precision) {
+                Some(p) => format!("%{}.{}f", flags, p),
+                None => format!("%{}g", flags),
+            };
+            out.push_str(&format!("  printf(\"{}\", (double)(", conv));
             out.push_str(&emit_expr(expr));
             out.push_str("));\n");
         }
@@ -16294,11 +16320,22 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
                 crate::lexer::PrintLangMode::Ascii => None,
             };
             if let Some(s) = suffix {
+                // #27 scope decision: a format spec's width doesn't
+                // apply here -- `intent_print_int_<lang>` renders
+                // localized (Devanagari/Bengali/...) digit
+                // codepoints through its own dedicated helper, not
+                // printf, so there's no format-string slot to widen.
+                // The checker still accepts the spec (it's valid for
+                // this expr's numeric type); it's just a no-op under
+                // a non-ASCII print-lang-mode. Padding a localized-
+                // digit render would need a per-script pad helper,
+                // out of scope for this pass -- documented in
+                // `tutorials/src/beginner/06_strings.md`.
                 out.push_str(&format!("  intent_print_int_{}((long long)(", s));
                 out.push_str(&emit_expr(expr));
                 out.push_str("));\n");
             } else {
-                out.push_str("  printf(\"%lld\", (long long)(");
+                out.push_str(&format!("  printf(\"%{}lld\", (long long)(", printf_width_flags(spec)));
                 out.push_str(&emit_expr(expr));
                 out.push_str("));\n");
             }
@@ -16310,12 +16347,12 @@ fn emit_eprint_items(items: &[crate::ir::TypedPrintItem], out: &mut String) {
     use crate::ir::TypedPrintItem;
     for (i, item) in items.iter().enumerate() {
         match item {
-            TypedPrintItem::Str(s) => {
+            TypedPrintItem::Str(s, _) => {
                 out.push_str("  fputs(\"");
                 out.push_str(&escape_c_string(s));
                 out.push_str("\", stderr);\n");
             }
-            TypedPrintItem::Expr(expr) => emit_eprint_expr_no_newline(expr, out),
+            TypedPrintItem::Expr(expr, spec) => emit_eprint_expr_no_newline(expr, spec, out),
         }
         if i + 1 < items.len() {
             out.push_str("  fputs(\" \", stderr);\n");
@@ -16324,7 +16361,7 @@ fn emit_eprint_items(items: &[crate::ir::TypedPrintItem], out: &mut String) {
     out.push_str("  fputc('\\n', stderr);\n");
 }
 
-fn emit_eprint_expr_no_newline(expr: &TypedExpr, out: &mut String) {
+fn emit_eprint_expr_no_newline(expr: &TypedExpr, spec: &Option<crate::ast::FormatSpec>, out: &mut String) {
     match &expr.ty {
         Type::Bool => {
             out.push_str("  fputs(");
@@ -16332,12 +16369,17 @@ fn emit_eprint_expr_no_newline(expr: &TypedExpr, out: &mut String) {
             out.push_str(" ? \"true\" : \"false\", stderr);\n");
         }
         Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-            out.push_str("  fprintf(stderr, \"%llu\", (unsigned long long)(");
+            out.push_str(&format!("  fprintf(stderr, \"%{}llu\", (unsigned long long)(", printf_width_flags(spec)));
             out.push_str(&emit_expr(expr));
             out.push_str("));\n");
         }
         Type::F32 | Type::F64 => {
-            out.push_str("  fprintf(stderr, \"%g\", (double)(");
+            let flags = printf_width_flags(spec);
+            let conv = match spec.as_ref().and_then(|s| s.precision) {
+                Some(p) => format!("%{}.{}f", flags, p),
+                None => format!("%{}g", flags),
+            };
+            out.push_str(&format!("  fprintf(stderr, \"{}\", (double)(", conv));
             out.push_str(&emit_expr(expr));
             out.push_str("));\n");
         }
@@ -16362,7 +16404,7 @@ fn emit_eprint_expr_no_newline(expr: &TypedExpr, out: &mut String) {
             }
         }
         _ => {
-            out.push_str("  fprintf(stderr, \"%lld\", (long long)(");
+            out.push_str(&format!("  fprintf(stderr, \"%{}lld\", (long long)(", printf_width_flags(spec)));
             out.push_str(&emit_expr(expr));
             out.push_str("));\n");
         }
@@ -23423,7 +23465,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             TypedStmt::Assert { expr, .. } | TypedStmt::Prove { expr } => walk_expr(expr, set),
             TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
                 for item in items {
-                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                    if let crate::ir::TypedPrintItem::Expr(e, _) = item {
                         walk_expr(e, set);
                     }
                 }

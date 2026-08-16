@@ -759,7 +759,7 @@ fn collect_call_overrides_in_stmt(
         | TypedStmt::Discard { expr } => collect_call_overrides_in_expr(expr, ctx, out),
         TypedStmt::Print { items } => {
             for item in items {
-                if let TypedPrintItem::Expr(e) = item {
+                if let TypedPrintItem::Expr(e, _) = item {
                     collect_call_overrides_in_expr(e, ctx, out);
                 }
             }
@@ -1742,7 +1742,7 @@ fn collect_var_uses(stmt: &TypedStmt, target: &Target, out: &mut Vec<crate::span
         | TypedStmt::Discard { expr } => collect_var_uses_in_expr(expr, target, out),
         TypedStmt::Print { items } => {
             for item in items {
-                if let TypedPrintItem::Expr(e) = item {
+                if let TypedPrintItem::Expr(e, _) = item {
                     collect_var_uses_in_expr(e, target, out);
                 }
             }
@@ -1922,7 +1922,7 @@ fn walk_stmt_for_var(
         | TypedStmt::Discard { expr } => walk_expr_for_var(expr, offset, best),
         TypedStmt::Print { items } => {
             for item in items {
-                if let TypedPrintItem::Expr(e) = item {
+                if let TypedPrintItem::Expr(e, _) = item {
                     walk_expr_for_var(e, offset, best);
                 }
             }
@@ -2164,7 +2164,7 @@ fn walk_stmt(
         TypedStmt::Return { expr } => walk_expr(expr, offset, best),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for item in items {
-                if let TypedPrintItem::Expr(e) = item {
+                if let TypedPrintItem::Expr(e, _) = item {
                     walk_expr(e, offset, best);
                 }
             }

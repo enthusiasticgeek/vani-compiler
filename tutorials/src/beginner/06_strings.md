@@ -435,10 +435,72 @@ whenever the output needs a *fixed* number of decimal places --
 currency, fixed-width tables, anything a human will compare
 column-by-column. Negative `decimals` is clamped to 0.
 Combined with `str_pad_left(i64_to_str(n), width, "0")` for
-integers, this covers the same ground as Rust's `{:.N}` / `{:0N}`
-format specifiers -- as ordinary function calls rather than a
-`{}` mini-language, since `print` has no format-string syntax of
-its own (a comma-separated list of items, each printed as-is).
+integers, this covers the same ground as ordinary function calls.
+`print` also has direct, literal syntax for the common case --
+covered next.
+
+## Inline `print` format specs: `x:03` / `y:.2`
+
+A `print` item can carry an inline width/precision spec, written
+right after the value with no space: `print x:03;` pads `x` to width
+3, zero-filled; `print y:.2;` prints `y` (an `f32`/`f64`) with
+exactly 2 digits after the point; `print z:08.3;` combines both
+(zero-padded to total width 8, 3 decimal digits). This is the same
+idea as Rust's `{:03}` / `{:.2}` or C's `printf("%03d")` /
+`printf("%.2f")`, just written postfix instead of inside a template
+string:
+
+```vani
+fn main() -> i64 {
+  print 5:03;              // "005"
+  print 3.14159:.2;        // "3.14"
+  print 3.14159:08.3;      // "0003.142"
+  return 0;
+}
+```
+
+Grammar: an optional `0` flag (zero-fill instead of the default
+space-fill) immediately followed by optional width digits, then an
+optional `.` and precision digits -- `'0'? WIDTH? ('.' PRECISION)?`.
+At least one of width or precision must be present (a bare `:` with
+nothing after it is just the ordinary colon token used everywhere
+else in the language -- struct field types, type annotations,
+labels -- there's no ambiguity since none of those put a digit or
+`.` directly after `:` with no space).
+
+**Rules**:
+
+- **Width** works on any numeric type (`i8`..`i64`, `u8`..`u64`,
+  `f32`, `f64`) -- it pads the printed representation, right-
+  aligned, to at least that many characters.
+- **Precision** (`.N`) is valid only on `f32`/`f64` -- it forces
+  fixed-notation rounding to exactly `N` digits after the point,
+  the same rounding `f64_to_str_fixed` uses. Precision on an integer
+  is a compile-time error (`` `:.N` precision is only valid on
+  f32/f64 print items ``), not a silent no-op.
+- **Any spec at all on `bool`/`Str`/`OwnedStr`/a struct/an enum** is
+  a compile-time error (`` format specs aren't supported on `<type>`
+  print items ``) -- there's no implicit stringification to apply a
+  width to.
+- **Width/precision are compile-time literal digits only.** There's
+  no `x:0{n}`-style runtime-substituted width -- every backend bakes
+  a literal `printf`-style format string at the call site, never one
+  assembled at runtime.
+- **One narrow, documented no-op**: a signed integer's width spec
+  has no effect when the file uses a non-ASCII `// vani-lang:`
+  dialect that renders digits as localized codepoints (Devanagari,
+  Bengali, Tamil, ...) -- those route through a dedicated per-script
+  renderer, not `printf`, so there's no format-string slot for width
+  to apply to. `eprint` is unaffected (it always renders integers as
+  plain ASCII regardless of the file's dialect, so its format specs
+  always apply). Reach for `str_pad_left(i64_to_str(n), width, "0")`
+  if you need a padded localized-digit integer.
+
+This is purely a print-site convenience over what `f64_to_str_fixed`
++ `str_pad_left` already let you build as an `OwnedStr` and print
+normally -- reach for the function-call form instead when you need
+the formatted text as a value (to concatenate, store, pass to
+another call), not just to print it immediately.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 

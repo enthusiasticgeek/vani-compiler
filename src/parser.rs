@@ -5349,12 +5349,36 @@ impl Parser {
         if let TokenKind::Str(_) = &self.current().kind {
             let tok = self.bump();
             match tok.kind {
-                TokenKind::Str(s) => Ok(PrintItem::Str(s)),
+                TokenKind::Str(s) => {
+                    let spec = self.parse_format_spec();
+                    Ok(PrintItem::Str(s, spec))
+                }
                 _ => unreachable!(),
             }
         } else {
             let expr = self.parse_expr()?;
-            Ok(PrintItem::Expr(expr))
+            let spec = self.parse_format_spec();
+            Ok(PrintItem::Expr(expr, spec))
+        }
+    }
+
+    /// #27: consumes a trailing `TokenKind::FormatSpec` if present
+    /// right after a print item (`print x:03;`). `parse_expr()`
+    /// already stops before any trailing `:`-shaped token today
+    /// (colon isn't a binary operator), so this composes with no
+    /// lookahead conflicts. Returns `None` (consuming nothing) for
+    /// the ordinary no-spec case.
+    fn parse_format_spec(&mut self) -> Option<crate::ast::FormatSpec> {
+        if let TokenKind::FormatSpec { zero_pad, width, precision } = self.current().kind {
+            let tok = self.bump();
+            Some(crate::ast::FormatSpec {
+                zero_pad,
+                width,
+                precision,
+                span: tok.span,
+            })
+        } else {
+            None
         }
     }
 
@@ -6928,8 +6952,8 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
             | Stmt::Prove { expr, .. }
             | Stmt::Assign { expr, .. } => expr_uses(expr),
             Stmt::Print { items, .. } => items.iter().any(|it| match it {
-                crate::ast::PrintItem::Expr(e) => expr_uses(e),
-                crate::ast::PrintItem::Str(_) => false,
+                crate::ast::PrintItem::Expr(e, _) => expr_uses(e),
+                crate::ast::PrintItem::Str(_, _) => false,
             }),
             Stmt::If { cond, then_body, else_body, .. } => {
                 expr_uses(cond)
@@ -7016,8 +7040,8 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
         | Stmt::Prove { expr, .. }
         | Stmt::Assign { expr, .. } => expr_contains_io_async(expr),
         Stmt::Print { items, .. } => items.iter().any(|it| match it {
-            crate::ast::PrintItem::Expr(e) => expr_contains_io_async(e),
-            crate::ast::PrintItem::Str(_) => false,
+            crate::ast::PrintItem::Expr(e, _) => expr_contains_io_async(e),
+            crate::ast::PrintItem::Str(_, _) => false,
         }),
         Stmt::If { cond, then_body, else_body, .. } => {
             expr_contains_io_async(cond)
@@ -8420,7 +8444,7 @@ fn validate_v31_phase_21a_branch(
                 // contains a suspend (ANF doesn't yet lift
                 // inside print items).
                 for it in items {
-                    if let crate::ast::PrintItem::Expr(e) = it {
+                    if let crate::ast::PrintItem::Expr(e, _) = it {
                         if expr_contains_io_async(e) {
                             return Err(Diagnostic::new(
                                 crate::span::Span::new(0, 0),
@@ -8889,10 +8913,11 @@ fn rewrite_vars_in_stmt(
         }
         Stmt::Print { items, span } => Stmt::Print {
             items: items.iter().map(|it| match it {
-                crate::ast::PrintItem::Expr(e) => crate::ast::PrintItem::Expr(
+                crate::ast::PrintItem::Expr(e, spec) => crate::ast::PrintItem::Expr(
                     rewrite_vars_to_fields(e, rename_set, obj_name),
+                    *spec,
                 ),
-                crate::ast::PrintItem::Str(s) => crate::ast::PrintItem::Str(s.clone()),
+                crate::ast::PrintItem::Str(s, spec) => crate::ast::PrintItem::Str(s.clone(), *spec),
             }).collect(),
             span: *span,
         },
@@ -9847,7 +9872,7 @@ pub(crate) fn try_v31_transform(
             | Stmt::Assign { expr, .. } => expr_reads_into(expr, out),
             Stmt::Print { items, .. } => {
                 for it in items {
-                    if let crate::ast::PrintItem::Expr(e) = it {
+                    if let crate::ast::PrintItem::Expr(e, _) = it {
                         expr_reads_into(e, out);
                     }
                 }

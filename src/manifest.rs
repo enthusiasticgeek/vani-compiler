@@ -1010,6 +1010,46 @@ fn base64_encode(data: &[u8]) -> String {
     s
 }
 
+/// Decode base64 (whitespace and `=` padding tolerated/ignored -- GitHub's
+/// Contents API returns its `content` field with embedded newlines every
+/// 60 chars). Used to read a file's content straight out of the SAME
+/// metadata response `gh api contents/...` already returns, instead of a
+/// second request to its `download_url` -- see the comment at
+/// `fetch_index_file`'s call site for why that second request is unsafe.
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let clean: Vec<u8> = s
+        .bytes()
+        .filter(|&b| !b.is_ascii_whitespace() && b != b'=')
+        .collect();
+    let mut out = Vec::with_capacity(clean.len() / 4 * 3 + 3);
+    for chunk in clean.chunks(4) {
+        let mut vals = [0u32; 4];
+        for (i, &c) in chunk.iter().enumerate() {
+            vals[i] = val(c)
+                .ok_or_else(|| format!("base64_decode: invalid character {:?}", c as char))?;
+        }
+        let n = (vals[0] << 18) | (vals[1] << 12) | (vals[2] << 6) | vals[3];
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(n as u8);
+        }
+    }
+    Ok(out)
+}
+
 /// Compute the SHA-256 hex digest of a file.
 /// Tries `sha256sum` first (Linux/macOS/Git-Bash), then `certutil` (Windows).
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -1093,11 +1133,25 @@ fn fetch_index_file(name: &str) -> Result<Option<(String, String)>, String> {
     let meta: serde_json::Value =
         serde_json::from_slice(&out.stdout).map_err(|e| format!("gh api JSON: {e}"))?;
     let file_sha = meta["sha"].as_str().unwrap_or("").to_string();
-    let download_url = meta["download_url"].as_str().unwrap_or("").to_string();
-    if download_url.is_empty() {
-        return Err("gh api: missing download_url in response".to_string());
+    // Decode the base64 `content` field ALREADY present in this same
+    // metadata response, rather than a second request to `download_url`
+    // (raw.githubusercontent.com). That URL is served through a CDN that
+    // can lag several minutes behind a just-pushed commit -- found via a
+    // real registry-index corruption: publishing 3 versions of the same
+    // package in quick succession (vani-ml v0.4.0/v0.5.0/v0.6.0) silently
+    // DROPPED the v0.5.0 index entry, because the v0.6.0 publish's
+    // "existing content" fetch returned a CDN-cached copy from BEFORE the
+    // v0.5.0 commit, so its append landed on top of a stale base and
+    // overwrote the real v0.5.0 line -- the push still succeeded because
+    // its `sha` check was validated against the metadata call (always
+    // fresh), not the stale cached content actually being appended to.
+    let content_b64 = meta["content"].as_str().unwrap_or("");
+    if content_b64.is_empty() {
+        return Err("gh api: missing content field in response".to_string());
     }
-    let content = http_get_text(&download_url)?;
+    let bytes = base64_decode(content_b64)?;
+    let content = String::from_utf8(bytes)
+        .map_err(|e| format!("gh api content: not valid UTF-8: {e}"))?;
     Ok(Some((content, file_sha)))
 }
 
@@ -1201,8 +1255,15 @@ fn fetch_governance_with_sha(registry: &str) -> Result<(serde_json::Value, Strin
     let meta: serde_json::Value =
         serde_json::from_slice(&out.stdout).map_err(|e| format!("gh api: {e}"))?;
     let file_sha = meta["sha"].as_str().unwrap_or("").to_string();
-    let download_url = meta["download_url"].as_str().unwrap_or("").to_string();
-    let content = http_get_text(&download_url)?;
+    // Decode `content` directly from this same metadata response rather
+    // than a second `download_url` (CDN-cached) request -- same fix as
+    // `fetch_index_file`'s, same staleness-corruption risk if two
+    // governance updates (e.g. approving two publishers) happen close
+    // together.
+    let content_b64 = meta["content"].as_str().unwrap_or("");
+    let bytes = base64_decode(content_b64)?;
+    let content = String::from_utf8(bytes)
+        .map_err(|e| format!("gh api content: not valid UTF-8: {e}"))?;
     let gov: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| format!("governance.json: {e}"))?;
     Ok((gov, file_sha))

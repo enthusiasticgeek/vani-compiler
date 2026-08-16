@@ -351,7 +351,7 @@ pub(crate) fn stmt_callees(stmt: &TypedStmt, out: &mut Vec<String>) {
         }
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     expr_callees(e, out);
                 }
             }

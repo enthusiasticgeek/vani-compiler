@@ -4429,6 +4429,16 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str(&format!("  br label %{}\n", header));
             // Header re-evaluates the condition each iteration.
             out.push_str(&format!("{}:\n", header));
+            // Same "phi predecessor tracking" class of bug as BUG-185 /
+            // Closure #238 (this loop's own `exit` block below): a `cond`
+            // that itself contains a short-circuit `&&`/`||` reads
+            // `ctx.current_block` to build its phi's incoming-edge label.
+            // Without this update, that read sees whatever block was
+            // current *before* the loop (e.g. an outer `if`'s merge
+            // block), not `header` -- corrupting the phi and producing
+            // "PHI node entries do not match predecessors!" as soon as a
+            // `while` condition uses `&&`/`||`.
+            ctx.current_block = header.clone();
             let c = emit_expr(cond, ctx, out);
             out.push_str(&format!(
                 "  br i1 {}, label %{}, label %{}\n",
@@ -4436,6 +4446,14 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
             // Body.
             out.push_str(&format!("{}:\n", body_lbl));
+            // Same fix as above, for the loop body: a short-circuit
+            // `&&`/`||` as (or at the start of) the body's first statement
+            // must see `body_lbl` as the current block, not whatever was
+            // current before the loop -- this is the exact shape that
+            // crashed `backward_euler_step`-style Newton loops (an `if
+            // abs(gp) < eps || ... { return y; }`-style guard as the first
+            // statement in a `while` body).
+            ctx.current_block = body_lbl.clone();
             ctx.loops.push(LoopFrame {
                 header: header.clone(),
                 exit: exit.clone(),
@@ -19353,6 +19371,59 @@ fn emit_vec_let_from_literal(
     );
 }
 
+/// #27: whether a `print`/`eprint`-item format spec on a value of
+/// type `ty` actually needs a DERIVED printf format string looked
+/// up via `ctx.print_str_indices` (vs. falling through to the
+/// existing fixed `@.fmt.lld`-style globals unmodified). Signed
+/// integers under a Brahmi (localized-digit) print-lang-mode route
+/// through `intent_print_int_<suffix>` instead of printf -- no
+/// format-string slot exists there for width to apply to, so a spec
+/// on those is a documented no-op (matches the identical scope
+/// decision in `backend_c.rs`'s tree-C emitter). That routing is
+/// `print`-only, though: `eprint` always uses plain ASCII `%lld`
+/// regardless of the file's print-lang-mode (confirmed by reading
+/// `emit_eprint_expr_no_newline_llvm`'s signed-int arm -- no suffix
+/// branch there at all), so `is_eprint` must gate the Brahmi check
+/// or an `eprint x:03;` in a Devanagari-mode file would wrongly
+/// treat its own always-ASCII output as a no-op. Must stay in exact
+/// sync with `print_spec_format_string` and with the module-level
+/// collection pass (`collect_print_strings`'s `Print`/`EPrint` arm)
+/// -- called from both, so there's nothing to keep in sync by hand.
+fn print_spec_needs_derived_format(ty: &Type, is_eprint: bool) -> bool {
+    ty.is_unsigned_integer()
+        || ty.is_float()
+        || (ty.is_signed_integer() && (is_eprint || brahmi_suffix().is_none()))
+}
+
+/// #27: the exact printf conversion string a format spec produces
+/// for a given type -- shared by the module-level collection pass
+/// (which interns one `@.print_str.<n>` global per distinct result,
+/// exactly like any other string literal) and the per-item emitter
+/// (which looks the same text back up by index), so the two can
+/// never drift apart. Only called when
+/// `print_spec_needs_derived_format` is true; the checker has
+/// already rejected any type/spec combination not covered here
+/// (see `checker.rs`'s `validate_print_item_spec`).
+fn print_spec_format_string(ty: &Type, spec: &crate::ast::FormatSpec) -> String {
+    let mut flags = String::new();
+    if spec.zero_pad {
+        flags.push('0');
+    }
+    if let Some(w) = spec.width {
+        flags.push_str(&w.to_string());
+    }
+    if ty.is_unsigned_integer() {
+        format!("%{}llu", flags)
+    } else if ty.is_signed_integer() {
+        format!("%{}lld", flags)
+    } else {
+        match spec.precision {
+            Some(p) => format!("%{}.{}f", flags, p),
+            None => format!("%{}g", flags),
+        }
+    }
+}
+
 /// Lower `print item1, item2, …;`. Each item is printed without a
 /// trailing newline; a single space separates adjacent items; a
 /// final `\n` terminates the line.
@@ -19364,7 +19435,7 @@ fn emit_print_items(
     use crate::ir::TypedPrintItem;
     for (i, item) in items.iter().enumerate() {
         match item {
-            TypedPrintItem::Str(text) => {
+            TypedPrintItem::Str(text, _) => {
                 if let Some(&idx) = ctx.print_str_indices.get(text) {
                     let bytes = text.len() + 1;
                     let str_p = ctx.fresh_tmp();
@@ -19383,7 +19454,7 @@ fn emit_print_items(
                     ));
                 }
             }
-            TypedPrintItem::Expr(expr) => emit_print_expr_no_newline(expr, ctx, out),
+            TypedPrintItem::Expr(expr, spec) => emit_print_expr_no_newline(expr, spec, ctx, out),
         }
         if i + 1 < items.len() {
             // Use printf("%c", 32) not putchar(32): on Windows, JITLink
@@ -19416,7 +19487,7 @@ fn emit_eprint_items_llvm(
     use crate::ir::TypedPrintItem;
     for (i, item) in items.iter().enumerate() {
         match item {
-            TypedPrintItem::Str(text) => {
+            TypedPrintItem::Str(text, _) => {
                 if let Some(&idx) = ctx.print_str_indices.get(text) {
                     let bytes = text.len() + 1;
                     let str_p = ctx.fresh_tmp();
@@ -19435,7 +19506,7 @@ fn emit_eprint_items_llvm(
                     ));
                 }
             }
-            TypedPrintItem::Expr(expr) => emit_eprint_expr_no_newline_llvm(expr, ctx, out),
+            TypedPrintItem::Expr(expr, spec) => emit_eprint_expr_no_newline_llvm(expr, spec, ctx, out),
         }
         if i + 1 < items.len() {
             let sp = ctx.fresh_tmp();
@@ -19454,7 +19525,53 @@ fn emit_eprint_items_llvm(
     out.push_str(&format!("  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i32 10)\n", nl));
 }
 
-fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) {
+/// #27: emits the `getelementptr` for whichever format-string
+/// pointer a numeric print item should use, returning the SSA
+/// register holding the resulting `i8*`. When `spec` is present and
+/// needs a derived format string (see `print_spec_needs_derived_format`),
+/// looks it up in the SAME `@.print_str.<n>` pool ordinary string
+/// literals use (interned by the module-level collection pass --
+/// see the `Print`/`EPrint` arm of `collect_print_strings`). Falls
+/// back to `fallback_global`/`fallback_bytes` (the pre-existing
+/// fixed global for this type, e.g. `@.fmt.lld`) otherwise -- keeps
+/// the untouched-common-case (`spec: None`) IR byte-identical to
+/// before this feature existed. The fallback also covers the
+/// defensive case where a derived string somehow wasn't interned
+/// (should never happen if the collection pass ran correctly; never
+/// crashes, worst case silently drops the spec rather than emitting
+/// a dangling reference to an undeclared global).
+fn emit_print_fmt_ptr(
+    ty: &Type,
+    spec: &Option<crate::ast::FormatSpec>,
+    is_eprint: bool,
+    fallback_global: &str,
+    fallback_bytes: usize,
+    ctx: &mut FnCtx,
+    out: &mut String,
+) -> String {
+    if let Some(s) = spec {
+        if print_spec_needs_derived_format(ty, is_eprint) {
+            let text = print_spec_format_string(ty, s);
+            if let Some(&idx) = ctx.print_str_indices.get(&text) {
+                let bytes = text.len() + 1;
+                let p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [{} x i8], [{} x i8]* @.print_str.{}, i64 0, i64 0\n",
+                    p, bytes, bytes, idx
+                ));
+                return p;
+            }
+        }
+    }
+    let p = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr [{} x i8], [{} x i8]* {}, i64 0, i64 0\n",
+        p, fallback_bytes, fallback_bytes, fallback_global
+    ));
+    p
+}
+
+fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, spec: &Option<crate::ast::FormatSpec>, ctx: &mut FnCtx, out: &mut String) {
     let value = emit_expr(expr, ctx, out);
     match &expr.ty {
         Type::Bool => {
@@ -19485,11 +19602,7 @@ fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut
         }
         ty if ty.is_unsigned_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, false);
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(ty, spec, true, "@.fmt.llu", 5, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {})\n",
                 fmt, widened
@@ -19497,22 +19610,14 @@ fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut
         }
         ty if ty.is_signed_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, true);
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(ty, spec, true, "@.fmt.lld", 5, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {})\n",
                 fmt, widened
             ));
         }
         Type::F64 => {
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(&expr.ty, spec, true, "@.fmt.g", 3, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {})\n",
                 fmt, value
@@ -19521,11 +19626,7 @@ fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut
         Type::F32 => {
             let dbl = ctx.fresh_tmp();
             out.push_str(&format!("  {} = fpext float {} to double\n", dbl, value));
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(&expr.ty, spec, true, "@.fmt.g", 3, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {})\n",
                 fmt, dbl
@@ -19549,7 +19650,7 @@ fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut
     }
 }
 
-fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) {
+fn emit_print_expr_no_newline(expr: &TypedExpr, spec: &Option<crate::ast::FormatSpec>, ctx: &mut FnCtx, out: &mut String) {
     let value = emit_expr(expr, ctx, out);
     match &expr.ty {
         Type::Bool => {
@@ -19595,11 +19696,7 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
             // types always use the plain `%llu` ASCII path instead,
             // matching tree-C's convention (which never routed
             // unsigned types through the dialect helper either).
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(ty, spec, false, "@.fmt.llu", 5, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
                 fmt, widened
@@ -19609,16 +19706,18 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
             let widened = widen_int_to_64(&value, ty, ctx, out, true);
             let suffix = brahmi_suffix();
             if let Some(s) = suffix {
+                // #27 scope decision: a format spec's width doesn't
+                // apply here -- `intent_print_int_<lang>` renders
+                // localized digit codepoints through its own
+                // dedicated helper, not printf, so there's no
+                // format-string slot to widen. Matches the identical
+                // scope decision in `backend_c.rs`'s tree-C emitter.
                 out.push_str(&format!(
                     "  call void @intent_print_int_{}(i64 {})\n",
                     s, widened
                 ));
             } else {
-                let fmt = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n",
-                    fmt
-                ));
+                let fmt = emit_print_fmt_ptr(ty, spec, false, "@.fmt.lld", 5, ctx, out);
                 out.push_str(&format!(
                     "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
                     fmt, widened
@@ -19626,11 +19725,7 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
             }
         }
         Type::F64 => {
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(&expr.ty, spec, false, "@.fmt.g", 3, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i8*, ...) @printf(i8* {}, double {})\n",
                 fmt, value
@@ -19639,11 +19734,7 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
         Type::F32 => {
             let dbl = ctx.fresh_tmp();
             out.push_str(&format!("  {} = fpext float {} to double\n", dbl, value));
-            let fmt = ctx.fresh_tmp();
-            out.push_str(&format!(
-                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
-                fmt
-            ));
+            let fmt = emit_print_fmt_ptr(&expr.ty, spec, false, "@.fmt.g", 3, ctx, out);
             out.push_str(&format!(
                 "  call i32 (i8*, ...) @printf(i8* {}, double {})\n",
                 fmt, dbl
@@ -27288,7 +27379,7 @@ fn program_uses_box(program: &TypedProgram) -> bool {
             S::Return { expr } => expr_uses(expr),
             S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|item| match item {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body } => {
@@ -27357,7 +27448,7 @@ fn program_uses_box_dyn(program: &TypedProgram) -> bool {
             S::Return { expr } => expr_uses(expr),
             S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|item| match item {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body } => {
@@ -27447,7 +27538,7 @@ fn program_uses_rng(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If {
@@ -27566,7 +27657,7 @@ fn program_uses_sleep_ms(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body } => {
@@ -27659,7 +27750,7 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body } => {
@@ -28330,7 +28421,7 @@ fn program_uses_epoll(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body } => {
@@ -29144,7 +29235,7 @@ fn program_uses_siphash(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If { cond, then_body, else_body, .. } => {
@@ -29222,7 +29313,7 @@ fn program_uses_hash(program: &TypedProgram) -> bool {
             | S::Prove { expr } => expr_uses(expr),
             S::Discard { expr } => expr_uses(expr),
             S::Print { items } => items.iter().any(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_uses(e),
                 _ => false,
             }),
             S::If {
@@ -45820,10 +45911,28 @@ fn collect_print_strings(
         // `emit_print_items_llvm` and `emit_eprint_items_llvm`),
         // so both statement kinds need to feed it here.
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
+            let is_eprint = matches!(stmt, TypedStmt::EPrint { .. });
             for it in items {
                 match it {
-                    crate::ir::TypedPrintItem::Str(text) => intern(text, msgs, idx),
-                    crate::ir::TypedPrintItem::Expr(e) => {
+                    crate::ir::TypedPrintItem::Str(text, _) => intern(text, msgs, idx),
+                    crate::ir::TypedPrintItem::Expr(e, spec) => {
+                        // #27: a format spec's DERIVED printf format
+                        // string (e.g. "%03lld" for `x:03` on an
+                        // i64) is just a string like any other --
+                        // intern it into this SAME `@.print_str.<n>`
+                        // pool rather than standing up a parallel
+                        // pool + parallel module-preamble emission +
+                        // a new FnCtx field. The emitter
+                        // (`emit_print_expr_no_newline`) looks the
+                        // identical derived text back up by calling
+                        // the same `print_spec_format_string` this
+                        // site does, so the two can never drift.
+                        if let Some(s) = spec {
+                            if print_spec_needs_derived_format(&e.ty, is_eprint) {
+                                let text = print_spec_format_string(&e.ty, s);
+                                intern(&text, msgs, idx);
+                            }
+                        }
                         collect_strings_in_expr(e, msgs, idx, &intern)
                     }
                 }
@@ -46167,7 +46276,7 @@ fn collect_vec_elements_in_stmt(
         | TypedStmt::Prove { expr } => collect_vec_elements_in_expr(expr, seen, out),
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_vec_elements_in_expr(e, seen, out);
                 }
             }
@@ -46635,7 +46744,7 @@ pub(crate) fn walk_body(
             }
             TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
                 for it in items {
-                    if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                         walk_expr(e, declared, order, seen);
                     }
                 }

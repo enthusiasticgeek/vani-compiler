@@ -3443,10 +3443,34 @@ fn emit_instr(
             // introduces for `print` and assert-with-message
             // statements. Today's tests on the SSA-LLVM path
             // don't print, so emit them as no-ops / abort.
-            if name == "intent_print_item" {
+            let print_item_spec = crate::ssa::decode_print_item_spec(name);
+            if name == "intent_print_item" || print_item_spec.is_some() {
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "intent_print_item expects one argument".to_string(),
                 })?;
+                // #27: unlike the tree-LLVM emitter (which has a
+                // fixed set of pre-declared `@.fmt.*` globals to
+                // choose between), this SSA-LLVM path already
+                // synthesizes a FRESH `@.str.<n>` global for
+                // `fmt_text` on every single print call (see
+                // `STR_COUNTER`/`STR_GLOBALS` below) -- so there's
+                // nothing extra to plumb here at all. Building
+                // `fmt_text` with the spec's width/precision flags
+                // baked in is enough; the getelementptr + printf
+                // emission after the match is completely unchanged.
+                let (flags, spec_precision) = match print_item_spec {
+                    Some((zero_pad, width, precision)) => {
+                        let mut f = String::new();
+                        if zero_pad {
+                            f.push('0');
+                        }
+                        if let Some(w) = width {
+                            f.push_str(&w.to_string());
+                        }
+                        (f, precision)
+                    }
+                    None => (String::new(), None),
+                };
                 // BUG-123: same class as BUG-111 -- a bare
                 // `Operand::Const` has no `ValueId`, so `operand_type`
                 // always returns `None` for it; the old fallback
@@ -3500,7 +3524,7 @@ fn emit_instr(
                             t_ptr,
                             f_ptr
                         ));
-                        ("%s", "i8*".to_string(), sel)
+                        ("%s".to_string(), "i8*".to_string(), sel)
                     }
                     Type::F32 => {
                         let d = format!("%v_{}.pd", instr.result.0);
@@ -3509,11 +3533,21 @@ fn emit_instr(
                             d,
                             operand_str(arg)
                         ));
-                        ("%g", "double".to_string(), d)
+                        let fmt = match spec_precision {
+                            Some(p) => format!("%{}.{}f", flags, p),
+                            None => format!("%{}g", flags),
+                        };
+                        (fmt, "double".to_string(), d)
                     }
-                    Type::F64 => ("%g", "double".to_string(), operand_str(arg)),
+                    Type::F64 => {
+                        let fmt = match spec_precision {
+                            Some(p) => format!("%{}.{}f", flags, p),
+                            None => format!("%{}g", flags),
+                        };
+                        (fmt, "double".to_string(), operand_str(arg))
+                    }
                     Type::Str | Type::OwnedStr => {
-                        ("%s", "i8*".to_string(), operand_str(arg))
+                        ("%s".to_string(), "i8*".to_string(), operand_str(arg))
                     }
                     _ => {
                         let ity = llvm_type_string(&aty)?;
@@ -3563,7 +3597,11 @@ fn emit_instr(
                                 return Ok(());
                             }
                         }
-                        let fmt = if is_signed_int(&aty) { "%lld" } else { "%llu" };
+                        let fmt = if is_signed_int(&aty) {
+                            format!("%{}lld", flags)
+                        } else {
+                            format!("%{}llu", flags)
+                        };
                         (fmt, "i64".to_string(), widened)
                     }
                 };

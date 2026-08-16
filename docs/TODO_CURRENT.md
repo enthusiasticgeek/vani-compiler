@@ -154,7 +154,7 @@ workarounds, and the exact design goal for each.
   parse_match_arms_block refactor; SOV match at stmt pos → helpful error;
   wired in top-level + module-body dispatchers; 3 new lib tests pass)
 
-- [ ] **27. Inline `print`-item format specs (Rust `{:03}` / `{:.2}` syntax)** —
+- [x] **27. Inline `print`-item format specs (Rust `{:03}` / `{:.2}` syntax)** ✅ done 2026-08-15 —
   `print` currently takes a flat comma-separated list of string-literal-or-expr
   items (`parser.rs::parse_print_item`, `PrintItem::{Str,Expr}`) — there's no
   template-string / placeholder mini-language. `f64_to_str_fixed(x, decimals)`
@@ -246,6 +246,86 @@ workarounds, and the exact design goal for each.
   guess into where the days actually go — checker duplication and the
   SSA-backend name-mangling plumbing are the two real risk/effort centers,
   not parsing or the tree backends).
+
+  **Shipped 2026-08-15**, per user request (explicitly confirmed via
+  `AskUserQuestion` that the syntax itself was wanted, not just a
+  pointer to the already-shipped `f64_to_str_fixed` capability). Went
+  through `EnterPlanMode` first specifically to re-verify this scoping
+  note against current code before touching anything — `checker.rs`
+  alone had grown ~7000 lines since 2026-07-25 — and that re-
+  verification found one real design gap the original note missed:
+  **the proposed grammar couldn't actually be parsed as described.**
+  `TokenKind::Int(i128)` only stores the parsed numeric *value*, not
+  the source spelling, and `Parser` has no reference back to the
+  source text — `:03` and `:3` both lex to `Colon, Int(3)`, so the
+  pad-with-zero-vs-space flag would already be lost by the time a
+  general-token-stream parser saw it. Fixed by giving the lexer a
+  dedicated `TokenKind::FormatSpec { zero_pad, width, precision }`,
+  emitted atomically whenever `:` is immediately followed (no
+  whitespace) by a digit or `.`+digit — safe unconditionally, not
+  just in "after a print item" context, since that exact byte pattern
+  is never legally produced anywhere else in vāṇी's grammar (verified
+  empirically: grepped the full corpus, the only 2 hits were inside
+  `//` comments).
+
+  Confirmed the doc's core architecture claim otherwise held up
+  exactly as scoped, just at different line numbers — EXCEPT the
+  checker duplication count was **6 real construction sites, not the
+  documented 2**: `check_expr`'s Block-expr arm (the "T-block MVP"
+  match-arm-body checker — the same function BUG-195 touched earlier
+  the same session) independently duplicates the fn-body handler's
+  Print/EPrint/PrintBlock construction, twice over (once for the
+  block's own stmts, once more for a nested `while`'s body inside
+  that block). One shared `validate_print_item_spec` helper, called
+  from all 6, avoided copy-pasting the new width/precision-vs-type
+  validation 6 times.
+
+  For the SSA backends' name-mangling scheme (`intent_print_item` →
+  `intent_print_item$z1w3p2`-shaped when a spec is present, decoded
+  by a shared `encode`/`decode` pair in `ssa.rs`), the SSA-LLVM half
+  turned out to need NO new plumbing at all: unlike tree-LLVM (fixed,
+  pre-declared `@.fmt.*` globals), the SSA-LLVM emitter already
+  synthesizes a **fresh** `@.str.<n>` global for its printf format
+  string on every single print call — building that string with the
+  spec's flags baked in was the entire change. Tree-LLVM needed the
+  more involved fix: reused the EXISTING `@.print_str.<n>` string-
+  literal interning pool for derived format-spec strings too (a
+  string like `"%03lld"` needs exactly the same "intern once, GEP by
+  index" treatment as any user string literal — no new pool, no new
+  `FnCtx` field, no new module-preamble emission loop).
+
+  **Real bug self-caught before shipping** (not a fuzzer finding):
+  the first draft of the "does this type need a derived format
+  string" predicate checked the file's GLOBAL print-lang-mode to
+  decide whether a signed int's width should route through the
+  Brahmi localized-digit helper (a real no-op case) or plain printf —
+  but `eprint` *always* renders integers as plain ASCII regardless of
+  the file's dialect (confirmed by reading `emit_eprint_expr_no_
+  newline`/`_llvm` — neither has the Brahmi-suffix branch `emit_
+  print_expr_no_newline` has). An `eprint x:03;` in a Devanagari-mode
+  file would have wrongly treated its own always-ASCII output as a
+  no-op. Fixed by threading `is_eprint` through the predicate; locked
+  in with a dedicated regression test
+  (`format_spec_on_eprint_applies_even_under_devanagari_print_lang_
+  mode` in `tests/run_end_to_end.rs`).
+
+  **Verification**: 8 new `src/lib.rs` unit tests (6 lexer-level
+  confirming the atomic-token design + 2 checker-level diagnostics),
+  4 new `tests/run_end_to_end.rs` real-subprocess tests (all-four-
+  backends exact-output match on the SSA fast path; the same on the
+  tree-forced path via the `#[no_mangle]`-marker-function trick;
+  the eprint/Devanagari fix; both new checker diagnostics). Full
+  corpus swept twice after each of the two codegen phases (tree,
+  then SSA): `tools/backend_crosscheck.py` (0 flagged/1056 both
+  times) and `tools/leak_sweep.py` (matches its 4-finding baseline
+  both times). Full `cargo test --release --workspace` clean: 2997
+  lib (2989 + 8 new) / 272 e2e (268 + 4 new), 0 failed. `mdbook
+  build` clean (only the same pre-existing, unrelated warnings).
+  Documented in `tutorials/src/beginner/06_strings.md` (replaces a
+  now-false claim there that `print` "has no format-string syntax of
+  its own" with the new inline-spec section, cross-referencing
+  `f64_to_str_fixed` for when the formatted text is needed as a
+  value rather than printed immediately).
 
   **27.1 (done 2026-07-23)**: `f64_to_str_fixed(x, decimals) -> OwnedStr` —
   the cheap half of this ask, shipped as an ordinary builtin. Checker
@@ -15095,3 +15175,119 @@ clean. 2 new `src/lib.rs` unit tests. Full `cargo test --release
 --workspace` clean: 2991 lib (2989 + 2 new) / 268 e2e, 0 failed.
 Marked FIXED in both this file and the localfuzz worktree's
 `docs/TODO_LOCAL_STAGING.md`, per the project's closeout convention.
+
+## BUG-196 -- LLVM `While` codegen left `ctx.current_block` stale, corrupting short-circuit `&&`/`||` PHI nodes (2026-08-16)
+
+Found while validating a new `vani-calculus` package feature (BDF2
+ODE solver): `vanic run` (default LLVM backend) crashed with `PHI
+node entries do not match predecessors!` on `backward_euler_step`
+and other pre-existing Newton-iteration-style functions -- an `if
+abs(gp) < eps { return y; }`-shaped guard as the first statement of
+a `while` loop body. Confirmed not a regression from the new code:
+reproduces identically on the unmodified pre-existing
+`backward_euler_step`/`crank_nicolson_step` and on a from-scratch
+minimal repro; `--backend=c` was unaffected and produced correct
+results throughout.
+
+Root cause (`src/backend_llvm.rs`, `TypedStmt::While` codegen):
+opening the `header:` and `loop_body:` blocks never updated
+`ctx.current_block` to match -- unlike the loop's own `exit:` block,
+which already carries an explicit fix for exactly this (see its
+"Closure #238" comment). The `&&`/`||` short-circuit codegen (added
+2026-08-13, its own comment cites "BUG-185-class") reads
+`ctx.current_block` right after evaluating its left operand to
+record the PHI's incoming-edge label; with a loop condition or the
+first block-reading construct in a loop body left unset, that read
+saw whatever block was current *before* the loop (e.g. an outer
+`if`'s merge block) instead of `header`/`loop_body`, producing a PHI
+whose recorded predecessor didn't match the actual `br` instruction
+-- exactly the failure LLVM's verifier reported. This is the same
+recurring bug class as BUG-185 and Closure #238, just two more sites
+in the same function that never got the treatment when those fixes
+landed.
+
+Fixed by adding `ctx.current_block = header.clone();` right after
+opening the header block (before evaluating `cond`) and
+`ctx.current_block = body_lbl.clone();` right after opening the body
+block (before emitting the body's statements), mirroring the
+existing `exit`-block fix.
+
+**Verification**: original repro and a minimal from-scratch repro
+both now run correctly on LLVM, matching `--backend=c`. All 7
+`vani-calculus` implicit-ODE tests (previously all 7 crashing on
+LLVM, `--backend=c` unaffected) now pass on both backends via
+`vanic test`, as do all 59 tests and 8 examples across that package.
+Full corpus swept: `tools/backend_crosscheck.py` (0 new findings /
+1056) and `tools/leak_sweep.py` (0 new findings, matches the
+existing 4-entry baseline exactly -- a first sweep pass spuriously
+flagged 28 files as `ASAN_EXIT_99_UNCLASSIFIED`, traced to
+`LeakSanitizer does not work under ptrace` self-failures caused by
+manual `strace -p <pid>` progress-checking during that run; a clean
+re-run with no `strace` attached matched the baseline exactly,
+confirming the fix introduces no new memory-safety regressions).
+Full `cargo test --release --workspace` clean: 2997 lib / 272 e2e (1
+flaky, pre-existing `concurrent_pipeline_dashboard` pthread/JIT
+concurrency race, confirmed unrelated via 5 isolated reruns before
+and after the fix).
+
+## BUG-197 -- `vanic publish`/`registry-approve-publisher` silently drop a registry-index entry under rapid repeated publishes (2026-08-16, FIXED)
+
+Found while publishing vani-ml through its full v0.1.0-v0.6.0 roadmap
+in one session (4 back-to-back `vanic publish` calls). After the
+v0.6.0 publish, `kosh-index/index/ml.json` was missing the v0.5.0
+entry entirely -- even though its GitHub Release
+(`ml-v0.5.0`) existed and its own publish had printed "index updated."
+with no error.
+
+Root cause (`src/manifest.rs`'s `fetch_index_file`, and the identical
+pattern in `fetch_governance_with_sha`): both fetch a file's current
+content for a read-modify-write cycle via `gh api
+repos/.../contents/<path>`, which returns metadata including a `sha`
+AND a `download_url`. The code used the `download_url`
+(`raw.githubusercontent.com`) for the actual content -- but that URL
+is served through a CDN that can lag several minutes behind a
+just-pushed commit. When two publishes of the same package happen
+within that lag window (exactly what four back-to-back version bumps
+in one session produces), the second publish's "existing content"
+fetch returns a CDN-cached copy from BEFORE the first publish's
+commit. Appending the new version to that stale base and pushing it
+(using the metadata call's `sha`, which IS fresh, since Contents API
+metadata isn't CDN-cached the same way) succeeds -- the `sha`-based
+optimistic-concurrency check only confirms "this content matches
+what's on `main`", not "the content you're about to overwrite it with
+was based on that up-to-date state" -- so the PUT silently overwrites
+the real file with one missing every entry added since the stale
+fetch.
+
+Fixed by decoding the base64 `content` field ALREADY present in the
+SAME metadata response the `sha` comes from, instead of a second
+request to `download_url` -- eliminates the CDN entirely from this
+read path. Added a hand-rolled `base64_decode` (matching the existing
+hand-rolled `base64_encode`, no new dependency) and applied the fix to
+both `fetch_index_file` (publish) and `fetch_governance_with_sha`
+(governance/publisher-approval updates -- same failure mode, lower
+frequency, not yet observed but the same bug). Left `registry_search`
+(`vanic search`) on `download_url` deliberately -- it's read-only
+display data with an explicit documented "avoids base64 decode"
+tradeoff already in its own comment; a few minutes of stale search
+results has no data-loss consequence, unlike the two write paths.
+
+**Verification**: the actual corruption was confirmed by diffing
+`kosh-index`'s git history (`git show <commit> -- index/ml.json`) --
+the v0.6.0 commit's diff showed the v0.5.0 line being REMOVED and the
+v0.6.0 line added in its place, not a clean append. The fix's
+`content`-field approach was validated against live data before
+trusting it: decoding the metadata response's `content` field
+independently (a small Python script) reproduced the exact same
+(correct, un-cached) current state my local git clone already showed.
+The missing `ml` v0.5.0 index entry was manually restored via a
+corrective `gh api ... --method PUT` (same shape the fixed code now
+produces, using the exact checksum recorded from the original v0.5.0
+publish output) -- `index/ml.json` now correctly lists all 5 published
+versions (0.1.0, 0.3.0, 0.4.0, 0.5.0, 0.6.0) in order. Re-checked
+`calculus`/`sparse`/`complex`/`probability`'s index files (each
+published once, not back-to-back, in the same session) -- all correct,
+this bug only manifests on repeated publishes of the same package
+within the CDN's cache-lag window. Full `cargo build --release --bin
+vanic` clean; full `cargo test --release --workspace` re-run after the
+fix.

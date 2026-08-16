@@ -118,7 +118,7 @@ fn collect_in_stmt(stmt: &TypedStmt, seen: &mut BTreeSet<String>, out: &mut Vec<
         }
         S::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_in_expr(e, seen, out);
                 }
             }

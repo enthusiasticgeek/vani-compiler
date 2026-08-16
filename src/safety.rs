@@ -258,7 +258,7 @@ fn walk_stmt(stmt: &TypedStmt, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<
         | TypedStmt::FieldAssign { value, .. } => walk_expr(value, alloc, calls),
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     walk_expr(e, alloc, calls);
                 }
             }
@@ -377,7 +377,7 @@ fn walk_stmt_for_isr(
         }
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     walk_expr_for_isr(e, calls, violations);
                 }
             }
@@ -549,7 +549,7 @@ fn stmt_complexity(stmt: &TypedStmt) -> u64 {
         }
         TypedStmt::Print { items } => {
             items.iter().map(|it| match it {
-                crate::ir::TypedPrintItem::Expr(e) => expr_complexity(e),
+                crate::ir::TypedPrintItem::Expr(e, _) => expr_complexity(e),
                 _ => 0,
             }).sum()
         }
@@ -747,7 +747,7 @@ fn walk_stmt_for_float(
         }
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     walk_expr_for_float(e, float_use, calls);
                 }
             }
@@ -880,7 +880,7 @@ fn walk_stmt_for_nan(
         | TypedStmt::FieldAssign { value, .. } => walk_expr_for_nan(value, f, diagnostics),
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for item in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = item {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = item {
                     walk_expr_for_nan(e, f, diagnostics);
                 }
             }
@@ -1178,7 +1178,7 @@ fn wcet_stmt(
         S::Print { items } | S::EPrint { items } => {
             let mut total: u64 = 0;
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     total = total.saturating_add(wcet_expr(e, fn_map, visiting, recursion_bound)?);
                 }
             }
@@ -1685,7 +1685,7 @@ fn check_dt_stmt(
         S::FieldAssign { value, .. } => check_dt_expr_calls(value, f, fn_map, diagnostics),
         S::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     check_dt_expr_calls(e, f, fn_map, diagnostics);
                 }
             }
@@ -1822,7 +1822,7 @@ fn check_misra_13_stmt(
         }
         S::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     check_misra_13_expr(e, fn_name, sig_pure, diagnostics);
                 }
             }
@@ -1980,7 +1980,7 @@ fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
         }
         TypedStmt::Print { items } => {
             for it in items {
-                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                if let crate::ir::TypedPrintItem::Expr(e, _) = it {
                     collect_expr_calls(e, out);
                 }
             }
@@ -2692,7 +2692,7 @@ fn dead_stmt_span(stmt: &TypedStmt) -> Option<crate::span::Span> {
         TypedStmt::ForIter { collection_ty: _, .. } => None,
         TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             items.first().and_then(|i| match i {
-                crate::ir::TypedPrintItem::Expr(e) => Some(e.span),
+                crate::ir::TypedPrintItem::Expr(e, _) => Some(e.span),
                 _ => None,
             })
         }
@@ -3089,7 +3089,7 @@ fn build_lock_edges(
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
-                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                    if let crate::ir::TypedPrintItem::Expr(e, _) = item {
                         build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
                     }
                 }
@@ -3424,7 +3424,7 @@ fn collect_locked_mutexes_stmts(
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
-                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                    if let crate::ir::TypedPrintItem::Expr(e, _) = item {
                         collect_locked_mutexes_expr(e, out, fn_map, visiting);
                     }
                 }
@@ -3704,7 +3704,7 @@ fn collect_mcdc_stmts(
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
-                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                    if let crate::ir::TypedPrintItem::Expr(e, _) = item {
                         collect_mcdc_stmts_expr_scan(e, fn_name, counter, out);
                     }
                 }

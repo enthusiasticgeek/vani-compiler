@@ -121,7 +121,7 @@ fn stmt_span(stmt: &TypedStmt) -> Option<crate::span::Span> {
         S::Prove { expr } => Some(expr.span),
         S::Discard { expr } => Some(expr.span),
         S::Print { items } => items.iter().find_map(|it| match it {
-            crate::ir::TypedPrintItem::Expr(e) => Some(e.span),
+            crate::ir::TypedPrintItem::Expr(e, _) => Some(e.span),
             _ => None,
         }),
         S::IndexAssign { value, .. } | S::FieldAssign { value, .. } => Some(value.span),

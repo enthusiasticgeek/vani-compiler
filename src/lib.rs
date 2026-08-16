@@ -64187,5 +64187,114 @@ fn main() -> i64 { return leak_check(); }
             errs
         );
     }
+
+    /// #27 -- inline `print` format specs (`print x:03;` / `print
+    /// y:.2;`). `TokenKind::FormatSpec` must be lexed as ONE atomic
+    /// token (not `Colon`+`Int`+`Dot`+`Int`) because `Int(i128)` only
+    /// stores the parsed numeric VALUE, not the source spelling --
+    /// `"03"` and `"3"` both parse to the same `Int(3)`, so the
+    /// pad-with-zero-vs-space flag would already be lost by the time
+    /// a general-token-stream parser saw it.
+    fn lex_format_spec_tokens(source: &str) -> Vec<crate::lexer::TokenKind> {
+        crate::lexer::lex(source)
+            .expect("lex ok")
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
+    }
+
+    #[test]
+    fn format_spec_lexes_width_only_with_zero_pad_flag() {
+        let toks = lex_format_spec_tokens("print 5:03;");
+        assert!(
+            toks.iter().any(|k| matches!(
+                k,
+                crate::lexer::TokenKind::FormatSpec { zero_pad: true, width: Some(3), precision: None }
+            )),
+            "expected a single FormatSpec{{zero_pad:true, width:Some(3)}} token \
+             (NOT separate Colon/Int(3) tokens, which would lose the \
+             leading-zero flag), got: {:?}",
+            toks
+        );
+    }
+
+    #[test]
+    fn format_spec_lexes_precision_only() {
+        let toks = lex_format_spec_tokens("print 3.14:.2;");
+        assert!(
+            toks.iter().any(|k| matches!(
+                k,
+                crate::lexer::TokenKind::FormatSpec { zero_pad: false, width: None, precision: Some(2) }
+            )),
+            "expected FormatSpec{{width:None, precision:Some(2)}}, got: {:?}",
+            toks
+        );
+    }
+
+    #[test]
+    fn format_spec_lexes_width_and_precision_combined() {
+        let toks = lex_format_spec_tokens("print 3.14:08.3;");
+        assert!(
+            toks.iter().any(|k| matches!(
+                k,
+                crate::lexer::TokenKind::FormatSpec { zero_pad: true, width: Some(8), precision: Some(3) }
+            )),
+            "expected FormatSpec{{zero_pad:true, width:Some(8), precision:Some(3)}}, got: {:?}",
+            toks
+        );
+    }
+
+    #[test]
+    fn plain_colon_in_type_annotation_position_is_unaffected() {
+        // The FormatSpec lexing branch is unconditional (not gated to
+        // "right after a print item"), so this is the actual safety
+        // proof that ordinary `:` usage (type annotations, struct
+        // fields) never accidentally becomes a FormatSpec token --
+        // `:` here is followed by whitespace then a letter, never a
+        // digit or `.`+digit, so it must still lex as plain `Colon`.
+        let toks = lex_format_spec_tokens("fn main() -> i64 { let x: i64 = 5; return 0; }");
+        assert!(
+            toks.iter().any(|k| matches!(k, crate::lexer::TokenKind::Colon)),
+            "expected a plain Colon token for the `let x: i64` type annotation, got: {:?}",
+            toks
+        );
+        assert!(
+            !toks.iter().any(|k| matches!(k, crate::lexer::TokenKind::FormatSpec { .. })),
+            "a type annotation's `:` must never be mistaken for a format spec, got: {:?}",
+            toks
+        );
+    }
+
+    #[test]
+    fn format_spec_dot_with_no_trailing_digit_is_not_misparsed() {
+        // `:.` with nothing digit-shaped after the `.` at all doesn't
+        // look enough like an attempted format spec to claim --
+        // falls back to ordinary Colon+Dot tokens, letting the parser
+        // give its own (less specific but still correct) syntax
+        // error rather than the lexer guessing at intent.
+        let toks = lex_format_spec_tokens("fn main() -> i64 { print 5:.; return 0; }");
+        assert!(
+            toks.iter().any(|k| matches!(k, crate::lexer::TokenKind::Colon))
+                && toks.iter().any(|k| matches!(k, crate::lexer::TokenKind::Dot)),
+            "expected plain Colon + Dot tokens for `:.` with no digit after, got: {:?}",
+            toks
+        );
+    }
+
+    #[test]
+    fn format_spec_width_then_bare_dot_is_a_lex_error() {
+        // Once a format spec HAS started (a digit or `.`+digit
+        // immediately follows `:`), a `.` with no digits after it is
+        // unambiguously a malformed spec, not a fallback-to-Colon
+        // case -- `:5.` already committed to being a format spec via
+        // its leading width digit.
+        let err = crate::lexer::lex("fn main() -> i64 { print 5:5.; return 0; }")
+            .expect_err("malformed format spec must be a lex error");
+        assert!(
+            err.message.contains("expected digits after '.' in format spec"),
+            "expected the format-spec-specific error message, got: {:?}",
+            err.message
+        );
+    }
 }
 
