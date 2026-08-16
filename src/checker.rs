@@ -15637,6 +15637,39 @@ fn check_one_stmt(
                     }
                 }
             }
+            // BUG-199 fix: `obj.field = value;` must invalidate any
+            // stale `struct_literal_fields`-derived SMT fact for THIS
+            // field -- sibling of BUG-198's Vec-mutation case, same
+            // underlying shape (a mutation that doesn't invalidate a
+            // previously-established fact). `prove_with_calls_extra`'s
+            // struct-field SMT plumbing re-derives `<obj>__<field> ==
+            // <original-literal-value>` from `env`'s
+            // `struct_literal_fields` on EVERY subsequent proof query,
+            // for the entire remaining life of the binding, regardless
+            // of any `FieldAssign` since construction. Confirmed
+            // exploitable, not just theoretical: `let c = Counter { n:
+            // 0 }; c.n = 5; if c.n == 5 { prove c.n == 0; }` -- the
+            // `prove` (a demonstrably FALSE claim) was silently
+            // accepted with zero diagnostics, because the fact base
+            // became directly contradictory (`c__n == 5` from the `if`
+            // condition AND the stale `c__n == 0` from construction,
+            // simultaneously), and a contradictory fact base makes
+            // every subsequent query vacuously "provable" -- not a
+            // narrow missed-optimization gap like a mere failure to
+            // prove something true, but a real path to proving
+            // arbitrary false claims. This is also the confirmed
+            // origin of an `(assert false)`-prefixed SMT query
+            // observed while auditing `__poll_*` async state-machine
+            // bodies (every `t.state_tag = N;` is a `FieldAssign`),
+            // though that specific instance happened not to enable an
+            // observable unsound elision in the cases tested.
+            if let Some(obj_root) = root_var_of_expr(object) {
+                if let Some(obj_info) = env.lookup_mut(&obj_root) {
+                    if let Some(fields) = &mut obj_info.struct_literal_fields {
+                        fields.retain(|(fname, _)| fname != field);
+                    }
+                }
+            }
             let mut val_expr = value_coerced.expr;
             inject_branch_drops(&mut val_expr);  // closure #179
             body.push(TypedStmt::FieldAssign {

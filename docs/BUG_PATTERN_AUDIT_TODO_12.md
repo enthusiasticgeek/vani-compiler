@@ -41,6 +41,29 @@ async suspend-point (`__poll_*`) state-machine transforms — not yet
 tested with a targeted repro combining a suspend point inside a loop
 with a bounds-check-eligible access.
 
+**Status update 2026-08-16, later same day**: the async suspend-point
+item was picked up. Bounds/overflow elision inside an async loop with a
+real suspend point (`echo_loop.vani`'s exact shape) is confirmed safely
+conservative — the transform's synthesized `while true { if
+state_tag==N {...} ... }` wrapper means `inside_loop` is true for the
+whole poll-fn body, so BUG-127/181's existing blanket guard already
+covers every state segment. While chasing an `(assert false)` anomaly
+noticed in `--smt-debug` output for these repros, found and fixed a
+DIFFERENT, more severe bug: **BUG-199**, `Stmt::FieldAssign` never
+invalidated `struct_literal_fields`-derived SMT facts (the sibling gap
+to BUG-198, for struct fields instead of Vec mutation) — confirmed to
+let the checker `prove` a demonstrably FALSE claim about a field's
+value right after reassignment (`c.n = 5; prove c.n == 0;` was silently
+accepted). Full writeup: `docs/TODO_CURRENT.md`'s BUG-199 entry. The
+`(assert false)` anomaly itself persists in every `__poll_*` function's
+first-branch queries even after the BUG-199 fix — traced its span to
+the function's own `fn_name_span` (used pervasively by
+`try_v31_transform`'s synthesized code) but not fully root-caused;
+empirically confirmed NOT exploitable across every case tested this
+round (the contaminated query is independently, trivially true
+regardless), flagged for a dedicated follow-up round with better
+tooling rather than continued span-matching guesswork.
+
 ## The pattern, in one sentence
 
 `checker.rs`'s SMT-based elision passes (overflow-guard elision AND

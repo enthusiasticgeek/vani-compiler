@@ -15434,3 +15434,147 @@ async suspend-point (`__poll_*`) state-machine transforms (not yet
 empirically tested with a targeted repro combining a suspend point
 inside a loop with a bounds-check-eligible access; flagged for a
 follow-up round, not ruled out).
+
+## Async suspend-point audit (2026-08-16) -- found and fixed BUG-199; one characterized-but-unresolved anomaly remains
+
+Continuation of the round-12 async item above, at the user's explicit
+request. Three things came out of this pass:
+
+**1. Bounds/overflow elision inside async loops is safely conservative
+(no new bug here).** Adapted `examples/language/english/echo_loop.vani`'s
+exact "Phase 2.5 -- loops with suspend" shape (a `while` loop containing
+an `io_recv_async` suspend point, transformed by `parser.rs`'s
+`try_v31_transform` into a `while true { if state_tag==0 {...} if
+state_tag==1 {...} ... }` cascade with backward `continue` jumps) into a
+repro that grows a `Vec` via `push(mut ref xs, n)` INSIDE the suspending
+loop, then reads `xs[count-1]` after the loop -- the same shape BUG-182's
+original repro used, just with a real suspend point in the loop body.
+Confirmed via generated C: the post-loop access still gets a real
+`intent_check_bounds(...)` guard, not an elided raw index. Root cause
+this stays safe: the async transform's synthesized `while true` wrapper
+means `check_one_stmt`'s `loops` stack is non-empty for the ENTIRE
+poll-fn body, so BUG-127/181's existing `if inside_loop { return; }`
+blanket-conservatism guard (on the Binary-overflow and Index-bounds
+elision arms) already covers every state segment, not just the user's
+literal loop. Also confirmed a provably-overflow-eligible `n +
+i64_max_value()` (n from `io_recv_async`, genuinely unknown at compile
+time) correctly kept its `intent_check_i64_add` runtime guard inside a
+non-loop async fn. Three varied repros, zero elided checks that should
+have stayed guarded.
+
+**2. BUG-199 (FIXED): `FieldAssign` doesn't invalidate stale
+`struct_literal_fields`-derived SMT facts -- a DIFFERENT, more severe bug
+found while chasing an anomaly noticed during (1).** While inspecting
+`--smt-debug` output for the async repros above, every `__poll_*`
+function's very first reachable branch showed a query prefixed with a
+bare `(assert false)` -- a directly contradictory premise, present even
+in the absolute minimal case (one `io_recv_async` call, no loop, no
+Vec). Traced (via temporary `eprintln` instrumentation at
+`prove_with_calls_extra`'s final fact list, span-matched back to source)
+far enough to notice `Stmt::FieldAssign`'s checker handling
+(`check_one_stmt`, ~line 15439) never called `drop_facts_mentioning` or
+touched `env`'s `VarInfo.struct_literal_fields` bookkeeping at all --
+the exact same "mutation doesn't invalidate a stale fact" shape as
+BUG-198, but for struct fields via `FieldAssign` instead of Vec mutation
+via `mut ref` call arguments. `prove_with_calls_extra`'s struct-field
+SMT plumbing re-derives `<obj>__<field> == <original-construction-
+literal>` from `struct_literal_fields` on EVERY subsequent proof query,
+for the entire remaining life of the binding, regardless of any
+`FieldAssign` since construction -- and since every `t.state_tag = N;`
+in a `__poll_*` function IS a `FieldAssign`, this fires on every single
+state transition.
+
+Confirmed exploitable with a minimal, non-async repro -- and confirmed
+this is NOT a narrow missed-optimization gap like BUG-198's in-place-
+push case, but a real path to proving arbitrary FALSE claims:
+
+```vani
+struct Counter { n: i64 }
+
+fn main() -> i64 {
+    let c: Counter = Counter { n: 0 };
+    c.n = 5;
+    if c.n == 5 {
+        prove c.n == 0;   // demonstrably false -- silently ACCEPTED, zero diagnostics
+    }
+    return 0;
+}
+```
+
+`--smt-debug` showed the exact contradiction:
+`(assert (= v_c__n (_ bv5 64)))` (the `if` branch's own, correct
+condition fact) AND `(assert (= v_c__n (_ bv0 64)))` (the STALE
+`struct_literal_fields`-derived fact from `Counter { n: 0 }`'s
+construction, never invalidated by `c.n = 5;`) asserted simultaneously
+-- a directly contradictory fact base makes every subsequent query
+vacuously "provable," including proving the negation of the field's
+actual current value. This is the general form of what was observed
+polluting every `__poll_*` function's queries (there, `t.state_tag = N;`
+is the `FieldAssign` and `t__state_tag`'s stale construction-time value
+is `0`).
+
+Fixed by clearing the mutated field's entry from `struct_literal_fields`
+in `Stmt::FieldAssign`'s checker handling (`root_var_of_expr(object)` to
+resolve the object's root binding, `env.lookup_mut` to reach its
+`VarInfo`, `fields.retain(|(fname, _)| fname != field)`). Deliberately
+scoped to invalidation only (matching BUG-198's own scope) -- no attempt
+to synthesize a NEW `<obj>__<field> == <new-value>` fact, since
+correctness only requires not asserting a stale one, not full precision.
+
+**Verification**: the false-claim repro now correctly fails with `proof
+failed: SMT counterexample [c__n = 5]`; a parallel true-claim variant
+(`prove c.n == 5;` in the same position) still passes; `--smt-debug`
+confirms the stale `c__n == 0` assert is gone from the fact base.
+Git-stash-compared against the pre-fix binary (same discipline as
+BUG-198, this time run cleanly with no concurrent build/stash overlap):
+`vanic check examples` produces an IDENTICAL 20-file error set
+before/after; full `cargo test --release --workspace` clean (3563
+lines, 0 FAILED/panicked, all 13 `test result:` summaries `0 failed`);
+`tools/backend_crosscheck.py` reports 1036/1036 clean (FULLY clean this
+time, not even the usual flaky concurrency test triggered);
+`tools/leak_sweep.py`'s 4 findings match the existing baseline exactly.
+
+**3. Characterized but NOT fully root-caused: the `(assert false)`
+anomaly itself, independent of the FieldAssign fix, still reproduces in
+every io-async `__poll_*` function's first-branch queries.** After the
+BUG-199 fix, the SAME `(assert false)`-prefixed query from finding (2)
+above is STILL present verbatim in the minimal
+`async fn probe2(fd: i64) -> i64 { let n: i64 = io_recv_async(fd, 64);
+return n; }` repro -- meaning `struct_literal_fields` staleness was NOT
+its (sole) source here; something else independently injects a bare
+`Bool(false)` fact into every `__poll_*` function's very first reachable
+branch. Traced its span (via the same temporary instrumentation,
+removed before this fix was finalized) to `Span { start: 6, end: 15 }`
+in the minimal repro -- the literal source text `"fn probe2"`, i.e. the
+function's own `fn_name_span`, used as a placeholder span by whatever
+code constructs this fact (`fn_name_span` is threaded pervasively
+through `parser.rs`'s `try_v31_transform`, used for many synthesized-
+code spans there, including the `synth_i64_sub(0, 1, fn_name_span)`
+sentinel-value construction visible in the generated C's fallback tail
+-- not yet narrowed further than that). Confirmed this is NOT the
+general `while true { ... }` mechanism itself (a plain, non-async
+`while true { ... }` loop produces ZERO SMT queries for an identical
+in-loop Vec-index pattern, since the Binary/Index elision arms bail out
+before ever calling z3 whenever `inside_loop` is true -- so there's no
+query at all to contaminate in the general case). Whatever this is, it
+appears SPECIFIC to the v3.1 async transform's own synthesized code.
+
+**Empirically confirmed NOT (yet) exploitable**, across every case
+constructed this round: the query it contaminates (proving `0 - 1`/`0 -
+2` -- the sentinel-value computation -- doesn't overflow) is ALSO
+independently, trivially true regardless of any facts (both are small
+compile-time literals), so a contradictory premise doesn't change the
+outcome there. Every OTHER check tested inside a `__poll_*` body in this
+round (the trivial `xs[0]`, the loop-grown-then-indexed `xs[count-1]`,
+and the genuinely-overflow-eligible `n + i64_max_value()`) correctly
+kept its runtime guard -- none of them were near enough to the
+contaminated query to be affected by it, or the `inside_loop`
+conservatism protected them independently regardless. Flagged as a real,
+reproducible, but currently-inert finding for a dedicated follow-up
+round with proper tooling (a debug build with persistent fact-provenance
+tracking, or bisecting `try_v31_transform`'s synthesized-code
+construction directly, rather than more span-matching guesswork) --
+stopped here after reasonable effort rather than continuing indefinitely
+on a lead that hasn't yet demonstrated actual unsoundness.
+
+Next free bug number is **BUG-200**.
