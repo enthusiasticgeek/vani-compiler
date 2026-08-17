@@ -8868,3 +8868,12 @@ Repro: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-220558-run-crash-07913ee091
+
+Repro: `tools/localfuzz/findings/20260817-220558-run-crash-07913ee091/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-220558-run-crash-07913ee091/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
