@@ -15645,4 +15645,59 @@ from 2997 -- the 3 new Sanskrit tests above), `cargo test --release
 correctly on both backends, `vanic check` re-confirmed against the
 existing Sanskrit example corpus with no regressions.
 
-Next free bug number is **BUG-201**.
+## BUG-201 -- LLVM backend emitted `%intent_vec_T` typedefs AFTER structs/enums that embed `Vec<T>` by value, breaking `lli` with "base element of getelementptr must be sized" (2026-08-17, FIXED)
+
+Found via localfuzz (a qwen-generated candidate program, not a
+mutation): a closure-as-value capturing a non-Copy struct (one with a
+`Vec<T>` field) by ref crashed `vanic run` (LLVM) outright while
+`--backend=c` ran and printed correct output -- a real, live backend
+divergence, not just a style/perf gap. Bisected the qwen-generated
+repro down to a 12-line minimal case with no closure-as-fn-arg
+machinery, no `clone_at`, nothing async -- a bare
+`let node0: Node = Node { value: 7, children: some_vec };` followed by
+a closure literal capturing `node0` by ref was already sufficient. A
+Copy-only struct (all-`i64` fields, no `Vec`) captured the same way
+compiled and ran fine -- isolating the trigger to specifically
+"non-Copy struct containing a `Vec<T>` field, captured by ref."
+
+Root cause, confirmed empirically by hand-editing a captured `.ll`
+file's type-definition order (not just read from source): `lli`'s
+LLVM IR parser genuinely requires a named struct type to be *defined*
+before any other type that embeds it *by value* (not behind a
+pointer) is used in a context that needs its size (a `getelementptr`
+into it). `backend_llvm.rs` emitted `%intent_vec_T = type { T*, i64,
+i64 }` (the typedef every `Vec<T>` needs) in a *later* pass than the
+user-struct loop (and the enum-payload loop, and the closure-env-struct
+loop -- Arc 5c's `__anon_env_N` structs are themselves plain user
+structs from the emitter's point of view). Any struct/enum/closure-env
+type embedding `Vec<T>` by value -- which is common, since vāṇी's
+`Vec<T>` is a value-type triple, not a separate heap box -- got its
+own type definition emitted *before* the `%intent_vec_T` body it
+depends on, and any later `getelementptr` through it (field access,
+closure-env capture, etc.) hit the unsized-type parser error. The
+divergence with the C backend makes sense in hindsight: C has no such
+ordering requirement (`struct Foo { struct Bar b; }` and `struct Bar`
+can be declared/defined in either order as long as both exist by the
+time anything is compiled), so this class of bug is architecturally
+LLVM-backend-only.
+
+Fixed by moving the `%intent_vec_T` *type definition* emission (not
+the helper-function bodies, which have no such ordering restriction)
+to the very front of the type-emission sequence, before the
+user-struct loop, the enum loop, and everything downstream. Safe in
+the other direction unconditionally: `%intent_vec_T`'s own body only
+ever holds `T*` (a pointer), never `T` by value, so it can never
+itself depend on `T`'s struct body being defined yet, regardless of
+what `T` is -- confirmed by inspection, not just assumed, since this
+is exactly the invariant the fix relies on.
+
+Verification: `cargo test --release --lib` (3000 tests, 0 failed),
+`cargo test --release --test run_end_to_end` (272 passed, 0 failed),
+`tools/backend_crosscheck.py` (1038/1038 clean corpus-wide, 0 flagged),
+`tools/leak_sweep.py` (4 flagged, all matching the pre-existing
+baseline exactly), full example corpus `vanic check` (same 19-file
+known-non-compiling baseline, no new failures), and both the original
+qwen-generated repro and the minimal 12-line isolation now produce
+byte-identical output on both backends.
+
+Next free bug number is **BUG-202**.

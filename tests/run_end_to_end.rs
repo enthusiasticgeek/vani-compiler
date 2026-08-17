@@ -16284,3 +16284,47 @@ fn main() -> i64 {
         String::from_utf8_lossy(&out2.stderr)
     );
 }
+
+// BUG-201 (2026-08-17, found via localfuzz): a closure-as-value
+// capturing a non-Copy struct (one with a Vec<T> field) by ref
+// crashed the LLVM backend outright -- lli rejected the emitted IR
+// with "base element of getelementptr must be sized" because
+// backend_llvm.rs emitted %intent_vec_T's typedef AFTER the
+// struct/closure-env types that embed Vec<T> by value. Only a real
+// `lli` parse+run catches this (the malformed type ordering doesn't
+// itself panic in the Rust compiler, so a `compile_to_llvm`-only
+// lib.rs test wouldn't have caught it) -- an actual subprocess `vanic
+// run` invocation is the right test shape here, matching this file's
+// own convention for backend-specific regressions.
+#[test]
+fn bug201_closure_captures_vec_struct_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug201_closure_captures_vec_struct.vani",
+        manifest_dir
+    );
+    let expected = "result: 12\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-201: closure-as-value capturing a Vec-owning struct by ref \
+             produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}

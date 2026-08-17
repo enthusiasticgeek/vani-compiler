@@ -1,0 +1,29 @@
+// build & run:
+//   vanic run examples/language/english/bug201_closure_captures_vec_struct.vani              # LLVM
+//   vanic run examples/language/english/bug201_closure_captures_vec_struct.vani --backend=c  # C
+
+intent "BUG-201 regression: a closure-as-value capturing a non-Copy struct (one with a Vec<T> field) by ref used to crash the LLVM backend outright -- lli rejected the emitted IR with \"base element of getelementptr must be sized\" because %intent_vec_T's typedef was emitted AFTER the struct/closure-env types that embed Vec<T> by value. A Copy-only struct (no Vec field) captured the same way was unaffected, which is what made this a genuine backend divergence rather than a general closure bug: the C backend has no such type-ordering requirement and always ran this correctly.";
+
+struct Node {
+  value: i64,
+  children: Vec<i64>,
+}
+
+fn apply(f: Closure(i64) -> i64, x: i64) -> i64 {
+  return f(x);
+}
+
+fn main() -> i64 {
+  let empty_children: Vec<i64> = vec();
+  let node0: Node = Node { value: 7, children: empty_children };
+
+  // Closure captures `node0` by ref -- `Node` is non-Copy (owns a
+  // Vec<i64>), so this exercises the ref-capturing-closure path that
+  // synthesizes an anonymous env struct embedding `Node` by value,
+  // which itself embeds `Vec<i64>` by value.
+  let add_n = fn(y: i64) -> i64 { return node0.value + y; };
+  let r: i64 = apply(add_n, 5);
+  print "result:", r;
+
+  return 0;
+}
