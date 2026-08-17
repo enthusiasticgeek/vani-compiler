@@ -1,12 +1,12 @@
-# mdBook configuration for the vāṇी (वाणी) tutorials site.
+# mdBook configuration for the vāṇī (वाणी) tutorials site.
 # Build with `mdbook build` from this directory; serve locally
 # with `mdbook serve --open`. See `tutorials/README.md` for the
 # full development loop.
 
 [book]
-title = "vāṇी (वाणी) — Tutorials"
-authors = ["vāṇी contributors"]
-description = "Beginner → intermediate → advanced tutorials for the vāṇी language. Code as you speak."
+title = "vāṇī (वाणी) — Tutorials"
+authors = ["vāṇī contributors"]
+description = "Beginner → intermediate → advanced tutorials for the vāṇī language. Code as you speak."
 language = "en"
 src = "src"
 
@@ -16,7 +16,7 @@ preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/enthusiasticgeek/vani-compiler"
 edit-url-template = "https://github.com/enthusiasticgeek/vani-compiler/edit/main/tutorials/{path}"
 no-section-label = false
-# manas -- the vāṇी mascot. Small inline emotion icons next to code
+# manas -- the vāṇī mascot. Small inline emotion icons next to code
 # blocks, styled the same way the Rust book uses Ferris.
 additional-css = ["theme/manas.css"]
 # "Translate this page" button in the menu bar, for readers not fluent
