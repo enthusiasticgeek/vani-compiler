@@ -1,0 +1,25 @@
+// Regression example for BUG-207 (LLVM backend, `TypedStmt::For` --
+// range-based `for i from LOW to HIGH`).
+//
+// Found by deliberately auditing the ctx.current_block family after
+// this session's Vec-bounds-check family sweep (BUG-206) -- following
+// the standing instruction to check sibling functions/features after
+// every bugfix. This is the 4th confirmed instance of the same bug
+// class as BUG-190 (`If`): `ctx.current_block` was never updated
+// anywhere inside `TypedStmt::For`'s own codegen (header/body/step/
+// exit blocks), so any PHI-based construct in the loop body (here,
+// `vec_fill`'s hand-rolled SSA loop, the exact same trigger BUG-190
+// used) with no intervening branch read a STALE `ctx.current_block`
+// for its phi's entry-edge predecessor -- producing the identical
+// "PHI node entries do not match predecessors!" LLVM verifier crash.
+fn main() -> i64 {
+    let n: i64 = 3;
+    let k: i64 = 5;
+    let total: i64 = 0;
+    for i from 0 to n {
+        let v: Vec<i64> = vec_fill(k, 7);
+        total = total + (len(ref v) as i64);
+    }
+    print "total:", total;
+    return 0;
+}

@@ -15846,4 +15846,61 @@ triggered it rather than to the whole family of similar accessors --
 which is exactly why the family kept growing. Any NEW Vec/Array
 accessor added in the future should get a bounds check from day one.
 
-Next free bug number is **BUG-207**.
+## BUG-207
+
+Found 2026-08-17 immediately after BUG-206, by deliberately auditing
+a second known-recurring bug family (the `ctx.current_block`-not-
+updated LLVM family) right after closing the Vec-bounds-check family
+-- per the same standing "check siblings/related features after every
+bugfix" practice that found BUG-206.
+
+**Root cause**: both `TypedStmt::For` (range-based `for i from LOW to
+HIGH`) and `TypedStmt::ForIter` (collection-based `for x in xs`) in
+`src/backend_llvm.rs` never updated `ctx.current_block` **anywhere**
+in their own codegen -- not for the loop's header, body, step, or
+exit blocks. These are two SEPARATE duplicate-walker copies (one per
+loop kind), matching the already-known "checker.rs has >=2 duplicate
+walker copies to fix in tandem" pattern from BUG-188/189/190. Any
+PHI-based construct (e.g. `vec_fill`'s hand-rolled SSA loop, the exact
+same trigger BUG-190 used) placed as the first statement in a loop
+body -- with no intervening branch to accidentally self-correct
+`ctx.current_block` as a side effect -- read a STALE block name for
+its phi's entry-edge predecessor, producing the identical "PHI node
+entries do not match predecessors!" LLVM verifier crash `lli` refuses
+to run.
+
+This is the **4th confirmed instance** of this exact bug class:
+`Assert` (BUG-185), `If` (BUG-190), `While` (already correct), and now
+`For`+`ForIter` (BUG-207). BUG-190's own write-up explicitly flagged
+"worth specifically re-auditing every label-emission site in
+`backend_llvm.rs` for a missing paired `ctx.current_block` assignment"
+as a to-do -- this is the first time that re-audit actually happened,
+three days later.
+
+**Confirmed real** via the exact same repro shape as BUG-190: a `for`
+loop whose body's first (and only) statement is `vec_fill(k, v)` with
+`k`/`v` plain variables (no arithmetic, so nothing else updates
+`ctx.current_block` as a side effect before `vec_fill` runs). Verified
+the emitted `.ll`'s phi node directly (`%t13 = phi i64 [ 0, %entry ],
+[...]`, when the true predecessor was `%for_body1`) before touching
+any Rust source, then confirmed `lli` rejects it with exactly BUG-190's
+error text.
+
+**Fix**: mirrored BUG-190's exact per-block `ctx.current_block`
+assignment pattern in both `TypedStmt::For` and `TypedStmt::ForIter`
+-- set `ctx.current_block` right after emitting each of the header,
+body, and step block labels (and once more after the exit label, for
+any code that runs after the loop).
+
+Regression: `examples/language/english/bug207_for_vecfill_phi.vani` +
+`bug207_foriter_vecfill_phi.vani`, plus `tests/run_end_to_end.rs`'s
+`bug207_for_vecfill_phi_example_produces_correct_output_on_both_backends`
+and `bug207_foriter_vecfill_phi_example_produces_correct_output_on_both_backends`
+-- both assert success + exact stdout (not `exit(3)` like BUG-204/206,
+since this fix makes the program run to completion correctly rather
+than fail cleanly). Full `cargo test --release --workspace` clean
+after the fix (0 failed). The C backend has no equivalent concept
+(`ctx.current_block`/phi tracking is LLVM-SSA-specific), confirmed
+unaffected on both new examples.
+
+Next free bug number is **BUG-208**.

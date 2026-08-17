@@ -4644,6 +4644,17 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let exit = ctx.fresh_label("for_exit");
             out.push_str(&format!("  br label %{}\n", header));
             out.push_str(&format!("{}:\n", header));
+            // BUG-207: mirrors BUG-190's `If` fix -- `ctx.current_block`
+            // must track each of this loop's own blocks (header/body_lbl/
+            // step/exit) as they're entered, not just once via a single
+            // post-construct assignment (`TypedStmt::For` previously
+            // never updated it at all). Confirmed via the same repro
+            // shape as BUG-190: `vec_fill` as the first statement in a
+            // `for i from LOW to HIGH` body (no intervening branch) read
+            // a stale `ctx.current_block` for its phi's entry-edge
+            // predecessor, producing the identical "PHI node entries do
+            // not match predecessors!" LLVM verifier error.
+            ctx.current_block = header.clone();
             let cur = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", cur, lty, lty, i_addr));
             let cmp = ctx.fresh_tmp();
@@ -4657,6 +4668,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", body_lbl));
+            ctx.current_block = body_lbl.clone();
             ctx.loops.push(LoopFrame {
                 header: step.clone(),
                 exit: exit.clone(),
@@ -4673,6 +4685,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.pop();
             // Step block: increment i_addr, jump to header.
             out.push_str(&format!("{}:\n", step));
+            ctx.current_block = step.clone();
             let now = ctx.fresh_tmp();
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", now, lty, lty, i_addr));
@@ -4690,6 +4703,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx.locals.remove(var);
             }
             out.push_str(&format!("{}:\n", exit));
+            ctx.current_block = exit;
         }
         TypedStmt::FieldAssign {
             object,
@@ -5198,6 +5212,12 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let exit = ctx.fresh_label("iter_exit");
             out.push_str(&format!("  br label %{}\n", header));
             out.push_str(&format!("{}:\n", header));
+            // BUG-207: same gap as TypedStmt::For's own fix above --
+            // `ctx.current_block` was never updated anywhere in this
+            // duplicate walker copy either (matches the "checker.rs
+            // has >=2 duplicate walker copies to fix in tandem"
+            // pattern already known from BUG-188/189/190).
+            ctx.current_block = header.clone();
             let cur = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load i64, i64* {}\n", cur, i_addr));
             let cmp = ctx.fresh_tmp();
@@ -5211,6 +5231,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", body_lbl));
+            ctx.current_block = body_lbl.clone();
             // Load element at `cur` into `var`'s alloca.
             let elem_val = elem_gep(&cur, ctx, out);
             out.push_str(&format!(
@@ -5233,12 +5254,14 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.pop();
             // Step block: bump i_addr then jump to header.
             out.push_str(&format!("{}:\n", step));
+            ctx.current_block = step.clone();
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = add i64 {}, 1\n", next, cur));
             out.push_str(&format!("  store i64 {}, i64* {}\n", next, i_addr));
             out.push_str(&format!("  br label %{}\n", header));
             ctx.terminated = outer_terminated;
             out.push_str(&format!("{}:\n", exit));
+            ctx.current_block = exit.clone();
 
             // If we consumed an owned Vec, free its buffer here.
             // For non-Copy elements each slot was loaded into x and
