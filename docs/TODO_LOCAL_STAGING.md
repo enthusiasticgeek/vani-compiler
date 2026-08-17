@@ -8724,3 +8724,12 @@ Repro: `tools/localfuzz/findings/20260817-160254-backend-divergence-c8ae24438d/r
 Fix attempt: `tools/localfuzz/findings/20260817-160254-backend-divergence-c8ae24438d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-173836-run-crash-3eb740e33e
+
+Repro: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
