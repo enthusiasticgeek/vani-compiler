@@ -8909,3 +8909,57 @@ STATUS: reviewed 2026-08-17, FALSE POSITIVE, same class as the
 earlier Finnish/Sinhala findings already triaged today -- mutation
 changed the loop increment `i = i + 1;` to `i = i + 0;`, a genuine
 infinite loop in the mutated source (i never reaches 6).
+
+---
+
+### Candidate: 20260817-231657-run-crash-b761c1a3d6
+
+Repro: `tools/localfuzz/findings/20260817-231657-run-crash-b761c1a3d6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-231657-run-crash-b761c1a3d6/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Project:** vani-compiler
+
+**Commit:** [Insert commit hash here]
+
+**Branch:** localfuzz
+
+**Repo URL:** https://github.com/vanilabench/vani-compiler.git
+
+**File:** /home/virgo/source/vani-compiler-localfuzz/examples/language/english/concurrency.vani
+
+**Command:** `vanic run examples/language/english/concurrency.vani`
+
+**Time:** [Insert timestamp here]
+
+---
+
+**Problem Description:**
+
+A crash occurred during the execution of a VANI program. The exact source and observed symptom (crash/hang/ divergent output) are as follows:
+
+```vani
+// build & run:
+//   vanic run examples/language/english/concurrency.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/concurrency.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/concurrency.vani -o /tmp/concurrency && /tmp/concurrency   # native binary
+
+intent "Channels + Mutex / Guard: escape hatches for shared state the affine model can't express";
+
+// `Atomic<T>` (see examples/atomics.intent) gives you a single
+// cell with single-op atomicity. For multi-step protocols the
+// language also has:
+//
+//   `Channel<T>` — single-slot rendezvous. `channel_send` stores
+//                  a value + sets a ready flag; `channel_recv`
+//                  spin-waits on the flag, reads, then clears.
+//
+//   `Mutex<T>` + `Guard<T>` — value protected by a spin-lock.
+//                  `mutex_lock(ref m)` cmpxchg-loops until it
+//                  acquires; returns an affine `Guard<T>`.
+//                  `guard_get` / `guard_set` access the value
+//                  under the lock. The guard's scope-exit drop
+//                 
