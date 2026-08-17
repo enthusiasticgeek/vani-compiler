@@ -8783,6 +8783,14 @@ positive shape as the two infinite-loop findings above.
 Repro: `tools/localfuzz/findings/20260817-192153-run-crash-7a09d47656/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-192153-run-crash-7a09d47656/fix_attempt.md`
 
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, not a compiler bug. The
+mutation changed `let i: i64 = 0;` to `let i: i64 = -1;` in the
+pool-fill loop (`while i < 3 { ...tcp_accept... i = i+1; }`), making
+it accept 4 connections while only 3 peer tasks ever connect -- the
+4th `tcp_accept` blocks forever, hanging both backends identically.
+Confirmed via direct diff against the base example file
+(`examples/language/english/echo_pool.vani`).
+
 **STAGING ENTRY**
 
 ---
@@ -8833,7 +8841,20 @@ fn main() -> i64 {
 Repro: `tools/localfuzz/findings/20260817-195304-run-crash-44717c6740/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-195304-run-crash-44717c6740/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, NOT a compiler bug -- a JIT-vs-AOT
+artifact of the test harness, not a compiler defect. The mutation set
+the loop counter to i64::MIN (from 0), making the true iteration
+count ~9.2 quintillion before an early break at n==5. The C backend's
+real AOT compile (gcc -O2) collapses this via induction-variable/loop
+analysis and runs instantly ("Mongolian early exit OK 5"); LLVM's
+`vanic run` path uses `lli` (unoptimized JIT interpretation with no
+such collapse), which would genuinely take longer than any timeout to
+interpret ~9.2 quintillion iterations one at a time. Confirmed by
+building the SAME repro via `vanic build` (real AOT LLVM compilation,
+not JIT) -- the resulting native binary also runs instantly and
+correctly, proving the LLVM backend's generated CODE is correct; only
+`vanic run`'s JIT-without-optimization execution strategy is slow for
+this specific extreme-trip-count program.
 
 **Staging Entry**
 
@@ -8856,7 +8877,11 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-211147-run-crash-560c3a3267/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-211147-run-crash-560c3a3267/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, same class as
+20260817-174249 (Konkani, already triaged earlier today) -- mutation
+blew `delay`'s first `sleep_ms(...)` argument up to
+`9223372036854775807` (i64::MAX ms), a legitimately multi-million-year
+sleep before the second `delay` even starts.
 
 This bug report was run against the vani-compiler project's local staging log using the `/home/virgo/source/vani-compiler-localfuzz/examples/language/catalan/async_cancel_auto.vani` base corpus file with the `delay` function implemented in both LLVM and C backends. The resulting executable exhibited a crash or hang upon execution, indicating that the vani compiler was unable to correctly handle or execute the provided mutant code within the specified time constraints.
 
@@ -8867,7 +8892,11 @@ This bug report was run against the vani-compiler project's local staging log us
 Repro: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, same class as
+20260817-174249 (Konkani) and 20260817-211147 (Catalan, both already
+triaged today) -- mutation blew `delay`'s first `sleep_ms(...)`
+argument up to `9223372036854775807` (i64::MAX ms), a legitimately
+multi-million-year sleep before the second `delay` even starts.
 
 ---
 
@@ -8876,4 +8905,7 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-220558-run-crash-07913ee091/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-220558-run-crash-07913ee091/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, same class as the
+earlier Finnish/Sinhala findings already triaged today -- mutation
+changed the loop increment `i = i + 1;` to `i = i + 0;`, a genuine
+infinite loop in the mutated source (i never reaches 6).
