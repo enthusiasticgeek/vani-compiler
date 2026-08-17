@@ -8695,3 +8695,12 @@ Repro: `tools/localfuzz/findings/20260817-013737-run-crash-36adb701c2/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260817-013737-run-crash-36adb701c2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-141110-run-crash-4a96c72857
+
+Repro: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
