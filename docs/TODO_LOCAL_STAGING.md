@@ -8825,3 +8825,26 @@ fn main() -> i64 {
   print "server bound (port > 0):", port > 0;
 
   // Three
+
+---
+
+### Candidate: 20260817-195304-run-crash-44717c6740
+
+Repro: `tools/localfuzz/findings/20260817-195304-run-crash-44717c6740/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-195304-run-crash-44717c6740/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**Staging Entry**
+
+**Base Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/mongolian/early_exit.vani`
+
+**Mutant/generated Source:**
+```vani
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/early_exit.vani              # LLVM
+//   vanic run examples/language/mongolian/early_exit.vani --backend=c  # C
+
+
