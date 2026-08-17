@@ -113,7 +113,7 @@ Err.
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 Rust-style `match` can destructure a tuple shape directly:
-`match (x, y) { (0, 0) => ..., (a, b) => ... }`. **vāṇी's v1
+`match (x, y) { (0, 0) => ..., (a, b) => ... }`. **vāṇī's v1
 `match` can't** -- patterns are limited to enum variants
 (single-level, one bound name), integer/bool/string/float
 literals, and Vec/array slice patterns. There's no tuple
@@ -153,7 +153,7 @@ A `_` arm can carry a guard (`if condition`) -- the branch
 runs only when the guard is true, and the guard (and the
 branch body) can freely reference `status`, the scrutinee's
 own name, which is still in scope. This is also why you don't
-write `n if n < 0` here the way you might in Rust: vāṇी match
+write `n if n < 0` here the way you might in Rust: vāṇī match
 patterns don't introduce a fresh binding for "whatever this
 arm caught" -- only enum-variant and slice patterns bind new
 names. When you need the value inside a catch-all-style arm,
@@ -241,7 +241,7 @@ input`.
 
 ## `match` as an expression, not a statement
 
-A subtle but important property: in vāṇी, `match` is an
+A subtle but important property: in vāṇī, `match` is an
 EXPRESSION. It produces a value.
 
 ```vani
@@ -294,7 +294,7 @@ anything, in any position.
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 Rust can peel two layers of variant in one pattern:
-`Ok(Command::Echo(s)) =>`. **vāṇी can't** -- `EnumName.Variant(binding)`
+`Ok(Command::Echo(s)) =>`. **vāṇī can't** -- `EnumName.Variant(binding)`
 patterns take exactly one plain binding name, never another
 pattern. Write nested dispatch as two flat matches instead --
 extract the inner value with a plain binding in the outer
@@ -335,7 +335,7 @@ fn describe(code: i64) -> Str {
 }
 ```
 
-vāṇी has no `1..99`-style range pattern syntax. The real
+vāṇī has no `1..99`-style range pattern syntax. The real
 idiom is a chain of guarded `_` arms, each testing a range with
 a plain boolean condition, ending in an unguarded `_` as the
 final fallback -- exactly the "wildcard with a guard" shape

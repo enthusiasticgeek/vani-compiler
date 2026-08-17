@@ -76,7 +76,7 @@ cargo test --test run_end_to_end llvm_backend_run_produces_same_output_as_c
 
 ## vāṇी-specific deviations from textbook GoF
 
-A few patterns adapt to vāṇी's affine ownership + composition-over-
+A few patterns adapt to vāṇī's affine ownership + composition-over-
 inheritance model. The full catalog of v1 deviations (not just
 design-pattern ones — also includes parser shortcuts, codegen
 quirks, by-design choices) lives in
@@ -84,11 +84,11 @@ quirks, by-design choices) lives in
 each deviation below cross-references its L-number there.
 
 - **Composite** uses a tagged struct (`kind: i64` discriminator)
-  instead of an enum with a `Vec` payload — vāṇी's v1 doesn't
+  instead of an enum with a `Vec` payload — vāṇī's v1 doesn't
   destructure-bind non-Copy enum payloads. See
   [v1_limitations.md L1](../../../../docs/v1_limitations.md).
 - **Bridge** uses an integer discriminator for the renderer family
-  instead of `Box<dyn Renderer>` — vāṇी's v1 has no `Box`-like
+  instead of `Box<dyn Renderer>` — vāṇī's v1 has no `Box`-like
   owning-interface-object yet. See
   [v1_limitations.md L2](../../../../docs/v1_limitations.md).
 - **Decorator** composes via a flag-bag struct (`email`/`sms`/
@@ -106,7 +106,7 @@ each deviation below cross-references its L-number there.
   `let mut`; mutation goes through `mut ref self` on methods. See
   [v1_limitations.md L5](../../../../docs/v1_limitations.md).
 - **Singleton** lives in `main()`'s scope and is borrowed by
-  callers — vāṇी has no globally-mutable storage by default
+  callers — vāṇī has no globally-mutable storage by default
   (affine ownership). The `Atomic<i64>` counter pattern shown is
   the closest idiomatic equivalent.
 

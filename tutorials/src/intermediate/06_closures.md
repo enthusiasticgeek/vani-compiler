@@ -139,7 +139,7 @@ fn main() -> i64 {
 
 ## Comparison to Rust
 
-| Rust | vāṇी v1 |
+| Rust | vāṇī v1 |
 |---|---|
 | `|x| x + x` | `fn(x: i64) -> i64 { return x + x; }` |
 | Closure with capture (`move \|x\|`) | Supported -- by-value for owning types (FnOnce), by-copy for `Copy` types |

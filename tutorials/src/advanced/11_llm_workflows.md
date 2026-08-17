@@ -2,12 +2,12 @@
 
 > **Learning goal**: drive an off-the-shelf large language model
 > (Claude, GPT-4-class, Llama-3-class, local) to generate
-> useful vāṇी programs -- either by pasting a static context
+> useful vāṇī programs -- either by pasting a static context
 > bundle into a chat, or by wiring the dedicated MCP server so
-> an agent can write, type-check, and run vāṇी source on its
+> an agent can write, type-check, and run vāṇī source on its
 > own without leaving the conversation.
 
-vāṇी treats AI-assisted code generation as a first-class
+vāṇī treats AI-assisted code generation as a first-class
 workflow. The compiler's SMT verifier + deterministic
 diagnostics make it unusually suited as a target for LLM
 output -- when the model gets something wrong, the compiler
@@ -23,7 +23,7 @@ Two scripts under [`tools/llm_context/`](https://github.com/enthusiasticgeek/van
   context bundle, ~33K tokens full, ~22K with `--no-examples`
   (confirmed by testing; the corpus has grown a lot since an
   earlier ~13K/~7K estimate). Paste it into any LLM as a system
-  prompt and the model can generate working vāṇी without any
+  prompt and the model can generate working vāṇī without any
   training.
 - **`mcp_server.py`** (Phase ML-2, 2026-06-07) -- exposes the
   same content as an [MCP](https://modelcontextprotocol.io/)
@@ -86,7 +86,7 @@ drifts from reality.
 
 Paste the bundle as the first message. Then ask:
 
-> "Here's the vāṇी context. Now: write a `fn clamp(x: i64, lo:
+> "Here's the vāṇī context. Now: write a `fn clamp(x: i64, lo:
 > i64, hi: i64) -> i64` that clamps `x` into `[lo, hi]`, with a
 > `requires lo <= hi;` precondition and an `ensures _return >=
 > lo && _return <= hi;` postcondition, using English keywords."
@@ -285,7 +285,7 @@ search":
 Steps 3-6 happened inside the agent's own context, NOT a
 manual paste-back. The compiler is in-the-loop; the agent
 self-corrects against SMT proof obligations. This is what
-makes vāṇी an unusually good target for AI-assisted code:
+makes vāṇī an unusually good target for AI-assisted code:
 the agent has a deterministic oracle it can interrogate.
 
 ### What's *not* in the MCP server
@@ -304,7 +304,7 @@ the agent has a deterministic oracle it can interrogate.
 
 | Scenario | Use |
 |---|---|
-| Quick "generate me a vāṇी snippet" in a chat client | **Bundle paste** (workflow 1) |
+| Quick "generate me a vāṇī snippet" in a chat client | **Bundle paste** (workflow 1) |
 | Agentic loop where you want the agent to verify before suggesting | **MCP server** (workflow 2) |
 | Local model (Llama-3, Qwen) without MCP support | **Bundle paste** (workflow 1) |
 | You're using Claude Desktop / Code / Cursor anyway | **MCP server** (workflow 2) |
@@ -317,7 +317,7 @@ plumbing, tighter loop.
 ## What's queued (not shipped today)
 
 The roadmap (see [`docs/archive/TODO_ARCHIVE.md` §"🤖 ML model
-that learns vāṇी"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/archive/TODO_ARCHIVE.md)
+that learns vāṇī"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/archive/TODO_ARCHIVE.md)
 -- confirmed by grep; an earlier version of this page linked to
 `TODO.md`, which was condensed on 2026-06-19 and no longer
 contains this section) has two further phases that haven't
@@ -342,7 +342,7 @@ cost.
 
 - **`tools/llm_context/bundle.py`** -- Markdown context bundle
   to stdout. Paste into Claude / ChatGPT / local LLM and the
-  model generates passable vāṇी with zero training. Trim
+  model generates passable vāṇī with zero training. Trim
   flags (`--no-examples`, `--no-limits`, `--section`) for
   tight context budgets.
 - **`tools/llm_context/mcp_server.py`** -- MCP server exposing
@@ -359,7 +359,7 @@ cost.
   are queued, not shipped. The bundle + MCP cover most use
   cases today.
 
-The takeaway: **AI-assisted vāṇी is a write-verify-iterate
+The takeaway: **AI-assisted vāṇī is a write-verify-iterate
 loop, not a one-shot prompt.** The compiler is in the loop;
 the model self-corrects against SMT obligations; the result is
 unusually high-quality generated code for a language this

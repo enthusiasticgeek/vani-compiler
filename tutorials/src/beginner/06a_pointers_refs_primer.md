@@ -78,7 +78,7 @@ fn rename(who: mut ref OwnedStr) -> i64 { ... }
 ```
 
 This is the difference between **read-only access** (`ref T`)
-and **read-write access** (`mut ref T`). vāṇी uses two
+and **read-write access** (`mut ref T`). vāṇī uses two
 keywords; many other languages use punctuation (`&T` vs `&mut T`
 in Rust; `const T*` vs `T*` in C).
 
@@ -99,7 +99,7 @@ In option 1, the book is **moved** from you to your friend. In
 option 2, both of you have **references** to the book; the book
 itself stays on the shelf.
 
-Programming languages with **affine ownership** (vāṇी, Rust)
+Programming languages with **affine ownership** (vāṇī, Rust)
 take both options seriously. You can MOVE a value (option 1)
 or BORROW it via a reference (option 2). The compiler enforces
 that you never accidentally do both at once in conflicting
@@ -123,7 +123,7 @@ numbers). When you take a `ref Vec<i64>`, you're getting a
 pointer to that small handle on the stack -- which itself points
 to the heap data.
 
-You don't need to know which is which to USE vāṇी. The compiler
+You don't need to know which is which to USE vāṇī. The compiler
 handles all of it. But when you read words like "heap-allocated"
 in the next chapter, this is what they mean.
 
@@ -135,7 +135,7 @@ in the next chapter, this is what they mean.
 - Use references when (a) the data is large and copying would
   be wasteful, or (b) you want a function to *modify* the
   caller's data.
-- vāṇी distinguishes **read-only** (`ref T`) from
+- vāṇī distinguishes **read-only** (`ref T`) from
   **read-write** (`mut ref T`) references -- both are addresses,
   but the compiler enforces what you're allowed to do through
   each.
@@ -162,7 +162,7 @@ just remember:
   destructor + freeing its heap memory. It happens automatically
   at scope-exit; you don't write it yourself.
 
-These three together explain why vāṇी doesn't have a garbage
+These three together explain why vāṇī doesn't have a garbage
 collector AND doesn't make you remember to `free()` anything.
 The compiler tracks ownership at compile time and inserts the
 right cleanup automatically.
@@ -174,7 +174,7 @@ with `Vec`, `OwnedStr`, and structs.
 
 ## Does vāṇी have pointers?
 
-**Short answer: Not in safe code -- ordinary vāṇी code uses
+**Short answer: Not in safe code -- ordinary vāṇī code uses
 references, not raw pointers. The exception is `unsafe(reason = "...")`
 code, where raw pointers (`*T`, `*mut T`) are fully supported for
 cases like embedded MMIO/DMA registers and hand-rolled allocators --
@@ -219,7 +219,7 @@ buffer overflows, and data races.
 
 ### What vāṇी has instead: `ref T` and `mut ref T`
 
-vāṇी does NOT let you take the raw address of a variable, do
+vāṇī does NOT let you take the raw address of a variable, do
 pointer arithmetic, cast integers to pointers, or hold a
 null/dangling reference. Instead it gives you two kinds of
 **checked references**:
@@ -272,7 +272,7 @@ fn main() -> i64 {
 ```
 
 You cannot write `&pt` (address-of) or `*ptr` (dereference) in
-vāṇी. References are created at the **call site** using the
+vāṇī. References are created at the **call site** using the
 `ref` and `mut ref` keywords and are verified by the compiler.
 
 ### Why the restriction matters
@@ -285,7 +285,7 @@ vāṇी. References are created at the **call site** using the
 | Can alias freely | Yes (data races) | **No** (`mut ref` is exclusive) |
 | Checked by compiler | No (runtime crashes) | **Yes** (compile-time errors) |
 
-vāṇी trades the flexibility of raw pointers for a guarantee:
+vāṇī trades the flexibility of raw pointers for a guarantee:
 if the program compiles, none of those classes of bugs exist.
 
 ### When do you actually need `unsafe` (raw memory access)?

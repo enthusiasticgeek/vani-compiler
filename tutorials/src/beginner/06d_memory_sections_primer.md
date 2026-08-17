@@ -99,21 +99,21 @@ on it reading as zero. Two answers, depending on platform:
 
 ## Where vāṇी constructs land
 
-| vāṇी construct | Section |
+| vāṇī construct | Section |
 |---|---|
 | A string literal `"hello"` (backing bytes for `Str`) | `.rodata` -- see [Beginner 6, strings](06_strings.md) |
 | A compiled function body | `.text` |
 | A local variable (`let x: i64 = 5;`) | the **stack**, not a static section -- see [Beginner 6b](06b_heap_vs_stack_primer.md) |
 | `Vec<T>` / `OwnedStr` backing bytes | the **heap**, not a static section |
 
-Notice what's missing from that table: a vāṇी *global mutable
-variable*. vāṇी v1 has no `static` keyword and no mutable
+Notice what's missing from that table: a vāṇī *global mutable
+variable*. vāṇī v1 has no `static` keyword and no mutable
 module-level state -- every binding is either a local (stack), a
 heap allocation reached through a local handle, or a `.rodata`
 constant. That's a deliberate simplification (mutable globals are
 a classic source of hidden coupling and data races), and it also
 means `.data` and `.bss` are populated almost entirely by the C
-runtime your program links against, not by your own vāṇी code --
+runtime your program links against, not by your own vāṇī code --
 **except on embedded targets**, where `#[link_section]` (see
 [Advanced 4b](../advanced/04b_cross_compile_primer.md)) lets you
 place hardware-specific data explicitly, and where the
@@ -132,8 +132,8 @@ the `.data`-copy / `.bss`-zero step described above.
 - On a hosted OS, the loader zeroes `.bss` for you. On bare
   metal, your own `Reset_Handler` does it by hand, along with
   copying `.data` from Flash to RAM.
-- vāṇी string literals live in `.rodata`; compiled functions
-  live in `.text`. vāṇी v1 has no mutable globals, so `.data`
+- vāṇī string literals live in `.rodata`; compiled functions
+  live in `.text`. vāṇī v1 has no mutable globals, so `.data`
   and `.bss` are mostly a "who links your program" concern
   rather than a "what did I write" concern -- until you're
   targeting embedded, where they become directly visible.

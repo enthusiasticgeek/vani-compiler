@@ -403,7 +403,7 @@ fn main() -> i64 {
 
 ## String builtins reference
 
-vāṇी ships a rich set of string builtins.
+vāṇī ships a rich set of string builtins.
 
 | Builtin | Signature | Returns |
 |---|---|---|
@@ -574,7 +574,7 @@ explicit `f64_to_str` calls.
   result matters for a test assertion, verify it against the
   real compiler rather than assuming either convention.
 - **Decimal separator is always `.`**, regardless of OS locale
-  (no locale-aware formatting, matching every other vāṇी
+  (no locale-aware formatting, matching every other vāṇī
   numeric builtin).
 
 Quick example:

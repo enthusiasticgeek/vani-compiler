@@ -1,6 +1,6 @@
 # Beginner 1 -- Hello, World
 
-> **Learning goal**: write your first vāṇी program, compile it
+> **Learning goal**: write your first vāṇī program, compile it
 > with the C and the LLVM backend, and read the output.
 
 ## The program
@@ -18,7 +18,7 @@ fn main() -> i64 {
 
 Three things to notice already:
 
-- The first line is `intent "...";`. Every vāṇी file declares its
+- The first line is `intent "...";`. Every vāṇī file declares its
   *intent* -- a free-text description of what the program does.
   It's not a comment: the compiler accepts it as a statement, so
   you'll see it referenced when we get to SMT contracts.
@@ -27,7 +27,7 @@ Three things to notice already:
   code).
 - `print` is a statement, not a function call. You'll see why in
   [Sec.3 Functions](03_functions.md) -- it's part of a small family
-  of *verb-at-end* aliases that comes from vāṇी's dialect
+  of *verb-at-end* aliases that comes from vāṇī's dialect
   support.
 
 ## Compile + run
@@ -70,7 +70,7 @@ A few one-line answers for the things you'll wonder about:
 - **Why must `main` return `i64`?** Because the shell exit code
   is a byte and a signed 64-bit integer is the smallest type
   that's both wide enough and easy to write into. There's no
-  `int` keyword -- vāṇी is strict about width (`i8`, `i16`, `i32`,
+  `int` keyword -- vāṇī is strict about width (`i8`, `i16`, `i32`,
   `i64`, plus the unsigned siblings).
 - **Why no `;` after the function body's `}`?** Same convention
   as Rust: braces are statements, semicolons aren't required to

@@ -1,13 +1,13 @@
 # Beginner 12 -- Devanagari surface (optional intro)
 
-> **Learning goal**: see vāṇी's same program in Sanskrit, get a
+> **Learning goal**: see vāṇī's same program in Sanskrit, get a
 > feel for verb-at-end (SOV) shape, and decide whether the
 > Devanagari dialect surface is for you. Skip this lesson if
-> you only plan to write English-keyword vāṇी; nothing later in
+> you only plan to write English-keyword vāṇī; nothing later in
 > the tracks depends on it.
 
 Most programming languages use English keywords because they
-were invented by English speakers. vāṇी treats that as a
+were invented by English speakers. vāṇī treats that as a
 historical accident, not a rule. The same compiler that reads
 `fn main()` also reads `फलन main()`, because the Devanagari
 keyword `फलन` maps to `fn` in the same way `funcion` maps to
@@ -63,7 +63,7 @@ Expected output:
 १२
 ```
 
-Note the **Devanagari digits**: `१२` is `12`. vāṇी's runtime
+Note the **Devanagari digits**: `१२` is `12`. vāṇī's runtime
 PRINT helper detects the file's `// vani-lang:` pragma and
 converts integer output to Devanagari numerals (`०..९`)
 automatically (Phase 1.1).
@@ -162,7 +162,7 @@ reasons:
 1. **Code as you speak.** If your mental language for thinking
    about programs is Sanskrit / Hindi / Marathi, writing keywords
    in those languages removes a context-switch.
-2. **Pedagogy in Indian-language CS curricula.** A vāṇी
+2. **Pedagogy in Indian-language CS curricula.** A vāṇī
    classroom can introduce programming without forcing students
    to learn English keywords first.
 

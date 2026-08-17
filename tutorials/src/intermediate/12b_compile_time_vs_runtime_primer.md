@@ -1,7 +1,7 @@
 # Intermediate 12b -- Compile time vs runtime (intuition primer)
 
 > **Learning goal**: build a clear mental model of WHICH
-> checks happen WHEN. vāṇी moves a lot of work to compile
+> checks happen WHEN. vāṇī moves a lot of work to compile
 > time that other languages defer to runtime; understanding
 > the split is half the story of writing fast, correct
 > programs. Reading order: read after [Intermediate 12a -- SMT
@@ -59,7 +59,7 @@ program while it's actually executing -- is this particular array
 index in bounds THIS time, did THIS division actually get a zero --
 is cooking-for-real work: it happens while the program runs,
 against real data, and it's called **runtime**. The rest of this
-chapter is about which of vāṇी's checks happen at which stage, and
+chapter is about which of vāṇī's checks happen at which stage, and
 why moving a check from the stove to the recipe card, whenever you
 honestly can, is almost always a win.
 
@@ -80,7 +80,7 @@ checks fail your execution.**
 
 ## The pyramid
 
-vāṇी layers its checks. Bottom of the pyramid: pervasive,
+vāṇī layers its checks. Bottom of the pyramid: pervasive,
 applies to every line. Top of the pyramid: explicit + opt-in.
 
 ```
@@ -245,7 +245,7 @@ elided either way.
 - Failures crash users, not developers.
 - Hard to enumerate every code path that could fire.
 
-vāṇी's design choice: **prefer compile time, fall back to
+vāṇī's design choice: **prefer compile time, fall back to
 runtime when SMT can't prove**. The check is always there;
 the question is whether it ran at build or at execution.
 
@@ -295,7 +295,7 @@ to the syscall.
 
 ## The vāṇी payoff
 
-The cumulative effect of layering: hosted vāṇी programs
+The cumulative effect of layering: hosted vāṇī programs
 **cannot segfault from source**. Every memory-corruption
 class is either rejected at compile time (affine, scope-
 escape, no raw pointers) OR caught at runtime with a clean
@@ -322,7 +322,7 @@ happen.
 - Strengthen `requires` / `ensures` to lift checks to
   compile time. Read the emitted artifact to see which
   checks survived.
-- The cumulative guarantee: hosted vāṇी programs cannot
+- The cumulative guarantee: hosted vāṇī programs cannot
   segfault from source. Every memory-corruption class is
   either prevented (compile time) or detected (runtime
   abort).
@@ -331,7 +331,7 @@ The takeaway: **the same operation may be checked at compile
 time OR runtime, depending on how much the compiler can
 prove.** Writing better contracts moves checks earlier and
 makes the artifact faster -- that's the optimization story
-in vāṇी.
+in vāṇī.
 
 ## Cross-reference
 

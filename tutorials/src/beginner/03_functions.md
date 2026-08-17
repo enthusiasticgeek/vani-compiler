@@ -73,7 +73,7 @@ hello from a helper
 - **Function syntax**: `fn name(p1: T1, p2: T2) -> R { ... }`.
   Every parameter is typed. The return type comes after `->`.
   Functions returning *nothing* return `i64` and use `0` by
-  convention (vāṇी v1 has no `()` unit type at the language
+  convention (vāṇī v1 has no `()` unit type at the language
   surface; the `shout` helper above uses this convention).
 - **Pass by value**. Primitives (`i64`, `f64`, `bool`, ...) and
   `Str` (a borrowed string) copy on call. To pass a `Vec<T>`

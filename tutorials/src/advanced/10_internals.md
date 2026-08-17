@@ -1,6 +1,6 @@
 ﻿# Advanced 10 -- Compiler internals tour
 
-> **Learning goal**: orient yourself in the vāṇी compiler
+> **Learning goal**: orient yourself in the vāṇī compiler
 > source tree so you can read a diagnostic, find the
 > responsible pass, and contribute a fix.
 
@@ -246,7 +246,7 @@ All dialect-related source-of-truth files:
   roadmap.
 - Debugging a "proof failed" you can't reduce. `VANIC_SMT_DEBUG=1`
   + `src/smt.rs` are the answer.
-- Building a tool that consumes vāṇी AST. `cargo run --release
+- Building a tool that consumes vāṇī AST. `cargo run --release
   --bin vanic -- ast foo.vani` prints the AST -- as Rust's `{:#?}`
   pretty-debug format, NOT JSON (confirmed by testing; an earlier
   version of this page overclaimed JSON, and there's no `--json`

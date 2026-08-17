@@ -2,7 +2,7 @@
 
 > **Learning goal**: build a mental model of "embedded
 > programming" -- what's different about running on tiny
-> hardware -- and the language features vāṇी provides for it
+> hardware -- and the language features vāṇī provides for it
 > (`unsafe(reason = "...")` blocks + region typing). Reading
 > order: [Beginner 6b heap/stack primer](../beginner/06b_heap_vs_stack_primer.md)
 > -> this -> [Advanced 4 -- Embedded](04_embedded.md).
@@ -54,8 +54,8 @@ safety net you want, you have to build into the program itself,
 because nothing else is watching.
 
 That's exactly why the rest of this chapter reads stricter than
-ordinary vāṇी code: `unsafe(reason = "...")` blocks, region typing,
-and hard limits on heap and stack usage are the tools vāṇी gives you
+ordinary vāṇī code: `unsafe(reason = "...")` blocks, region typing,
+and hard limits on heap and stack usage are the tools vāṇī gives you
 to be careful BY HAND, on the microwave's chip, in a world where
 there's no operating system left to be careful for you.
 
@@ -90,7 +90,7 @@ function with no bound? Forbidden -- stack overflow. An
 unbounded loop? Maybe forbidden -- could miss a real-time
 deadline.
 
-vāṇी has language-level features specifically for this
+vāṇī has language-level features specifically for this
 environment.
 
 ## The first feature: explicit `no_heap`
@@ -154,9 +154,9 @@ worst-case-execution-time (WCET) tools.
 Sometimes you genuinely need to:
 - Talk directly to a hardware register (a specific memory
   address).
-- Do pointer arithmetic that vāṇी's ownership system can't
+- Do pointer arithmetic that vāṇī's ownership system can't
   track.
-- Call into legacy C firmware that doesn't follow vāṇी rules.
+- Call into legacy C firmware that doesn't follow vāṇī rules.
 
 For the first case, note that `volatile_read`/`volatile_write`
 (guaranteeing the compiler won't coalesce or reorder register
@@ -167,8 +167,8 @@ a plain `ref`/`mut ref i64`, gated only on the embedded build target
 for the full runnable pattern). v1 has no way to construct a raw
 pointer from an arbitrary hardcoded address (`0x40020000 as *mut T`
 is rejected outright -- casting TO a raw pointer type only works
-FROM an existing vāṇी binding, `&x as *const T` / `&mut x as *mut
-T`); real firmware binds a fixed hardware address to a vāṇी variable
+FROM an existing vāṇī binding, `&x as *const T` / `&mut x as *mut
+T`); real firmware binds a fixed hardware address to a vāṇī variable
 via a linker symbol instead (`#[link_section]`, covered in
 [Advanced 4b](04b_cross_compile_primer.md)), not pointer casting.
 
@@ -191,7 +191,7 @@ Two things matter:
 
 1. **`unsafe` is a BLOCK, not a function modifier**. The unsafe
    region is *visible in the source* -- anyone reading the
-   code sees exactly where vāṇी's safety guarantees stop. The
+   code sees exactly where vāṇī's safety guarantees stop. The
    rest of your code is still type-checked.
 
 2. **`reason = "..."`** is MANDATORY. You can't just write
@@ -200,9 +200,9 @@ Two things matter:
    evidence -- "is this *really* necessary, and is the
    explanation correct?"
 
-These two design choices distinguish vāṇी's `unsafe` from
+These two design choices distinguish vāṇī's `unsafe` from
 C-style "everything is unsafe, who cares?". In C, every pointer
-dereference could be unsafe but nothing flags it. In vāṇी, the
+dereference could be unsafe but nothing flags it. In vāṇī, the
 unsafe blocks are tiny, visible, and required to justify
 themselves.
 
@@ -258,7 +258,7 @@ discipline anywhere.
 ## When NOT to reach for these
 
 For ordinary application code (a web server, a desktop tool, a
-script), you usually don't need any of these. The default vāṇी
+script), you usually don't need any of these. The default vāṇī
 shape -- ownership-tracked heap allocation, automatic Drop,
 unbounded recursion within reason -- is fine. The embedded
 features are *opt-in*; you reach for them when the constraints
@@ -281,7 +281,7 @@ match.
 - **Region typing** = arena allocation with compile-time
   scope tracking; allocations can't escape the region.
 
-Together these let vāṇी target embedded shapes without losing
+Together these let vāṇī target embedded shapes without losing
 the safety story. The next two chapters cover the rest:
 - [Advanced 4b -- Cross-compilation primer](04b_cross_compile_primer.md)
   -- `--target <triple>`, `--no-std`, `#[no_mangle]`, `#[link_section]`,

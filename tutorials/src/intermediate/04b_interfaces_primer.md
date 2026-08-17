@@ -1,7 +1,7 @@
 # Intermediate 4b -- Interfaces and static dispatch (intuition primer)
 
 > **Learning goal**: build a mental model of "interface" (what
-> vāṇी calls Rust's "trait" or Java's "interface") and "static
+> vāṇī calls Rust's "trait" or Java's "interface") and "static
 > dispatch" -- the non-`dyn` counterpart that pairs with
 > [04a dyn Iface primer](04a_dyn_iface_primer.md). Reading
 > order: 04a -> here -> [Intermediate 4 generics+interfaces](04_generics_iface.md)
@@ -82,7 +82,7 @@ There's a question hidden in this signature: **which `Shape`**?
 A Circle? A Square? Triangles aren't even mentioned yet but
 they could be.
 
-vāṇी (and Rust) offer two answers:
+vāṇī (and Rust) offer two answers:
 
 ### Answer 1: static dispatch
 
@@ -158,7 +158,7 @@ model for. `dyn Shape` plays the role of a pointer/reference to
 an **abstract base class** with pure virtual methods; each
 `implement Shape for Circle` block plays the role of a
 **derived class** overriding those methods. Same underlying
-mechanism too -- vāṇी's `dyn Iface` really is a fat pointer to a
+mechanism too -- vāṇī's `dyn Iface` really is a fat pointer to a
 vtable, exactly like a C++ object with virtual methods carries a
 hidden vtable pointer.
 
@@ -200,7 +200,7 @@ fn area_of(d: dyn Shape) -> i64 { return d.area(); }   // dispatches via vtable
 
 Where they diverge:
 - **Inheritance vs. composition.** C++ derives `Circle : Shape`
-  -- the base class is part of `Circle`'s type, forever. vāṇी's
+  -- the base class is part of `Circle`'s type, forever. vāṇī's
   `implement Shape for Circle` is a separate declaration bolted
   on afterward; `Circle` itself (`struct Circle { r: i64 }`)
   knows nothing about `Shape`. You can `implement` an interface
@@ -210,16 +210,16 @@ Where they diverge:
 - **One conformance mechanism, not two.** C++ overloads
   inheritance for both "is-a" dispatch AND code reuse (a base
   class with shared implementation, multiple/virtual inheritance
-  for mixing both in). vāṇी keeps `interface`/`implement` purely
+  for mixing both in). vāṇī keeps `interface`/`implement` purely
   for the dispatch contract; there's no base-class-style shared
   state or implementation inheritance to reach for instead.
 - **No slicing, no missing virtual destructor footgun.** Passing
   a `Circle` where a `Shape` is expected in C++ silently *slices*
   it to the base-class part if you pass by value instead of by
-  reference/pointer -- a classic bug class. vāṇी's `dyn Shape`
+  reference/pointer -- a classic bug class. vāṇī's `dyn Shape`
   coercion always produces a `{ vtable, data }` fat pointer; the
   underlying `Circle`/`Square` data is never truncated, and there's
-  no `virtual ~Shape()` to forget (vāṇी's affine Drop runs
+  no `virtual ~Shape()` to forget (vāṇī's affine Drop runs
   regardless of which concrete type is behind the `dyn`).
 - **Static dispatch has no inheritance-based C++ analogue at
   all.** The `where T is Shape` generic-bound form above (Answer
@@ -333,7 +333,7 @@ Shape + Cloneable`), `T` must implement BOTH.
 
 ## No derive -- Eq (and other traits) are always hand-written
 
-vāṇी has no `#[derive(Eq)]` / `#[derive(Debug)]` / `#[derive(Clone)]`.
+vāṇī has no `#[derive(Eq)]` / `#[derive(Debug)]` / `#[derive(Clone)]`.
 Every interface implementation, including the ones that would be a
 one-line attribute in many other languages, is a real `implement`
 block you write yourself:
@@ -398,7 +398,7 @@ compared via `match`.)
 chapter already covers for interfaces generally -- a type never gains
 a capability just because its shape happens to match one. Generating
 that opt-in block automatically from an attribute would be implicit
-magic vāṇी deliberately avoids elsewhere too (no operator overloading
+magic vāṇī deliberately avoids elsewhere too (no operator overloading
 outside the fixed `Eq` hook, no implicit type coercion).
 
 **Is this a real cost?** Yes, in raw lines -- but not in what's

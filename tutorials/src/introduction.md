@@ -1,20 +1,20 @@
 # Introduction
 
-<img class="vani-logo" src="images/logo/vani_logo2.png" alt="vāṇी logo"/>
+<img class="vani-logo" src="images/logo/vani_logo2.png" alt="vāṇī logo"/>
 
-Welcome to the **vāṇी** (वाणी) tutorials.
+Welcome to the **vāṇī** (वाणी) tutorials.
 
-vāṇी is a programming language designed to read like speech,
+vāṇī is a programming language designed to read like speech,
 not symbols. The name (Sanskrit for *"speech"*) expands to
 *Verbose Alternative Natural Interface*. You write `fn add(a: i64, b: i64) -> i64`
-and vāṇी turns it into a fast native binary -- no startup
+and vāṇī turns it into a fast native binary -- no startup
 overhead, no garbage collector slowing things down. It supports
 62 human languages as keyword sets (English, Hindi, Sanskrit,
 Mandarin, Arabic, and more), so you can write code in the
 language you think in.
 
-**New here and wondering why you'd pick vāṇी over Python, C/C++, or
-Rust?** See **[Why vāṇी?](why_vani.md)** for the direct comparison
+**New here and wondering why you'd pick vāṇī over Python, C/C++, or
+Rust?** See **[Why vāṇī?](why_vani.md)** for the direct comparison
 before you dive in.
 
 **No CS background required.** Every computer-science concept
@@ -26,7 +26,7 @@ a little real code once the analogy lands, to ground it, but never
 before explaining the concept in plain terms first. The code
 chapters then assume you've built the mental model first.
 
-> **⚠️ Note on natural-language dialects.** vāṇी ships keyword
+> **⚠️ Note on natural-language dialects.** vāṇī ships keyword
 > tables for 62 dialects across 26 scripts, but only **English**
 > and the **Devanagari Indo-Aryan family** (Sanskrit / Hindi /
 > Marathi as primary; Nepali / Maithili / Konkani as close
@@ -60,19 +60,19 @@ Each lesson has:
    file and compile.
 3. **Compile + run steps** -- exact `vanic` commands to try.
 4. **Why it works that way** -- design notes that connect this
-   lesson to the rest of the language (and to vāṇी's v1
+   lesson to the rest of the language (and to vāṇī's v1
    limitations, where relevant).
 5. **A challenge** -- a small extension to write yourself.
 
-You'll want vāṇी installed locally. See the
+You'll want vāṇī installed locally. See the
 **[Installation page](installation.md)**
 for step-by-step instructions (Linux / macOS / Windows + WSL2).
 
 ## Meet manas
 
-<img class="manas-large" src="images/mascot/manas_mascot.png" alt="manas, the vāṇी mascot"/>
+<img class="manas-large" src="images/mascot/manas_mascot.png" alt="manas, the vāṇī mascot"/>
 
-This is **manas** (मनस्, Sanskrit for *"mind"*) -- the vāṇी mascot.
+This is **manas** (मनस्, Sanskrit for *"mind"*) -- the vāṇī mascot.
 Throughout these tutorials, a small version of manas shows up next
 to a code block to tell you what to expect *before* you compile it,
 the same way the Rust book uses Ferris the crab:

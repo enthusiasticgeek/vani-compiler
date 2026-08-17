@@ -163,7 +163,7 @@ Cons:
 - Lost type info at runtime: you can't ask "is this a
   `List<String>` vs `List<Integer>`?".
 
-vāṇी (and Rust, and C++ templates) pick monomorphization
+vāṇī (and Rust, and C++ templates) pick monomorphization
 because the speed win is large for systems code. The cost is
 a bigger compiled binary, but that's usually acceptable.
 
@@ -199,21 +199,21 @@ site: historically an error inside the template body only
 surfaced (with a wall of nested-instantiation text) once you
 called it with a type that didn't support the operation; C++20
 `concepts` fixed this by letting you write the constraint
-(`requires std::totally_ordered<T>`) up front. vāṇी's `where T
+(`requires std::totally_ordered<T>`) up front. vāṇī's `where T
 is Iface` bound is the same idea, but mandatory and checked once
 against the generic definition itself -- if the body uses an
 operation the bound doesn't grant, it's a compile error on the
 `fn` before anyone calls it with any type.
 There's no equivalent to an unconstrained template (any type,
-checked only at use) in vāṇी v1: every generic needs an explicit
+checked only at use) in vāṇī v1: every generic needs an explicit
 bound for every operation its body performs.
 
 The other difference: C++ templates support far more --
 non-type template parameters, template template parameters,
-partial/explicit specialization, SFINAE, variadic packs. vāṇी
+partial/explicit specialization, SFINAE, variadic packs. vāṇī
 generics are deliberately smaller: one type parameter per `fn`
 in v1, a fixed set of bound kinds, no specialization. If you've
-felt template-metaprogramming pain in C++, that's the pain vāṇी
+felt template-metaprogramming pain in C++, that's the pain vāṇī
 is opting out of.
 
 ## Common generic shapes
@@ -299,7 +299,7 @@ Generics misfire when:
   compiled copy per concrete type used. Fast, no boxing, no
   runtime type info.
 - The trade-off vs Java-style erasure: bigger binary, faster
-  runtime, no boxing. vāṇी picks this trade-off.
+  runtime, no boxing. vāṇī picks this trade-off.
 
 That's generics. The pairing with interfaces (which 04b
 covered) is the whole story: interfaces define contracts,

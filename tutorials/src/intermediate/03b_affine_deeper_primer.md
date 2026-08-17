@@ -39,12 +39,12 @@ An **affine** resource can be used AT MOST once. You can
 either use it (move/consume it) OR let it scope-exit naturally
 (the compiler inserts the cleanup). You cannot use it twice.
 
-vāṇी is affine. You don't have to manually consume every
+vāṇī is affine. You don't have to manually consume every
 non-Copy value -- the scope-exit drop handles unused ones. But
 you can never use a value AFTER it's been moved.
 
 The formal name in academic literature is *affine type
-system*. vāṇी's particular variant follows Rust's design
+system*. vāṇī's particular variant follows Rust's design
 choices in most respects.
 
 ## Partial moves
@@ -236,7 +236,7 @@ independently-enforced mechanism (Copy-only task captures, no
 implicit sharing across `task`/`parallel-for` boundaries without
 an explicit `Mutex`/`Channel`/`Atomic`) -- see
 [Advanced 2a](../advanced/02a_parallelism_primer.md) for how
-vāṇी's concurrency primitives handle shared mutable state in
+vāṇī's concurrency primitives handle shared mutable state in
 practice.
 
 The cost: you have to think about WHO OWNS WHAT and pass
@@ -245,7 +245,7 @@ Python/JS/Java sometimes hits compile errors in vāṇી because
 it would have been silently sharing state -- which would
 manifest later as bugs.
 
-In practice, after a few days of writing vāṇी, the
+In practice, after a few days of writing vāṇī, the
 constraints feel natural. The compile errors are concrete and
 the fixes are mechanical (clone, borrow, restructure). The
 "thinking about ownership" cost is front-loaded; once your
@@ -255,7 +255,7 @@ ownership errors.
 ## A summary you can carry
 
 - **Affine** = each value can be used AT MOST once. (Linear
-  would be EXACTLY once -- vāṇी is affine, not linear, so
+  would be EXACTLY once -- vāṇī is affine, not linear, so
   unused values are auto-dropped.)
 - **Partial moves**: a struct's fields can be moved
   individually. The compiler tracks which fields are moved.

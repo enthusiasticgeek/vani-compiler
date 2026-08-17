@@ -183,7 +183,7 @@ you write something similar:
 
 - **Avoid per-worker branching in the lock-acquisition order.** An
   earlier draft branched on `id` to decide which mutex was "mine";
-  vāṇी's static deadlock detector (S-19) rejected it because
+  vāṇī's static deadlock detector (S-19) rejected it because
   different branches acquired the same set of locks in different
   orders (even though no runtime cycle was actually possible). The
   fix: pass which mutex is "mine" as a uniform `own` parameter, so

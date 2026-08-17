@@ -402,7 +402,7 @@ error: non-exhaustive match: slice/array scrutinees require a
 
 ## Putting it all together
 
-`Task` is a reserved built-in type name in vāṇी (the `task <fn>(...)`
+`Task` is a reserved built-in type name in vāṇī (the `task <fn>(...)`
 concurrency primitive from Intermediate's later concurrency chapters
 uses it) -- name your own enum something else, e.g. `Job`:
 

@@ -9,7 +9,7 @@ label so you can hand the whole card to someone instead of
 passing three separate pieces of paper. `methods` are the
 actions that make sense to do WITH that card (`fn print_card`,
 `fn update_email`). Grouping data + actions together is the
-core idea behind OOP, and vāṇी does it without inheritance:
+core idea behind OOP, and vāṇī does it without inheritance:
 just structs + methods.
 
 ## The program

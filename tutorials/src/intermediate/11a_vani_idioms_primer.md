@@ -2,10 +2,10 @@
 
 > **Read this before the GoF tutorial.** The Gang of Four
 > patterns were named for class-based, inheritance-heavy
-> languages. vāṇी has a different set of primitives -- affine
+> languages. vāṇī has a different set of primitives -- affine
 > ownership, interfaces, closures, enums, channels -- and
 > several GoF patterns reduce to a one-liner or disappear
-> entirely. Knowing the idiomatic vāṇी shape first makes the
+> entirely. Knowing the idiomatic vāṇī shape first makes the
 > GoF translation easier to read.
 
 ## Local cooking customs
@@ -40,11 +40,11 @@ That gap -- between "technically works" and "recognizable,
 comfortable, and easy for other locals to build on" -- is exactly
 what a programming language's **idioms** are about. Any code that
 compiles is like the edible stir-fry: it runs, it's not wrong. But
-vāṇी, like every language, has its own local cooking customs --
+vāṇī, like every language, has its own local cooking customs --
 conventional shapes for common problems -- that aren't enforced by
 the compiler (the compiler doesn't care about your knife technique)
 but ARE what makes your code instantly readable to anyone else who's
-used to vāṇी's kitchen, and easy for them to modify later without
+used to vāṇī's kitchen, and easy for them to modify later without
 first reverse-engineering your particular choices. The rest of this
 chapter is a tour of those local customs: the "way locals do it" for
 problems that, in OOP languages, usually get solved with a class
@@ -53,7 +53,7 @@ hierarchy.
 ## Idiom 1: enum instead of a class hierarchy
 
 In OOP you might write a `Shape` base class with `Circle` and
-`Rect` subclasses. In vāṇी the natural form is a single enum:
+`Rect` subclasses. In vāṇī the natural form is a single enum:
 
 ```
 enum Shape {
@@ -76,7 +76,7 @@ enforces exhaustiveness, so you cannot forget a case.
 ## Idiom 2: closure or function pointer instead of Strategy
 
 The Strategy pattern in OOP wraps an algorithm in an object so
-it can be swapped at runtime. In vāṇी a closure or a plain
+it can be swapped at runtime. In vāṇī a closure or a plain
 function pointer does the same job with less ceremony:
 
 ```
@@ -120,7 +120,7 @@ monomorphizes at the call site -- zero vtable overhead.
 ## Idiom 4: ownership transfer instead of RAII destructor classes
 
 In OOP, Decorator and Proxy often wrap an object in a class that
-calls cleanup in its destructor. In vāṇी the affine type system
+calls cleanup in its destructor. In vāṇī the affine type system
 makes ownership transfer explicit:
 
 ```
@@ -137,7 +137,7 @@ There is no hidden destructor. The lock guard is an affine value
 
 ## Idiom 5: Vec of function pointers instead of Observer subscriber list
 
-Observer in OOP maintains a list of subscriber objects. vāṇी's
+Observer in OOP maintains a list of subscriber objects. vāṇī's
 equivalent is a `Vec<fn(i64) -> i64>` -- no interface wrapping
 needed when all subscribers share the same signature:
 
@@ -188,7 +188,7 @@ example in the GoF tutorial.
 
 ## Quick reference
 
-| OOP instinct | vāṇी idiom |
+| OOP instinct | vāṇī idiom |
 |---|---|
 | Subclass hierarchy | Enum variants + match |
 | Strategy object | `fn` pointer or closure |

@@ -1,8 +1,8 @@
 # QEMU-based testing for cross-architecture targets
 
-> vāṇी v0.2.4+. Updated 2026-07-10.
+> vāṇī v0.2.4+. Updated 2026-07-10.
 
-Running cross-compiled vāṇी programs on hardware you don't have is the job of
+Running cross-compiled vāṇī programs on hardware you don't have is the job of
 **QEMU user-mode emulation**. This document explains what QEMU can and cannot
 validate, which architectures are supported, and how to set it up for ARM NEON
 and RISC-V Vector (RVV) testing.

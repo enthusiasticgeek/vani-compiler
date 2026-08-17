@@ -1,7 +1,7 @@
 ﻿# Advanced 9 -- Adding a new dialect
 
 > **Learning goal**: walk through the exact steps to add a new
-> dialect to vāṇी, using the per-script abstraction set up in
+> dialect to vāṇī, using the per-script abstraction set up in
 > Phase 5b / 6.
 
 **Who this chapter is for**: contributors who want to add a
@@ -187,7 +187,7 @@ Thanks to Phase 6's parameterized print helpers:
   UTF-8 in logical (byte) order -- RTL is a rendering concern
   of the editor, not a compiler concern. But cursor
   navigation + selection in RTL source files is the editor's
-  job, not vāṇी's.
+  job, not vāṇī's.
 - **Logographic scripts** (Mandarin, Japanese kanji) historically
   needed a tokenizer that knew about CJK word boundaries.
   Japanese (Phase 9b) and Mandarin (Phase 10.2, 2026-06-08)

@@ -197,7 +197,7 @@ determined was needed. `ssa.rs`'s `InstrKind::Binary` had no field to carry
 `TypedExprKind::Binary`'s `checked` flag at all; it was silently dropped on every SSA
 lowering. The tree backends (`backend_c.rs`/`backend_llvm.rs`) always respected it
 correctly — this was purely an SSA-path gap, but since SSA is the FAST/PREFERRED path,
-it meant most ordinary vāṇी programs ran with zero overflow/divide-by-zero/shift-range
+it meant most ordinary vāṇī programs ran with zero overflow/divide-by-zero/shift-range
 protection on either backend, silently contradicting the language's own stated
 ASIL-D/DO-178C-oriented safety guarantee. Confirmed via disassembly: with no overflow
 check, `cc -O2` legally proved the repro's recursive branch unreachable-by-UB (would

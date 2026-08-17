@@ -1,6 +1,6 @@
 # Contributor License Agreement — vāṇī Compiler
 
-**Project**: vāṇी compiler (`vani-compiler`)
+**Project**: vāṇī compiler (`vani-compiler`)
 **Maintainer**: Pratik M. Tambe &lt;enthusiasticgeek@gmail.com&gt;
 **Agreement version**: 1.2 — 2026-07-10
 
@@ -16,7 +16,7 @@
 
 **"Contribution"** means any original work of authorship, including any modification or addition to an existing work, intentionally submitted by You to the Project in any form — source code, documentation, tests, examples, or other material.
 
-**"Project"** means the vāṇी compiler source code, documentation, and associated materials maintained at <https://github.com/enthusiasticgeek/vani-compiler>.
+**"Project"** means the vāṇī compiler source code, documentation, and associated materials maintained at <https://github.com/enthusiasticgeek/vani-compiler>.
 
 **"Maintainer"** means Pratik M. Tambe, the copyright holder and primary maintainer of the Project.
 
@@ -420,4 +420,4 @@ Open a GitHub Discussion in the `vani-compiler` repository, or contact the Maint
 
 ---
 
-*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇी Kosh Publisher Agreement v1.0. Patent non-assertion and aggression-termination clauses modeled on the Open Invention Network License and Apache License v2.0 §3. Revision: 2026-07-10 v1.3.*
+*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇī Kosh Publisher Agreement v1.0. Patent non-assertion and aggression-termination clauses modeled on the Open Invention Network License and Apache License v2.0 §3. Revision: 2026-07-10 v1.3.*

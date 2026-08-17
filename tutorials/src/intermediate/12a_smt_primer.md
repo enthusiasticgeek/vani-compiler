@@ -1,7 +1,7 @@
 # Intermediate 12a -- SMT, `requires`, `ensures` (intuition primer)
 
 > **Learning goal**: build a mental model of "the compiler can
-> mathematically prove things about your code." This is vāṇी's
+> mathematically prove things about your code." This is vāṇī's
 > most distinctive feature -- and the one most foreign to
 > readers coming from any mainstream language. If you followed the
 > book in order you already saw first contracts in
@@ -51,11 +51,11 @@ blueprint.
 In this analogy, the blueprint's PRE-CONSTRUCTION checklist -- what
 must already be true before the crew is allowed to start pouring
 concrete (the lot is zoned correctly, the foundation plan matches
-the soil report) -- is what vāṇी calls `requires`: a condition the
+the soil report) -- is what vāṇī calls `requires`: a condition the
 CALLER must satisfy before the function is allowed to run. And the
 finished building's PROMISE -- what the completed structure must
 satisfy once construction is done (the stairwell IS at least 44
-inches, the wall CAN hold the load) -- is what vāṇी calls `ensures`:
+inches, the wall CAN hold the load) -- is what vāṇī calls `ensures`:
 a condition the function itself guarantees to be true when it hands
 control back. Both are checked against the blueprint itself -- the
 source code -- using logic and math, not by building the thing and
@@ -67,7 +67,7 @@ instead.
 ## The pitch in one sentence
 
 > Some of the bugs that other languages catch at runtime -- or
-> not at all -- vāṇी catches at *compile time* by proving them
+> not at all -- vāṇī catches at *compile time* by proving them
 > impossible.
 
 If that sounds like magic, it isn't. It's a specific
@@ -93,7 +93,7 @@ crashes when it gets there, not when you wrote the code.
 In Rust: a runtime panic. Same -- checked at access, not
 compile.
 
-In vāṇी, *if the compiler can prove `0 <= i < 3` at compile
+In vāṇī, *if the compiler can prove `0 <= i < 3` at compile
 time*, the bounds-check is elided entirely. No runtime cost.
 No possibility of an out-of-bounds bug. **The compiler proved
 it can't happen.**
@@ -111,7 +111,7 @@ that makes all these statements true at once?" If yes, it
 hands you the values. If no, it says "unsatisfiable" -- the
 statements contradict each other; no such values exist.
 
-vāṇी uses **Z3**, a popular open-source SMT solver from
+vāṇī uses **Z3**, a popular open-source SMT solver from
 Microsoft Research. You don't write Z3 expressions directly --
 the compiler translates your code into a Z3 query, asks the
 solver, gets the answer, and uses it to make decisions.
@@ -165,7 +165,7 @@ If Z3 says "no, it can't" -> the call is fine.
 If Z3 says "yes, it could be 0 here" -> compile error: the
 caller didn't satisfy the contract.
 
-This is how vāṇी turns "this function requires a positive
+This is how vāṇī turns "this function requires a positive
 number" from a comment-in-prose into a compile-time check.
 
 ## Three contract keywords
@@ -297,7 +297,7 @@ SMT solvers are powerful but not omniscient. They struggle with:
 
 - **Unbounded loops**: proving "this while loop terminates"
   requires a loop *invariant* you supply manually.
-- **Heap aliasing across function calls**: vāṇी sidesteps this
+- **Heap aliasing across function calls**: vāṇī sidesteps this
   via affine ownership, but the SMT layer doesn't reason
   about all heap shapes.
 - **Floating-point edge cases**: NaN handling, denormals -- the
@@ -327,7 +327,7 @@ property.
 ## Doesn't this slow the compiler down?
 
 It does -- by some. SMT queries take milliseconds each, and a
-modest-sized vāṇी program may issue thousands of them. Two
+modest-sized vāṇī program may issue thousands of them. Two
 mitigations:
 
 1. **The compiler is incremental**. SMT queries are cached;
@@ -345,7 +345,7 @@ worth several seconds of compile time.
 - **SMT** = "Satisfiability Modulo Theories." A mathematical
   tool that proves (or disproves) propositions about
   integers, reals, booleans, etc.
-- vāṇी uses Z3 (Microsoft Research's SMT solver) for these
+- vāṇī uses Z3 (Microsoft Research's SMT solver) for these
   proofs.
 - **`requires`** = caller-side pre-condition.
 - **`ensures`** = function-side post-condition.
@@ -359,7 +359,7 @@ worth several seconds of compile time.
   own induction hypothesis.
 - `VANIC_NO_VERIFY=1` skips SMT entirely for fast iteration.
 
-This is the feature that most distinguishes vāṇी from Rust /
+This is the feature that most distinguishes vāṇī from Rust /
 Swift / Go. It's worth investing time to get comfortable with --
 the productivity gains compound.
 

@@ -1,6 +1,6 @@
 # Patent Policy — vāṇी Compiler
 
-**Project**: vāṇी compiler (`vani-compiler`)
+**Project**: vāṇī compiler (`vani-compiler`)
 **Maintainer**: Pratik M. Tambe &lt;enthusiasticgeek@gmail.com&gt;
 **Effective**: 2026-07-10
 

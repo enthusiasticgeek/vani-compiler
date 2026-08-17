@@ -124,7 +124,7 @@ fn outer() -> Result<i64, OuterError> { ... }
 The only time a nested Result is intentionally kept is when the
 *two failure modes have different recovery strategies* that the
 caller must distinguish at structurally different levels. In
-practice this is rare in vāṇी code; reach for the union enum
+practice this is rare in vāṇī code; reach for the union enum
 first.
 
 ---
@@ -223,7 +223,7 @@ reporting with a message.
 ## Pattern 5: FFI error translation
 
 C functions signal errors through return values (typically -1 or
-0) and `errno`. The canonical vāṇी pattern wraps the C call in
+0) and `errno`. The canonical vāṇī pattern wraps the C call in
 a thin function that translates to a `Result`:
 
 ```vani
@@ -243,8 +243,8 @@ fn open_file(path: Str) -> Result<i64, SysError> {
 ```
 
 **Rules for FFI error wrapping**:
-1. **Never let C's -1 escape into vāṇी code as a raw integer.**
-   Wrap at the boundary; internal vāṇी code sees only `Result`.
+1. **Never let C's -1 escape into vāṇī code as a raw integer.**
+   Wrap at the boundary; internal vāṇī code sees only `Result`.
 2. **One wrapper per C function family.** Don't scatter raw
    `extern` calls through the codebase; put them in one FFI
    module with `Result`-returning wrappers.
@@ -261,7 +261,7 @@ fn open_file(path: Str) -> Result<i64, SysError> {
 
 Sometimes you know the Result must be Ok (you've already
 validated earlier) and writing a full match is noise. The
-idiomatic vāṇी approach is an `assert`-style helper:
+idiomatic vāṇī approach is an `assert`-style helper:
 
 ```vani
 fn unwrap_or_abort(r: Result<i64, i64>, msg: Str) -> i64 {

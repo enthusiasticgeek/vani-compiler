@@ -2,7 +2,7 @@
 
 > **Learning goal**: build a mental model of "parallel execution"
 > and the specific bug class -- **data races** -- that vāṇī
-> rejects at compile time. This is the second of vāṇी's two
+> rejects at compile time. This is the second of vāṇī's two
 > "compiler proves it can't go wrong" stories (SMT being the
 > first; see [12a SMT primer](../intermediate/12a_smt_primer.md)).
 > Reading order: [06c ownership primer](../beginner/06c_ownership_primer.md)
@@ -82,7 +82,7 @@ Examples that DON'T:
 - Anything with a strict order ("step N depends on step N-1").
 - Anything where shared state is mutated chaotically.
 
-vāṇी helps you exploit the parallelizable shapes and rejects
+vāṇī helps you exploit the parallelizable shapes and rejects
 the bug-prone non-parallelizable shapes at compile time.
 
 ## The bug class to fear: data races
@@ -127,11 +127,11 @@ Languages handle data races in three broad ways:
    convention): force serialization via locks. Easy to reason
    about, kills parallelism.
 
-3. **Compile-time prevention** (vāṇी, Rust): the compiler
+3. **Compile-time prevention** (vāṇī, Rust): the compiler
    rejects code that COULD race. Programs that compile can't
    data-race. Period.
 
-vāṇी picks (3).
+vāṇī picks (3).
 
 ## How the compiler rejects races
 
@@ -163,7 +163,7 @@ Either choice gives you race-free code.
 
 ## `parallel for` -- the easiest pattern
 
-The simplest way to use parallelism in vāṇी is the parallel
+The simplest way to use parallelism in vāṇī is the parallel
 for loop:
 
 ```vani
@@ -261,7 +261,7 @@ waits for it to complete. Variables CAPTURED by the task body
 follow the same ownership + race rules -- if both tasks try to
 read AND write the same shared variable, the compiler rejects.
 
-Tasks are vāṇी's parallel-for-loops counterpart: parallel for
+Tasks are vāṇī's parallel-for-loops counterpart: parallel for
 is data-parallel (many uniform iterations); tasks are
 task-parallel (a few distinct chunks of work).
 
@@ -290,7 +290,7 @@ this particular loop has to stay sequential.
 
 - **Data races** = the bug class where two threads concurrently
   read+write the same memory without coordination.
-- vāṇी eliminates them at COMPILE TIME by tracking ownership
+- vāṇī eliminates them at COMPILE TIME by tracking ownership
   + requiring explicit concurrency primitives (`Atomic`,
   `Mutex`, `Channel`) for shared mutable state.
 - **`parallel for`** is the easiest parallelism -- the compiler
@@ -303,7 +303,7 @@ this particular loop has to stay sequential.
   few distinct chunks of work, each on its own OS thread.
 
 This pairs with the SMT primer ([12a](../intermediate/12a_smt_primer.md))
-as vāṇी's two "compiler proves it can't go wrong" stories:
+as vāṇī's two "compiler proves it can't go wrong" stories:
 SMT for arithmetic/logic correctness; ownership + concurrency
 typing for memory + race safety. Together, the class of bugs
 that survive compilation is dramatically narrower than in any
@@ -319,7 +319,7 @@ covers atomics / mutexes / channels in detail.
   -- the foundation: one-owner-at-a-time is what makes
   race-freedom possible
 - [Intermediate 12a -- SMT primer](../intermediate/12a_smt_primer.md)
-  -- vāṇी's OTHER compile-time-proves-it story
+  -- vāṇī's OTHER compile-time-proves-it story
 - [Advanced 2 -- `parallel for` + reductions + race-freedom](02_parallel.md)
   -- syntax + worked examples
 - [Advanced 3 -- task / join / atomics / mutexes / channels](03_concurrency.md)

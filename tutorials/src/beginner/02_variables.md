@@ -74,7 +74,7 @@ either = true
   trust your guess about what the inferred type is, spelling it
   out is the safe choice.
 - **Integer widths matter, but *safe* mixing doesn't need a cast**.
-  vāṇी has `i8`, `i16`, `i32`, `i64` (signed) and `u8`, `u16`,
+  vāṇī has `i8`, `i16`, `i32`, `i64` (signed) and `u8`, `u16`,
   `u32`, `u64` (unsigned). Two operands of the *same signedness*
   (`i32 * i64`, `u8 + u32`, ...) silently widen to the bigger of
   the two -- that direction can't lose information, so there's
@@ -87,7 +87,7 @@ either = true
 - **Floats mix with integers the same permissive way**: `f64 * i64`
   silently converts the integer operand to float and evaluates as
   `f64` -- no cast required. This differs from many languages'
-  "explicit everywhere" stance; vāṇी's explicitness requirement
+  "explicit everywhere" stance; vāṇī's explicitness requirement
   is really about *narrowing or sign-changing* conversions, not
   numeric mixing in general.
 - **`bool` is its own type**, not a 0-or-1 integer. `&&` / `||` /
@@ -132,7 +132,7 @@ Add a `u32` variable to the program and multiply it by `a` (an
 narrower than `i64`, so it's a safe implicit widen. Now add an
 `i32` variable at the *same width* as a `u32` and multiply the
 two together. This time note the **type error**: same-width
-mixed signedness is exactly the case vāṇी won't silently resolve,
+mixed signedness is exactly the case vāṇī won't silently resolve,
 because there's no widening direction that's obviously safe.
 Then fix the error using a cast.
 
@@ -151,7 +151,7 @@ let widened: i64 = small_i as i64;
 print "widened * a =", widened * a;
 ```
 
-vāṇी uses `as` for the conversions it won't do implicitly: any
+vāṇī uses `as` for the conversions it won't do implicitly: any
 cast that could change a value's meaning (sign-changing, or
 narrowing to a type that might not hold the value) has to be
 spelled out at the call site.

@@ -12,7 +12,7 @@ packages migrated and verified.
 
 Two related bugs, both surfaced the same day by a direct user question
 ("what happens if a kosh-index package has the same function name as a
-vāṇी built-in — namespace or modules?") followed by hands-on testing:
+vāṇī built-in — namespace or modules?") followed by hands-on testing:
 
 ### Bug 1 — no per-package namespace, flat global names
 
@@ -23,7 +23,7 @@ wrapper, no `pkgname::item` qualification. `collect_signatures`
 (`checker.rs`) checks every top-level function name in that combined
 program against the ~500-name `BUILTIN_FUNCTION_NAMES` list and against
 every other top-level function; any collision — whether against a
-vāṇी builtin or against another package's function — is a hard
+vāṇī builtin or against another package's function — is a hard
 compile error, not shadowing, not priority-based resolution:
 
 ```
@@ -69,7 +69,7 @@ published packages.
 
 ## Root design decision: reuse the existing module system, don't invent one
 
-vāṇी already ships a real `module { }` / `use foo::bar;` / `pub` /
+vāṇī already ships a real `module { }` / `use foo::bar;` / `pub` /
 `pub(kosh)` system (`docs/namespaces_design.md`, closures #242-258).
 Notably, `pub(kosh)` is already documented as *"preparatory; behaves as
 `pub` today, enforces at the future kosh boundary"* — this feature was
@@ -286,7 +286,7 @@ started to fix.
   full writeup). Neither of those needs a migration to fix later, for
   the same reason as before: fixing them only ever makes something
   *less* visible than it is today, never more.
-- Package names are validated as legal vāṇी identifiers before wrapping
+- Package names are validated as legal vāṇī identifiers before wrapping
   (`is_valid_vani_identifier`) — a hyphenated or otherwise invalid
   `[package].name` gets a clear diagnostic instead of a confusing parse
   error deep inside the wrapped dependency source. (`vanic publish`-time
@@ -315,7 +315,7 @@ new parsing logic, just a missing wire-up.
 
 **Verified**:
 - The original motivating question, directly: a dependency package
-  defining `fn abs(x: i64) -> i64 { ... }` (colliding with the vāṇी
+  defining `fn abs(x: i64) -> i64 { ... }` (colliding with the vāṇī
   builtin `abs`) now compiles and runs correctly — `abs(-7)` (builtin)
   and `mypkg::abs(-7)` (package function) both resolve and both return
   `7`, zero collision error.

@@ -30,7 +30,7 @@ locked, rather than retrofitting after.
   `#[no_float]` gets the composite's primitives ∪ `{no_float}`.
   Most restrictive wins. Two composites stack the same way.
 - **Compile-with-and-without parity is mandatory.** Without any
-  tag set or env var, vāṇी behaves exactly as today — no
+  tag set or env var, vāṇī behaves exactly as today — no
   compile-time perf or behavior change. Strictness is purely
   opt-in via per-fn tags or global env vars (`INTENT_NO_HEAP=1`,
   etc.).

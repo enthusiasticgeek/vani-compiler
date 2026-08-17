@@ -147,7 +147,7 @@ Then install Rust via `rustup` (the curl one-liner under Linux
 above works on macOS too).
 
 > **Apple Silicon (M1/M2/M3)**: both Homebrew and MacPorts paths
-> work natively; vāṇी's C and LLVM backends emit ARM64 code
+> work natively; vāṇī's C and LLVM backends emit ARM64 code
 > directly. No Rosetta needed.
 
 ### Arc 8 I/O note for macOS
@@ -349,7 +349,7 @@ lli --version          # from MSYS2 mingw64-llvm (if installed)
 llc --version
 ```
 
-Then build vāṇी itself:
+Then build vāṇī itself:
 
 **Linux / macOS / WSL2:**
 ```bash
@@ -386,7 +386,7 @@ You should see the output `42`.
 
 ## Optional: MCP server for AI-assisted code generation
 
-vāṇी ships an [MCP](https://modelcontextprotocol.io/) server at
+vāṇī ships an [MCP](https://modelcontextprotocol.io/) server at
 `tools/llm_context/mcp_server.py` so AI agents (Claude Desktop,
 Claude Code, Cursor) can pull language context AND call
 `vanic check` / `vanic run` / `vanic emit-c` on their own

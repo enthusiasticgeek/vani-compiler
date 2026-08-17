@@ -1,7 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
-[Why vāṇी? -- comparisons with Python, C/C++, and Rust](why_vani.md)
+[Why vāṇī? -- comparisons with Python, C/C++, and Rust](why_vani.md)
 [Installation & LSP setup](installation.md)
 
 # Beginner
@@ -41,7 +41,7 @@
 - [`Box<T>` and RAII -- intuition primer](intermediate/03a_box_raii_primer.md)
 - [Affine ownership -- deeper pass](intermediate/03b_affine_deeper_primer.md)
 - [Shared ownership without `Rc`/`Arc` -- intuition primer](intermediate/03c_shared_ownership_primer.md)
-- [Cyclic references: Rust's `Weak<T>` vs vāṇी's index handles -- intuition primer](intermediate/03d_cyclic_references_primer.md)
+- [Cyclic references: Rust's `Weak<T>` vs vāṇī's index handles -- intuition primer](intermediate/03d_cyclic_references_primer.md)
 - [Lifetimes and reference returns -- intuition primer](intermediate/03e_lifetimes_primer.md)
 - [Affine ownership: `ref` / `mut ref`](intermediate/03_affine.md)
 - [What's a `dyn Iface`? -- intuition primer](intermediate/04a_dyn_iface_primer.md)
@@ -70,7 +70,7 @@
 - [Math, random numbers, and clone](intermediate/15_math_rng.md)
 - [Math library deep-dive: special functions, ML activations, bit ops](intermediate/15a_math_deep.md)
 - [Vec statistics and combinators](intermediate/15b_vec_stats.md)
-- [vāṇी design idioms -- intuition primer](intermediate/11a_vani_idioms_primer.md)
+- [vāṇī design idioms -- intuition primer](intermediate/11a_vani_idioms_primer.md)
 - [SOLID design principles](intermediate/11b_solid_primer.md)
 - [Architectural patterns: Hexagonal and Pipeline](intermediate/11c_architecture_primer.md)
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
@@ -78,7 +78,7 @@
 - [Compile time vs runtime -- intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Packages with Kosh](intermediate/16_packages.md)
-- [Testing your vāṇी code: #[test], vanic test, and assert_eq_*](intermediate/16a_testing_primer.md)
+- [Testing your vāṇī code: #[test], vanic test, and assert_eq_*](intermediate/16a_testing_primer.md)
 - [Capstone: a terminal tic-tac-toe game](intermediate/17_tic_tac_toe_capstone.md)
 
 # Advanced
@@ -106,7 +106,7 @@
 - [Writing a cross-language translator extension](advanced/08_translator.md)
 - [Adding a new dialect (Tier I rollout)](advanced/09_new_dialect.md)
 - [Compiler internals tour](advanced/10_internals.md)
-- [Using vāṇी with an LLM (Claude / GPT / MCP)](advanced/11_llm_workflows.md)
+- [Using vāṇī with an LLM (Claude / GPT / MCP)](advanced/11_llm_workflows.md)
 - [Safety-critical standards (MISRA / ASIL-D / DO-178C / IEC 62304)](advanced/12_safety_standards.md)
 
 ---

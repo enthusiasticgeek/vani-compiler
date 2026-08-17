@@ -50,7 +50,7 @@ the membership's lifetime, not tracked separately.
 
 That automatic "cleanup happens exactly when the owning thing's
 lifetime ends" policy has a name in programming: **RAII**. `Box<T>`
-is one example of it in vāṇी; you'll meet several more below.
+is one example of it in vāṇī; you'll meet several more below.
 
 ## The problem: where do I put this?
 
@@ -175,7 +175,7 @@ The reason RAII matters: you NEVER have to remember to
 release operation at the right point automatically, based on
 the scope structure of your source code.
 
-This is why vāṇी programs don't have:
+This is why vāṇī programs don't have:
 - `free()` calls
 - `unlock()` calls
 - `close()` calls (in v1; file handles are queued)
@@ -235,7 +235,7 @@ You'd use both:
 ## Variations -- what Box wraps in real programs
 
 You've seen `Box<Foo>` for a single user-struct. The shape
-works for far more -- and the recursive-drop wiring in vāṇी
+works for far more -- and the recursive-drop wiring in vāṇī
 makes the affine combinations work too.
 
 ### `Box<Vec<T>>` -- heap-pointer to a heap-allocated Vec
@@ -260,7 +260,7 @@ When `b` goes out of scope, the compiler drops in order:
 1. `intent_vec_int64_t__free(*b)` -- free the data buffer.
 2. `free(b)` -- free the Vec struct allocation.
 
-This is why vāṇी's recursive-drop wiring matters: BOTH layers
+This is why vāṇī's recursive-drop wiring matters: BOTH layers
 need cleanup. The compiler emits both calls automatically.
 
 ### `Box<OwnedStr>` -- heap-pointer to a heap char buffer
@@ -364,7 +364,7 @@ or terminates the list (`None`). The `Option` makes the "null
 pointer" case explicit at the type level -- you have to match
 on it before dereferencing. No silent nullptr crashes.
 
-This is THE canonical recursive data-structure shape in vāṇी /
+This is THE canonical recursive data-structure shape in vāṇī /
 Rust.
 
 ## When NOT to use `Box<T>`

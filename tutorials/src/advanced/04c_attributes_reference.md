@@ -1,6 +1,6 @@
 # Advanced 4c -- Attributes reference
 
-> A one-page reference for every `#[attribute]` vāṇी supports
+> A one-page reference for every `#[attribute]` vāṇī supports
 > on `fn` and `struct` declarations. Attributes add safety
 > requirements, linker directives, FFI layout control, and
 > verification constraints.
@@ -19,7 +19,7 @@ struct Point { x: i64, y: i64 }
 extern "C" fn c_translate(p: Point, dx: i64, dy: i64) -> Point;
 ```
 
-Without `#[repr(C)]`, vāṇी is free to reorder or pad fields for
+Without `#[repr(C)]`, vāṇī is free to reorder or pad fields for
 its own purposes; with it, the in-memory layout is identical to
 what a C compiler would produce for the equivalent `struct`.
 
@@ -288,7 +288,7 @@ for the full expansion matrix and certification workflow.
 ### `#[no_mangle]`
 
 Suppress symbol name mangling. The function is emitted with its
-exact vāṇी name (no `intent_` prefix, no Unicode encoding).
+exact vāṇī name (no `intent_` prefix, no Unicode encoding).
 
 ```vani
 #[no_mangle]

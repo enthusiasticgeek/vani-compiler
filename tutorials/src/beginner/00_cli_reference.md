@@ -116,7 +116,7 @@ vanic emit hello.vani --big-o               # prepend Big-O annotations
 
 ### `vanic fmt <file.vani | directory> [--check]`
 
-Format vāṇी source files. Without `--check`, rewrites the file in place.
+Format vāṇī source files. Without `--check`, rewrites the file in place.
 
 ```bash
 vanic fmt hello.vani            # format in place
@@ -130,7 +130,7 @@ vanic fmt --check src/          # CI-style check for entire tree
 ### `vanic test [<file.vani | directory>...]`
 
 Full tour with worked examples:
-[Intermediate 16a -- Testing your vāṇी code](../intermediate/16a_testing_primer.md).
+[Intermediate 16a -- Testing your vāṇī code](../intermediate/16a_testing_primer.md).
 Quick reference:
 
 `vanic test` supports two modes:
@@ -332,7 +332,7 @@ vanic audit-safety src/lib.vani --format=json
 
 ## Compiler warnings (as of 2026-08-14)
 
-Most vāṇी diagnostics are hard errors -- this is a "catch it at
+Most vāṇī diagnostics are hard errors -- this is a "catch it at
 compile time" language by design. A small, growing set of
 diagnostics are genuine **warnings** instead: printed, but they
 don't fail the build (unless you pass `--deny-warnings`, above).

@@ -69,7 +69,7 @@ unsafety question:
   - Custom linker-placed memory ranges and fixed-address
     peripherals the build target doesn't model.
 - Goal is **rare** `unsafe` even on embedded — well-written
-  vāṇी firmware should have zero or near-zero `unsafe`
+  vāṇī firmware should have zero or near-zero `unsafe`
   blocks in application code, with the few that exist
   confined to vendor-HAL crates.
 

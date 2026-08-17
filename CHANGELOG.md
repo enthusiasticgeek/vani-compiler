@@ -70,7 +70,7 @@ writeup; full per-bug detail lives in `docs/TODO_CURRENT.md`.
 - **L28**: float-to-int `as` casts were unchecked UB on both backends,
   diverging in observable exit code — now a defined runtime range check.
 - **L30**: added `tcp_buf_byte_at(i: i64) -> i64` so `tcp_recv`'s
-  received bytes are inspectable from vāṇी code.
+  received bytes are inspectable from vāṇī code.
 - `vani_translate.py` (dev tool) was silently broken for ~24% of
   dialects — its keyword-alias table had drifted from `src/lexer.rs`;
   now regenerated mechanically with a permanent regression suite.
@@ -82,7 +82,7 @@ chapters' false "no compiler code" claims fixed, stale language/example
 counts fixed), plus L31 documented: a `detach()`'d task still running
 when `main` returns can segfault under `vanic run`'s default LLVM
 `lli`-JIT path — root-caused to upstream `lli`'s own teardown, not
-vāṇी's emitted IR; use `vanic build` or `--backend=c` instead.
+vāṇī's emitted IR; use `vanic build` or `--backend=c` instead.
 
 ---
 
@@ -306,7 +306,7 @@ handful of the AST's shapes, not all of them. Full per-bug detail in
 ### Fixed (localfuzz-found bugs, BUG-105–112)
 
 8 bugs found by `tools/localfuzz` random-mutation fuzzing, most notably
-**BUG-110**: both SSA backends — the default codegen path for most vāṇी
+**BUG-110**: both SSA backends — the default codegen path for most vāṇī
 programs — silently emitted fully unchecked arithmetic (no overflow,
 divide-by-zero, or shift-range guards) regardless of what the checker had
 determined was needed. The single most impactful fix in this release.
@@ -443,7 +443,7 @@ control flow, not real compiler defects). Highlights:
 
 ### Added
 
-- **Kosh package dependency namespacing** — every `[deps]` package is compiled inside its own namespace; call its functions as `pkgname::item` instead of unqualified. Closes a real name-collision gap (a dependency's function could collide with a vāṇी builtin or another dependency and be an unrecoverable compile error).
+- **Kosh package dependency namespacing** — every `[deps]` package is compiled inside its own namespace; call its functions as `pkgname::item` instead of unqualified. Closes a real name-collision gap (a dependency's function could collide with a vāṇī builtin or another dependency and be an unrecoverable compile error).
 - **Fully transitive, diamond-safe dependency resolution** — a dependency of a dependency resolves automatically, deduplicated by `(name, version)`; two packages sharing a third dependency resolve to one compiled copy instead of a silent missing-function error.
 - **Circular Kosh dependency detection** — rejected at compile time with a full cycle-chain diagnostic (`pkg_a -> pkg_b -> pkg_a`), reusing the Tarjan SCC algorithm behind `vanic acyclicity`.
 - **Migration diagnostic** — an unqualified call to a dependency function now suggests the qualified fix (`did you mean matrix::mat_zeros?`) instead of a bare unknown-function error.
@@ -548,7 +548,7 @@ Feature release, closing out the L-series and XL-series work queued after v0.5.0
 
 ---
 
-All notable changes to vāṇी (vanic) are documented here.
+All notable changes to vāṇī (vanic) are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
 
@@ -851,7 +851,7 @@ Two lib tests conditionally ignored on non-x86 targets:
 - **`#[link_section = "..."]`** — places function in the named linker section
   (C: `__attribute__((section(...)))`; LLVM IR: `section "..."`).
 - **`#[no_mangle]`** — suppresses `intent_` prefix and Unicode mangling in both
-  backends; linker scripts can reference the bare vāṇी function name.
+  backends; linker scripts can reference the bare vāṇī function name.
 - **`mmio_read_u8` / `mmio_write_u8`** — 8-bit volatile MMIO builtins.
 - **`mmio_read_u16` / `mmio_write_u16`** — 16-bit volatile MMIO builtins.
 - **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently
@@ -999,7 +999,7 @@ Two lib tests conditionally ignored on non-x86 targets:
 
 ## [0.1.0] — 2026-06-18
 
-First public release. vāṇी compiles, verifies, and runs programs written
+First public release. vāṇī compiles, verifies, and runs programs written
 in a readable, proof-annotated language with affine types, closures,
 generics, async/await, and a package manager.
 

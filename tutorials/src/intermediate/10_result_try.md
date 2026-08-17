@@ -91,7 +91,7 @@ pipeline(-3)  = -999
 
 ## The `try` keyword and `?` (works for `Option<T>`, not yet for `Result<T, E>`)
 
-vāṇी reserves `try EXPR` and the postfix `?` for the standard
+vāṇī reserves `try EXPR` and the postfix `?` for the standard
 short-circuit propagation. **They already work today -- but only
 for enums shaped like `Option<T>`** (exactly one payloaded
 variant + one payload-less variant), confirmed directly on both

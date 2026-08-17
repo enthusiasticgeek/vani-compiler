@@ -72,7 +72,7 @@ figures):
 2. **Prime the model**. Open Claude / ChatGPT / your local LLM
    client. Paste the bundle as the first message. Add your task:
 
-   > "Here's the vāṇी context. Now: write a `fn factorial(n: i64) -> i64`
+   > "Here's the vāṇī context. Now: write a `fn factorial(n: i64) -> i64`
    > with `requires n >= 0;` and `ensures result >= 1;` clauses,
    > using English keywords."
 
@@ -168,11 +168,11 @@ server name. Point `command` at `python3` and `args[0]` at
   `vani://aliases` table when it needs to write a Devanagari
   file.
 - **Tools** close the write-verify loop. Without them, an
-  agent that writes vāṇी source has to ask the user to run the
+  agent that writes vāṇī source has to ask the user to run the
   compiler and paste back diagnostics. With them, the agent
   iterates inside the same conversation: write → check → fix →
   check → done. SMT-backed compile-time proofs at every step
-  are vāṇी's unique selling point for AI-assisted code.
+  are vāṇī's unique selling point for AI-assisted code.
 
 ### What's *not* in the MCP server
 

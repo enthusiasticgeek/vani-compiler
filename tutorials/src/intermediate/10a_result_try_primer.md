@@ -1,7 +1,7 @@
 # Intermediate 10a -- Result, `try`, and `?` (intuition primer)
 
 > **Learning goal**: build a mental model of "errors as
-> values" -- the alternative to exceptions that vāṇी (and Rust)
+> values" -- the alternative to exceptions that vāṇī (and Rust)
 > use. Why this design choice, and how the `try` keyword + `?`
 > operator make it ergonomic in practice. Reading order:
 > [04a dyn primer](04a_dyn_iface_primer.md) and
@@ -110,7 +110,7 @@ Cons:
 - Calling code has to handle the error case at every call. Can
   be noisy without language support.
 
-vāṇी picks Philosophy 2 and adds **language support** to make
+vāṇī picks Philosophy 2 and adds **language support** to make
 it ergonomic.
 
 ## The shape: `Result<T, E>`
@@ -161,7 +161,7 @@ fn pipeline(s: Str) -> Result<i64, ParseError> {
 }
 ```
 
-(Not `parse_int` -- that's one of vāṇी's own built-in names and
+(Not `parse_int` -- that's one of vāṇī's own built-in names and
 can't be redefined; and not a `match`-expression with a `return`
 arm -- verified directly that doesn't parse: a `let x = match {
 ... }` puts every arm in expression position, and `return` is a
@@ -176,7 +176,7 @@ error."
 
 ## The `try` keyword and `?` operator -- works today for `Option<T>`, not yet for `Result<T, E>`
 
-vāṇी reserves `try EXPR` and the postfix `?` operator for
+vāṇī reserves `try EXPR` and the postfix `?` operator for
 exactly this pattern. **The real v1 boundary is narrower than
 "not implemented" -- it already works, but only for enums
 shaped like `Option<T>`** (exactly one payloaded variant plus
@@ -255,7 +255,7 @@ enum Option<T> {
 ```
 
 `Option<T>` is the simpler cousin of Result. Both support
-`try` and `?` in vāṇी; they propagate "absence" or "failure"
+`try` and `?` in vāṇī; they propagate "absence" or "failure"
 respectively up the call chain.
 
 ## When NOT to use Result
@@ -329,7 +329,7 @@ Some C APIs use `-1` to mean "error". Why is Result better?
   failure case can be proven impossible.
 
 This pattern + the SMT pattern (from 12a) are the two halves
-of vāṇी's "compile-time-proves-correctness" + "runtime-explicit-
+of vāṇī's "compile-time-proves-correctness" + "runtime-explicit-
 handling" story. Together they cover most error scenarios
 without exceptions OR uncaught crashes.
 

@@ -6,7 +6,7 @@
 > time after [Beginner 03 -- Functions and the four return
 > aliases](03_functions.md) and [Beginner 05 -- Loops](05_loops.md).
 
-This chapter leads with an analogy, then real (small) vāṇी functions
+This chapter leads with an analogy, then real (small) vāṇī functions
 throughout to ground it -- nothing here uses syntax beyond what
 [Beginner 3](03_functions.md) and [Beginner 5](05_loops.md) already
 covered. Read the analogy first.
@@ -236,7 +236,7 @@ fn bad(n: i64) -> i64 {
 }
 ```
 
-Detection: vāṇी's `--big-o` flag reports `O(recursive)` --
+Detection: vāṇī's `--big-o` flag reports `O(recursive)` --
 the analyzer flags the call but doesn't prove termination.
 Use `requires`/`ensures` SMT clauses to prove the recursion
 shrinks (see [Beginner 09 SMT intro](09_smt_intro.md)).
@@ -262,13 +262,13 @@ intermediate results.
 
 ### Mutual recursion
 
-A calls B, B calls A. vāṇी allows this but the call-graph
+A calls B, B calls A. vāṇī allows this but the call-graph
 analyzer treats them like self-recursion. Same rules: base
 case, shrinking argument. Same risks: stack overflow.
 
 ## Recursion vs loops in vāṇी
 
-vāṇी allows both freely. Pick based on the data shape:
+vāṇī allows both freely. Pick based on the data shape:
 
 - Linear data, simple accumulator -> loop.
 - Tree data, divide-and-conquer, recursive math -> recursion.

@@ -1,7 +1,7 @@
 # Intermediate 10b -- Runtime errors, panic-free design, and the segfault-free guarantee
 
 > **Learning goal**: build the mental model for what *can*
-> fail at runtime in a vāṇी program, what *cannot* by
+> fail at runtime in a vāṇī program, what *cannot* by
 > construction (segfaults, UAF, double-free, dangling-ref
 > deref), and the everyday discipline for writing programs
 > that never reach an abort. Reading order: at minimum
@@ -45,7 +45,7 @@ appliance still fails in a controlled, predictable way: a fault
 light, a clear beep code, a documented error state you can look up
 -- never silent internal damage that shows up as a mystery later.
 
-This is the split vāṇी programs live by. Some categories of
+This is the split vāṇī programs live by. Some categories of
 runtime disaster -- the programming equivalent of "door open +
 emitter on," things like writing past the end of an array, using
 memory after it's been freed, following a null pointer -- are made
@@ -57,7 +57,7 @@ range, a contract the caller failed to uphold -- can't be ruled out
 by construction, so instead of corrupting memory unpredictably, the
 program stops in a controlled, named, diagnosable way, the way the
 transmission just declines the shift instead of shredding gears.
-That controlled stop is vāṇी's `abort()`: not a crash in the
+That controlled stop is vāṇī's `abort()`: not a crash in the
 "anything could happen" sense, but a deliberate, predictable
 refusal to continue in a dangerous state.
 
@@ -82,9 +82,9 @@ different failure modes:
   / sets errno; Java throws checked exceptions; Python
   raises; Rust returns `Result<T, E>`.
 
-vāṇी's design splits these cleanly:
+vāṇī's design splits these cleanly:
 
-| Class | vāṇी's stance |
+| Class | vāṇī's stance |
 |---|---|
 | Bug-class crashes | **Structurally impossible on hosted targets** -- affine ownership + bounds checks + no raw pointers + scope-escape analysis eliminate the surface. |
 | Logic-class crashes | **Compile-time when SMT can prove**; otherwise a clean `abort()` at the operation with a diagnostic. No corrupted state. |
@@ -94,7 +94,7 @@ The rest of this chapter unpacks each row.
 
 ## Row 1: the "no segfault" guarantee
 
-Hosted-target vāṇी (Linux / macOS / Windows; no embedded
+Hosted-target vāṇī (Linux / macOS / Windows; no embedded
 `unsafe`) has **no segfault surface** in source-level code.
 The reasons stack:
 
@@ -155,7 +155,7 @@ The classic segfault sources from C/C++ don't exist:
 - Stack smash via unbounded `strcpy` -> no unbounded copy primitives
 - Type confusion via `transmute` -> not in safe code
 
-A hosted-target vāṇी program **cannot segfault from source
+A hosted-target vāṇī program **cannot segfault from source
 code alone**. If one segfaults, the cause is in linked C
 (FFI), the OS (running out of stack), or a compiler bug.
 
@@ -179,7 +179,7 @@ and the backend, confirmed directly against a current build
 | Integer overflow (SMT-unprovable site), **C backend only** | `a + b`, `a * b`, etc. on signed integers | `"integer overflow in <c-type> <op>"`, e.g. `"integer overflow in int64_t add"` (no file/line; the C-type spelling and exact wording differ slightly between the tree-C and SSA-C code paths, see the aside below) |
 | Divide / modulo by zero, **C backend only** | `a / b` / `a % b` when SMT can't prove `b != 0` | `"division by zero"` (no file/line) |
 | Shift past width, **C backend only** | `a << k` / `a >> k` when SMT can't prove `k < width(a)` | `"shift amount out of range"` (no file/line) |
-| Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | as of BUG-162 (2026-08-10), the same kind of message the C backend prints (see the 4 rows above) -- e.g. `"integer overflow in int64_t add"`, `"index out of bounds: 7, len 3"`. Before BUG-162: nothing at all, silently. **Wording caveat**: LLVM's message matches its OWN paired C backend's wording, not necessarily the OTHER C backend's -- `ssa_backend_c.rs` spells the type with the C typedef name (`"int64_t"`) and a static bounds message (`"index out of bounds"`, no operands); `backend_c.rs` (tree) spells it with the short vāṇी type name (`"i64"`) and a DYNAMIC bounds message with the actual values (`"index out of bounds: 7, len 3"`). Which pairing you get for a given program depends on whether it took the SSA fast path or the tree path on each side independently -- they don't always agree with each other, even post-fix (see the aside right after this table). |
+| Bounds / overflow / div-by-zero / shift, **LLVM backend (default)** | same triggers as above | as of BUG-162 (2026-08-10), the same kind of message the C backend prints (see the 4 rows above) -- e.g. `"integer overflow in int64_t add"`, `"index out of bounds: 7, len 3"`. Before BUG-162: nothing at all, silently. **Wording caveat**: LLVM's message matches its OWN paired C backend's wording, not necessarily the OTHER C backend's -- `ssa_backend_c.rs` spells the type with the C typedef name (`"int64_t"`) and a static bounds message (`"index out of bounds"`, no operands); `backend_c.rs` (tree) spells it with the short vāṇī type name (`"i64"`) and a DYNAMIC bounds message with the actual values (`"index out of bounds: 7, len 3"`). Which pairing you get for a given program depends on whether it took the SSA fast path or the tree path on each side independently -- they don't always agree with each other, even post-fix (see the aside right after this table). |
 | `ensures` fails at a return site (SMT-unprovable clause) | Any `return EXPR;` where SMT couldn't prove the post-condition | `"assertion failed: postcondition violated in '<fn>'"` (as of 2026-08-07; matches `requires`'s wording pattern) |
 | `invariant` fails at loop entry (SMT-unprovable clause) | A `while`/`for` loop, checked once on the first pass through the body | `"assertion failed: loop invariant does not hold at loop entry in '<fn>'"` (`while`) or `"...does not hold at the for-loop's first iteration in '<fn>'"` (`for`), as of 2026-08-07 |
 | `invariant` fails after an iteration (SMT-unprovable clause) | Same loop, checked at the natural end of every iteration AND before every `continue` that targets it | `"assertion failed: loop invariant is not preserved by the loop body in '<fn>'"` (`while`) or `"...is not preserved by the for-loop body in '<fn>'"` (`for`) |
@@ -313,7 +313,7 @@ This is **graceful in the diagnostic sense** -- a named,
 deterministic event with a printable cause -- but **terminal
 in the cleanup sense** -- no chance to recover, no chance to
 flush buffers manually, no chance to write a crash dump from
-inside vāṇी code.
+inside vāṇī code.
 
 The intentional trade: abort is reserved for "I have
 detected a bug; the program's invariants are violated;
@@ -544,7 +544,7 @@ a genuinely new gap.
 For long-running services that want to write a crash dump
 or notify oncall before exiting, the conventional approach
 is an external supervisor (systemd, k8s probe, your service
-manager). vāṇी does not currently expose an in-process
+manager). vāṇī does not currently expose an in-process
 SIGABRT hook because the design treats abort as
 "contract violated, anything I do next could compound the
 bug." The supervisor approach keeps recovery logic *outside*
@@ -611,7 +611,7 @@ for pure-Python code).
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="adapted, not a literal port -- see the notes below"/>
 
-vāṇी's `main` can't take `argv` directly -- `fn main() -> i64`
+vāṇī's `main` can't take `argv` directly -- `fn main() -> i64`
 takes no parameters at all (command-line args need an `extern`
 FFI declaration for the C runtime's `argc`/`argv`, out of scope
 here); and `parse_int` returns `Option<i64>`, not `Result`, so
@@ -719,7 +719,7 @@ named contract."
 
 - **Bug-class crashes** (segfault, UAF, double-free, dangling
   ref, buffer overrun) are **structurally impossible** on
-  hosted vāṇी. Affine ownership + bounds checks + no raw
+  hosted vāṇī. Affine ownership + bounds checks + no raw
   pointers + scope-escape analysis remove the surface.
 - **Logic-class crashes** are **compile-time when SMT can
   prove**; otherwise a runtime termination at the operation --
@@ -753,7 +753,7 @@ named contract."
   the program. Crash recovery lives in the supervisor /
   service manager, outside.
 
-The takeaway: **vāṇी replaces "what could go wrong at
+The takeaway: **vāṇī replaces "what could go wrong at
 runtime?" with "what HAVE I declared is allowed to go
 wrong?"** Everything else is either structurally
 impossible or named at a contract.

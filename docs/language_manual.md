@@ -417,7 +417,7 @@ are called as `pkgname::item`, exactly like an in-file module:
 let y: Vec<f64> = matrix::mat_solve(ref a, ref b, n);
 ```
 
-This is what makes two unrelated packages — or a package and a vāṇी
+This is what makes two unrelated packages — or a package and a vāṇī
 builtin — safe to share a function name: they live in different
 namespaces and can never collide. See
 [Kosh package namespacing design](kosh_namespacing_design.md) and

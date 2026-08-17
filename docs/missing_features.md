@@ -1,14 +1,14 @@
 # Missing language features and their vāṇी workarounds
 
 > Audience: experienced systems programmers asking "does
-> vāṇी have X?" and what to do when the honest answer is no.
+> vāṇī have X?" and what to do when the honest answer is no.
 > Updated 2026-07-17 — marked 11 features shipped since 2026-06-20.
 
-vāṇी ships with a deliberately small feature surface — the
+vāṇī ships with a deliberately small feature surface — the
 goal is everything that's there is fully verified and
 composable, not everything that exists in Rust or C++.
 This doc enumerates the genuinely-useful features that
-**aren't** in v1, paired with the idiomatic vāṇी substitute
+**aren't** in v1, paired with the idiomatic vāṇī substitute
 when one exists.
 
 > **⚠️ Feature combinations matter as much as features.** A
@@ -42,7 +42,7 @@ Sections:
 compiler enforces that `T` implements the listed traits at
 each instantiation.
 
-**vāṇी today:** monomorphized generics work (`fn id<T>(x:
+**vāṇī today:** monomorphized generics work (`fn id<T>(x:
 T) -> T`), but there's **no syntactic bound expression**.
 The compiler can require an iface impl indirectly: HashMap
 keys require `Hash for K` via `iface_impl_exists` at use
@@ -59,19 +59,19 @@ parameter types** instead of generic bounds:
 // vāṇी:  fn process(t: dyn Drawable) -> i64
 ```
 
-The vāṇी version pays one indirect call per method; the
+The vāṇī version pays one indirect call per method; the
 Rust version monomorphizes. Trade.
 
 ### Higher-rank polymorphism (`for<'a>`, `Box<dyn for<T> Fn(T)>`)
 
-**Not in vāṇी.** No one's reached for it; v1 closures use
+**Not in vāṇī.** No one's reached for it; v1 closures use
 fixed argument types in their `Closure<T1, T2> -> R` shape.
 
 ### Generic associated types (Rust's GATs)
 
-**Not in vāṇी.** Niche even in Rust. No workaround needed —
+**Not in vāṇī.** Niche even in Rust. No workaround needed —
 the patterns that use GATs (streaming iterators with
-lifetime-parameterized items) don't compose with vāṇी's
+lifetime-parameterized items) don't compose with vāṇī's
 single-param lifetime elision anyway.
 
 ### Const generics
@@ -124,7 +124,7 @@ calls until the needed-set is stable. Two-level and three-level chains now compi
 
 ### Type-state via phantom types
 
-**Not in vāṇी.** No `PhantomData<T>`; structs can only carry
+**Not in vāṇī.** No `PhantomData<T>`; structs can only carry
 fields whose types are part of the runtime representation.
 
 **Workaround:** enum-tag-based state machines. A `Connection`
@@ -139,7 +139,7 @@ verification at every branch.
 
 ### Reference counting (`Rc<T>` / `Arc<T>` / `Weak<T>`)
 
-**Deliberately not in vāṇी.** See
+**Deliberately not in vāṇī.** See
 [Intermediate 3c shared-ownership-without-Rc](../tutorials/src/intermediate/03c_shared_ownership_primer.md)
 and
 [Intermediate 3d cyclic-references](../tutorials/src/intermediate/03d_cyclic_references_primer.md)
@@ -152,7 +152,7 @@ DOM-like graphs) reach for `unsafe(reason = "...")`.
 
 ### Recursive / self-referential types (tree/list nodes via `Box<Self>`)
 
-**Not in vāṇी.** A type can't contain a `Box` of itself, directly or
+**Not in vāṇī.** A type can't contain a `Box` of itself, directly or
 through a wrapper struct — the classic Rust
 `enum Expr { Num(i64), Add(Box<Expr>, Box<Expr>) }` shape doesn't
 compile. Confirmed by direct test (2026-07-24, while scoping
@@ -189,7 +189,7 @@ model.
 
 ### Lifetime variables (`'a`, `'b`)
 
-**Not in vāṇी (path-D, deferred indefinitely).** v1 has
+**Not in vāṇī (path-D, deferred indefinitely).** v1 has
 single-param lifetime elision for ref returns (path-C); see
 [Intermediate 3e lifetimes](../tutorials/src/intermediate/03e_lifetimes_primer.md).
 The rejected cases are multi-input distinct lifetimes and
@@ -232,7 +232,7 @@ everything.
 
 ### Drop ordering control
 
-**Not in vāṇी.** Drop fires in reverse-declaration order
+**Not in vāṇī.** Drop fires in reverse-declaration order
 within a block. No `ManuallyDrop<T>` to opt one binding out
 of the auto-drop pass.
 
@@ -241,7 +241,7 @@ let _ = take(b);` ensures `a` is consumed before `b`.
 
 ### Custom allocator
 
-**Not in vāṇी.** All allocs go through libc `malloc`/`free`.
+**Not in vāṇī.** All allocs go through libc `malloc`/`free`.
 
 **Workaround:** for embedded targets, `region { ... }` blocks
 allocate from a stack buffer (Layer 5 of unsafe.md; planned
@@ -254,7 +254,7 @@ for v2). For now, custom allocation is `unsafe(reason =
 
 ### `async fn` returning an opaque `impl Future`
 
-**Not in vāṇी.** Async fns lower to a synthesized `Task__X`
+**Not in vāṇī.** Async fns lower to a synthesized `Task__X`
 struct + `__poll_X` function (Arc 8 v3.1); the type is
 explicitly named, not opaque. Callers see `Task__X` and
 must call `__poll_X` directly (or use `await` which desugars
@@ -271,7 +271,7 @@ backends). See [ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md).
 
 ### `Stream<T>` (async iterator)
 
-**Not in vāṇी.** No `Stream` trait; no `for await` loop.
+**Not in vāṇī.** No `Stream` trait; no `for await` loop.
 
 **Workaround:** hand-roll a poll loop:
 
@@ -296,8 +296,8 @@ ready arm executes and breaks.
 
 ### Async with `Pin<&mut Self>` self-references
 
-**Explicitly not in vāṇी** (🛑 NON-COMPLIANT under affine
-ownership). The state machine vāṇी synthesizes is plain
+**Explicitly not in vāṇī** (🛑 NON-COMPLIANT under affine
+ownership). The state machine vāṇī synthesizes is plain
 struct-with-fields; no self-references in the state struct.
 
 **Workaround:** restructure the async fn so locals don't
@@ -305,7 +305,7 @@ need to alias across `await` points.
 
 ### Threads with shared mutable state (no Mutex)
 
-**Not in vāṇी.** Cross-thread state goes through `Atomic<T>`
+**Not in vāṇī.** Cross-thread state goes through `Atomic<T>`
 (lock-free seq-cst) or `Mutex<T>` + `Guard<T>` (RAII unlock).
 Sharing a raw `Vec<i64>` between threads is rejected.
 
@@ -321,7 +321,7 @@ collection payloads.
 
 ### Procedural macros
 
-**Not in vāṇी.** No source-level code generation.
+**Not in vāṇī.** No source-level code generation.
 
 **Workaround:** code-generate at build time with an external
 script. The `tools/llm_context/bundle.py` script is itself
@@ -330,7 +330,7 @@ bundle from repo data.
 
 ### Declarative macros (`macro_rules!`)
 
-**Not in vāṇी.** No `macro_rules!` equivalent.
+**Not in vāṇī.** No `macro_rules!` equivalent.
 
 **Workaround:** generic functions cover most "abstract over
 type" cases; for repeated boilerplate (e.g. one Drop impl
@@ -338,7 +338,7 @@ per dozen structs), a build-time codegen script.
 
 ### Reflection / runtime type introspection
 
-**Not in vāṇी.** No `TypeId`, no `Any`, no field-by-name
+**Not in vāṇī.** No `TypeId`, no `Any`, no field-by-name
 runtime access.
 
 **Workaround:** `dyn Iface` for runtime polymorphism;
@@ -347,7 +347,7 @@ dispatch in another language.
 
 ### Attribute macros (`#[derive(Debug)]`)
 
-**Not in vāṇी.** No `derive(Debug)` / `derive(Clone)` / `derive(Eq)`
+**Not in vāṇī.** No `derive(Debug)` / `derive(Clone)` / `derive(Eq)`
 etc. `Eq` (like every interface) is always opt-in and hand-written --
 `implement Eq for T { fn eq(self: ref T, other: ref T) -> bool { ... } }`
 for non-Copy structs, or `self: T, other: T` by value for Copy ones
@@ -358,7 +358,7 @@ extension or hand-written field-by-field code.
 
 **Is this a real gap?** Not a capability one -- everything derive
 would generate is still directly expressible by hand, and it matches
-vāṇी's explicit-over-implicit posture (interface conformance is
+vāṇī's explicit-over-implicit posture (interface conformance is
 always an opt-in `implement` block, never inferred from shape). The
 real cost is boilerplate that scales with struct count × trait count
 -- as the [kosh ecosystem](https://github.com/enthusiasticgeek/kosh-index/blob/main/ROADMAP.md)
@@ -377,7 +377,7 @@ debugging.
 
 ### Custom allocator per-type
 
-**Not in vāṇी.** Every allocation goes through global libc
+**Not in vāṇī.** Every allocation goes through global libc
 `malloc`/`free`.
 
 **Workaround:** `region { ... }` blocks (v2 / Layer 5) for
@@ -386,7 +386,7 @@ single owner.
 
 ### `Box::leak` / intentionally leaked allocations
 
-**Not in vāṇी.** Affine ownership requires every
+**Not in vāṇī.** Affine ownership requires every
 heap-owning value to drop on scope exit.
 
 **Workaround:** if you genuinely need a lifetime-of-the-
@@ -433,7 +433,7 @@ assigns synthetic `__vani_pos_N` labels; LLVM backend searches by label.
 
 ### Try-block / `try { ... }`
 
-**Not in vāṇी.** No try-block construct (the `try EXPR`
+**Not in vāṇī.** No try-block construct (the `try EXPR`
 keyword + postfix `?` cover the propagation cases).
 
 **Workaround:** wrap the fallible operations in a helper fn
@@ -445,7 +445,7 @@ that returns `Result<T, E>` and `try` / `?` propagates.
 
 ### Bigint / arbitrary-precision
 
-**Not in vāṇी.** Integers are `i64` / `u64` / smaller.
+**Not in vāṇī.** Integers are `i64` / `u64` / smaller.
 Runtime overflow guards are now emitted (L4, 2026-07-16) — every signed `+`, `-`,
 `*` site gets a guard; the SMT pass elides guards it can prove safe from `requires`
 bounds. See the **Integer overflow runtime guards** row in Mixed-feature gaps below
@@ -462,7 +462,7 @@ shipped; works for the common cases.
 
 ### `Decimal` / fixed-point
 
-**Not in vāṇी.** Use scaled integers (multiply by 100 for
+**Not in vāṇī.** Use scaled integers (multiply by 100 for
 2-decimal money math).
 
 ### SIMD intrinsics
@@ -482,8 +482,8 @@ with the target's intrinsic headers. See `docs/simd_ffi_shims.md`.
 
 ### GPU / hardware-accelerated math (CUDA, ROCm, TensorRT, DLA)
 
-**Not in vāṇी, and no compiler backend is planned.** There's no PTX/
-SPIR-V/HSA lowering path — vāṇी only ever emits LLVM IR or C. Same
+**Not in vāṇī, and no compiler backend is planned.** There's no PTX/
+SPIR-V/HSA lowering path — vāṇī only ever emits LLVM IR or C. Same
 answer applies to any dedicated hardware-acceleration API (CUDA
 Runtime/cuBLAS/cuDNN, ROCm/HIP, TensorRT, DLA via TensorRT's
 execution-provider flag).
@@ -502,7 +502,7 @@ b: ref Vec<i64>, ...)`). A device pointer can be carried as an opaque
 pointer type, which does NOT cross the FFI boundary in v1. The GPU
 kernel/device code itself still has to be written and compiled by the
 vendor's own toolchain (`nvcc`, `hipcc`) and linked in via
-`--link-with`/`-l<name>` — vāṇी can never emit device code without a
+`--link-with`/`-l<name>` — vāṇī can never emit device code without a
 real GPU backend, independent of the FFI question.
 
 Full scoping + effort estimate for building this as Kosh packages
@@ -546,7 +546,7 @@ against external Kosh consumers are both genuinely enforced.
 `docs/kosh_namespacing_design.md`). Every `[deps]` package is compiled
 inside an implicit `module <pkg_name> { ... }`, so its functions (and
 any exported struct types) are called as `pkgname::item` — a package
-defining `fn abs(...)` no longer collides with the vāṇी builtin `abs`,
+defining `fn abs(...)` no longer collides with the vāṇī builtin `abs`,
 or with any other package's `abs`, ever. Dependency resolution is fully
 transitive and deduplicated by `(name, version)`: two packages that
 share a third ("diamond" dependency) resolve to one compiled copy
@@ -558,7 +558,7 @@ not just direct deps.
 
 ### Workspace / multi-crate package
 
-**Not in vāṇी.** Each `vani.toml` is a single crate; no
+**Not in vāṇī.** Each `vani.toml` is a single crate; no
 workspace concept.
 
 **Workaround:** monorepo with one manifest, or build each
@@ -686,9 +686,9 @@ in the current set, but watch for):
 - Match-with-bindings on a deeply nested enum payload
 - Custom Drop impl with `mut ref` to a Vec field
 
-The honest list: vāṇी covers the **structural** ergonomics
+The honest list: vāṇī covers the **structural** ergonomics
 of Rust (ownership, types, async) and a **subset** of the
 syntactic ergonomics. If you want maximally-concise
 expression of every CS pattern, Rust is the answer. If you
 want a smaller, fully-verified surface that's safe by
-construction on the hosted target, that's what vāṇी ships.
+construction on the hosted target, that's what vāṇī ships.

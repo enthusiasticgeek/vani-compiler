@@ -74,7 +74,7 @@ free-standing helper functions:
 - `find_min(xs: ref Vec<i64>) -> i64` -- the smallest element.
 
 ...and print each result. Why these names? `vec_sum` is a
-built-in name in vāṇी's standard prelude, and `min` / `max`
+built-in name in vāṇī's standard prelude, and `min` / `max`
 are stdlib generic free functions -- naming yours `vec_min` /
 `vec_max` would shadow useful primitives in larger programs.
 Picking distinct verb-style names sidesteps the collision and

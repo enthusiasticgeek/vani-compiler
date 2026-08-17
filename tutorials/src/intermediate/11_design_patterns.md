@@ -5,10 +5,10 @@
 > directory, understand which v1 idiom each pattern uses, and
 > know where to look when you reach for one.
 
-> **Prerequisites**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md),
+> **Prerequisites**: read the [vāṇī design idioms primer](11a_vani_idioms_primer.md),
 > the [SOLID primer](11b_solid_primer.md), and the
 > [architectural patterns primer](11c_architecture_primer.md) first.
-> The idioms page shows vāṇी-native shapes; SOLID explains *why* a design
+> The idioms page shows vāṇī-native shapes; SOLID explains *why* a design
 > is good; architecture shows how major parts connect. GoF then names
 > the recurring solutions you'll meet inside each layer.
 
@@ -19,7 +19,7 @@ idea "have one place that decides which concrete type to
 create, so callers don't need to know." The GoF ("Gang of Four")
 catalogue named 23 such patterns in 1994 and every major
 language community has since translated them into idiomatic
-examples. This chapter is a guided tour of the vāṇी versions --
+examples. This chapter is a guided tour of the vāṇī versions --
 it assumes you've read through Intermediate 1-13 (structs,
 enums, ownership, generics, closures, collections) so the
 idioms feel familiar.
@@ -66,7 +66,7 @@ Each file:
 
 ## The idioms you'll see (and why)
 
-vāṇी v1's constraints push these patterns toward specific
+vāṇī v1's constraints push these patterns toward specific
 shapes. The most important to internalize:
 
 | Pattern | v1 idiom | Why |
@@ -101,7 +101,7 @@ sweep, so it's guaranteed to compile + run on every release.
 
 ## When *not* to reach for a GoF pattern
 
-vāṇी's affine ownership + interface system + match-on-enum
+vāṇī's affine ownership + interface system + match-on-enum
 flatten a lot of object-oriented design space. Before reaching
 for, say, **Strategy** + a `dyn StrategyIface`, ask whether a
 plain enum with one variant per strategy is cleaner. Often it

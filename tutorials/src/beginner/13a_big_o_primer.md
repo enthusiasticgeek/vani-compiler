@@ -97,7 +97,7 @@ items" -- the growth shape predicts the wall.
 
 ## How the compiler infers complexity
 
-vāṇी's `--big-o` flag walks each function and looks at:
+vāṇī's `--big-o` flag walks each function and looks at:
 
 1. **Loop nesting depth.** Zero loops -> `O(1)` baseline. One
    loop -> `O(n)`. Two nested -> `O(n^2)`. K nested -> `O(n^k)`.
@@ -186,7 +186,7 @@ variant) or falls back to the conservative `O(recursive)` /
    iterations), the annotation will over-report.
 2. **Recurrence-driven recursion.** Merge sort
    (`T(n) = 2T(n/2) + O(n) = O(n log n)`) is honestly
-   `O(recursive)` in vāṇी today -- no closed-form recurrence
+   `O(recursive)` in vāṇī today -- no closed-form recurrence
    solver in v1.
 3. **Indirect calls via `dyn Iface`.** A method call through
    a `dyn` trait object dispatches at runtime; the compiler
@@ -252,7 +252,7 @@ recursion), the more reliable the annotation becomes.
   it takes in milliseconds.
 - The five shapes to know: `O(1)`, `O(log n)`, `O(n)`,
   `O(n log n)`, `O(n^2)`.
-- vāṇी's `--big-o` flag walks each fn statically and prints
+- vāṇī's `--big-o` flag walks each fn statically and prints
   the inferred annotation. Three modes: `auto` (default, skip
   O(1)), `force` (every fn), `off`.
 - Annotation lives in the check output AND as a comment

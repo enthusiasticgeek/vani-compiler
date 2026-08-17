@@ -29,7 +29,7 @@ that's where the package goes) and the slip is sitting right there,
 impossible to miss, telling you plainly what happened and why.
 
 Way 1 is how **exceptions** work. Way 2 is how **errors as values**
-work. vāṇी -- like Rust and Go -- always uses the delivery slip: the
+work. vāṇī -- like Rust and Go -- always uses the delivery slip: the
 "did it work, and if not, why" answer sits in the exact same spot
 you'd look for the successful result, as an ordinary value you're
 handed back, not an alarm that might go off from three floors away.

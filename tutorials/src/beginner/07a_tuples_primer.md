@@ -165,7 +165,7 @@ function body then operates on the components.
 
 ### Not in match arms
 
-vāṇी's `match` patterns don't include a tuple form -- `match
+vāṇī's `match` patterns don't include a tuple form -- `match
 position { (0, 0) then "origin", ... }` is a parse error (`match`
 only supports variant, literal, wildcard, and slice patterns; see
 [Beginner 8a](08a_pattern_match_primer.md)). Destructure the tuple

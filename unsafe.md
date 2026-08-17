@@ -1,6 +1,6 @@
 # Embedded-vāṇī Unsafe + Memory-Safety Plan
 
-Goal: vāṇी usable in embedded systems where:
+Goal: vāṇī usable in embedded systems where:
 - `unsafe(reason = "...") { ... }` blocks are necessary (raw pointer arithmetic,
   MMIO, DMA, hand-rolled allocators)
 - No garbage collector
@@ -551,7 +551,7 @@ shouldn't gate it.
 
 ## Safety-critical readiness checklist
 
-Once Layer 5 ships, vāṇी can credibly claim suitability for:
+Once Layer 5 ships, vāṇī can credibly claim suitability for:
 - **ASIL-D automotive** (ISO 26262) — needs compile-time UAF proof
   (regions) + canaries + taint
 - **DO-178C avionics** (Level A) — same plus deterministic timing
@@ -559,6 +559,6 @@ Once Layer 5 ships, vāṇी can credibly claim suitability for:
 - **IEC 62304 medical** (Class C) — same plus auditable allocation
   sites (regions make allocator boundaries explicit)
 
-Until Layer 5 ships, vāṇी is positioned for **mainstream embedded /
+Until Layer 5 ships, vāṇī is positioned for **mainstream embedded /
 IoT / consumer firmware / robotics** — substantially safer than
 C/C++ but not certifiable for the categories above.

@@ -1035,4 +1035,4 @@ fn main() -> i64 {
 ---
 
 **Previous**: [Sec.15a -- Math library deep-dive ->](15a_math_deep.md)
-**Next**: [Sec.11a -- vāṇी design idioms primer ->](11a_vani_idioms_primer.md)
+**Next**: [Sec.11a -- vāṇī design idioms primer ->](11a_vani_idioms_primer.md)

@@ -358,7 +358,7 @@ If none of those apply, write a plain `fn`.
 - **Lambda lifting** is the compile-time transformation that
   turns the closure expression into a top-level function +
   env struct.
-- vāṇी captures by value (for owning types), by copy (for Copy
+- vāṇī captures by value (for owning types), by copy (for Copy
   types), or by reference via an explicit `[ref name]` list. A
   `[ref name]`-capturing closure can be called directly or
   passed as an argument today, but can't yet escape its creating

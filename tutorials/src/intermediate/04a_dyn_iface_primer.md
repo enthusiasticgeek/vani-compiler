@@ -21,7 +21,7 @@ shape has a different formula:
 - Square: side x side
 - Triangle: 1/2 x base x height
 
-Imagine a `Shape` **interface** (vāṇी's word for "the set of
+Imagine a `Shape` **interface** (vāṇī's word for "the set of
 methods any shape supports") with one method, `area` — the next
 two chapters ([4b](04b_interfaces_primer.md),
 [Intermediate 4](04_generics_iface.md)) show you how to actually
@@ -63,7 +63,7 @@ This is the trick: every case is wrapped in the same
 *standard packaging* with the *standard set of actions*, even
 though the inside (the specific report) is different.
 
-That's a `dyn Iface` in vāṇी.
+That's a `dyn Iface` in vāṇī.
 
 ## What `dyn Iface` actually is
 
