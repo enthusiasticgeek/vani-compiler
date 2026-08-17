@@ -1814,8 +1814,31 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
             collect_vec_elements_ty(fty, &mut seen, &mut vec_elements);
         }
     }
-    // User-declared structs emitted before vec / tuple
-    // typedefs so other shapes can reference them. T1.2.
+    // BUG-201 (2026-08-17, found via localfuzz): Vec-element struct
+    // typedefs (`%intent_vec_T = type { T*, i64, i64 }`) must be
+    // emitted BEFORE any user struct/enum/closure-env type that embeds
+    // a `Vec<T>` field BY VALUE -- `lli`'s LLVM IR parser genuinely
+    // requires named struct types to be defined before a later type
+    // uses them unsized (confirmed empirically: hand-reordering a
+    // captured .ll file's type definitions was the difference between
+    // "base element of getelementptr must be sized" and a clean run).
+    // Emitting this first is always safe in the other direction --
+    // `%intent_vec_T` only ever holds `T*` (a pointer), never `T` by
+    // value, so it never itself depends on T's own struct body being
+    // defined yet, regardless of what T is.
+    for elt in &vec_elements {
+        // XL1: Vec<bool> uses i64* (64-bit words) not i1* in its packed layout.
+        let data_ptr_ty = if *elt == Type::Bool { "i64".to_string() } else { vec_element_value_str(elt) };
+        out.push_str(&format!(
+            "{} = type {{ {}*, i64, i64 }}\n",
+            vec_struct_name(elt),
+            data_ptr_ty
+        ));
+    }
+    if !vec_elements.is_empty() {
+        out.push('\n');
+    }
+    // User-declared structs emitted next. T1.2.
     // `#[repr(packed)]` uses LLVM's packed-struct syntax `<{ ... }>`;
     // `#[repr(C)]` and the default both use ordinary `{ ... }`.
     for decl in &program.structs {
@@ -2083,17 +2106,11 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     if !used_dyn_ifaces_llvm.is_empty() {
         out.push('\n');
     }
-    for elt in &vec_elements {
-        // XL1: Vec<bool> uses i64* (64-bit words) not i1* in its packed layout.
-        let data_ptr_ty = if *elt == Type::Bool { "i64".to_string() } else { vec_element_value_str(elt) };
-        out.push_str(&format!(
-            "{} = type {{ {}*, i64, i64 }}\n",
-            vec_struct_name(elt),
-            data_ptr_ty
-        ));
-    }
+    // BUG-201: the type definitions themselves were moved earlier (see
+    // above, before the user-struct loop) -- only the helper function
+    // BODIES stay here. Bodies don't have the same forward-declaration
+    // restriction the type layouts did.
     if !vec_elements.is_empty() {
-        out.push('\n');
         for elt in &vec_elements {
             emit_vec_helpers(elt, &mut out);
         }
