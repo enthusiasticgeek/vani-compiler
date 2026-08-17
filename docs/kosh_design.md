@@ -1,10 +1,10 @@
 # Kosh package manager — design notes
 
-**Status**: ✅ MVP shipped 2026-06-17. vāṇी `0.1.0` released 2026-06-18.
+**Status**: ✅ MVP shipped 2026-06-17. vāṇī `0.1.0` released 2026-06-18.
 Registry live at `https://enthusiasticgeek.github.io/kosh-index/`.
 
 `Kosh` = कोश ("treasure / repository"). The package manager for
-vāṇी, implemented as Arc 9 in [TODO.md](../TODO.md).
+vāṇī, implemented as Arc 9 in [TODO.md](../TODO.md).
 
 ---
 
@@ -125,7 +125,7 @@ for the full dependency-graph design.
 namespace, so `mathlib`'s `square` function is called as
 `mathlib::square(5)`, or imported unqualified with
 `use mathlib::square;`. This is what lets two unrelated packages (or a
-package and a vāṇी builtin) share a function name with zero conflict --
+package and a vāṇī builtin) share a function name with zero conflict --
 before namespacing, every `[deps]` package landed in one flat global
 function table and a name collision with anything, anywhere, was an
 unrecoverable compile error. If you forget the prefix, the compiler
@@ -315,7 +315,7 @@ The index is a public git repo — anyone can fork. `vani.toml` accepts
 
 ## Legal note
 
-vāṇी keyword spellings that resemble Rust keywords (`unwrap`, `match`,
+vāṇī keyword spellings that resemble Rust keywords (`unwrap`, `match`,
 `struct`, `fn`, etc.) are **not** trademark-protected. The Rust Foundation
 trademark covers the name "Rust", the Rust logo, "Cargo", and "crates.io" —
 not keywords or stdlib function names. *Oracle v. Google* (2021) settled the

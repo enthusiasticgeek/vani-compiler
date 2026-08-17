@@ -41,7 +41,7 @@ When that happens, checkout itself fails, or reading partway through
 gives you garbage instead of the next chapter. You have to notice the
 book is unusable before you trust anything you tried to read from it.
 
-A `FileHandle` in vāṇी is exactly this checkout record. **Opening a
+A `FileHandle` in vāṇī is exactly this checkout record. **Opening a
 file** (`file_open(...)`) is checking the book out -- you get back a
 `FileHandle`, the record of which file you're now holding.
 **Reading** a file a line or chunk at a time (`file_read_line`) is
@@ -56,7 +56,7 @@ detect before you trust anything you tried to read from it.
 
 Keep the librarian's desk in mind. Everything below -- `FileHandle`,
 opening, reading, closing, checking for errors -- is that same
-checkout process, spelled out with vāṇी's exact function names.
+checkout process, spelled out with vāṇī's exact function names.
 
 ## Why a dedicated FileHandle type?
 

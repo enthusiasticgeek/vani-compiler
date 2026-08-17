@@ -18,7 +18,7 @@ now. Order of priority when ready:
    standard distribution path for developer CLI tools on macOS/Linux.
    Do this **after macOS is empirically verified** on a Darwin host.
 3. **npm binary wrapper** — deferred indefinitely. npm is the
-   JavaScript ecosystem's registry; signaling vāṇी as JS-adjacent
+   JavaScript ecosystem's registry; signaling vāṇī as JS-adjacent
    is wrong for a systems language compiler. If community demand
    emerges, revisit.
 4. **GitHub Container Registry (Docker)** — not a priority. Binary

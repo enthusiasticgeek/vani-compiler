@@ -100,7 +100,7 @@ working in the background.
 
 ## Why it works that way
 
-vāṇी has **three contract keywords**, each with a different
+vāṇī has **three contract keywords**, each with a different
 job:
 
 - **`requires <bool>;`** -- a *precondition* clause that goes

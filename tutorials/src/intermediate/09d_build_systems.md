@@ -370,7 +370,7 @@ executable('myproject',
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="linking against a static_library() here fails -- confirmed"/>
 
-**Don't link against a `static_library()` of the raw vāṇी output the
+**Don't link against a `static_library()` of the raw vāṇī output the
 way you might for a project with no `main`-collision problem.** An
 earlier version of this snippet did exactly that
 (`vani_lib = static_library(...)` + `link_with: vani_lib`) and it

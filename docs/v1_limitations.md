@@ -30,12 +30,12 @@
 > networked tic-tac-toe capstone, filed not fixed). Still open, same
 > as before: L5, L6, L10-macOS, L13 (partial), L14, L24, L25.
 >
-> **Update (2026-08-15): L31 added, not fixable in vāṇी.** A
+> **Update (2026-08-15): L31 added, not fixable in vāṇī.** A
 > `detach`'d task still running when `main` returns can segfault
 > under `vanic run` (LLVM `lli` JIT) -- found via localfuzz,
 > root-caused to `lli`'s own JIT-code-teardown-vs-still-running-
 > pthread race (confirmed via `vanic build`/AOT running the identical
-> program correctly every time), so there's no vāṇी-side codegen fix
+> program correctly every time), so there's no vāṇī-side codegen fix
 > available. Documented as a `vanic run`-only caveat instead.
 >
 > | # | Summary | Status |
@@ -70,7 +70,7 @@
 > | L28 | `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit | ⬜ Not fixed — needs a checked-vs-saturating semantics decision |
 > | L29 | `for i from lo to hi` is ascending-only | ✅ Partially resolved 2026-08-13 — `downto` added; `step`/stride-N still unsupported |
 > | L30 | `tcp_recv`'s received bytes are not inspectable from vani code | ⬜ Not fixed — no `tcp_buf_byte_at`-style builtin yet |
-> | L31 | `detach`'d task still running when `main` returns can segfault under `vanic run` (LLVM `lli` JIT only) | ⬜ Not fixable in vāṇी — root-caused to upstream `lli`'s own JIT teardown; `vanic build`/AOT confirmed correct |
+> | L31 | `detach`'d task still running when `main` returns can segfault under `vanic run` (LLVM `lli` JIT only) | ⬜ Not fixable in vāṇī — root-caused to upstream `lli`'s own JIT teardown; `vanic build`/AOT confirmed correct |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -354,7 +354,7 @@ fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
 let r: ref Foo = ref some_foo;       // ❌ — let annotation cannot be a reference type
 ```
 
-**Why**: vāṇी references are second-class — they live only in
+**Why**: vāṇī references are second-class — they live only in
 parameter / argument position. Storing a reference in a `let`
 binding would require first-class lifetime tracking that v1
 doesn't have.
@@ -445,7 +445,7 @@ let mut x: i64 = 0;       // ❌ — expected identifier where `mut` appears
 **Why**: mutability is governed by how a binding's value is
 later used (the method receiver shape `mut ref self` triggers
 the borrow, not the let-binding declaration). The Rust-style
-`let mut` would be redundant in vāṇी's model.
+`let mut` would be redundant in vāṇī's model.
 
 **Workaround**: declare `let x: T = ...;` and use mutations
 through a `mut ref` parameter or a method declared with
@@ -464,7 +464,7 @@ for v in xs { ... }       // ❌ — moves xs; can't be used after
 for v in ref xs { ... }   // ✅ — borrows by reference
 ```
 
-**Why**: vāṇी's affine ownership means a default value-form `for`
+**Why**: vāṇī's affine ownership means a default value-form `for`
 would consume the Vec. The keyword-first `ref` annotation makes
 the borrow explicit at the loop head.
 
@@ -768,11 +768,11 @@ cache (`smt.rs:165-197`) to skip repeat solver calls.
 
 ### L13 — SOV reshape: `match`-as-statement stays keyword-first ✅ Partially resolved 2026-06-19
 
-vāṇी's SOV (Subject–Object–Verb) parser covers:
+vāṇī's SOV (Subject–Object–Verb) parser covers:
 - 8 statement verb-at-end shapes: `let` / `return` / `print` / `assert` / `prove` / range-`for` / `if`/`else` / `while`
 - **3 top-level declaration shapes (new in item 16, 2026-06-19)**: `fn` (name-first), `struct` (name-first), `enum` (name-first)
 
-The one remaining keyword-first-only construct is **`match`-as-statement**. `match` is expression-only in vāṇी; there is no `;`-terminated match statement in either keyword-first or SOV form.
+The one remaining keyword-first-only construct is **`match`-as-statement**. `match` is expression-only in vāṇī; there is no `;`-terminated match statement in either keyword-first or SOV form.
 
 **Why**: `match x { … }` is already natural in SOV files — the scrutinee `x` comes before the verb-like `match` keyword. Forcing a terminal verb (`x match { … } ;`) would be awkward and is "declined as design" for v1.
 
@@ -956,7 +956,7 @@ call as UART/I2C/SPI.
 
 ---
 
-*Historical note (pre-v0.1.5): vāṇी v1 had no built-in file I/O layer.
+*Historical note (pre-v0.1.5): vāṇī v1 had no built-in file I/O layer.
 The only I/O primitive was `print` / `write` to stdout.*
 
 | Feature | v1 status (pre-v0.1.5) |
@@ -1853,12 +1853,12 @@ plain, long-running counting loop (no huge/adversarial values needed
 return from `main` immediately. `lli` prints its own "PLEASE submit a
 bug report to https://github.com/llvm/llvm-project/issues/" crash
 banner -- the same misleading-JIT-crash signature already documented
-for BUG-106/108/110/113/115/117/120/162 (a real vāṇी runtime trap
+for BUG-106/108/110/113/115/117/120/162 (a real vāṇī runtime trap
 that `lli`'s JIT engine reports as if it were an LLVM internal
 crash), except this time there's no controlled trap underneath it at
 all -- this is a genuine segfault.
 
-**Root-caused, not vāṇी's own bug**: the identical program, built
+**Root-caused, not vāṇī's own bug**: the identical program, built
 with `vanic build` (real AOT native compilation, no `lli` involved)
 and then run directly, completes cleanly and correctly every time --
 confirmed 3/3 runs, `exit 0`, both the background heartbeat's own
@@ -1866,18 +1866,18 @@ prints (when it finishes fast enough to) and `main`'s own output
 behave exactly as documented. `vanic run` (LLVM, no `--backend`)
 literally shells out to the external `lli` binary
 (`src/main.rs`, `env::var("LLI").unwrap_or_else(|_| "lli".to_string())`)
-to JIT-execute the emitted `.ll` -- vāṇी's own codegen is
+to JIT-execute the emitted `.ll` -- vāṇī's own codegen is
 byte-identical between the JIT and AOT paths, and AOT is proven
 correct, so the bug lives entirely inside `lli`'s own JIT engine:
 most likely, `lli` tears down (unmaps/frees) its JIT-compiled machine
 code when the JIT'd `main` function returns, without any awareness
-that a real OS-level pthread spawned via vāṇी's `task`/`detach`
+that a real OS-level pthread spawned via vāṇī's `task`/`detach`
 runtime may still be executing machine code the JIT engine owns --
 a classic "the CPU is still executing code whose memory was just
 freed" segfault, entirely inside upstream LLVM's `lli` tool, outside
-what vāṇी's own source can patch.
+what vāṇī's own source can patch.
 
-**Not fixed this pass** -- there's no vāṇी-side code change available
+**Not fixed this pass** -- there's no vāṇī-side code change available
 (the bug isn't in vāṇī's emitted IR or runtime C shims, confirmed by
 AOT working). The honest mitigation is the documentation update this
 pass DID make: `tutorials/src/advanced/03_concurrency.md`'s `detach`

@@ -1,6 +1,6 @@
 # SOLID design principles in vāṇी -- primer
 
-> **Read this after the [vāṇी design idioms primer](11a_vani_idioms_primer.md)
+> **Read this after the [vāṇī design idioms primer](11a_vani_idioms_primer.md)
 > and before the [GoF tutorial](11_design_patterns.md).** SOLID explains
 > *why* a design is good; GoF explains *named solutions* to recurring
 > problems. The two are complementary, not alternatives.
@@ -8,7 +8,7 @@
 SOLID is a set of five principles for writing maintainable software.
 They were articulated for object-oriented languages but none of them
 actually require inheritance -- they describe properties of modules,
-interfaces, and functions that hold in any typed language. vāṇी maps
+interfaces, and functions that hold in any typed language. vāṇī maps
 them cleanly, and in one case (the Liskov Substitution Principle,
 abbreviated LSP -- see "L" below; not to be confused with the
 [Language Server Protocol](../installation.md#editor-integration-lsp))
@@ -46,7 +46,7 @@ fn validate(data: ref Vec<i64>) -> i64 { /* ... */ return 0; }
 fn format(data: ref Vec<i64>)   -> i64 { /* ... */ return 0; }
 ```
 
-In vāṇी, affine ownership reinforces SRP: if a function takes
+In vāṇī, affine ownership reinforces SRP: if a function takes
 ownership of a value, it is responsible for that value's full
 lifecycle. Splitting responsibilities becomes structurally visible.
 
@@ -57,7 +57,7 @@ lifecycle. Splitting responsibilities becomes structurally visible.
 > *Software entities should be open for extension but closed for
 > modification.*
 
-In class-based OOP "extension" means subclassing. In vāṇी it means
+In class-based OOP "extension" means subclassing. In vāṇī it means
 adding a new `implement` block for an existing `interface` without
 touching the interface definition or any existing implementation.
 
@@ -107,11 +107,11 @@ fn main() -> i64 {
 > *Subtypes must be substitutable for their base types without
 > altering the correctness of the program.*
 
-Classical LSP talks about subclasses. In vāṇी the equivalent is:
+Classical LSP talks about subclasses. In vāṇī the equivalent is:
 every type that implements an interface must satisfy not just the
 *signature* but also the *behavioral contract* of that interface.
 
-vāṇी can enforce this mechanically with `requires` / `ensures` --
+vāṇī can enforce this mechanically with `requires` / `ensures` --
 but note the clause has to live on each `implement` block's
 function, not on the `interface` declaration itself (v1's parser
 doesn't accept `ensures` directly on an interface method signature):
@@ -200,7 +200,7 @@ implement Serializable for Invoice { fn serialize(self: Invoice) -> Str  { retur
 // Invoice does NOT implement Validatable -- that's intentional.
 ```
 
-In vāṇी, generic bounds let callers express exactly which capability
+In vāṇī, generic bounds let callers express exactly which capability
 they need: `fn print<T: Renderable>(x: T)` -- not
 `fn print<T: Document>(x: T)`.
 
@@ -264,7 +264,7 @@ at runtime (e.g. a plugin loaded from config).
 
 ## Quick reference
 
-| Principle | vāṇी mechanism | Enforced by |
+| Principle | vāṇī mechanism | Enforced by |
 |---|---|---|
 | **S** -- Single Responsibility | One function / struct per concern | Code review; affine ownership makes split visible |
 | **O** -- Open / Closed | `interface` + new `implement` blocks | Type system: existing code untouched |
@@ -272,11 +272,11 @@ at runtime (e.g. a plugin loaded from config).
 | **I** -- Interface Segregation | Many small `interface` declarations | Type system: implement only what you need |
 | **D** -- Dependency Inversion | `<T: Iface>` bounds or `dyn Iface` params | Compiler: concrete struct not visible to caller |
 
-LSP is the standout: vāṇी is one of the few languages where a
+LSP is the standout: vāṇī is one of the few languages where a
 Liskov violation in an `implement` block is a *compile error*, not
 a bug found at runtime.
 
 ---
 
-**Previous**: [vāṇी design idioms -- intuition primer](11a_vani_idioms_primer.md)  
+**Previous**: [vāṇī design idioms -- intuition primer](11a_vani_idioms_primer.md)  
 **Next**: [Architectural patterns: Hexagonal and Pipeline ->](11c_architecture_primer.md)

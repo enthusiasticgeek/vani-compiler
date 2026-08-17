@@ -9,7 +9,7 @@
 Design patterns (GoF) operate at the class/function level. Architectural
 patterns operate at the module/program level -- they answer "how do the
 major parts of the program connect?" Two patterns are especially natural
-in vāṇी: **Hexagonal** and **Pipeline**.
+in vāṇī: **Hexagonal** and **Pipeline**.
 
 ---
 
@@ -270,7 +270,7 @@ the boundaries, and testable at every level.
 
 ## Quick reference
 
-| Pattern | Core idea | vāṇी mechanism | Best for |
+| Pattern | Core idea | vāṇī mechanism | Best for |
 |---|---|---|---|
 | **Hexagonal** | Core logic depends only on interface ports; adapters plug in at the boundary | `interface` + `implement` + `<T: Port>` generics | Programs with multiple I/O backends, SMT-verifiable cores |
 | **Pipeline** | Data flows through a chain of single-purpose stage functions | Plain functions + `parallel for` for fan-out | Compilers, ETL, signal processing, data transformation |

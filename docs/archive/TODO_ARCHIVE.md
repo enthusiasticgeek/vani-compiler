@@ -258,7 +258,7 @@ per the standing direction.
 
 These are surface-level refinements that surfaced during the
 2026-06-08 multi-arc session but aren't blocking any user-facing
-capability. Pick one whenever the user revisits vāṇी work.
+capability. Pick one whenever the user revisits vāṇī work.
 
 | Task | Effort | Notes |
 |---|---|---|
@@ -401,7 +401,7 @@ globals + ML + tutorials): **~240-270h focused work**.
 
 ## 🟡 Sanskrit-derived SOV completion (PRIORITY — user direction 2026-06-06)
 
-vāṇी's PRIMARY target is the Sanskrit-derived family (SOV: Subject–
+vāṇī's PRIMARY target is the Sanskrit-derived family (SOV: Subject–
 Object–Verb): Sanskrit, Hindi, Marathi, and the broader Indo-Aryan
 group (Bengali, Gujarati, Punjabi, Nepali, Konkani, Odia, Assamese,
 etc.). After that, global languages (English, Spanish, Mandarin,
@@ -495,9 +495,9 @@ or open issues.
 > like vanic or similar."
 
 The `intentc` binary name is a carryover from the project's
-earlier `future_compiler` / `intent` naming. The current `vāṇी`
+earlier `future_compiler` / `intent` naming. The current `vāṇī`
 brand maps more naturally to `vanic` (or a similar short form
-like `vc` or `vāṇी-c`).
+like `vc` or `vāṇī-c`).
 
 **Work items**:
 1. **CLI-1** — Pick the final name. Candidates: `vanic`, `vc`,
@@ -590,7 +590,7 @@ update + small doc fixes.
 
 > "I want a translator (could be python or other code) for any
 > user to take a .vani source file in any human-speaking language
-> and translate it to any other vāṇी-supported natural language
+> and translate it to any other vāṇī-supported natural language
 > and compile successfully. E.g. English to Sanskrit and vice
 > versa, Sanskrit to Marathi and vice versa, etc."
 
@@ -702,7 +702,7 @@ User-specified priority order, in sequence:
 |---|---|---|---|---|---|---|
 | 1 | Spanish | español | Latin | SVO | small | Tier II opener; Latin script + SVO is closest to English |
 | 2 | Mandarin Chinese | 中文 | Han logograms | SVO + topic-prominent | hard | Needs CJK word-boundary tokenizer; no native whitespace between words |
-| 3 | Japanese | 日本語 | Kanji + Hiragana + Katakana | **SOV** | medium | vāṇी's SOV plumbing transfers directly; 3-script mix needs lexer awareness |
+| 3 | Japanese | 日本語 | Kanji + Hiragana + Katakana | **SOV** | medium | vāṇī's SOV plumbing transfers directly; 3-script mix needs lexer awareness |
 | 4 | Russian | русский | Cyrillic | SVO + free order | small | Cyrillic block + SVO; case-marked free order is parser-friendly |
 | 5 | German | deutsch | Latin | V2 + SOV subordinate | medium | Partial SOV reuse for subordinate clauses |
 | 6 | French | français | Latin | SVO | small | Standard Latin SVO |
@@ -779,7 +779,7 @@ bundle:
   - The v1 limitations catalog ([docs/v1_limitations.md](docs/v1_limitations.md))
     so the model knows which textbook constructs are unsupported
 
-That bundle plus a short system prompt ("you are a vāṇी
+That bundle plus a short system prompt ("you are a vāṇī
 programmer; emit only the .vani source unless asked otherwise;
 use English keywords by default; honor `// vani-lang:` pragmas")
 gets ~80% of the way to useful code generation **with no
@@ -789,7 +789,7 @@ training**.
 
   **HIGH value applications** (justify the full project):
     - **MCP server integration** — AI agents become first-class
-      vāṇी users via the existing MCP protocol. An agent
+      vāṇī users via the existing MCP protocol. An agent
       writing vāṇī can use SMT proofs to verify its own code at
       generation time, which is a unique selling point.
     - **Boilerplate generation** — "generate a Vec-of-Point
@@ -802,7 +802,7 @@ training**.
       Significantly lowers the barrier for non-English speakers.
 
   **MEDIUM value** (nice but not transformational):
-    - **LSP autocomplete** — vāṇी already has an LSP server
+    - **LSP autocomplete** — vāṇī already has an LSP server
       (`intent-lsp`); adding a model-driven completion mode is
       a multiplier but the basic LSP already works.
     - **Doc generation** — could be more efficiently done with
@@ -863,7 +863,7 @@ ML-1 / ML-2 are cheap enough to ship speculatively.
 
 ## 📚 HTML tutorials with examples — beginner / intermediate / advanced (user direction 2026-06-06)
 
-> "html tutorials on vāṇी with examples for featureset — divide
+> "html tutorials on vāṇī with examples for featureset — divide
 > into beginner, intermediate and advance."
 
 ### Value assessment
@@ -923,13 +923,13 @@ structs / enums → generics → SMT proofs → async → embedded.
 
   **Option A** (lowest effort): Markdown lessons rendered as
   HTML via [mdBook](https://rust-lang.github.io/mdBook/). Each
-  lesson is one `.md` file with embedded vāṇी examples. mdBook
+  lesson is one `.md` file with embedded vāṇī examples. mdBook
   builds + serves locally; a single `mdbook build` produces a
   static site deployable to GitHub Pages.
 
   **Option B** (more polish): Docusaurus / VitePress / a custom
   static-site generator. More setup; nicer interactive code
-  blocks (vāṇी syntax highlighting, "Try in playground" button
+  blocks (vāṇī syntax highlighting, "Try in playground" button
   if/when the playground exists).
 
   **Option C** (most ambitious): browser-based playground that
@@ -1386,7 +1386,7 @@ current position*. Active sub-step list lives in [unsafe.md](unsafe.md).
   controllers, and peripherals the language doesn't model
   need *some* path to raw load / store. Without an explicit
   `unsafe`, that code gets written in C and FFI'd in — which
-  is strictly *more* unsafe than `unsafe { ... }` in vāṇी,
+  is strictly *more* unsafe than `unsafe { ... }` in vāṇī,
   since FFI escapes affine tracking entirely. The hatch is
   the lesser evil and the more auditable one.
 - **The goal is to make `unsafe` rare even on embedded.**
@@ -1394,7 +1394,7 @@ current position*. Active sub-step list lives in [unsafe.md](unsafe.md).
   (`Register<T, ADDR>`, `Mmio<T>`, typestate pins, effect
   typing) cover the bulk of what driver code needs. `unsafe`
   is for the residual: things the compiler genuinely cannot
-  prove. A well-written embedded vāṇी program should have
+  prove. A well-written embedded vāṇī program should have
   zero or near-zero `unsafe` blocks in application code, with
   the few that exist confined to vendor-HAL crates.
 - **Borrow-checking is not the gap.** Affine ownership + Z3
@@ -1480,7 +1480,7 @@ recorded for completeness.
 6. **Linear (not just affine) types** for must-consume
    resources — DMA descriptors, peripheral handles that must
    be released. "Exactly once" instead of "at most once."
-   Tightens one axis vāṇी already enforces; much smaller
+   Tightens one axis vāṇī already enforces; much smaller
    change than adding borrow-checking would be.
 
 ### What the answer is NOT
@@ -1531,7 +1531,7 @@ recorded for completeness.
 
 User-asked scope: *"any other items from MISRA C / AUTOSAR /
 other standards we could include for maximum embedded safety."*
-unsafe.md's surface puts vāṇी in striking distance of MISRA C
+unsafe.md's surface puts vāṇī in striking distance of MISRA C
 2012, ISO 26262 ASIL-D, DO-178C Level A, and IEC 62304 Class C
 certification feasibility. The remaining gap is largely (a) an
 extraction tool for the deviation metadata already in the IR
@@ -2286,7 +2286,7 @@ let cv: Condvar = condvar_new();
   shape — that would force the user to re-bind the guard on
   every loop iteration, which fights the natural `while
   !pred { cv.wait(&mut g) }` pattern.
-- The kernel atomically releases + parks; from vāṇी's checker
+- The kernel atomically releases + parks; from vāṇī's checker
   perspective, the guard's `locked` state never changes (the
   release-and-re-acquire is invisible). Lock-graph analysis sees
   the guard as held continuously.
@@ -2376,7 +2376,7 @@ all flagged **queued** with this entry as the design of record.
 *Why tension:* a stackless coroutine across `await` points needs
 to capture its locals into a heap-allocated state machine that
 persists between polls. Rust solves this with `Pin` + self-
-referential structs — but vāṇी's standing decision rules out
+referential structs — but vāṇī's standing decision rules out
 `Pin` (see [[project-affine-standing]] and the
 NON-COMPLIANT block above). So async **cannot ship as Rust
 async/await ships**. The viable shape is:
@@ -2416,7 +2416,7 @@ async/await ships**. The viable shape is:
   non-compliant per [[project-affine-standing]]. The
   compiler-lowered state-machine substitute above covers the
   same use cases.
-- 🛑 **`async` cancellation via panic / unwind** — vāṇी has no
+- 🛑 **`async` cancellation via panic / unwind** — vāṇī has no
   exceptions. Cancellation is explicit via a `CancelToken`
   passed by-ref into `await`-able futures.
 - 🛑 **Stackful coroutines / fibers** (saving the full machine
@@ -2625,7 +2625,7 @@ Effort: M (mostly straightforward once A lands).
   x86-64, Windows x64, ARM64) + per-backend struct decomposition.
   L-tier.
 - **#7 Recursion bound `#[bounded(N)]`** — first attribute
-  syntax in vāṇी (new `#` token + parser + codegen). L-tier.
+  syntax in vāṇī (new `#` token + parser + codegen). L-tier.
 - **vani.toml v2 [deps] table** — Kosh-registry coordinates
   + diamond-import dedup. L-tier (needs Kosh registry plan).
 - **#8 Nested arrays** — lift array-element-must-be-Copy
@@ -2636,13 +2636,13 @@ Effort: M (mostly straightforward once A lands).
 require introducing significant new compiler machinery:
 
   - **Generic Result<T, E> + Generic struct/enum declarations** —
-    today vāṇी has fn-only generics (closure #99 bounded generics).
+    today vāṇī has fn-only generics (closure #99 bounded generics).
     `EnumDecl` and `StructDecl` have no `type_params` field; the
     monomorphization pass only walks fn signatures. Adding generic
     type declarations is comparable in scope to closure #99
     (multi-day). Blocks #6 (fallible try_vec).
   - **#7 Recursion depth bound `#[bounded(N)]`** — needs new
-    attribute syntax. vāṇी has no `#` token, no attribute parser,
+    attribute syntax. vāṇī has no `#` token, no attribute parser,
     no attribute-aware codegen. First attribute introduction is
     its own M+ arc.
   - **#13 FFI ABI lowering for small aggregates by value** —
@@ -2726,7 +2726,7 @@ value.
    (`...` in declarations) deferred to M+ because it requires
    the declaration shape AND variadic call-site syntax to be
    useful — declared `printf(...)` can't actually be called
-   from vāṇी source without variadic call expressions.
+   from vāṇī source without variadic call expressions.
 
 **Foundational arcs (multi-session enables):**
 
@@ -2743,7 +2743,7 @@ value.
    programs handle OOM gracefully instead of aborting.
 
 8. **#7 Recursion depth bound `#[bounded(N)]` annotation (M)** —
-   first attribute syntax in vāṇी. Parser recognizes
+   first attribute syntax in vāṇī. Parser recognizes
    `#[bounded(N)]` before fn; checker emits a runtime depth
    guard (atomic counter + abort if exceeded). Files:
    [src/lexer.rs](src/lexer.rs) (`#` token),
@@ -3288,7 +3288,7 @@ improvements, not correctness fixes.
 
 ### FFI v1 — `extern "C" fn` declarations (closed 2026-05-27, closure #269)
 
-✅ **DONE**: vāṇी can now call into C / C++ / Rust / libc / pthread / etc.
+✅ **DONE**: vāṇī can now call into C / C++ / Rust / libc / pthread / etc.
 Surface syntax `extern "C" fn name(params) -> R;` declares a C-ABI
 symbol. The checker accepts the body-less prototype, every codegen
 path (tree-LLVM, SSA-LLVM, tree-C, SSA-C) emits a forward
@@ -3305,7 +3305,7 @@ Verified end-to-end via `examples/ffi.vani` (calls libm's `abs`).
 - ✅ **`intentc build --link-with PATH` / `-l<name>`** —
   closure #270. `--link-with foo.c` (or `foo.o`,
   repeatable) and `-l<name>` (repeatable, e.g. `-lm`)
-  forward to the system linker after the vāṇी object.
+  forward to the system linker after the vāṇī object.
   CLI integration test
   `build_link_with_resolves_extern_c_symbol` pins the
   shape end-to-end with a tiny `helper.c` providing
@@ -3322,34 +3322,34 @@ Verified end-to-end via `examples/ffi.vani` (calls libm's `abs`).
 - ✅ **`pure extern` opt-in marker** — closure #271.
   `pure extern "C" fn name(...) -> R;` lets `pure fn` bodies
   call the foreign symbol. Caller's responsibility to ensure
-  the symbol is actually pure (vāṇी can't verify across the
+  the symbol is actually pure (vāṇī can't verify across the
   FFI boundary). Parallel-for body's extern-call gate is
   separate and queued — today the existing purity check
   admits `pure extern` callees from pure-fn contexts but the
   parallel-for body has its own walker that may need a
   parallel update.
 - ✅ **Symbol-naming convention documented** — README already
-  covers it: vāṇी function definitions emit `fn_<vani_name>`
+  covers it: vāṇī function definitions emit `fn_<vani_name>`
   (lines 1893, 1942); `extern "C" fn` declarations call the
   bare C-ABI name. Closure #268's docs sweep + #269's README
   rewrite together cover this fully.
 
 ### FFI history — original plan (closed by #269)
 
-Today vāṇी **produces** `.o` files (via `intentc emit + llc -filetype=obj`)
+Today vāṇī **produces** `.o` files (via `intentc emit + llc -filetype=obj`)
 that external linkers (cc / clang++ / rustc) can consume. Function
 symbols are emitted as `fn_<vani_name>` with C ABI, so C / C++ / Rust
 code can declare them as `extern int64_t fn_add(int64_t, int64_t);`
 and call them at the linker level.
 
 What's MISSING is the opposite direction: **declaring an external
-function in vāṇी source so vāṇी code can call into C / C++ / Rust /
+function in vāṇī source so vāṇī code can call into C / C++ / Rust /
 libc / pthread / etc.**
 
 Plan for the future closure:
 - Surface syntax: `extern "C" fn malloc(n: u64) -> ref u8;`
   declares a foreign function with C ABI. Type signatures use the
-  existing vāṇी type vocabulary; the checker validates the ABI is
+  existing vāṇī type vocabulary; the checker validates the ABI is
   representable (scalars, pointers, structs with all-Copy fields).
 - IR: a new `ExternFn` declaration that bypasses body type-
   checking. Calls to it generate `call` to the external symbol
@@ -3365,9 +3365,9 @@ Plan for the future closure:
   thread `--link-with foo.o` / `-lfoo` flags through. A small CLI
   addition.
 
-Without FFI, vāṇी is effectively "linker-output-only" — it can ship
+Without FFI, vāṇī is effectively "linker-output-only" — it can ship
 libraries that other languages call, but can't call existing C
-libraries from inside vāṇी source. The single concession today is
+libraries from inside vāṇī source. The single concession today is
 that runtime helpers (intent_str_concat, GOMP_*, pthread_create,
 atomicrmw) are emitted inline in the LLVM IR; nothing user code
 can extend.
@@ -3481,7 +3481,7 @@ triple update in response to user questions:
 
   - README's *Memory safety & concurrency model* gains a
     "Smart-pointer primitives — Rust / C++ comparison"
-    subsection. vāṇी ships no Box / Rc / Arc / RefCell /
+    subsection. vāṇī ships no Box / Rc / Arc / RefCell /
     Weak (or C++ unique_ptr / shared_ptr / weak_ptr)
     because each use case is either covered by an existing
     primitive or structurally avoided by the type system.
@@ -3496,10 +3496,10 @@ triple update in response to user questions:
     "How linking works (build pipeline)" subsection
     documenting the `intentc emit + llc -filetype=obj
     → .o` route, function symbol naming
-    (`fn_<vani_name>` with C ABI), and declaring vāṇी
+    (`fn_<vani_name>` with C ABI), and declaring vāṇī
     fns on the C / C++ / Rust side via `extern "C"`
-    blocks. Calling-INTO vāṇी works today. Calling-OUT
-    (declaring foreign symbols in vāṇी source) is
+    blocks. Calling-INTO vāṇī works today. Calling-OUT
+    (declaring foreign symbols in vāṇī source) is
     queued.
 
   - TODO.md gets a new "FFI" top-level section laying

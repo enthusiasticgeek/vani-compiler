@@ -17,7 +17,7 @@ files may have drifted since this was filed.
 
 ## Category A — unqualified `Some(...)` / `None` instead of `Opt.Some(...)` / `Opt.None`
 
-vāṇी requires enum variant construction to be qualified with the enum type
+vāṇī requires enum variant construction to be qualified with the enum type
 name (`Opt.Some(v)`, `Opt.None`) — see any working `option_types.vani` (e.g.
 `examples/language/persian/option_types.vani`, `examples/language/urdu/option_types.vani`)
 for the correct pattern. The following dialects' `option_types.vani`,
@@ -98,7 +98,7 @@ Category A triage also turned up two more mechanical mistakes bundled
 into the same files: `Box(...)` should be `box(...)` (lowercase builtin)
 in 9 dialects' `box_recursive_drop.vani`, and 8 dialects'
 `option_types.vani`/`try_question_op.vani` used `match` as a bare
-statement with block-bodied arms, which vāṇी doesn't support (`match`
+statement with block-bodied arms, which vāṇī doesn't support (`match`
 must be an expression bound via `let`, arms are single comma-separated
 expressions) -- rewritten as small `unwrap_or`-style helper functions
 per dialect, following the same design English's canonical

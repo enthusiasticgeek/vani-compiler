@@ -3,12 +3,12 @@
 > **Learning goal**: see the three canonical shapes that push
 > Rust users into `Rc<RefCell<T>> + Weak<T>` -- parent<->child
 > trees, doubly-linked lists, observer pattern -- and the
-> idiomatic vāṇी translation for each. Reading order:
+> idiomatic vāṇī translation for each. Reading order:
 > [Intermediate 3c -- shared ownership without Rc/Arc](03c_shared_ownership_primer.md)
 > + [Intermediate 3a -- Box+RAII primer](03a_box_raii_primer.md).
 
 This chapter is mostly intuition, with side-by-side worked examples
-(Rust on one side, vāṇी on the other) once each shape is introduced.
+(Rust on one side, vāṇī on the other) once each shape is introduced.
 
 ## The coat-check ticket
 
@@ -48,7 +48,7 @@ ticket number on a napkin and hand it to them ("if anything happens
 to me, coat 47 is ours too") with zero risk -- copying a number
 around is harmless in a way that copying a physical coat isn't.
 
-This is precisely the trick vāṇी uses to avoid reference cycles.
+This is precisely the trick vāṇī uses to avoid reference cycles.
 Instead of a parent node literally *holding onto* its child (and the
 child literally *holding onto* its parent -- two owning pointers,
 tangled, neither collectible until the other lets go), every node's
@@ -73,7 +73,7 @@ node wants a `parent` pointer for upward traversal; an
 observer wants to call back into the subject that registered
 it; a doubly-linked list needs `prev` AND `next`.
 
-Under **single-owner affine** ownership (vāṇी, Rust without
+Under **single-owner affine** ownership (vāṇī, Rust without
 Rc), cycles are *impossible* to express directly with owning
 pointers -- every value has exactly one owner, so the graph
 has no loops by construction. That's a feature when you
@@ -88,7 +88,7 @@ a non-owning pointer whose existence doesn't keep the target
 alive. The author marks back-edges as `Weak<T>` so the
 forward edges still count and the cycle eventually drops.
 
-vāṇी's answer is different: **don't use pointers at all for
+vāṇī's answer is different: **don't use pointers at all for
 cyclic shapes.** Use indices into a `Vec<Node>` (or `Pool<T>`
 when generation-checked handles are needed). The cycle exists
 in the index graph; the storage is a flat array. Cleanup is
@@ -203,7 +203,7 @@ Three things to notice:
    neither end OWNS the other. No Rc, no Weak, no RefCell.
 3. **Mutation goes through `clone_at` + `set`, not a direct
    two-hop `mut ref`.** `t.nodes[i].children` is a Vec index
-   followed by a field access -- two hops -- and vāṇी's `mut
+   followed by a field access -- two hops -- and vāṇī's `mut
    ref` can only reach a bare variable or a single
    struct-field hop, by design (it keeps the checker's
    exclusivity analysis local and simple). The idiom above --
@@ -216,7 +216,7 @@ Three things to notice:
 The cost: indices need a "world" parameter (`t: mut ref
 Tree`) threaded through anything that touches the tree. The
 Rust version doesn't need this -- each Rc carries its own
-context. In exchange, vāṇी has no refcount overhead, no
+context. In exchange, vāṇī has no refcount overhead, no
 per-access panic risk, and cache-friendly layout (all nodes
 contiguous).
 
@@ -230,7 +230,7 @@ contiguous).
   their non-zero weak count keeps the *control block*
   allocated until the last Weak drops, but the Node's data
   is already gone.
-- **vāṇी**: when the `Tree` binding's scope ends, the
+- **vāṇī**: when the `Tree` binding's scope ends, the
   `nodes: Vec<Node>` drops -- one `free` of the contiguous
   buffer (after running each Node's own field destructors).
   No cascade. No per-node bookkeeping.
@@ -356,7 +356,7 @@ In a Vec-of-Node list, deleting a middle node has a choice:
 2. **Mark deleted** without removing -- add a `dead: bool`
    field, skip over dead nodes when traversing. Indices
    stay valid forever, but the Vec grows monotonically.
-3. **Use a `Pool<T>`** (vāṇी [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
+3. **Use a `Pool<T>`** (vāṇī [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
    Layer 2). Generation-tagged handles: deleting a slot
    bumps the generation; `pool.get(h)` returns `None` for
    a stale handle. Same memory layout, type-safe slot
@@ -559,7 +559,7 @@ for stable handles.
 
 The back-pointer was load-bearing in Rust ONLY because
 nothing else gave the observer access to its subject. In
-vāṇी, every callback that needs to mutate the subject takes
+vāṇī, every callback that needs to mutate the subject takes
 `world: mut ref World` as a parameter -- the access is
 explicit and tracked.
 
@@ -567,7 +567,7 @@ explicit and tracked.
 
 In Rust, an Observer can hold its subject ref permanently
 and notify itself "I want to unregister at end-of-life" via
-its Drop impl. In vāṇी, the same operation is "the World
+its Drop impl. In vāṇī, the same operation is "the World
 removes me; my Drop runs when my Box is freed." No callback
 into a back-pointer needed.
 
@@ -588,14 +588,14 @@ from the Rust version worth calling out up front:
 - v1 has **no user-definable `Drop`** -- only the
   compiler-synthesized scope-exit cleanup for affine types
   (`Vec`, `OwnedStr`, ...). Rust's version really does run
-  from `impl Drop`; the honest vāṇी translation is an
+  from `impl Drop`; the honest vāṇī translation is an
   **explicit** `deregister(obs)` call, not an automatic
   destructor hook.
 - Raw pointer types (`*const T` / `*mut T`) are gated to
   embedded targets in v1 -- `INTENT_TARGET_EMBEDDED=1` must be
   set (env var today; a `--target embedded`-style flag will
   supersede it). This isn't specific to the observer pattern --
-  it's true of every raw pointer in vāṇी. See
+  it's true of every raw pointer in vāṇī. See
   [Advanced 4 -- Embedded](../advanced/04_embedded.md) and
   [`unsafe.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
   for the full policy.
@@ -690,7 +690,7 @@ A small set of patterns are genuinely awkward without Rc:
   rendering, by event handlers, all simultaneously and at
   independent lifetimes.
 
-For these, vāṇी's answer is:
+For these, vāṇī's answer is:
 
 1. **Refactor toward indices + World.** Most "many
    independent consumers" become cleaner as "indices into
@@ -714,7 +714,7 @@ For these, vāṇी's answer is:
 
 ## Side-by-side cheat sheet
 
-| Need | Rust shape | vāṇी shape |
+| Need | Rust shape | vāṇī shape |
 |---|---|---|
 | Parent <-> child tree | `Rc<Node> + Weak<Node>` + RefCell | `Vec<Node>` with `parent: i64` + `children: Vec<i64>` |
 | Doubly-linked list | `Rc<Node>` next + `Weak<Node>` prev | `Vec<Node>` with `next: i64` + `prev: i64` |
@@ -732,7 +732,7 @@ owning Vec/Pool.**
 
 Walking the same 1000-node tree drop, end-to-end:
 
-| Operation | Rust `Rc<Node>` tree | vāṇी `Vec<Node>` tree |
+| Operation | Rust `Rc<Node>` tree | vāṇī `Vec<Node>` tree |
 |---|---|---|
 | Allocations | 1000 (one per node, plus Rc control block) | 1 (Vec buffer; nodes inline) |
 | Drop cascade | 1000 refcount decrements (atomic if Arc), then 1000 frees | 1 free (after per-node field destructors run inline) |
@@ -748,11 +748,11 @@ this difference compounds.
   doubly-linked list, observer pattern -- all use
   `Rc<RefCell<T>> + Weak<T>` in Rust because affine
   ownership otherwise rejects them.
-- vāṇी's substitution is **the same shape rewritten as
+- vāṇī's substitution is **the same shape rewritten as
   indices into a `Vec<T>` (or `Pool<T>` for stable handles)
   owned by a single "World" struct.** The cycle exists in
   the index graph; ownership stays single.
-- The cost trade: vāṇी needs a `world: mut ref World`
+- The cost trade: vāṇī needs a `world: mut ref World`
   parameter threaded through anything touching the
   structure (vs. Rust's per-Rc context). Pay-off: no
   refcount overhead, no `borrow_mut()` panic risk, no
@@ -774,7 +774,7 @@ and the language's affine guarantees cover the rest.
   -- single-owner heap allocation, the recursion shape
   `Option<Box<Node>>` for the simple (non-cyclic) linked list
 - [Intermediate 3b -- Affine deeper primer](03b_affine_deeper_primer.md)
-  -- many-shared-XOR-one-mutable rule that makes vāṇी's
+  -- many-shared-XOR-one-mutable rule that makes vāṇī's
   reasoning sound
 - [Intermediate 3c -- Shared ownership without Rc/Arc](03c_shared_ownership_primer.md)
   -- the broader "no Rc by design" story; this chapter

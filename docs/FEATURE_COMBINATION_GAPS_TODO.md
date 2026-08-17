@@ -1,6 +1,6 @@
 # Feature-combination gap audit (2026-08-02)
 
-Critical inventory of vāṇी feature *combinations* that should work in
+Critical inventory of vāṇī feature *combinations* that should work in
 theory (every individual feature involved is shipped and documented)
 but have never been exercised **together**, end-to-end, on both
 backends. This is a fresh sweep layered on top of two already-closed
@@ -27,7 +27,7 @@ repeated experience.
 
 **Ground rule for what belongs here**: only combinations of features
 that *individually already exist and are documented as supported*.
-Things vāṇी doesn't have at all yet (const generics, `Rc<T>`, custom
+Things vāṇī doesn't have at all yet (const generics, `Rc<T>`, custom
 `Drop`, HashMap with a struct key, macros — see
 `docs/missing_features.md`'s main sections) are language gaps, not
 test gaps, and are explicitly OUT of scope for this file.

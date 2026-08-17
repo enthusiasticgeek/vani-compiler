@@ -1107,7 +1107,7 @@ with v3.1 phases.
 >
 > **VERIFICATION DEFERRED — Windows hot spots for first-host
 > verification**:
->   1. **IOCP ↔ readiness model mismatch** (R8). The vāṇी epoll
+>   1. **IOCP ↔ readiness model mismatch** (R8). The vāṇī epoll
 >      API is readiness-shaped; IOCP is completion-shaped. The
 >      current shim treats each `PostQueuedCompletionStatus` as a
 >      "wake the reader" event. For real Windows I/O workloads

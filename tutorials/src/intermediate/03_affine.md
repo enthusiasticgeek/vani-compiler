@@ -1,7 +1,7 @@
 # Intermediate 3 -- Affine ownership: `ref` / `mut ref`
 
 > **Learning goal**: borrow a struct by `ref` (read-only) or
-> `mut ref` (exclusive read-write), and understand how vāṇी's
+> `mut ref` (exclusive read-write), and understand how vāṇī's
 > affine ownership keeps borrows safe at compile time.
 
 > **New to this?** Read [Beginner 6c -- Ownership and move](../beginner/06c_ownership_primer.md)
@@ -17,8 +17,8 @@ the borrow model.
 
 ## Borrow checker: yes, but smaller than Rust's
 
-If you're coming from Rust (or asking "why doesn't vāṇी have a
-borrow checker like Rust?"), the premise is off: vāṇी has one.
+If you're coming from Rust (or asking "why doesn't vāṇī have a
+borrow checker like Rust?"), the premise is off: vāṇī has one.
 `ref` / `mut ref` above IS the borrow checker -- it enforces the
 same core rule Rust does, "many shared borrows XOR one exclusive
 mutable borrow, never both," and it rejects use-after-move and
@@ -28,7 +28,7 @@ pass, but the guarantee is the same class of guarantee.
 
 What's smaller than Rust's version:
 
-| | Rust | vāṇी v1 |
+| | Rust | vāṇī v1 |
 |---|---|---|
 | Shared-XOR-mutable borrows | ✓ enforced | ✓ enforced |
 | Use-after-move rejected | ✓ | ✓ |
@@ -45,7 +45,7 @@ C-style pointers): silent use-after-free, double-free, data
 races from aliased mutable pointers, and dangling references
 returned from functions -- all of them runtime bugs that show up
 far from their cause, sometimes only under load or with specific
-inputs. vāṇी's borrow checker turns every one of those into a
+inputs. vāṇī's borrow checker turns every one of those into a
 compile error at the call site.
 
 **What the smaller (elided-only) design costs you**, versus
@@ -53,7 +53,7 @@ Rust's explicit lifetimes: a few advanced shapes don't compile
 as-written and need a mechanical workaround --
 
 - A function taking two `ref` parameters can't return a `ref`
-  derived from just one of them (Rust: annotate `<'a>`; vāṇी:
+  derived from just one of them (Rust: annotate `<'a>`; vāṇī:
   split into narrower functions, or make the unused param a
   value instead of a ref). See [Intermediate 3e -- lifetimes
   primer](03e_lifetimes_primer.md).

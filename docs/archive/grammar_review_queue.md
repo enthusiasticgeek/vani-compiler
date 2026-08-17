@@ -55,7 +55,7 @@ Open a PR that:
 | `if` | `यदि` *yadi* | High | Classical Sanskrit standard |
 | `else` | `अन्यथा` *anyathā* | High | "Otherwise"; standard |
 | `while` | `यावत्` *yāvat* | Medium | "As long as"; closes with `तर्हि` traditionally; SOV not yet supported for while so the verb alone may feel incomplete |
-| `for` | `प्रति` *prati* | Medium | "For each"; range syntax is a vāṇी abstraction not directly Sanskrit-rooted |
+| `for` | `प्रति` *prati* | Medium | "For each"; range syntax is a vāṇī abstraction not directly Sanskrit-rooted |
 | `match` | `मेल` *mela* | Medium | "Join / match"; alternative `संगति` (saṅgati) might be clearer |
 | `assert` | `सिद्धम्` *siddham* | High | "Established; proven" |
 | `prove` | `प्रमाण` *pramāṇa* | High | "Proof" |

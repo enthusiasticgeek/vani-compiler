@@ -1,6 +1,6 @@
 ﻿# Advanced 10 -- Compiler internals tour
 
-> **Learning goal**: orient yourself in the vāṇी compiler
+> **Learning goal**: orient yourself in the vāṇī compiler
 > source tree so you can read a diagnostic, find the
 > responsible pass, and contribute a fix.
 
@@ -184,7 +184,7 @@ writeup: item 27.1 in
 Two consequences for anyone adding a language feature or builtin:
 1. **Test through `vanic run` / `vanic emit`**, not just
    `compile_to_c` / `compile_to_llvm`. The latter two (what
-   `src/lib.rs`'s ~1900 tests mostly use) call the tree backends
+   `src/lib.rs`'s ~3000 tests mostly use) call the tree backends
    *directly*, bypassing the SSA path entirely -- they would not
    have caught the bug above.
 2. If the new construct isn't SSA-supported, add a
@@ -246,7 +246,7 @@ All dialect-related source-of-truth files:
   roadmap.
 - Debugging a "proof failed" you can't reduce. `VANIC_SMT_DEBUG=1`
   + `src/smt.rs` are the answer.
-- Building a tool that consumes vāṇी AST. `cargo run --release
+- Building a tool that consumes vāṇī AST. `cargo run --release
   --bin vanic -- ast foo.vani` prints the AST -- as Rust's `{:#?}`
   pretty-debug format, NOT JSON (confirmed by testing; an earlier
   version of this page overclaimed JSON, and there's no `--json`

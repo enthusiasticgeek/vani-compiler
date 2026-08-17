@@ -19216,7 +19216,17 @@ fn emit_vec_bool_let_from_literal(
     let buf = ctx.fresh_tmp();
     out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, raw));
 
-    let cap = if n == 0 { 1 } else { n };
+    // BUG-202: `cap` is a BIT count in this packed layout (every other
+    // %intent_vec_bool op -- push's grow arithmetic in particular --
+    // divides/mods it by 64), not an element count. `word_count * 64`
+    // is the true bit capacity of the `bytes`-sized buffer just
+    // allocated above; using `n` (or 1 for the empty case) here made
+    // `cap` far smaller than the real buffer, so the very next push
+    // past that undersized `cap` computed `nc/64 == 0` (integer
+    // division) -> a zero-byte `realloc` -> a null/invalid pointer
+    // dereference on the following load. Confirmed via a minimal
+    // `Vec<bool>` two-push repro that crashed `lli` before this fix.
+    let cap = word_count * 64;
     let s_ty = "%intent_vec_bool";
     let s0 = ctx.fresh_tmp();
     out.push_str(&format!(
@@ -19279,7 +19289,17 @@ fn emit_vec_bool_literal_value(args: &[TypedExpr], ctx: &mut FnCtx, out: &mut St
     let buf = ctx.fresh_tmp();
     out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, raw));
 
-    let cap = if n == 0 { 1 } else { n };
+    // BUG-202: `cap` is a BIT count in this packed layout (every other
+    // %intent_vec_bool op -- push's grow arithmetic in particular --
+    // divides/mods it by 64), not an element count. `word_count * 64`
+    // is the true bit capacity of the `bytes`-sized buffer just
+    // allocated above; using `n` (or 1 for the empty case) here made
+    // `cap` far smaller than the real buffer, so the very next push
+    // past that undersized `cap` computed `nc/64 == 0` (integer
+    // division) -> a zero-byte `realloc` -> a null/invalid pointer
+    // dereference on the following load. Confirmed via a minimal
+    // `Vec<bool>` two-push repro that crashed `lli` before this fix.
+    let cap = word_count * 64;
     let s_ty = "%intent_vec_bool";
     let s0 = ctx.fresh_tmp();
     out.push_str(&format!(
@@ -41558,6 +41578,17 @@ fn emit_intent_array_helpers_i64_llvm(out: &mut String) {
 
 /// XL1: emit LLVM IR push/pop/free/clone helpers for packed-bit Vec<bool>.
 /// Layout: %intent_vec_bool = type { i64*, i64, i64 }  (data, len_bits, cap_bits)
+///
+/// BUG-203: both `push` and `set_mut` below build the bit to OR in via
+/// `zext i1 %v to i64` (fixed here from a prior `sext`). `sext` of an i1
+/// `true` produces all-ones (-1i64), not 1 -- shifting THAT left by `bi`
+/// sets every bit from position `bi` through 63, not just bit `bi`,
+/// corrupting every higher-indexed element in the same 64-bit word the
+/// moment any element is set/pushed `true`. Found while adding a direct
+/// test for `shuffled_indices` (vani-ml) that built a `Vec<bool>` seen-set
+/// via `push`+`set` in a loop -- earlier `true` writes kept making later,
+/// unrelated indices read back as `true` too. `zext` correctly maps i1
+/// `false`/`true` to the i64 values 0/1.
 fn emit_vec_bool_helpers_llvm(out: &mut String) {
     let s = "%intent_vec_bool";
     // ---- push(xs, v) -> xs'
@@ -41586,7 +41617,7 @@ fn emit_vec_bool_helpers_llvm(out: &mut String) {
          \x20 %bi   = urem i64 %len, 64\n\
          \x20 %wp   = getelementptr i64, i64* %nd, i64 %wi\n\
          \x20 %wv   = load i64, i64* %wp\n\
-         \x20 %bit  = sext i1 %v to i64\n\
+         \x20 %bit  = zext i1 %v to i64\n\
          \x20 %bsh  = shl i64 %bit, %bi\n\
          \x20 %msk  = shl i64 1, %bi\n\
          \x20 %nmsk = xor i64 %msk, -1\n\
@@ -41678,7 +41709,7 @@ fn emit_vec_bool_helpers_llvm(out: &mut String) {
          \x20 %bi   = urem i64 %i, 64\n\
          \x20 %wp   = getelementptr i64, i64* %data, i64 %wi\n\
          \x20 %wv   = load i64, i64* %wp\n\
-         \x20 %bit  = sext i1 %v to i64\n\
+         \x20 %bit  = zext i1 %v to i64\n\
          \x20 %bsh  = shl i64 %bit, %bi\n\
          \x20 %msk  = shl i64 1, %bi\n\
          \x20 %nmsk = xor i64 %msk, -1\n\

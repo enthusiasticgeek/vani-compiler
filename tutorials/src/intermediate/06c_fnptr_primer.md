@@ -45,7 +45,7 @@ implemented until the moment they actually call it.
 
 ## The concept
 
-In vāṇी a function name can be used as a *value* -- not just called,
+In vāṇī a function name can be used as a *value* -- not just called,
 but stored in a variable or passed to another function. The type of
 such a value is written `fn(A, B) -> R`, mirroring the parameter
 and return types of the function itself.
@@ -242,7 +242,7 @@ Write a function `compose(f: fn(i64)->i64, g: fn(i64)->i64) -> fn(i64)->i64`
 that returns a new function equal to `f(g(x))`. Use it to compose
 `double` and `square` and verify `compose(double, square)(3) == 18`.
 
-*(Hint: vāṇी v1 closures can capture function-pointer locals.)*
+*(Hint: vāṇī v1 closures can capture function-pointer locals.)*
 
 ---
 

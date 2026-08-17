@@ -1,6 +1,6 @@
 # Safety-Critical Standards
 
-vāṇी ships a structured safety layer that aligns with four industry
+vāṇī ships a structured safety layer that aligns with four industry
 standards: **MISRA C 2012**, **ISO 26262 ASIL-D**, **DO-178C Level A**
 (avionics), and **IEC 62304 Class C** (medical devices). This chapter
 explains what each composite tag enforces, how to read the audit

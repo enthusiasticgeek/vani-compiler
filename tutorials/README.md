@@ -1,6 +1,6 @@
 # vāṇी tutorials (mdBook)
 
-This is the mdBook source for the vāṇी (वाणी) tutorial site.
+This is the mdBook source for the vāṇī (वाणी) tutorial site.
 The compiled HTML lives in `tutorials/book/` after a build and
 is the artifact that gets deployed (eventually — see TUT-5 in
 [TODO.md](../TODO.md)).

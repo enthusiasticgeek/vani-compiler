@@ -87,7 +87,7 @@ Last updated: 2026-07-31
 
 ## Bare-metal / OS (high priority — L19)
 
-These five items together unlock vāṇी as the primary language for a
+These five items together unlock vāṇī as the primary language for a
 custom OS or bare-metal board firmware. See
 [L19 in docs/v1_limitations.md](v1_limitations.md) for full context,
 workarounds, and the exact design goal for each.
@@ -115,7 +115,7 @@ workarounds, and the exact design goal for each.
   Option<String>` on `Function` in `src/ast.rs`/`src/ir.rs`.
 
 - [x] **21. `#[no_mangle]` attribute — suppress symbol name mangling** (G4) ✅ done 2026-06-21
-  `fn` declarations with `#[no_mangle]` emit the bare vāṇी name in both
+  `fn` declarations with `#[no_mangle]` emit the bare vāṇī name in both
   C and LLVM backends. `NO_MANGLE_FN_REGISTRY` / `LLVM_NO_MANGLE_FN_REGISTRY`
   thread-locals track which functions are bare so call-sites use the right
   symbol.
@@ -165,7 +165,7 @@ workarounds, and the exact design goal for each.
 
   **Design question, still open**: this would be the first "magic syntax
   inside/beside a print item" feature in the language — worth a deliberate
-  decision (does it fit vāṇी's explicit-over-implicit posture, e.g. mandatory
+  decision (does it fit vāṇī's explicit-over-implicit posture, e.g. mandatory
   `unsafe(reason=...)`, no operator-overloading magic?) rather than adding it
   as a side effect of wanting decimal padding, which the cheap path already
   solves. Gate on: is there real demand for the syntax itself, not just the
@@ -176,7 +176,7 @@ workarounds, and the exact design goal for each.
   after the expr, `print x:03;` / `print y:.2;` / `print z:08.3;`, grammar
   `'0'? WIDTH? ('.' PRECISION)?`, hand-parsed as raw tokens right after `:`
   rather than reusing `parse_expr()`/number-literal lexing (`.2` isn't
-  otherwise a lexable float literal in vāṇी, and `:` is never consumed by
+  otherwise a lexable float literal in vāṇī, and `:` is never consumed by
   general expression parsing — checked every `TokenKind::Colon` site in
   `parser.rs`; all are struct-field/type-annotation/label contexts — so this
   is grammatically unambiguous to add). Semantics: WIDTH pads any numeric
@@ -264,7 +264,7 @@ workarounds, and the exact design goal for each.
   emitted atomically whenever `:` is immediately followed (no
   whitespace) by a digit or `.`+digit — safe unconditionally, not
   just in "after a print item" context, since that exact byte pattern
-  is never legally produced anywhere else in vāṇी's grammar (verified
+  is never legally produced anywhere else in vāṇī's grammar (verified
   empirically: grepped the full corpus, the only 2 hits were inside
   `//` comments).
 
@@ -860,7 +860,7 @@ via `echo_p3d_vec_struct.vani` and friends), so Complex/Tensor packages can use 
 directly, and the flat-`Vec<f64>`-plus-shape encoding vani-matrix already established
 generalizes to N-D tensors without new type-system support. Arbitrary-precision
 arithmetic (vani-bignum, for the symbolic tier) is likewise implementable in pure
-vāṇी via digit-array carry/borrow arithmetic -- no native bignum type needed.
+vāṇī via digit-array carry/borrow arithmetic -- no native bignum type needed.
 
 Two narrow compiler items surfaced during that planning pass:
 
@@ -1064,9 +1064,9 @@ audited the 12 existing math packages by hand, but nothing stopped the next
 
 Full design: [`docs/kosh_namespacing_design.md`](kosh_namespacing_design.md).
 Sourced from a direct user question ("what happens if a kosh-index
-package has the same function name as a vāṇी built-in?") that led to
+package has the same function name as a vāṇī built-in?") that led to
 hands-on testing and surfaced two real bugs: (1) Kosh packages share one
-flat global function namespace with vāṇी builtins and each other — any
+flat global function namespace with vāṇī builtins and each other — any
 name collision is an unrecoverable compile error, and package authors
 have no way to control other packages' names; (2) transitive
 dependencies (a dependency of a dependency) were only resolved one level
@@ -1158,7 +1158,7 @@ of a working shared dependency.
   `parse_attributed_fn` top-level items already use.
 
   Verified directly: (1) the original motivating question — a
-  dependency defining `fn abs(...)` colliding with the vāṇी builtin
+  dependency defining `fn abs(...)` colliding with the vāṇī builtin
   `abs` — now compiles and runs correctly, both `abs(-7)` and
   `mypkg::abs(-7)` resolve and return `7`; (2) an unqualified call to a
   dependency function now correctly fails ("unknown function"),
@@ -1461,7 +1461,7 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   case, so any standalone `Unary{Neg}` over an `f64`/`f32` operand fell
   through to the function's catch-all `unreachable!()`. This is
   consistent with — and narrower than — the existing documented guidance
-  that vāṇी source in the wild never uses unary minus (this repo's own
+  that vāṇī source in the wild never uses unary minus (this repo's own
   convention is `0.0 - x`, see `docs/reference_vani_language_notes.md`-
   style notes in downstream projects); the gap went unnoticed because the
   one existing regression test for this shape,
@@ -2613,7 +2613,7 @@ verifying the four fixes above against their tutorial worked examples
   OTHER variant carries a `Str` payload (not `OwnedStr`) crashed —
   `lli` rejected the emitted IR. Fixed 2026-07-28.** Found in the same
   audit pass as BUG-28, writing a "two flat matches instead of one
-  nested pattern" worked example (vāṇी has no nested variant-in-
+  nested pattern" worked example (vāṇī has no nested variant-in-
   variant match patterns — see the `beginner/08a_pattern_match_
   primer.md` fixes below) that needed an enum with a `Str` payload.
   Root cause: the zero-init placeholder for a payload-less variant's
@@ -2644,9 +2644,9 @@ verifying the four fixes above against their tutorial worked examples
   REST of the file's code blocks by hand (rather than trusting them
   because ONE was already caught) turned up five more: **Pattern 2**
   showed Rust-style tuple-destructuring match patterns (`match (x, y)
-  { (0, 0) then .. }`) — vāṇी has no tuple pattern at all, confirmed
+  { (0, 0) then .. }`) — vāṇī has no tuple pattern at all, confirmed
   via the same `Pattern` enum audit. **Pattern 3** showed a bare
-  binding pattern with a guard (`n if n < 0 then ..`) — vāṇी match
+  binding pattern with a guard (`n if n < 0 then ..`) — vāṇī match
   patterns can't introduce a fresh "catch and bind" name outside enum-
   variant/slice patterns; the parser expects a bare identifier pattern
   to be followed by `.` (interpreting it as `EnumName.Variant`) and
@@ -2658,7 +2658,7 @@ verifying the four fixes above against their tutorial worked examples
   pattern; confirmed via a parse error ("expected ')' (variant payload
   binding close)"). The exhaustiveness section's intentionally-broken
   example also used `match c { .. }` as a bare STATEMENT (no `return`)
-  — since `match` is expression-only in vāṇी, this hits "expected
+  — since `match` is expression-only in vāṇī, this hits "expected
   statement" instead of the intended "not exhaustive" diagnostic the
   prose promises, teaching the wrong lesson about why the example
   fails. All six rewritten with genuinely verified-working code (the
@@ -2977,7 +2977,7 @@ verifying the four fixes above against their tutorial worked examples
 - [x] **`beginner/06a_pointers_refs_primer.md` recommended `unsafe`
   raw pointers for FFI, contradicting the FFI primer's own
   (verified) guidance — fixed 2026-07-29.** Twice in the file
-  ("Does vāṇी have pointers?" and "When do you actually need
+  ("Does vāṇī have pointers?" and "When do you actually need
   unsafe"), the "when you need unsafe raw pointers" list included
   "FFI with a C library that passes raw pointers." This directly
   contradicts `intermediate/09a_ffi_primer.md` (fixed earlier this
@@ -3148,7 +3148,7 @@ verifying the four fixes above against their tutorial worked examples
 - [x] **`beginner/09a_modules_primer.md` through `13a_big_o_primer.md`
   (rest of the beginner track) audited 2026-07-29 — one confirmed
   doc bug found.** `13a_big_o_primer.md`'s "ships annotated as
-  `O(n^2)`" and its "Reading vāṇी's annotation output" code block
+  `O(n^2)`" and its "Reading vāṇī's annotation output" code block
   used a caret (`O(n^2)`) for what's presented as literal
   `--big-o` terminal output — the real output uses the Unicode
   superscript digit (`O(n²)`), confirmed via raw byte inspection
@@ -3748,9 +3748,9 @@ verifying the four fixes above against their tutorial worked examples
 
 - [x] **`intermediate/09a_ffi_primer.md`'s FFI worked example used
   `sqrt` as the `extern "C"` function name, which collides with
-  vāṇी's own built-in `sqrt` — fixed 2026-07-29.** `extern "C" fn
+  vāṇī's own built-in `sqrt` — fixed 2026-07-29.** `extern "C" fn
   sqrt(x: f64) -> f64;` is rejected outright: "function 'sqrt' is
-  a built-in name and cannot be redefined" (vāṇी ships `sqrt` as
+  a built-in name and cannot be redefined" (vāṇī ships `sqrt` as
   one of its many bare-named math builtins). Replaced with `hypot`
   (confirmed not a builtin collision, real libm function). Also
   corrected the surrounding claim that `vanic build --link-with=m`
@@ -3860,7 +3860,7 @@ verifying the four fixes above against their tutorial worked examples
 - [x] **BUG-44. `#[no_mangle]` silently did nothing for any program
   simple enough to hit the SSA fast path (the common case) — on
   BOTH backends. Found auditing `intermediate/09d_build_systems.md`'s
-  "Calling vāṇी functions from C" example, and confirmed the bug
+  "Calling vāṇī functions from C" example, and confirmed the bug
   ALSO already affected the already-shipped
   `examples/language/english/bare_metal.vani` (its own comment
   claims `#[no_mangle]` "makes Reset_Handler appear with its
@@ -3897,14 +3897,14 @@ verifying the four fixes above against their tutorial worked examples
   correctly) and doesn't parse bare; the correct, already-
   established pattern (confirmed against `bare_metal.vani`) is a
   plain top-level `fn`, no `pub` at all; (2) the doc's own
-  parenthetical "remove vāṇी's `main` or rename it" wasn't backed by
+  parenthetical "remove vāṇī's `main` or rename it" wasn't backed by
   any actual mechanism — every vāṇī file requires a `fn main()`, and
   `vanic emit`'s C output always lowers it to a literal, unmangled
   `int main(void)` (unlike every other function), so linking
-  `c_helper.c` (which has its own `main`) straight against the vāṇी
+  `c_helper.c` (which has its own `main`) straight against the vāṇī
   object genuinely fails with "multiple definition of `main`",
   confirmed directly. Replaced the unactionable claim with a
-  verified, working fix: `objcopy -N main` on the vāṇी object before
+  verified, working fix: `objcopy -N main` on the vāṇī object before
   the final link, plus the matching CMake `add_custom_command`.
   Confirmed end-to-end: without the `objcopy` step the link fails
   exactly as described; with it, the link and run both succeed and
@@ -3933,7 +3933,7 @@ verifying the four fixes above against their tutorial worked examples
   statements, which is exactly why they're the right tool for
   "extract a value, or bail out of the enclosing function." Also
   fixed the example's function name (`parse_int`) — it collides
-  with one of vāṇी's own built-in names ("function 'parse_int' is a
+  with one of vāṇī's own built-in names ("function 'parse_int' is a
   built-in name and cannot be redefined"), confirmed directly;
   renamed to `parse_num`. Also fixed a pre-existing `mdbook build`
   warning in the same file (bare `Option<T>` in an H2 heading,
@@ -4377,7 +4377,7 @@ verifying the four fixes above against their tutorial worked examples
   function rather than losing the qualifier), and spliced into all
   three symbol-name `format!` call sites
   (`__intent_par_<parent_fn>_<id>` etc.) — function names are already
-  unique in a vāṇी program, so this guarantees global uniqueness
+  unique in a vāṇī program, so this guarantees global uniqueness
   without a new module-level counter. C backend untouched (its own
   naming, in `backend_c.rs`, wasn't affected by this bug — separate
   code, separate counter).
@@ -7782,7 +7782,7 @@ flagged as needing a real look; both were genuine, fixed below.
   to the literal identifier `v__`). LLVM: ran fine, "OK 7".
   Root cause: `sanitize_ident` (backend_c.rs), used by both
   `function_name` (`fn_<sanitized>`) and `local_name`
-  (`v_<sanitized>`) to turn a vāṇी identifier into a valid C
+  (`v_<sanitized>`) to turn a vāṇī identifier into a valid C
   identifier, mapped EVERY non-ASCII character to a single literal
   `_` regardless of which character it was -- so any two non-ASCII
   names of the same byte length (like two single-character Burmese
@@ -8140,7 +8140,7 @@ backend handles this input correctly... possibly related to parallel/sort librar
 loading") undersold it enormously -- this is not about parallel/sort libs at all (those
 get loaded by every `lli` invocation regardless of use, a total red herring), and the
 actual bug is not specific to this one repro's `factorial` function. It's a gap in the
-runtime-safety-check machinery affecting essentially every ordinary vāṇी program.
+runtime-safety-check machinery affecting essentially every ordinary vāṇī program.
 
 - **BUG-110 (found by tools/localfuzz, finding 20260803-033452-run-crash-99db3e1928
   -- `examples/language/odia/keywords.vani`'s factorial, fuzzed from `n - 1` to
@@ -8168,7 +8168,7 @@ runtime-safety-check machinery affecting essentially every ordinary vāṇी pr
   respected `checked` correctly -- this was purely an SSA-path regression/gap, and since
   SSA is the FAST/PREFERRED path (`emit_c_via_ssa`/`emit_llvm_via_ssa` in `main.rs` only
   fall back to tree for struct literals, field access, or ~a hundred denylisted
-  builtins), this meant MOST ordinary vāṇी programs ran with ZERO overflow/divide-by-
+  builtins), this meant MOST ordinary vāṇī programs ran with ZERO overflow/divide-by-
   zero/shift-range protection on EITHER backend -- directly contradicting the language's
   own stated safety guarantee (see `backend_c.rs`'s overflow-helper comment: "Both
   signed and unsigned overflow are trapped... in ASIL-D / DO-178C contexts" -- this is a
@@ -8235,7 +8235,7 @@ runtime-safety-check machinery affecting essentially every ordinary vāṇी pr
   bug report" pattern on LLVM (same as before -- this is `lli`'s own interpreter
   genuinely exhausting its stack under deep real recursion, an expected, not-further-
   fixable consequence of the input program's actual infinite/unbounded recursion, not a
-  vāṇी-compiler bug; also matches how BUG-108's bounds-check aborts already look under
+  vāṇī-compiler bug; also matches how BUG-108's bounds-check aborts already look under
   `lli`, an established, accepted characteristic of this tool throughout this sweep).
   The original "C hangs, LLVM crashes" ASYMMETRY is resolved -- both now terminate
   quickly.
@@ -8363,7 +8363,7 @@ investigation.
 - **`vanic build` (LLVM AOT native-binary compile, `src/main.rs`'s `build`
   subcommand) omitted `-lm` from its host-POSIX link command, so ANY program could
   fail to link with `undefined reference to 'exp'` (or `erf`, `fmod`, ...) depending
-  on the host's default `cc`/linker behavior.** Every vāṇी program's runtime
+  on the host's default `cc`/linker behavior.** Every vāṇī program's runtime
   unconditionally emits math-builtin helper functions (`intent_f64_normal_pdf`,
   `intent_f64_normal_cdf`, `intent_f64_wrap`, etc.) that reference libm symbols,
   regardless of whether the program actually calls any of them -- so this wasn't
@@ -9709,7 +9709,7 @@ immediately before the GEP).
 
 ### BUG-139 -- checker never validated that a struct field / enum variant payload / function-signature type actually exists
 
-`enum Result { Ok(i64), Err(String) }` -- `String` isn't a real vāṇी type (only `Str`/
+`enum Result { Ok(i64), Err(String) }` -- `String` isn't a real vāṇī type (only `Str`/
 `OwnedStr` are) -- was silently accepted by `vanic check`. Investigation found this
 wasn't enum-specific: a struct field or function parameter/return type naming a
 nonexistent struct/enum was ALSO silently accepted, as long as the bogus type was
@@ -11615,7 +11615,7 @@ directly with no message at all -- `exit(3)` itself is a deliberate,
 correct design choice (NOT the bug -- see the BUG-106/113/115/117/120
 chain: a raw `abort()`'s SIGABRT makes `lli` misreport a clean,
 expected trap as an internal "PLEASE submit a bug report" crash dump,
-so every vāṇी runtime trap uses `exit(3)` instead), but unlike the C
+so every vāṇī runtime trap uses `exit(3)` instead), but unlike the C
 backends' equivalent guards, nothing ever prints WHY before exiting.
 
 **Fixed** on both `ssa_backend_llvm.rs` and `backend_llvm.rs`: added a
@@ -11631,7 +11631,7 @@ Each LLVM backend matches its OWN paired C backend's message wording
 -- which turned out to already differ from each other, a pre-existing
 inconsistency not introduced by this fix: `ssa_backend_c.rs` spells
 the overflow message with the C typedef name (`"integer overflow in
-int64_t add"`), `backend_c.rs` (tree) uses the short vāṇी type name
+int64_t add"`), `backend_c.rs` (tree) uses the short vāṇī type name
 (`"integer overflow in i64 add"`); `ssa_backend_c.rs`'s bounds message
 is static (`"index out of bounds"`), `backend_c.rs`'s includes the
 actual idx/len values (`"index out of bounds: 7, len 3"`) -- tree-
@@ -11712,7 +11712,7 @@ dynamic idx/len message tree-C already gives (`"index out of bounds:
 7, len 3"`) -- confirmed byte-identical between backends, both `vanic
 run` (JIT) and AOT `vanic build`. The write-path analog (`h.xs[h.i] =
 val`, direct assignment through a struct-field Vec index) turned out
-not to be valid vāṇी syntax at all (`vanic check` rejects it with
+not to be valid vāṇī syntax at all (`vanic check` rejects it with
 "expected statement"), so there's no equivalent write-path bug to fix
 -- `IndexAssign`'s own codegen only handles a plain local Vec base
 with FIELD DESCENT after the index (`xs[i].field = val`), not a Vec
@@ -11753,7 +11753,7 @@ is a genuinely broken MUTATED PROGRAM, not a compiler/runtime bug:
   s.m)` call inserted before the original one, on the SAME
   non-reentrant mutex, same thread -- a genuine self-deadlock from
   the mutated program, not a compiler bug (though arguably a missed
-  static-analysis opportunity -- vāṇी's existing lock-order checker
+  static-analysis opportunity -- vāṇī's existing lock-order checker
   doesn't currently catch same-thread double-lock in a straight-line
   scope; noted as a possible future static-check candidate, not
   pursued this session).
@@ -11890,7 +11890,7 @@ parity with exit codes deliberately unchanged).
   uses) has no equivalent optimization and hangs. NOT a compiler bug
   -- codegen is correct and identical in spirit on both paths; the
   gap is `lli`'s lack of loop-closed-form optimization, an inherent,
-  out-of-vāṇी's-control characteristic of using an interpreter for
+  out-of-vāṇī's-control characteristic of using an interpreter for
   the default `vanic run` execution strategy. Full writeup (including
   why this isn't fixable without either patching upstream LLVM
   tooling or changing `vanic run`'s default execution strategy
@@ -13981,7 +13981,7 @@ that can suspend and resume, non-blocking I/O", make tasks
 cancellable (both blocking-thread `task` and non-blocking `async fn`
 kinds), with no leaks, and update tutorials for done vs. TODO work.
 
-**Correction to the initial framing**: vāṇी already had genuine
+**Correction to the initial framing**: vāṇī already had genuine
 suspend/resume async, not just synchronous `async fn`/`await` sugar
 -- the Arc 8 v3.1 compiler-driven state-machine transform (`Task__
 <fn>` + `__poll_<fn>`, triggered by `io_*_async` calls in an async
@@ -14729,7 +14729,7 @@ independently-seeded schedules, asserting the textbook PCP guarantee
 many trials had a real inversion the ceiling actively prevented (25
 of 30 in the shipped run).
 
-Confirmed real vāṇी constraints while building this: enums have no
+Confirmed real vāṇī constraints while building this: enums have no
 built-in `==` (`match ... { Variant then true, _ then false }` used
 throughout instead of `s == St.B`); `len(xs)` returns `u64`, needing
 explicit `as i64` casts; plain scalar reassignment (`x = expr;`) on
@@ -14753,15 +14753,15 @@ full `cargo test --release --workspace` unchanged. Pushed as
 User request: a worked example of build-system integration covering
 all four of Make, CMake, Meson, and (hand-written, not just as a
 CMake/Meson generator backend) Ninja. `tutorials/src/intermediate/
-09d_build_systems.md` already documented a mixed C+vāṇी project
+09d_build_systems.md` already documented a mixed C+vāṇī project
 layout, but its snippets had never actually been built --
 confirmed by trying, which surfaced a real bug: the tutorial's
 `meson.build` linked against a `static_library()` of the raw,
-un-stripped vāṇी C output, which fails to link with "multiple
-definition of `main`" (every vāṇी entry point lowers `fn main()` to
+un-stripped vāṇī C output, which fails to link with "multiple
+definition of `main`" (every vāṇī entry point lowers `fn main()` to
 a literal C `int main(void)`, and `c_helper.c` has its own `main`
 too). Fixed by compiling to a plain object, `objcopy -N main`-
-stripping vāṇी's `main` symbol out of it, then linking the C side
+stripping vāṇī's `main` symbol out of it, then linking the C side
 directly against that stripped object -- never against a
 `static_library()` of it. Same fix applied to both the tutorial's
 own snippet and the new real project.
@@ -14804,14 +14804,14 @@ near the real mistake (`let mut x` fails inside `let`'s ident parse,
 then the checker reports `x` itself as unknown two lines later).
 
 Added a parser-level "did you mean" hint layer covering the most
-common shapes from mainstream languages that don't exist in vāṇी:
+common shapes from mainstream languages that don't exist in vāṇī:
 
 - **`for`-loop family** (inside `parse_for_stmt_inner`, since by
   that point the `for` keyword has already committed the parse --
   no ambiguity risk): C-style `for (init; cond; incr) { ... }`; the
   old Rust-style `for i in LOW..HIGH` range shape (removed by T0.0,
   still the single most likely mistake for anyone who's seen an
-  older vāṇी snippet or Rust); Pascal-style `for i = LO to HI`
+  older vāṇī snippet or Rust); Pascal-style `for i = LO to HI`
   and the bare "forgot `from`" shape `for i LO to HI` (both detected
   by a bounded forward scan for a `to`/`downto` token before the
   loop body's `{`).
@@ -14820,7 +14820,7 @@ common shapes from mainstream languages that don't exist in vāṇी:
   `foreach IDENT in ...`; `do { ... } while (cond);`;
   `switch (EXPR) { case ... }` / `switch EXPR { ... }`;
   `let mut IDENT`; `var IDENT = ...` (JS/Java/C#, NOT `const` --
-  that's real vāṇी syntax for module-level constants, a distinct
+  that's real vāṇī syntax for module-level constants, a distinct
   keyword token, so it was deliberately left alone); `elif` /
   `elseif`.
 
@@ -14984,7 +14984,7 @@ phase by phase before answering rather than guessing: `vanic check`
 0.19s, LLVM emit 0.24s, `gcc -O3 -c` on `sort_runtime.c` alone
 **0.94s (55% of the total 1.7s build)**, `gcc -O2 -c` on
 `parallel_runtime.c` 0.07s, `opt -O3` 0.17s, `llc` 0.16s. A `-j`-style
-flag doesn't map cleanly onto vāṇी's architecture -- the whole
+flag doesn't map cleanly onto vāṇī's architecture -- the whole
 program flattens into one `Program`/one LLVM module
 (`flatten_modules_in_program`), and there's no multi-package
 workspace build yet (kosh is still a design doc, no CLI command).
@@ -15081,7 +15081,7 @@ misleading-JIT-crash signature already on record for
 BUG-106/108/110/113/115/117/120/162, except this time there's a real
 segfault underneath, not a controlled trap.
 
-**Root-caused, not a vāṇी codegen bug**: the IDENTICAL program built
+**Root-caused, not a vāṇī codegen bug**: the IDENTICAL program built
 via `vanic build` (real AOT native compile, `lli` never involved) ran
 correctly 3/3 times -- `exit 0`, correct output. `vanic run` (LLVM,
 no `--backend`) literally shells out to the external `lli` binary to
@@ -15089,13 +15089,13 @@ JIT-execute the emitted `.ll`; since AOT is proven correct and both
 paths share the same codegen, the bug lives entirely inside `lli`'s
 own JIT engine -- most likely `lli` tears down its JIT-compiled
 machine code when the JIT'd `main` returns without waiting for (or
-being aware of) a real OS pthread spawned via vāṇी's `task`/`detach`
+being aware of) a real OS pthread spawned via vāṇī's `task`/`detach`
 runtime that may still be executing through that same code -- a
 classic "code memory freed out from under a still-running thread"
-segfault, entirely inside upstream LLVM, outside anything vāṇी's own
+segfault, entirely inside upstream LLVM, outside anything vāṇī's own
 source controls.
 
-**No code fix this pass** -- there's nothing in vāṇी's codegen or
+**No code fix this pass** -- there's nothing in vāṇī's codegen or
 runtime C shims to fix (confirmed by AOT working). Documented instead
 as a new tracked limitation: `docs/v1_limitations.md`'s L31, plus a
 `vanic run`-only caveat added to `tutorials/src/advanced/
@@ -15112,7 +15112,7 @@ for a dedicated future design pass, not attempted here.
 `<f32>` warnings). No test suite changes; the repro itself isn't
 added as a regression test since there's no fix to regress against
 (a `vanic run`-crashes-on-this-shape test would just be asserting a
-known, documented, upstream-`lli` limitation, not vāṇी's own
+known, documented, upstream-`lli` limitation, not vāṇī's own
 behavior).
 
 With this, all 4 items selected from this session's localfuzz-driven
@@ -15670,7 +15670,7 @@ i64 }` (the typedef every `Vec<T>` needs) in a *later* pass than the
 user-struct loop (and the enum-payload loop, and the closure-env-struct
 loop -- Arc 5c's `__anon_env_N` structs are themselves plain user
 structs from the emitter's point of view). Any struct/enum/closure-env
-type embedding `Vec<T>` by value -- which is common, since vāṇी's
+type embedding `Vec<T>` by value -- which is common, since vāṇī's
 `Vec<T>` is a value-type triple, not a separate heap box -- got its
 own type definition emitted *before* the `%intent_vec_T` body it
 depends on, and any later `getelementptr` through it (field access,
@@ -15700,4 +15700,63 @@ known-non-compiling baseline, no new failures), and both the original
 qwen-generated repro and the minimal 12-line isolation now produce
 byte-identical output on both backends.
 
-Next free bug number is **BUG-202**.
+## BUG-202 / BUG-203
+
+Found 2026-08-17 while closing a documentation-tooling-flagged test-
+coverage gap in vani-ml (`shuffled_indices` had zero test/example
+call sites; `tools/gen_api_tutorial.py`'s auto-generated
+`api_reference.md` correctly surfaced this as "no usage example
+found"). Writing a real test for it (a Fisher-Yates permutation check
+using a `Vec<bool>` seen-set built via `push`+`set` in a loop) hit two
+independent, previously-undiscovered LLVM-backend-only bugs in the
+packed-bit `Vec<bool>` layout (`%intent_vec_bool = { i64*, i64, i64 }`,
+`len`/`cap` in BITS, data = `ceil(n/64)` i64 words). The C backend's
+`intent_vec_bool` (also bit-packed) was unaffected by either.
+
+**BUG-202** (crash): `emit_vec_bool_let_from_literal` /
+`emit_vec_bool_literal_value` (`src/backend_llvm.rs`) built the
+initial `%intent_vec_bool` struct's `cap` field as an ELEMENT count
+(`if n == 0 { 1 } else { n }`), but every other op on this type
+(critically, `push`'s own growth arithmetic) treats `cap` as a BIT
+count and divides it by 64. A `Vec<bool>` constructed via `vec()`
+(empty, `n=0`) got `cap=1` instead of the correct `64` (the real bit
+capacity of the 8-byte/1-word buffer just malloc'd). The very next
+`push` past that undersized `cap` computed `nc = cap*2 = 2`, then
+`nw = nc/64 = 0` (LLVM `udiv`, no rounding up) -> a 0-byte `realloc`
+-> a null/invalid pointer dereference on the following load. Minimal
+repro: `let seen: Vec<bool> = vec(); push(mut ref seen, false); push(mut
+ref seen, false);` crashed `lli` on the second push. Fix: `cap =
+word_count * 64` in both functions (the true bit capacity of the
+buffer actually allocated), matching the unit `push`'s own grow logic
+expects.
+
+**BUG-203** (silent corruption, found immediately after fixing
+BUG-202 let the test run far enough to fail on a plain assertion
+instead of crashing): `push` and `set_mut`'s bit-OR logic
+(`emit_vec_bool_helpers_llvm`) built the bit to insert via `%bit =
+sext i1 %v to i64`. `sext` of an i1 `true` sign-extends to ALL ONES
+(`-1i64`), not `1` -- shifted left by the target bit index `bi`, that
+sets every bit from `bi` through 63, not just bit `bi`, silently
+corrupting every higher-indexed element in the same 64-bit word the
+instant any element is pushed/set `true`. Traced by hand-simulating a
+10-element `Vec<bool>` seen-set against a known permutation and
+matching the exact "already true" pattern the corruption produced at
+every step. Fix: `zext` instead of `sext` (i1 `false`/`true` ->
+i64 `0`/`1`, no sign extension) -- the only correct choice for a
+1-bit-wide payload being OR'd into a specific position. `pop_mut`'s
+read path (`lshr` + `and 1`, no sign-extension) was already correct
+and untouched.
+
+Regression: `examples/language/english/bug202_203_vec_bool_push_and_set.vani`
+(4 pushes + 1 `set` at a low index, checks the higher indices stayed
+false) + `tests/run_end_to_end.rs`'s
+`bug202_203_vec_bool_push_and_set_example_produces_correct_output_on_both_backends`,
+matching BUG-201's real-subprocess-`vanic-run` shape (a `compile_to_llvm`-
+only test wouldn't catch either bug: BUG-202 needs an actual `lli` run to
+crash, BUG-203 produces wrong-but-plausible output that only a real
+execution + assertion catches). vani-ml's own
+`tests/test_shuffled_indices.vani` (the test that found both bugs)
+passes clean post-fix and is the real-world coverage-gap closure this
+was written for in the first place.
+
+Next free bug number is **BUG-204**.

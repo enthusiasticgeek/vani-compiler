@@ -2,7 +2,7 @@
 
 > **Learning goal**: understand why condition variables exist,
 > what the wait-loop idiom guarantees, and how `Condvar` pairs
-> with `Mutex<T>` in vāṇी.
+> with `Mutex<T>` in vāṇī.
 > Reading order: [Advanced 3 -- Concurrency](03_concurrency.md)
 > -> here -> [Advanced 4a -- Embedded primer](04a_embedded_primer.md).
 

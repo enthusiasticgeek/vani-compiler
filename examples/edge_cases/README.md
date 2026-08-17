@@ -129,7 +129,7 @@ Inline `let f = fn(...) -> R { ... };` inside an
 `implement Iface for T { fn m(...) { ... } }` body or a
 `methods on T { fn m(...) { ... } }` body previously
 panicked the checker with "internal: anonymous fn expression
-survived the lambda-lift pass. This is a vāṇी compiler bug
+survived the lambda-lift pass. This is a vāṇī compiler bug
 — please report." The `lambda_lift_program` walked only
 `program.functions`; impls were hoisted INTO functions later
 but never had their inline closures lifted. Fixed by lifting

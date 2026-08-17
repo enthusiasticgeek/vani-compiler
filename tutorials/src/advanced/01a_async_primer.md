@@ -10,7 +10,7 @@
 
 This chapter is mostly intuition, with real `async`/`await` code
 once the analogy lands (one Rust-style preview snippet is a plain,
-non-`vani`-tagged block, not real vāṇी code).
+non-`vani`-tagged block, not real vāṇī code).
 
 ## The problem: waiting
 
@@ -72,7 +72,7 @@ to the next ball.
 ## What `async fn` actually IS
 
 This is the part that surprises CS-experienced readers coming
-from JavaScript / Python -- and is the entire point of vāṇी's
+from JavaScript / Python -- and is the entire point of vāṇī's
 async story.
 
 ```vani
@@ -124,7 +124,7 @@ When the waiting thing becomes ready, the juggler calls
 resume; the saved locals are still there in the struct. It's
 as if the function "continued where it left off".
 
-This is **the compiler-generated state machine** -- vāṇी's
+This is **the compiler-generated state machine** -- vāṇī's
 Arc 8 v3.1 work, which other docs reference. The user
 writes the natural `async fn` syntax; the compiler emits all
 this boilerplate.
@@ -185,7 +185,7 @@ fn drive(ep: i64, t: mut ref Task__fetch) -> i64 {
 ```
 
 This is the "juggler" -- the event loop that drives the state
-machine forward. vāṇी doesn't ship a compiler-BUILTIN runtime, but
+machine forward. vāṇī doesn't ship a compiler-BUILTIN runtime, but
 [Advanced 1](01_async.md) has a small, reusable `Pollable`/
 `Executor` pattern (2026-08-14) that generalizes this `drive(...)`
 shape to many DIFFERENT `Task__<fn>` types at once, so you don't
@@ -213,7 +213,7 @@ DON'T use async when:
 
 1. **Latency between events.** A task progresses one step per
    poll. If the driver is slow to call `poll` after the I/O
-   becomes ready, that's latency. Most runtimes (vāṇी's
+   becomes ready, that's latency. Most runtimes (vāṇī's
    driver loop included) try to poll promptly, but the
    abstraction adds some overhead vs sync code.
 
@@ -228,7 +228,7 @@ DON'T use async when:
    call stack. The "control flow" jumps between states.
 
 4. **Cancellation.** Stopping a task partway through requires
-   careful design -- vāṇी's `CancelToken` + A4.4 auto-plumbing
+   careful design -- vāṇī's `CancelToken` + A4.4 auto-plumbing
    handles the common case automatically for a non-blocking `async
    fn`/`Task__<fn>` (ASan-verified leak-safe even when cancelled
    mid-flight, holding real heap-owned locals). A BLOCKING `task`

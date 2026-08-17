@@ -1,6 +1,6 @@
 # Beginner 9a -- Modules and namespaces (intuition primer)
 
-> **Learning goal**: build a mental model of "module" (vāṇी's
+> **Learning goal**: build a mental model of "module" (vāṇī's
 > word for "namespace") -- why you'd partition code into named
 > regions, how visibility works, and why `pub` exists. Reading
 > order: this is foundational; read it before
@@ -130,7 +130,7 @@ module.
   reaching for it via `mod::bar` -- that's the boundary `pub(kosh)`
   exists to enforce.
 
-`kosh` (कोश, "treasure / repository") is vāṇी's word for what
+`kosh` (कोश, "treasure / repository") is vāṇī's word for what
 Rust calls a "crate" -- a single buildable package. `pub(kosh)`
 protects a package's internal helper from external consumers (the
 case that matters most -- see [Sec.16 -- Kosh Packages](../intermediate/16_packages.md))

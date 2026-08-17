@@ -1,6 +1,6 @@
 # Defensive Prior Art Disclosure — vāṇी Compiler
 
-**Project**: vāṇी compiler (`vani-compiler`)
+**Project**: vāṇī compiler (`vani-compiler`)
 **Maintainer**: Pratik M. Tambe &lt;enthusiasticgeek@gmail.com&gt;
 **Purpose**: This document is a **defensive publication**. It publicly
 discloses novel techniques implemented in this project so that no person
@@ -38,9 +38,9 @@ If a patent application is filed on any technique described below:
 ### PA-1 — vāṇी programming language design and compiler architecture
 
 **First public disclosure**: 2026-05-21
-**Git evidence**: Initial commit "vāṇी (VANI) — Verbose Alternative Natural Interface"
+**Git evidence**: Initial commit "vāṇī (VANI) — Verbose Alternative Natural Interface"
 
-The vāṇी programming language is a statically typed, affine-ownership,
+The vāṇī programming language is a statically typed, affine-ownership,
 Devanagari-keyword-compatible language with the following novel
 combination of properties:
 

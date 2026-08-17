@@ -1,7 +1,7 @@
 # Glossary
 
 A reference for terms used throughout these tutorials. Most are
-standard PL / compiler / verification vocabulary; where vāṇी
+standard PL / compiler / verification vocabulary; where vāṇī
 uses a term in a non-default way (or with a stronger guarantee
 than usual), the entry calls that out.
 
@@ -16,18 +16,18 @@ you can move between the two without re-orienting.
 
 | Term | Meaning |
 |---|---|
-| **affine** | A value that can be used **at most once** (consume or drop, never both). vāṇी's affine ownership is what makes use-after-move, double-free, and double-close detectable at compile time. Stricter than C++ "move-only"; weaker than fully **linear** (which requires *exactly* once). |
-| **linear** | Used *exactly* once -- never dropped silently. vāṇी is affine, not linear: an unused value drops at scope exit. The contrast is mainly relevant in academic comparisons. |
-| **ownership** | Which name in the program is responsible for releasing a value's resources. vāṇी has at most one owner per value at any moment; the owner's scope-exit triggers Drop. |
+| **affine** | A value that can be used **at most once** (consume or drop, never both). vāṇī's affine ownership is what makes use-after-move, double-free, and double-close detectable at compile time. Stricter than C++ "move-only"; weaker than fully **linear** (which requires *exactly* once). |
+| **linear** | Used *exactly* once -- never dropped silently. vāṇī is affine, not linear: an unused value drops at scope exit. The contrast is mainly relevant in academic comparisons. |
+| **ownership** | Which name in the program is responsible for releasing a value's resources. vāṇī has at most one owner per value at any moment; the owner's scope-exit triggers Drop. |
 | **move** | Transferring ownership from one binding to another. Equivalent to "consume": the source binding can no longer be used. |
 | **borrow** | Temporary read-only access via a `ref T` reference. The borrowed value's owner stays unchanged; the borrow may not outlive the owner. |
 | **mut ref / mutable borrow** | Temporary read/write access via `mut ref T`. Exclusive while held -- no other reference (shared or mut) can coexist. |
 | **reborrow** | Constructing a fresh reference from an existing one (e.g. passing `ref x` further inwards). Inherits the parent's lifetime. |
-| **alias / aliasing** | Two names that refer to the same underlying value. vāṇी forbids mutable aliasing -- one `mut ref` rules out every other reference for its scope. |
+| **alias / aliasing** | Two names that refer to the same underlying value. vāṇī forbids mutable aliasing -- one `mut ref` rules out every other reference for its scope. |
 | **escape (a reference escapes a scope)** | A reference outliving the local it borrows. The scope-escape analyzer rejects programs where a `ref` is returned, stored in a heap location, or assigned to a global. |
-| **elision** | Compiler-inferred ("elided") lifetime -- when the user doesn't write `<'a>`, the rules pick a sensible default. vāṇी uses Rust-style elision so most code is annotation-free. |
-| **borrow checker** | The compile-time analysis that enforces "many shared borrows XOR one mutable borrow, never both" and rejects use-after-move / dangling references. vāṇी *has* one -- it's built into the affine type system (`ref` / `mut ref`), not a separate pass. It's smaller than Rust's: lifetimes are always elided (no `'a` syntax), so a handful of Rust-legal shapes -- multiple distinct-lifetime ref parameters, ref-capturing closures, multi-lifetime structs -- are rejected outright rather than accepted with annotations. See [Intermediate 3](intermediate/03_affine.md#borrow-checker-yes-but-smaller-than-rusts) for the comparison and workarounds. |
-| **RAII** | "Resource Acquisition Is Initialization" -- the resource's lifetime is tied to the scope of its owning binding. vāṇी's Drop runs at scope exit; no need for `defer` or finalizers. |
+| **elision** | Compiler-inferred ("elided") lifetime -- when the user doesn't write `<'a>`, the rules pick a sensible default. vāṇī uses Rust-style elision so most code is annotation-free. |
+| **borrow checker** | The compile-time analysis that enforces "many shared borrows XOR one mutable borrow, never both" and rejects use-after-move / dangling references. vāṇī *has* one -- it's built into the affine type system (`ref` / `mut ref`), not a separate pass. It's smaller than Rust's: lifetimes are always elided (no `'a` syntax), so a handful of Rust-legal shapes -- multiple distinct-lifetime ref parameters, ref-capturing closures, multi-lifetime structs -- are rejected outright rather than accepted with annotations. See [Intermediate 3](intermediate/03_affine.md#borrow-checker-yes-but-smaller-than-rusts) for the comparison and workarounds. |
+| **RAII** | "Resource Acquisition Is Initialization" -- the resource's lifetime is tied to the scope of its owning binding. vāṇī's Drop runs at scope exit; no need for `defer` or finalizers. |
 
 > Want a worked example? See *Affine ownership: `ref` / `mut ref`*
 > ([`intermediate/03_affine.md`](intermediate/03_affine.md)) and
@@ -38,16 +38,16 @@ you can move between the two without re-orienting.
 
 | Term | Meaning |
 |---|---|
-| **generic / parametric** | A definition that takes one or more type parameters (`fn id<T>(x: T) -> T`). vāṇी supports one type parameter per fn. |
+| **generic / parametric** | A definition that takes one or more type parameters (`fn id<T>(x: T) -> T`). vāṇī supports one type parameter per fn. |
 | **monomorphization** | The pass that takes a generic definition (`fn id<T>`) and emits a specialized concrete copy per (template, type-args) tuple it sees called (`fn id__i64`, `fn id__bool`). The resulting program contains no generics at the IR level. |
 | **monomorphic** | Already fully-specialized at concrete types -- no remaining type parameters. |
 | **mangling** | Rewriting a name to encode type-args / module path so the linker can keep distinct instantiations apart (`id__Box_I64_`). |
 | **arity** | Number of arguments a function or variant takes. `fn add(a, b)` has arity 2. |
-| **coercion** | Implicit type conversion the compiler inserts (e.g. `OwnedStr` -> `Str` in read-only positions). vāṇी keeps these conservative -- every cross-width / cross-sign integer conversion requires an explicit `as`. |
-| **nominal type** | Two types with the same shape are *not* the same type unless they share a name. vāṇी's structs are nominal -- `struct A { x: i64 }` and `struct B { x: i64 }` aren't interchangeable. |
+| **coercion** | Implicit type conversion the compiler inserts (e.g. `OwnedStr` -> `Str` in read-only positions). vāṇī keeps these conservative -- every cross-width / cross-sign integer conversion requires an explicit `as`. |
+| **nominal type** | Two types with the same shape are *not* the same type unless they share a name. vāṇī's structs are nominal -- `struct A { x: i64 }` and `struct B { x: i64 }` aren't interchangeable. |
 | **opaque type** | A name whose definition is hidden from callers -- they can hold or pass the value but not read its fields. `Handle<T>` is opaque. |
-| **trait / interface** | A named collection of methods that types can implement. vāṇी uses `interface`; Rust users will recognize it as the equivalent of `trait`. |
-| **dyn iface** | A trait object -- a value whose concrete type is erased and dispatched dynamically via a **vtable**. Written `dyn Iface` in vāṇी. |
+| **trait / interface** | A named collection of methods that types can implement. vāṇī uses `interface`; Rust users will recognize it as the equivalent of `trait`. |
+| **dyn iface** | A trait object -- a value whose concrete type is erased and dispatched dynamically via a **vtable**. Written `dyn Iface` in vāṇī. |
 | **vtable** | A small table of function pointers (one per interface method) that powers dynamic dispatch on `dyn Iface`. |
 | **fat pointer** | A pointer carrying its companion data inline -- `Box<dyn Iface>` is `{ data_ptr, vtable_ptr }`; `BoundedPtr<T>` is `{ data, len, capacity }`. Contrast with a **thin pointer** (one word). |
 
@@ -67,7 +67,7 @@ you can move between the two without re-orienting.
 | **payload** | The data a variant carries. `Some(i64)` has an i64 payload; `None` has no payload. |
 | **discriminant / tag** | The runtime integer that distinguishes which variant a value holds. |
 | **destructure** | Pulling fields / payloads out of a compound value into named bindings -- `let (a, b) = pair;` or `K.Some(v) then ...` in a match arm. |
-| **exhaustive** | Every possible value of the scrutinee type matches at least one arm. vāṇी requires exhaustive matches and rejects gaps. |
+| **exhaustive** | Every possible value of the scrutinee type matches at least one arm. vāṇī requires exhaustive matches and rejects gaps. |
 
 > Worked examples: *Pattern matching -- intuition primer*
 > ([`beginner/08a_pattern_match_primer.md`](beginner/08a_pattern_match_primer.md));
@@ -79,11 +79,11 @@ you can move between the two without re-orienting.
 | Term | Meaning |
 |---|---|
 | **AST** | Abstract Syntax Tree -- the parser's structured representation of the source code. |
-| **IR** | Intermediate Representation -- a typed, post-checker form of the program. vāṇी emits a "tree IR" (close to the AST) and an "SSA IR" used by the optimizer / parallel-for emit. |
+| **IR** | Intermediate Representation -- a typed, post-checker form of the program. vāṇī emits a "tree IR" (close to the AST) and an "SSA IR" used by the optimizer / parallel-for emit. |
 | **SSA** | Static Single Assignment -- each variable is assigned exactly once; control flow merges become Phi nodes. Makes data-flow analyses straightforward. |
 | **lowering** | Translating from a higher-level IR to a lower-level one (typed-IR -> SSA -> backend-specific code). |
 | **emit / emission** | The final code-generation step that produces C or LLVM IR text. |
-| **backend** | The half of the compiler that consumes the IR and produces output for a target. vāṇी has C and LLVM backends. |
+| **backend** | The half of the compiler that consumes the IR and produces output for a target. vāṇī has C and LLVM backends. |
 | **lambda lift** | Hoisting an inline anonymous fn (`fn(x) -> y { ... }`) to a top-level fn with a synthesized name so the backend can emit it as a regular symbol. |
 | **(de)sugar** | "Sugar" is a convenient syntactic form; "desugar" is the parser- or pre-checker pass that rewrites it into the more verbose, semantically-equivalent core form (`?` becomes `try`, `+= 1` becomes `= ... + 1`, etc.). |
 | **hoist** | To move a sub-expression or statement *up* to an enclosing scope (e.g. binding a temporary `let` before using it inside a more restricted context). |
@@ -96,8 +96,8 @@ you can move between the two without re-orienting.
 
 | Term | Meaning |
 |---|---|
-| **SMT** | Satisfiability Modulo Theories -- a class of solvers (vāṇी uses Z3) that decide first-order formulas modulo integer/bitvector/float/etc. theories. Underpins `requires` / `ensures` / `prove` / `invariant`. |
-| **BitVec** | A fixed-width bit-vector -- how SMT models integer types. vāṇी encodes `i64` as `(_ BitVec 64)` so overflow is faithfully modeled (signed and unsigned semantics chosen per variable). |
+| **SMT** | Satisfiability Modulo Theories -- a class of solvers (vāṇī uses Z3) that decide first-order formulas modulo integer/bitvector/float/etc. theories. Underpins `requires` / `ensures` / `prove` / `invariant`. |
+| **BitVec** | A fixed-width bit-vector -- how SMT models integer types. vāṇī encodes `i64` as `(_ BitVec 64)` so overflow is faithfully modeled (signed and unsigned semantics chosen per variable). |
 | **discharge** | "Solve" a proof obligation -- show the negation is unsatisfiable, i.e. the claim always holds under the in-scope assumptions. |
 | **counterexample** | A concrete assignment of values to free variables under which a `prove` / `ensures` / `invariant` fails. Z3 emits one when the claim can't be discharged. |
 | **invariant** (loop) | A claim that holds at every iteration: before entry, after every body, and at exit. The SMT pipeline checks each of those points. |
@@ -119,7 +119,7 @@ you can move between the two without re-orienting.
 | **suspend point** | An `await(expr)` or `io_*_async(...)` call where the async runtime can pause the task and return control to the scheduler. State machines are split around these. |
 | **poll** | The runtime entry point on an async task -- called repeatedly until it returns `Ready(v)` or `Pending`. |
 | **yield** | An async task voluntarily relinquishing control (`sleep_ms(0)` is the conventional shape). |
-| **future** | An in-progress async computation. vāṇी's `Future<T>` is a state-machine enum with `Ready(T)` / `Pending` variants. |
+| **future** | An in-progress async computation. vāṇī's `Future<T>` is a state-machine enum with `Ready(T)` / `Pending` variants. |
 | **pure fn** | A function with no observable side effects -- no I/O, no heap allocation, no non-determinism, no impure callees. Verified by the effects checker. |
 | **effects checker** | The pass that decides whether a function body is pure, by walking calls and rejecting any impure builtin or non-pure callee. Same logic gates `parallel for` bodies. |
 | **`Pollable` / `Executor`** | A small, reusable *user-space* pattern (not a built-in prelude type like `Future<T>`) for driving several heterogeneous `Task__<fn>` state machines without a hand-rolled loop per shape -- `interface Pollable { fn poll(mut ref self) -> bool; }` plus an `Executor` holding `Vec<Box<dyn Pollable>>`. See [Advanced 1 -- Async / await](advanced/01_async.md#an-executor-not-a-hand-rolled-driver-pollable--executor) for the full worked pattern. |
@@ -136,14 +136,14 @@ you can move between the two without re-orienting.
 
 | Term | Meaning |
 |---|---|
-| **arena** | A region allocator whose contents are all freed at once when the arena drops. vāṇी's `Region` is a bump-allocator arena (`region <name> { ... }` + `region_borrow_i64` -> `ArenaRef<i64>`), usable directly on hosted targets -- no `unsafe` block needed for local use. Not related to `Pool<T>`/`Handle<T>` (a separate, runtime-checked mechanism); see [Advanced 4 -- Embedded](advanced/04_embedded.md). |
+| **arena** | A region allocator whose contents are all freed at once when the arena drops. vāṇī's `Region` is a bump-allocator arena (`region <name> { ... }` + `region_borrow_i64` -> `ArenaRef<i64>`), usable directly on hosted targets -- no `unsafe` block needed for local use. Not related to `Pool<T>`/`Handle<T>` (a separate, runtime-checked mechanism); see [Advanced 4 -- Embedded](advanced/04_embedded.md). |
 | **bump allocator** | Allocator that increments a single pointer and never reclaims individual cells -- the arena reclaims everything at once. O(1) allocation. |
 | **BoundedPtr<T>** | A fat pointer carrying `data + len + capacity` so `bptr_get(i)` can return `None` instead of UB on out-of-bounds. Available inside `unsafe(reason = "...")` for low-level interop. |
-| **MMIO** | Memory-mapped I/O -- reads and writes at hardware-defined addresses that map to device registers. `mmio_read_u32` / `mmio_write_u32` are the vāṇी builtins. |
-| **canary** | A sentinel value placed adjacent to a buffer or stack frame so the runtime can detect overflow. Used in C as a stack-smashing defense; vāṇी doesn't need user-level canaries -- bounds checks fire before overflow can occur. |
+| **MMIO** | Memory-mapped I/O -- reads and writes at hardware-defined addresses that map to device registers. `mmio_read_u32` / `mmio_write_u32` are the vāṇī builtins. |
+| **canary** | A sentinel value placed adjacent to a buffer or stack frame so the runtime can detect overflow. Used in C as a stack-smashing defense; vāṇī doesn't need user-level canaries -- bounds checks fire before overflow can occur. |
 | **prelude** | A small set of declarations the compiler injects before every program: `Option<T>`, `Result<T,E>`, `Future<T>`, `Poll<T>`, `CancelToken`, `AllocError`. |
 | **panic / abort** | A non-resumable termination. `assert` failures terminate the process with exit code 3 and a diagnostic on stderr (both backends deliberately avoid a raw `abort()`/SIGABRT here, since that can make `vanic run`'s JIT misreport the failure as an apparent native crash). |
-| **stack / heap** | The stack holds activation records (function-call frames); the heap holds long-lived allocations (`Vec<T>`, `OwnedStr`, `Box<T>`). vāṇी puts the choice in the type (Copy = stack-ish, owning = heap). |
+| **stack / heap** | The stack holds activation records (function-call frames); the heap holds long-lived allocations (`Vec<T>`, `OwnedStr`, `Box<T>`). vāṇī puts the choice in the type (Copy = stack-ish, owning = heap). |
 | **`.text` / `.rodata` / `.data` / `.bss`** | The named sections a compiled binary is divided into *before it runs*: `.text` = code, `.rodata` = read-only constants (`Str` literals), `.data` = initialized globals, `.bss` = zero-initialized globals. `.bss` stores no bytes in the binary file -- only a size; the loader (or, on bare metal, your own `Reset_Handler`) zeroes that much RAM at startup. Distinct from stack/heap, which fill up only while the program runs. |
 | **deferred** | A diagnostic or work-item delayed until later in the pipeline. |
 | **runtime** | Two senses: (a) the bundled C / LLVM helpers the compiler emits alongside user code (string concat, Vec helpers, futex-backed Mutex, etc.); (b) "at runtime" -- when the compiled program executes. |
@@ -159,33 +159,33 @@ you can move between the two without re-orienting.
 ## C++ equivalents
 
 The rest of this glossary (and most of the tutorials) explains
-vāṇी concepts by comparison to Rust, since vāṇी's ownership model
+vāṇī concepts by comparison to Rust, since vāṇī's ownership model
 is Rust-shaped. If C++ is your home language instead, this table
 is the same cross-reference the other way. None of these
-mappings are exact -- vāṇी's compiler enforces things C++ leaves
+mappings are exact -- vāṇī's compiler enforces things C++ leaves
 to convention or a library -- but they'll get you oriented fast.
 
 **Ownership and memory**
 
-| vāṇी | Rust | Nearest C++ | The gap |
+| vāṇī | Rust | Nearest C++ | The gap |
 |---|---|---|---|
-| affine ownership / `move` | ownership + move | Move semantics (C++11, `std::move`) | C++ leaves a moved-from object in a valid-but-unspecified state and lets you keep using it; vāṇी makes touching a moved-from binding a **compile error**. |
-| `ref T` / `mut ref T` | `&T` / `&mut T` | `const T&` / `T&`, or `const T*` / `T*` | C++ references/pointers carry no compile-time aliasing rule; vāṇी (like Rust) enforces "many shared borrows XOR one mutable," checked statically. |
+| affine ownership / `move` | ownership + move | Move semantics (C++11, `std::move`) | C++ leaves a moved-from object in a valid-but-unspecified state and lets you keep using it; vāṇī makes touching a moved-from binding a **compile error**. |
+| `ref T` / `mut ref T` | `&T` / `&mut T` | `const T&` / `T&`, or `const T*` / `T*` | C++ references/pointers carry no compile-time aliasing rule; vāṇī (like Rust) enforces "many shared borrows XOR one mutable," checked statically. |
 | borrow checker | borrow checker | *(nothing)* | This is the headline gap -- C++ has no compiler-enforced lifetime/aliasing analysis. Static analyzers (clang-tidy, Address/UBSan at runtime) catch some of the same bugs *after the fact*, not at compile time. |
 | `Box<T>` | `Box<T>` | `std::unique_ptr<T>` | Same shape: single owner, heap-allocated, moves not copies. |
-| RAII / scope-exit `Drop` | `Drop` trait, RAII | RAII, destructors | vāṇी and Rust both inherited this idea from C++ -- the term itself is a C++ coinage (Stroustrup). |
-| `Region` / `ArenaRef<T>` | an arena crate (e.g. `bumpalo`) + a lifetime-tied reference | A hand-rolled arena allocator, or `std::pmr::monotonic_buffer_resource` (C++17 PMR) | Neither C++ option is compiler-verified the way vāṇी's escape analysis is -- using a PMR allocation after its arena resets is a silent use-after-free in C++; it's a compile error in vāṇी. |
+| RAII / scope-exit `Drop` | `Drop` trait, RAII | RAII, destructors | vāṇī and Rust both inherited this idea from C++ -- the term itself is a C++ coinage (Stroustrup). |
+| `Region` / `ArenaRef<T>` | an arena crate (e.g. `bumpalo`) + a lifetime-tied reference | A hand-rolled arena allocator, or `std::pmr::monotonic_buffer_resource` (C++17 PMR) | Neither C++ option is compiler-verified the way vāṇī's escape analysis is -- using a PMR allocation after its arena resets is a silent use-after-free in C++; it's a compile error in vāṇī. |
 | `Pool<T>` / `Handle<T>` | a `slotmap` / `generational-arena` crate | A hand-rolled "slot map" (index + generation) | No standard-library equivalent in either language; this is a well-known pattern, not a language feature, in C++. |
 | `unsafe(reason = "...") { ... }` | `unsafe { ... }` | *(nothing as an opt-in boundary)* | Ordinary C++ is unsafe-by-default everywhere -- there's no compiler-enforced "safe by default, opt out explicitly" boundary to contrast with. The closest cultural equivalent is a documented raw-pointer comment convention, or a MISRA-style suppression comment. |
 
 **Types, generics, and dispatch**
 
-| vāṇी | Rust | Nearest C++ | The gap |
+| vāṇī | Rust | Nearest C++ | The gap |
 |---|---|---|---|
-| generics + monomorphization | generics (monomorphized) | Templates (compile-time instantiation) | Both are zero-cost and instantiate a concrete copy per type used. vāṇी caps generics at one type parameter per `fn` in v1; C++ templates have no such cap. |
-| `interface` (static dispatch) | `trait` (static, via generic bounds) | Templates + "concepts" (C++20), or duck-typing via templates (pre-C++20) | C++ has no single idiomatic mechanism here the way Rust/vāṇी have one keyword; concepts are the closest modern equivalent (compile-time-checked constraints on a template parameter). |
+| generics + monomorphization | generics (monomorphized) | Templates (compile-time instantiation) | Both are zero-cost and instantiate a concrete copy per type used. vāṇī caps generics at one type parameter per `fn` in v1; C++ templates have no such cap. |
+| `interface` (static dispatch) | `trait` (static, via generic bounds) | Templates + "concepts" (C++20), or duck-typing via templates (pre-C++20) | C++ has no single idiomatic mechanism here the way Rust/vāṇī have one keyword; concepts are the closest modern equivalent (compile-time-checked constraints on a template parameter). |
 | `dyn Iface` (dynamic dispatch) | `dyn Trait` (trait object) | An abstract base class with pure virtual methods, called through a base-class pointer/reference (virtual dispatch via vtable) | This is the "interfaces" mapping most C++ readers already know: `interface Shape { fn area(self: ref Self) -> f64; }` + `dyn Shape` ~ `class Shape { public: virtual double area() const = 0; };` + `Shape*`/`Shape&`. |
-| `enum` with payloads | `enum` (tagged union / "sum type") | `std::variant<Ts...>` (C++17), tagged by index; or a manually-tagged union pre-C++17 | vāṇी's `match` requires exhaustiveness the way Rust's does; `std::visit` on a `variant` gets you close in C++, but nothing enforces you handled every alternative unless you opt into `-Wswitch`-style warnings on the index. |
+| `enum` with payloads | `enum` (tagged union / "sum type") | `std::variant<Ts...>` (C++17), tagged by index; or a manually-tagged union pre-C++17 | vāṇī's `match` requires exhaustiveness the way Rust's does; `std::visit` on a `variant` gets you close in C++, but nothing enforces you handled every alternative unless you opt into `-Wswitch`-style warnings on the index. |
 | `match` | `match` | `switch` (much weaker), or `std::visit` for a `variant` | `switch` has no payload destructuring and (without extra tooling) no exhaustiveness check; fallthrough is opt-out, not opt-in. |
 | `Option<T>` | `Option<T>` | `std::optional<T>` (C++17) | Same shape. |
 | `Result<T, E>` + `try` / `?` | `Result<T, E>` + `?` | *(nothing idiomatic)* | C++ traditionally signals failure via exceptions (unwinding, not a return value) or an error code out-parameter. `std::expected<T, E>` (C++23) is the closest structural match but isn't yet in universal use. |
@@ -197,9 +197,9 @@ to convention or a library -- but they'll get you oriented fast.
 
 **Concurrency**
 
-| vāṇी | Rust | Nearest C++ | The gap |
+| vāṇī | Rust | Nearest C++ | The gap |
 |---|---|---|---|
-| `Mutex<T>` + `Guard<T>` | `Mutex<T>` + `MutexGuard` | `std::mutex` + `std::lock_guard`/`std::unique_lock` | Same RAII shape: the guard's destructor/scope-exit unlocks automatically. vāṇी and Rust additionally tie the *protected value* to the guard's type so you can't touch it without holding the lock; a `std::mutex` in C++ is just a bare lock with no compiler-enforced link to what it protects. |
+| `Mutex<T>` + `Guard<T>` | `Mutex<T>` + `MutexGuard` | `std::mutex` + `std::lock_guard`/`std::unique_lock` | Same RAII shape: the guard's destructor/scope-exit unlocks automatically. vāṇī and Rust additionally tie the *protected value* to the guard's type so you can't touch it without holding the lock; a `std::mutex` in C++ is just a bare lock with no compiler-enforced link to what it protects. |
 | `RwLock<T>` | `RwLock<T>` | `std::shared_mutex` (C++17) | |
 | `Atomic<T>` | `std::sync::atomic` types | `std::atomic<T>` (C++11) | |
 | `Barrier` | `std::sync::Barrier` | `std::barrier` (C++20) | |
@@ -208,9 +208,9 @@ to convention or a library -- but they'll get you oriented fast.
 
 **Verification**
 
-| vāṇी | Rust | Nearest C++ | The gap |
+| vāṇī | Rust | Nearest C++ | The gap |
 |---|---|---|---|
-| `requires` / `ensures` / `prove` (SMT-checked) | *(no stdlib equivalent; similar to `contracts`-style crates)* | `assert()` | `assert()` is a **runtime** check that can be compiled out (`NDEBUG`); vāṇी's `requires`/`ensures`/`prove` are discharged by an SMT solver **at compile time** -- a failure is a compile error, not a 3am production crash. The (still-experimental, repeatedly deferred) C++ Contracts proposal is aiming at similar ground but isn't standardized. |
+| `requires` / `ensures` / `prove` (SMT-checked) | *(no stdlib equivalent; similar to `contracts`-style crates)* | `assert()` | `assert()` is a **runtime** check that can be compiled out (`NDEBUG`); vāṇī's `requires`/`ensures`/`prove` are discharged by an SMT solver **at compile time** -- a failure is a compile error, not a 3am production crash. The (still-experimental, repeatedly deferred) C++ Contracts proposal is aiming at similar ground but isn't standardized. |
 
 See [Intermediate 4c -- Generics primer](intermediate/04c_generics_primer.md),
 [Intermediate 4b -- Interfaces primer](intermediate/04b_interfaces_primer.md),

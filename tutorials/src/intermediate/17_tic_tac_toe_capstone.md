@@ -360,7 +360,7 @@ instead of crashing.
 **A real gotcha, not a hypothetical one: blank input means quit.**
 `trimmed == ""` returns immediately rather than re-prompting. Two
 different situations produce an empty trimmed string here, and
-vāṇी's runtime doesn't distinguish them:
+vāṇī's runtime doesn't distinguish them:
 
 1. A player presses Enter on a genuinely blank line.
 2. `stdin_read_line()` hits real end-of-input on a closed or piped
@@ -561,5 +561,5 @@ that needs to care about it -- unchanged by the AI addition, since
 
 ---
 
-**Previous**: [Sec.16a -- Testing your vāṇी code ->](16a_testing_primer.md)
+**Previous**: [Sec.16a -- Testing your vāṇī code ->](16a_testing_primer.md)
 **Next**: [Advanced track: Async / await -- intuition primer ->](../advanced/01a_async_primer.md)

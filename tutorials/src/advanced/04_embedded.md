@@ -2,7 +2,7 @@
 
 > **Learning goal**: opt into the `unsafe` operations needed
 > for embedded / systems work (raw pointers, region-scoped
-> arenas, manual memory) -- and understand how vāṇी keeps the
+> arenas, manual memory) -- and understand how vāṇī keeps the
 > safety boundary explicit at the source level.
 
 > **New to this?** Read [Advanced 4a -- Embedded primer](04a_embedded_primer.md) first.
@@ -13,7 +13,7 @@ by posted rules. The service door lets authorized staff (the
 ones who KNOW the rules) step behind the scenes to do things
 the public corridors can't: move large equipment, access
 electrical panels, interact with the building's raw
-infrastructure. `unsafe(reason = "raw pointer write -- hardware register") {}` in vāṇी works the same way:
+infrastructure. `unsafe(reason = "raw pointer write -- hardware register") {}` in vāṇī works the same way:
 the rest of the language's safety rules still apply everywhere
 else; the `unsafe` block is a clearly-marked zone where the
 compiler relaxes exactly the restrictions that embedded

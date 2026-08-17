@@ -135,7 +135,7 @@ fn main() -> i64 {
   `lli`'s own JIT engine appears to tear down its compiled machine
   code when the JIT'd `main` returns without waiting for OS-level
   pthreads (like a detached task's) that may still be executing
-  through it. Root-caused to `lli` itself, not vāṇी's codegen: the
+  through it. Root-caused to `lli` itself, not vāṇī's codegen: the
   identical program compiled with `vanic build` (AOT, no `lli`
   involved) or run via `vanic run --backend=c` completes correctly
   every time. If a detached task's runtime might outlive `main`
@@ -205,7 +205,7 @@ fn main() -> i64 {
 
 ## The six concurrency primitives
 
-vāṇी ships six primitives in the prelude -- pick by the
+vāṇī ships six primitives in the prelude -- pick by the
 synchronization shape you need:
 
 ### `Atomic<T>` -- lock-free counters and flags

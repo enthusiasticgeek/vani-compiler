@@ -9,7 +9,7 @@ you know it hasn't been tampered with.
 
 ## What is Kosh?
 
-**Kosh** (कोश, "treasure / repository") is vāṇी's package manager. It lets
+**Kosh** (कोश, "treasure / repository") is vāṇī's package manager. It lets
 you:
 
 - **declare dependencies** in a `vani.toml` manifest
@@ -24,7 +24,7 @@ The live registry is at
 
 ## Your first `vani.toml`
 
-Every vāṇी project needs a manifest file at the project root:
+Every vāṇī project needs a manifest file at the project root:
 
 ```toml
 [package]
@@ -134,7 +134,7 @@ fn main() -> i64 {
 ```
 
 This namespacing is what lets two unrelated packages -- or a package and a
-vāṇी builtin -- share a function name with zero conflict. If you forget the
+vāṇī builtin -- share a function name with zero conflict. If you forget the
 prefix, the compiler tells you exactly what to write instead:
 
 ```
@@ -469,5 +469,5 @@ contract from across this track into one real program.
 ---
 
 **Previous**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
-**Next**: [Sec.16a -- Testing your vāṇी code ->](16a_testing_primer.md)
+**Next**: [Sec.16a -- Testing your vāṇī code ->](16a_testing_primer.md)
 

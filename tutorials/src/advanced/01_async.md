@@ -13,7 +13,7 @@ it's done. An async chef puts the pizza in the oven, notes
 "pizza for table 3 in the oven", and goes to make a salad
 (another request). When the oven timer dings, they come back
 (`await`), pull the pizza out, and finish the pizza order.
-`async fn` in vāṇी turns a function into this "return to it
+`async fn` in vāṇī turns a function into this "return to it
 when the slow thing is done" style automatically. The compiler
 transforms it into a state machine so the one thread can
 juggle many in-progress tasks without blocking.
@@ -157,7 +157,7 @@ attempts, and `epoll_close` when done.
 Everything above -- suspend points, `Task`, `select`, `epoll` -- exists
 because a real server juggles many connections on one thread. If
 you're writing a short script that talks to exactly one peer at a
-time, none of that machinery is required: vāṇी also ships an
+time, none of that machinery is required: vāṇī also ships an
 ordinary **blocking** socket API, the same shape you'd reach for
 first in Python or C.
 
@@ -204,7 +204,7 @@ thread -- concurrent `task` bodies each get their own), which
 `tcp_send_buf` echoes from directly, so a request/response echo is
 just `tcp_recv` then `tcp_send_buf(fd, n)`. This is the same
 "one-thread-per-connection" model `task`/`join` already gives you
-elsewhere in vāṇी -- reach for it before reaching for `async`/
+elsewhere in vāṇī -- reach for it before reaching for `async`/
 `epoll`, and only graduate to the suspend-point machinery above once
 you actually need one thread serving many connections at once.
 `tcp_accept_nb`/`tcp_recv_nb` (used earlier in this chapter) are the

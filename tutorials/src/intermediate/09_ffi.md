@@ -1,16 +1,16 @@
 # Intermediate 9 -- FFI: `extern "C"` + `--link-with`
 
-> **Learning goal**: call a C-ABI function from vāṇी, declare
+> **Learning goal**: call a C-ABI function from vāṇī, declare
 > a foreign function as `pure` so pure callers can use it, and
 > link external code at build time via `--link-with` / `-l<name>`.
 
 > **New to this?** Read [Intermediate 9a -- FFI primer](09a_ffi_primer.md) first.
 
 Think of a hardware store that sells pre-made door hinges. Your
-house is written in vāṇी; the hinges were made in a C factory.
+house is written in vāṇī; the hinges were made in a C factory.
 You don't need to understand how the factory works -- you just
 need to know the hinge's interface (its type signature) and where
-to get it (the library). `extern "C"` is the vāṇी way of
+to get it (the library). `extern "C"` is the vāṇī way of
 describing that interface; `--link-with` tells the compiler where
 the factory's finished goods are stored.
 
@@ -94,7 +94,7 @@ fn main() -> i64 {
 }
 ```
 
-Without `#[repr(C)]`, vāṇी may reorder or pad fields differently
+Without `#[repr(C)]`, vāṇī may reorder or pad fields differently
 from C, causing silent data corruption across the boundary.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="platform-specific — this example needs a tweak on Windows"/>
@@ -182,7 +182,7 @@ The fix is either `#[repr(C)]` (pass by value, C-compatible layout) or
 
 ## Linking external code
 
-vāṇी shells out to your system `cc` for the C backend and
+vāṇī shells out to your system `cc` for the C backend and
 `lli` for the LLVM JIT. Two flags forward to the linker:
 
 ```bash
@@ -197,7 +197,7 @@ vanic build foo.vani -o foo -lm -lcurl
 
 ## Common gotchas
 
-- **No null pointer in `Str`**. `Str` in vāṇी always points to
+- **No null pointer in `Str`**. `Str` in vāṇī always points to
   a valid NUL-terminated buffer. A C function that may return
   NULL needs a wrapper that converts NULL into a sentinel
   string or an `Option`.
@@ -220,7 +220,7 @@ vanic build foo.vani -o foo -lm -lcurl
 > The FFI patterns below are now only needed for **device I/O**:
 > serial ports (RS232/RS485/UART), I2C, SPI, and other kernel-ioctl
 > interfaces where the C `struct termios` / `struct ifreq` ABI is
-> aggregate-by-value (rejected at vāṇी's FFI boundary).
+> aggregate-by-value (rejected at vāṇī's FFI boundary).
 
 ### Flat file (append log)
 

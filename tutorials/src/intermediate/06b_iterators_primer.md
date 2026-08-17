@@ -52,7 +52,7 @@ one. Programmers call this behavior **lazy evaluation**, and each
 attachment clipped onto the chain (the screen, the dye cartridge) is
 what the rest of this chapter calls a **combinator** or an
 **adapter**. Keep the tap picture in mind -- the rest of this chapter
-is just giving these parts their formal names and vāṇी's exact
+is just giving these parts their formal names and vāṇī's exact
 spellings for them.
 
 ## The problem: collections of operations
@@ -101,14 +101,14 @@ step its own `let` the way the three lines above do -- same
 rule that governs `ref`/`mut ref`, which also only bind to a
 named place, never an arbitrary expression.
 
-That's the iterator-combinator style. vāṇी supports it through
+That's the iterator-combinator style. vāṇī supports it through
 function-style helpers (`vec_filter`, `vec_map`, `vec_fold`)
 and the method-call sugar (`xs.filter(...)`, `xs.map(...)`,
 `xs.fold(...)`).
 
 ## The combinator vocabulary
 
-You'll see these names across many languages. vāṇी's spellings:
+You'll see these names across many languages. vāṇī's spellings:
 
 ### Producers -- start a chain
 
@@ -145,7 +145,7 @@ The kitchen-tap picture at the top of this chapter -- water
 flowing on demand, nothing pre-made -- is how Rust's iterators
 and Python's generators actually work: *lazy evaluation*, where
 an adapter only touches an element the instant the consumer
-asks for the next one. **vāṇी v1 does NOT work this way.** Every
+asks for the next one. **vāṇī v1 does NOT work this way.** Every
 adapter is **eager**: `.filter(...)` walks the whole input right
 then and there and materializes a brand-new `Vec` holding the
 results, before the next step ever runs. `.map(...)` does the

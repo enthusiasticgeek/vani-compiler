@@ -151,7 +151,7 @@ Without the blanket impl you'd need a separate
 | Use when | You know the specific type | You're building a generic adapter/wrapper |
 
 **Overlap rule**: unlike most conflicting-declaration situations in
-vāṇी (duplicate functions, duplicate struct fields), the compiler
+vāṇī (duplicate functions, duplicate struct fields), the compiler
 does **not** reject an overlapping blanket + concrete impl pair --
 there's no "ambiguous, pick one" diagnostic. If you have a blanket
 impl for `Wrapper<T> where T is Printable` AND a concrete impl

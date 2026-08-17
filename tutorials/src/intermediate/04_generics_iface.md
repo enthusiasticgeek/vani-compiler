@@ -1,6 +1,6 @@
 # Intermediate 4 -- Generics and interfaces
 
-> **Learning goal**: declare an `interface` (vāṇी's name for
+> **Learning goal**: declare an `interface` (vāṇī's name for
 > traits), `implement` it for concrete types, and write a
 > generic function bounded by `where T is Iface`.
 

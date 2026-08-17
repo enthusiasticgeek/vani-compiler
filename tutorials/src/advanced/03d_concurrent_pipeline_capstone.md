@@ -245,7 +245,7 @@ correctness guarantee, not a coincidence of scheduling.)
 - [Advanced 4 -- Embedded, `unsafe`, region typing](04_embedded.md)
   -- `Pool<T>`/`Handle<T>` vs `Region`/`ArenaRef<T>`, side by side
 - [Intermediate 3c -- Shared ownership without `Rc`/`Arc`](../intermediate/03c_shared_ownership_primer.md)
-  -- why vāṇी reaches for handles and arenas instead of reference
+  -- why vāṇī reaches for handles and arenas instead of reference
   counting in the first place
 
 

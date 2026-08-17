@@ -125,7 +125,7 @@ historical context; each item links to the closure that shipped it.
 - **Glob imports** (`use foo::*;`). ✅ #253 — non-transitive only.
 - **Multi-item imports** (`use foo::{bar, baz};`). ✅ #247.
 - **`pub(kosh)` / `pub(super)`** visibility tiers -- `kosh`
-  is vāṇी's name for what Rust calls a crate. One kosh = one
+  is vāṇī's name for what Rust calls a crate. One kosh = one
   compilation unit / one package; the package registry is Kosh
   (`kosh-index`). #258 shipped `pub(kosh)` as preparatory syntax; the
   kosh boundary itself shipped 2026-07-21 (Kosh namespacing arc Phase

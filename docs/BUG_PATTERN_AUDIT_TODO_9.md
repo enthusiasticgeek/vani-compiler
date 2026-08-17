@@ -384,7 +384,7 @@ summary per finding:
 
 No fix needed for any of these. One soft follow-up noted (not
 pursued): `d8f20b7050`'s same-thread double-lock is arguably a missed
-static-analysis opportunity for vāṇी's existing lock-order checker,
+static-analysis opportunity for vāṇī's existing lock-order checker,
 which doesn't currently catch this pattern in a straight-line scope.
 
 ### 3 more findings, landed after BUG-164 shipped (2026-08-10, later still)
@@ -428,7 +428,7 @@ which doesn't currently catch this pattern in a straight-line scope.
   EXECUTION strategy `vanic run` picks (JIT-interpret via `lli`) vs.
   what `--backend=c` and `vanic build` do (compile with a real
   optimizer). Not fixable without either (a) making `lli` itself
-  smarter about loop induction variables -- out of vāṇी's control,
+  smarter about loop induction variables -- out of vāṇī's control,
   that's upstream LLVM tooling -- or (b) `vanic run` switching its
   default execution strategy away from `lli`, a much bigger design
   question with its own tradeoffs (JIT startup latency, etc.), not

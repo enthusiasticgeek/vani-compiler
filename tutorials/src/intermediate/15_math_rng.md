@@ -1,12 +1,12 @@
 # Intermediate 15 -- Math, random numbers, and `clone`
 
 > **Learning goal**: use the math, random-number, and `clone`
-> builtins that are available in every vāṇी program without an
+> builtins that are available in every vāṇī program without an
 > import.
 
 ## Math builtins
 
-vāṇी ships a large math library as compiler builtins. The most
+vāṇī ships a large math library as compiler builtins. The most
 commonly used ones:
 
 ### Basic arithmetic helpers
@@ -105,7 +105,7 @@ time-based or hardware seed for unpredictable output.
 
 ## `clone`
 
-In vāṇी, affine ownership means you can't use a value twice after
+In vāṇī, affine ownership means you can't use a value twice after
 moving it. For `Vec<T>`, `HashMap<K,V>`, `HashSet<T>`, and
 `OwnedStr`, you can make an explicit deep copy with `clone`:
 

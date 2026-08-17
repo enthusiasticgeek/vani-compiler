@@ -677,7 +677,7 @@ keyword. Native DiagLang labels for each:
 
 ### Cumulative new-script milestone
 
-vāṇी now spans **26 distinct scripts**: Latin, Devanagari,
+vāṇī now spans **26 distinct scripts**: Latin, Devanagari,
 Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam,
 Odia, Sinhala, Arabic, Cyrillic, Japanese (3-block), Hangul,
 Greek, Hebrew, Thai, Armenian, Georgian, Khmer, Burmese,
@@ -721,7 +721,7 @@ split ~9000 years ago; distinct keyword set. Uses ä/ö only.
 ~5M speakers.
 
 ### Phase 13.26 — Catalan (català)
-**Sixth Romance variant** in vāṇी (Spanish + French + Italian
+**Sixth Romance variant** in vāṇī (Spanish + French + Italian
 + Portuguese + Romanian + Catalan). Uses à/è/é/í/ï/ò/ó/ú/ü.
 ~10M speakers.
 
@@ -1018,7 +1018,7 @@ English identifiers.
 
 ### Phase 13.13 — Romanian (limba română)
 
-**Completes the Romance family** in vāṇी: Spanish + French +
+**Completes the Romance family** in vāṇī: Spanish + French +
 Italian + Portuguese + Romanian (German Latin-with-accents
 adjacent). Distinctive ă/â/î/ș/ț diacritics. ~25M speakers.
 
@@ -1058,7 +1058,7 @@ functie main() -> i64 {
 **First Thai-script dialect.** New `Script::Thai` covering
 block U+0E00..U+0E7F. ~70M speakers. v1 ships keyword-first
 SVO surface; native Thai prose has no word-internal spaces
-but vāṇी source still uses whitespace separators like every
+but vāṇī source still uses whitespace separators like every
 host language a Thai programmer would write.
 
 ```rust
@@ -1196,7 +1196,7 @@ Two more dialects round out two important groupings:
 
 ### Phase 13.6 — Italian (italiano)
 
-**Romance family complete in vāṇी.** Italian joins Spanish,
+**Romance family complete in vāṇī.** Italian joins Spanish,
 French, Portuguese (and German Latin-with-accents) as the
 fifth Latin Tier II dialect. Italian keyword surface is mostly
 pure-ASCII (`funzione`, `sia`, `se`, `mentre`, `per`, `vero`,
@@ -1651,7 +1651,7 @@ pragma-threading tests). All 186 example files compile.
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 13.1 Korean (first Hangul-script dialect)
 
-**Korean (한국어)** ships as vāṇी's first Hangul-script dialect
+**Korean (한국어)** ships as vāṇī's first Hangul-script dialect
 and second non-Indic SOV target (after Japanese). Roster grows
 to **27 dialects across 14 scripts**.
 
@@ -1806,7 +1806,7 @@ LLVM Box regression tests). All 185 example files compile.
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 L2 Box\<T\> Phase 1 (owning heap pointer)
 
-The first half of the L2 limitation ships: vāṇी now has a real
+The first half of the L2 limitation ships: vāṇī now has a real
 `Box<T>` owning heap pointer with full affine semantics on the
 C backend, including the headline use case — storing a Box in a
 struct field with automatic drop chaining.
@@ -2097,7 +2097,7 @@ Japanese regression tests). All 184 example files compile.
 This session shipped 4 Tier II / global dialects back-to-back:
 **Russian** (Cyrillic SVO) + **Spanish** (Latin+accents SVO) +
 **French** (Latin+accents SVO) + **Japanese** (three-script
-SVO-for-now-SOV-later). vāṇी now spans 25 dialects across 13
+SVO-for-now-SOV-later). vāṇī now spans 25 dialects across 13
 scripts.
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 8b.3 French (second Latin-with-accents dialect)
@@ -2178,7 +2178,7 @@ French regression tests). All 183 example files compile.
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 8b.1 Spanish (first Latin-script Tier II dialect)
 
-vāṇी lands its first **Latin-script-with-accents** Tier II
+vāṇī lands its first **Latin-script-with-accents** Tier II
 dialect: **Spanish (español)**. The roster grows to **23
 dialects across 12 scripts**.
 
@@ -2260,7 +2260,7 @@ compile.
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 8b.2 Russian (first Tier II + first Cyrillic dialect)
 
-vāṇी crosses out of Indic + Perso-Arabic for the first time:
+vāṇī crosses out of Indic + Perso-Arabic for the first time:
 **Russian** ships as the first Tier II dialect and the first
 **Cyrillic-script** dialect. The roster grows to **22 dialects
 across 12 scripts**.
@@ -2509,7 +2509,7 @@ new helper-reuse regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.1: Urdu (first Perso-Arabic / RTL dialect)
 
-vāṇी's first non-Brahmi-derived script lands: **Urdu** (اردو)
+vāṇī's first non-Brahmi-derived script lands: **Urdu** (اردو)
 joins the dialect roster, taking the total to **18 dialects
 across 11 scripts**.
 
@@ -2754,7 +2754,7 @@ keyword table, numeral-print helper, and native error labels;
 Assamese reuses the Bengali pipeline since the scripts share
 the U+0980..09FF block (differing only by `ৰ` / `ৱ`).
 
-Combined with Phase 6 first half, vāṇी now natively supports
+Combined with Phase 6 first half, vāṇī now natively supports
 **16 dialects across 8 distinct Brahmi scripts** (Devanagari,
 Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam,
 Odia, Sinhala — plus English Latin).
@@ -2878,7 +2878,7 @@ through the unified topo loop. Closes
 `tools/llm_context/bundle.py` assembles a Markdown context
 bundle (~13K tokens full / ~7K with `--no-examples`) from repo
 sources of truth so an off-the-shelf LLM can be prompt-engineered
-into a vāṇी programmer with zero training. Workflow documented
+into a vāṇī programmer with zero training. Workflow documented
 in `tools/llm_context/README.md`.
 
 **Phase 1.4 (TUT-1) — mdBook scaffolding**: `tutorials/` houses
@@ -2944,7 +2944,7 @@ verification gaps below:
 
 ## 🟢 Language surface — Devanagari purity arc complete (Sanskrit-derived)
 
-vāṇी's first-class target is the Sanskrit-derived family —
+vāṇī's first-class target is the Sanskrit-derived family —
 Sanskrit, Hindi, Marathi, and the broader Indo-Aryan group — with
 global languages queued after. Honest status:
 
@@ -4378,7 +4378,7 @@ emits per-(Struct K, V) bundle with prefix
 `intent_hashmap_Struct_<K>_<V>`. Hash function calls the user's
 `fn_<K>_hash` (FNV-1a wrapped around the user's i64 hash so
 single-field structs still distribute). Key equality uses
-`fn_<K>_eq`. Struct K values are passed by value (vāṇी structs
+`fn_<K>_eq`. Struct K values are passed by value (vāṇī structs
 are Copy).
 
 1.7c (LLVM bundle): `emit_intent_hashmap_struct_pair_llvm`
@@ -4751,7 +4751,7 @@ Vec<Tuple>) shipped. ARC 2 (Trie sparse) is next.)
 
 **Prior:** 2026-06-03 (**ARC 3c shipped — `.collect()`
 chain syntax.** Third sub-track of the richer-closures arc. New
-postfix `.collect()` is recognized as identity-on-Vec: vāṇी's
+postfix `.collect()` is recognized as identity-on-Vec: vāṇī's
 combinators are eager (`.map(f)` already returns a fresh
 `Vec<T>`), so `xs.map(f).collect()` is sugar for `xs.map(f)`. The
 sugar terminates iterator-chain expressions in the Rust-familiar
@@ -5526,7 +5526,7 @@ identical code to a direct call.
   closure #315.** Nested closures inside `if` / `while` /
   `for` / `ForIter` / `TaskSpawn` bodies are now supported;
   the lift pass recurses into nested blocks. Closure names
-  must still be unique within the function (vāṇी's
+  must still be unique within the function (vāṇī's
   shadowing rules forbid same-scope reuse).
 
 **Codegen:** None new. The rewritten calls are regular
@@ -7370,7 +7370,7 @@ fn main() returns i64 {
 
    1. **Smart-pointer / cycle-avoidance section** added to
       the README's *Memory safety & concurrency model*:
-      vāṇी ships none of Rust's Box / Rc / Arc / RefCell /
+      vāṇī ships none of Rust's Box / Rc / Arc / RefCell /
       Weak or C++'s unique_ptr / shared_ptr / weak_ptr.
       Each use case is either covered by an existing
       primitive (Vec/OwnedStr replace Box; Channel /
@@ -7384,10 +7384,10 @@ fn main() returns i64 {
       added under *Multi-file projects*. Documents the
       `intentc emit + llc -filetype=obj → .o` pipeline,
       function symbol naming (`fn_<name>` with C ABI),
-      and how to declare vāṇी fns on the C / C++ / Rust
-      side via `extern "C"` blocks. Calling-INTO vāṇी
+      and how to declare vāṇī fns on the C / C++ / Rust
+      side via `extern "C"` blocks. Calling-INTO vāṇī
       works today. Calling-OUT (`extern fn foo();`
-      declarations in vāṇी source) is queued — TODO.md
+      declarations in vāṇī source) is queued — TODO.md
       gets a new FFI section laying out the design
       (surface syntax, ExternFn IR shape, effects
       treatment as impure-by-default, toolchain
@@ -7458,14 +7458,14 @@ fn main() returns i64 {
      • `--link-with PATH` (repeatable) — pass an extra
        object or source file to cc. The common shape: a
        `helper.c` (or `.o`) carrying the body of an `extern
-       "C" fn` declared in vāṇी. Both `--link-with PATH`
+       "C" fn` declared in vāṇī. Both `--link-with PATH`
        and `--link-with=PATH` accepted.
      • `-l<name>` (repeatable) — pass a system library
        link flag to cc (e.g. `-lm` for libm, `-lcurl`).
        Forwarded verbatim.
 
-   Both flag groups appear after the vāṇी object in the
-   link command so usual link-order rules apply (vāṇी's
+   Both flag groups appear after the vāṇī object in the
+   link command so usual link-order rules apply (vāṇī's
    `call @triple` discovers the providing symbol from
    the helper that follows it).
 
@@ -7479,11 +7479,11 @@ fn main() returns i64 {
 
    **FFI v3 — `pure extern "C" fn` opt-in marker done 2026-05-27**:
    the purity side of FFI. `pure extern "C" fn name(...) -> R;`
-   declares an FFI symbol that vāṇी's effect tracker treats as
+   declares an FFI symbol that vāṇī's effect tracker treats as
    pure, so `pure fn` bodies (and parallel-for bodies, once
    those gain extern-call support) can call it. The caller
    asserts the foreign symbol is actually pure — no side
-   effects, no shared state, deterministic output — vāṇी can't
+   effects, no shared state, deterministic output — vāṇī can't
    verify across the FFI boundary.
 
    Changes:
@@ -7538,7 +7538,7 @@ fn main() returns i64 {
    silent ABI corruption guard. While probing
    `extern "C" fn point_sum(p: Point) -> i32;` against a C
    helper, the resulting binary returned `3` instead of `7`
-   for `Point { x: 3, y: 4 }`: vāṇी's LLVM emit produces
+   for `Point { x: 3, y: 4 }`: vāṇī's LLVM emit produces
    `declare i32 @point_sum(%Struct_Point)` which doesn't
    match cc's System V x86-64 ABI lowering for small
    aggregates (packed-register layout). Same risk applies to
@@ -7591,7 +7591,7 @@ fn main() returns i64 {
 
    New `parse_run_args` helper mirrors `parse_build_args`'s
    shape; `run_program` (C backend) takes the link_args slice
-   and appends each flag after the vāṇी source on the cc
+   and appends each flag after the vāṇī source on the cc
    command line.
 
    2 new e2e tests pin the shape: positive
@@ -7763,14 +7763,14 @@ fn main() returns i64 {
      extern "C" fn qsort(base: ref u8, n: u64, sz: u64,
                           cmp: fn(ref u8, ref u8) -> i32);
 
-   Verified end-to-end: vāṇी's `my_cmp` fn passed as
+   Verified end-to-end: vāṇī's `my_cmp` fn passed as
    callback to a separately-compiled `helper.c` returns the
    correct `cmp(5, 7) = -1` on both backends.
 
    Varargs (`...` in declarations) deferred: requires both
    the declaration shape AND variadic call-site syntax to be
    useful. Without variadic calls, declared `printf(...)`
-   can't actually be called from vāṇी source. M+ tier.
+   can't actually be called from vāṇī source. M+ tier.
 
    1 new lib test (`extern_fn_with_fn_pointer_param_accepted`)
    pins compile-time acceptance on both backends.
@@ -8132,7 +8132,7 @@ fn main() returns i64 {
    user-drop-by-ref + 1 ssa-examples. Closure #285.
 
    **#[bounded(N)] recursion-depth attribute done 2026-05-27 (C backend)**:
-   first attribute syntax in vāṇी. Caps fn recursion depth
+   first attribute syntax in vāṇī. Caps fn recursion depth
    at runtime — exceeding N aborts with a diagnostic.
    Caller's responsibility: pick a sane N.
 
@@ -8240,7 +8240,7 @@ fn main() returns i64 {
 
    Pipeline:
 
-     • `llvm_ffi_struct_lowered_ty(ty)` — maps a vāṇी
+     • `llvm_ffi_struct_lowered_ty(ty)` — maps a vāṇī
        struct type to the lowered LLVM form per the rules
        above.
      • `emit_function` (extern path) — declare emits the
@@ -8251,7 +8251,7 @@ fn main() returns i64 {
      • Return-type lowering — call's result type uses the
        lowered form for extern returns.
 
-   Verified end-to-end via `intentc build` of a vāṇी
+   Verified end-to-end via `intentc build` of a vāṇī
    program calling `point_sum({x: 3, y: 4})` against a C
    helper — both backends now return 7.
 

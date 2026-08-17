@@ -134,7 +134,7 @@ examples` unchanged at the 78-error baseline. Full writeup in
   check.
 - **`examples/language/english/sort_large_block_partition.vani`** --
   UBSan: "left shift of 108595223277980261 by 17 places cannot be
-  represented." Same class -- vāṇी's `<<` is meant to be a raw,
+  represented." Same class -- vāṇī's `<<` is meant to be a raw,
   always-well-defined bitwise operation, but the C backend emits it
   as C's native `<<` on a signed `int64_t`, which has stricter
   (letter-of-the-standard) UB rules when the shifted result doesn't

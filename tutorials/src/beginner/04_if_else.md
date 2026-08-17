@@ -80,7 +80,7 @@ x is a single-digit positive
 ## Why it works that way
 
 - **The condition is a `bool`**, not "anything truthy". `if 5 {...}`
-  is a type error. vāṇी has no "0 is false, anything else is
+  is a type error. vāṇī has no "0 is false, anything else is
   true" coercion -- write the comparison you mean (`if x != 0`).
 - **`else if` chains as deeply as you need**. Each arm must
   produce the same type if the `if` is used as an expression

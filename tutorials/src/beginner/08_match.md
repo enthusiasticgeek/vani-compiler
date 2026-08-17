@@ -1,7 +1,7 @@
 # Beginner 8 -- Pattern match on integers + booleans
 
 > **Learning goal**: replace long `if`/`else if` chains with
-> `match`, and learn that `match` in vāṇी is an **expression**
+> `match`, and learn that `match` in vāṇī is an **expression**
 > using `then` (not `=>`) between the pattern and the arm body.
 
 > **New to this?** Read [Beginner 8a -- Pattern matching primer](08a_pattern_match_primer.md) first.
@@ -136,7 +136,7 @@ many
   exhaustive without needing `_`.
 - **Why `then` instead of `=>`?** It reads aloud naturally --
   *"match `n`: case 1 then `Monday`, case 2 then `Tuesday`, ..."* --
-  which fits vāṇी's "code as speech" philosophy. Sanskrit /
+  which fits vāṇī's "code as speech" philosophy. Sanskrit /
   Hindi / Marathi files use the same `तदा` / `तो` / `तर` keyword
   in the same slot.
 

@@ -1,13 +1,13 @@
 # Beginner 1b -- Block Comments `/* ... */`
 
 > **Learning goal**: use multi-line block comments to annotate any part
-> of a vāṇी program, including nested comments and inline annotations.
+> of a vāṇī program, including nested comments and inline annotations.
 
 ---
 
 ## The two comment styles
 
-vāṇी supports two comment forms:
+vāṇī supports two comment forms:
 
 | Style | Syntax | Use case |
 |-------|--------|----------|
@@ -57,7 +57,7 @@ The compiler strips the comment and sees `let x: i64 = 42;` as normal.
 
 ## Nested block comments
 
-vāṇी block comments nest to any depth. The `*/` closes the *innermost*
+vāṇī block comments nest to any depth. The `*/` closes the *innermost*
 open `/*`, so you can comment out a block that already contains a comment:
 
 ```vani

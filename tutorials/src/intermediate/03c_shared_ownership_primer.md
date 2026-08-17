@@ -1,6 +1,6 @@
 # Intermediate 3c -- Shared ownership without `Rc`/`Arc`
 
-> **Learning goal**: understand vāṇी's intentional omission of
+> **Learning goal**: understand vāṇī's intentional omission of
 > reference-counted pointers (`Rc<T>` / `Arc<T>` / `Weak<T>`)
 > AND the five idiomatic alternatives. Reading order: at
 > minimum [Beginner 6c ownership](../beginner/06c_ownership_primer.md)
@@ -41,7 +41,7 @@ small, harmless to write on a sticky note, and never keeps the car
 from being sold or swapped -- because the number doesn't hold the
 car, it just points at a slot.
 
-This is the shape vāṇी uses instead of the "many owners with a
+This is the shape vāṇī uses instead of the "many owners with a
 running head-count" pattern (what other languages call reference
 counting, `Rc`/`Arc`). One owner holds the actual thing -- the
 household account, or in code, a single struct or `Vec`. Everyone
@@ -56,7 +56,7 @@ Keep this picture in mind for the rest of the chapter: every time
 you read "borrow," think "took the keys, will give them back."
 Every time you read "index" or "handle," think "wrote down the spot
 number instead of hauling the car around." And every time the
-chapter says vāṇी has NO `Rc`/`Arc`, think "no running head-count of
+chapter says vāṇī has NO `Rc`/`Arc`, think "no running head-count of
 claims" -- just one owner, plus keys-borrowing and spot-numbers.
 
 ## What vāṇी does NOT have
@@ -66,7 +66,7 @@ and `Arc<T>` (atomic, thread-safe reference-counted pointer).
 Both let MULTIPLE owners share one heap allocation; the value
 is freed when the LAST owner drops.
 
-vāṇी has **neither**.
+vāṇī has **neither**.
 
 It also doesn't have `Weak<T>` (a non-owning pointer that lets
 you peek at an Rc-managed value without keeping it alive),
@@ -106,7 +106,7 @@ will run. Debugging a "this resource is freed too early" or
 "this resource is held too long" bug under Rc is harder than
 under single-owner because the *ownership graph* is dynamic.
 
-vāṇी's single-owner-plus-borrows model makes cleanup time
+vāṇī's single-owner-plus-borrows model makes cleanup time
 predictable: when the owning binding's scope ends. The trade
 is more thinking up front about who owns what -- but it's the
 SAME thinking the Rc programmer should be doing anyway, just
@@ -114,7 +114,7 @@ forced to be explicit.
 
 ## How to share without Rc -- five patterns
 
-vāṇी's borrow system (`ref T` / `mut ref T`) handles MOST
+vāṇī's borrow system (`ref T` / `mut ref T`) handles MOST
 cases that would use Rc in Rust. When that's not enough, five
 specific patterns cover the rest.
 
@@ -178,7 +178,7 @@ holding `Vec<u32>` of neighbor indices -- no `Box`, no `Rc`, no
 cycles-as-pointers (cycles become valid index-graphs, freed
 together when the World drops).
 
-vāṇी's own concrete version of this pattern is `Pool<T>` /
+vāṇī's own concrete version of this pattern is `Pool<T>` /
 `Handle<T>` -- a generational-index handle that stays safely
 detectable (`pool_get` returns `Option::None`) instead of a
 use-after-free when the slot it named has since been freed and
@@ -209,7 +209,7 @@ refcounting; one wholesale cleanup at scope exit. This is
 how compilers, parsers, and game-frame allocators often
 manage many temporary objects.
 
-vāṇी's region typing ([Advanced 4 -- Embedded](../advanced/04_embedded.md))
+vāṇī's region typing ([Advanced 4 -- Embedded](../advanced/04_embedded.md))
 enforces at compile time that a region-allocated `ArenaRef`
 doesn't escape the region's scope. The shipped slot type is
 `i64` -- the `Foo { ... }` struct case shown as the pattern's
@@ -327,7 +327,7 @@ A small set of patterns are genuinely awkward without Rc:
   a value; the plugin unregisters; the callback might still
   be in flight).
 
-For these, vāṇी's current answer is:
+For these, vāṇī's current answer is:
 
 1. **Refactor toward handles + Vec** wherever possible. Most
    "graphs with cycles" become cleaner as `Vec<Node>` with
@@ -357,7 +357,7 @@ borrow scope to ensure the source outlives the borrower.
 
 ## A summary you can carry
 
-- vāṇी has **no `Rc`, `Arc`, or `Weak`**. By design.
+- vāṇī has **no `Rc`, `Arc`, or `Weak`**. By design.
 - Reasons: cycle leaks under Rc, real overhead per
   clone/drop, hidden ownership graph dynamics.
 - Five idiomatic alternatives:
@@ -374,9 +374,9 @@ borrow scope to ensure the source outlives the borrower.
 - For the rare genuine Rc-required cases: refactor toward
   handles, or use `unsafe` with a documented discipline.
 
-vāṇी optimizes for *predictable* memory behavior -- you can
+vāṇī optimizes for *predictable* memory behavior -- you can
 always tell when something will be freed. Rc trades that
-predictability for flexibility; vāṇी declines that trade as a
+predictability for flexibility; vāṇī declines that trade as a
 default. The patterns above let you achieve almost all of
 Rc's expressiveness without the cost.
 
@@ -391,7 +391,7 @@ Rc's expressiveness without the cost.
 - [Intermediate 3d -- Cyclic references primer](03d_cyclic_references_primer.md)
   -- worked side-by-side examples (parent<->child tree,
   doubly-linked list, observer pattern) of the three
-  canonical Rc+Weak shapes translated to vāṇी's
+  canonical Rc+Weak shapes translated to vāṇī's
   index-into-Vec pattern
 - [Advanced 2a -- Parallelism + race-freedom primer](../advanced/02a_parallelism_primer.md)
   -- channels + mutex as the cross-thread sharing primitives

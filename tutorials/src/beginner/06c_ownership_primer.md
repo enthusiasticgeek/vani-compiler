@@ -1,7 +1,7 @@
 # Beginner 6c -- Ownership and move (intuition primer)
 
 > **Learning goal**: build the "one-owner-at-a-time" mental
-> model that explains why vāṇी doesn't have a garbage collector
+> model that explains why vāṇī doesn't have a garbage collector
 > AND doesn't make you free heap memory yourself. Reading order:
 > [06a pointers/refs](06a_pointers_refs_primer.md) ->
 > [06b heap/stack](06b_heap_vs_stack_primer.md) -> here.
@@ -21,7 +21,7 @@ You know from the heap/stack chapter that:
   **heap** -- someone must explicitly tell the system to release
   it later.
 
-You also know vāṇी's choice for who that "someone" is: not the
+You also know vāṇī's choice for who that "someone" is: not the
 programmer (manual `free`), not a garbage collector -- the
 **compiler**, automatically, at compile time.
 
@@ -45,7 +45,7 @@ You have a bicycle. Three things are true:
 3. **If you only let them ride it for an afternoon and they
    bring it back**, you still own it. They had it temporarily.
 
-These map directly to vāṇी:
+These map directly to vāṇī:
 
 1. `let bike: Bike = Bike { ... };` -- `bike` is the owner.
 2. `let friend_bike: Bike = bike;` -- ownership **moves** from
@@ -75,7 +75,7 @@ When `a` goes out of scope, it calls `free()` on the data. When
 `b` goes out of scope, it ALSO calls `free()` on the data --
 double-free. Memory corruption. Crash.
 
-vāṇी's rule prevents this. The `let b = a;` MOVES ownership.
+vāṇī's rule prevents this. The `let b = a;` MOVES ownership.
 `a` is now invalid; only `b` will free the data when it
 exits scope. One free per allocation. Safe.
 
@@ -93,7 +93,7 @@ let r: ref Vec<i64>;
 print r[0];  // r points at freed memory -> undefined behavior
 ```
 
-vāṇी's compiler tracks references and rejects this at compile
+vāṇī's compiler tracks references and rejects this at compile
 time -- you don't even get to run the program. The reference
 isn't allowed to outlive the value it points to.
 
@@ -104,7 +104,7 @@ In languages where YOU write the `free()`, you sometimes forget
 SAME thing twice (problem 1) or free something that's still
 being used (problem 2).
 
-vāṇी moves all three problems from runtime crashes to
+vāṇī moves all three problems from runtime crashes to
 compile-time errors. If your program compiles, the cleanup is
 correct.
 
@@ -124,7 +124,7 @@ at the SAME list. Both names refer to one list. Appending via
 `a` changes what `b` sees. This is *shared-reference*
 semantics.
 
-vāṇी (and Rust) take a different stance: `let b: Vec<i64> = a;`
+vāṇī (and Rust) take a different stance: `let b: Vec<i64> = a;`
 *moves the list from a to b*. `a` is now an invalid name.
 You'd write your program differently if you want both names
 to mutate the same data -- either pass a `mut ref` around, or
@@ -133,7 +133,7 @@ restructure.
 Why this design? Because *shared mutation* is the source of
 most multi-threading bugs (race conditions) AND most subtle
 program errors ("I changed this list over here, why is THAT
-function seeing the old value?"). vāṇी opts out of shared
+function seeing the old value?"). vāṇī opts out of shared
 mutation by default; you opt back in explicitly with
 references.
 
@@ -219,7 +219,7 @@ fn main() -> i64 {
 ```
 
 This pattern -- borrow when you can, move when ownership
-genuinely transfers -- is how vāṇी (and Rust) code feels in
+genuinely transfers -- is how vāṇī (and Rust) code feels in
 practice.
 
 ## A summary you can carry
@@ -243,19 +243,19 @@ read like sensible feedback instead of cryptic noise.
 
 ## "Affine"? "Linear"? Where do those words come from?
 
-You'll see "affine ownership" in vāṇी's docs. The word "affine"
+You'll see "affine ownership" in vāṇī's docs. The word "affine"
 comes from logic -- *affine logic* treats each resource as
 something that can be used at most once (you can drop it
-unused, but you can't use it twice). vāṇी's bindings are
+unused, but you can't use it twice). vāṇī's bindings are
 "affine" because each value can be moved at most once.
 
 A related word is "linear" -- same idea but stricter: each
-resource MUST be used exactly once (no dropping). vāṇी is
+resource MUST be used exactly once (no dropping). vāṇī is
 affine, not linear -- you can declare a value and never
 explicitly consume it (the scope-exit cleanup uses it
 implicitly).
 
-You don't need these words to write vāṇी code. They're just
+You don't need these words to write vāṇī code. They're just
 the formal vocabulary the docs use.
 
 ## Cross-reference

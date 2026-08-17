@@ -1,6 +1,6 @@
 # Intermediate 3e -- Lifetimes and reference returns (intuition primer)
 
-> **Learning goal**: understand vāṇी's "implicit lifetimes"
+> **Learning goal**: understand vāṇī's "implicit lifetimes"
 > model -- how `fn foo(p: ref T) -> ref T` works without
 > mentioning `'a` anywhere, when it accepts your code, and
 > when it doesn't. Reading order: [Intermediate 3 -- Affine
@@ -49,7 +49,7 @@ about a thing that's already gone. That's a dangling reference: a
 "you can use this" claim that outlived the actual thing it pointed
 to.
 
-This is exactly the shape of a reference in vāṇी. A `ref T` is a
+This is exactly the shape of a reference in vāṇī. A `ref T` is a
 borrowed ladder -- temporary access to a value you don't own, valid
 only as long as the actual owner still has it. A function that hands
 back a `ref` is like you telling someone "here, use my neighbor's
@@ -97,11 +97,11 @@ variable, invisible to the function.
 The answer is **lifetime elision**: the compiler INFERS the
 relationship from the signature shape. The single ref input
 is the "source"; the ref output borrows from it. Lifetimes
-exist conceptually, but you never type `'a` in vāṇी.
+exist conceptually, but you never type `'a` in vāṇī.
 
 ## The elision rule
 
-vāṇी's rule is the simplest possible:
+vāṇī's rule is the simplest possible:
 
 > A function that returns `ref T` (or `mut ref T`) must
 > have **exactly one** `ref`/`mut ref` parameter. The
@@ -141,7 +141,7 @@ instead, or use Box<T> for owned heap allocation.
 ```
 
 This is the classic "returning a pointer to a local"
-mistake. C compiles it; vāṇी rejects it at the signature.
+mistake. C compiles it; vāṇī rejects it at the signature.
 
 ### Case 3: two or more ref params -> [x] reject
 
@@ -164,7 +164,7 @@ narrower functions, one per borrow.
 
 Some languages (Rust) handle this with **explicit lifetime
 variables** (`fn pick<'a>(a: &'a Point, b: &'a Point) ->
-&'a Point`). vāṇी doesn't expose that syntax -- the
+&'a Point`). vāṇī doesn't expose that syntax -- the
 designers decided the ergonomics weren't worth it for v1.
 The workaround: refactor to use one ref + one value, or
 split into two functions -- worked examples below.
@@ -375,7 +375,7 @@ lifetime variables, which v1 doesn't ship:
 ```
 
 You'd want this if the output borrows from ONE specific input
-but the fn takes multiple refs. The vāṇी workaround:
+but the fn takes multiple refs. The vāṇī workaround:
 restructure so the fn has only one ref param (pass the others
 by value, or call multiple narrower fns).
 
@@ -420,7 +420,7 @@ because they unlock advanced patterns. The cost: every
 intermediate Rust user has war stories about lifetime
 errors that took hours to untangle.
 
-vāṇी's design choice: **elide the easy 90%, reject the
+vāṇī's design choice: **elide the easy 90%, reject the
 remaining 10% with a clear "use a different shape"
 diagnostic.** The 10% includes some genuinely useful
 patterns (multi-input distinct lifetimes), but the rejection
@@ -565,7 +565,7 @@ Caller matches on the Option before dereferencing.
 
 ## A summary you can carry
 
-- vāṇी uses **lifetime elision** -- references can be
+- vāṇī uses **lifetime elision** -- references can be
   returned from functions, but lifetimes are inferred from
   signature shape, NEVER written as `'a` / `'b`.
 - The rule: a function returning `ref T` must have
@@ -601,7 +601,7 @@ Caller matches on the Option before dereferencing.
   check, just not yet for the "outlive the creating scope" shape
   -- see the "Closures capturing refs" section above.
 
-The takeaway: **vāṇी has lifetimes -- they're just always
+The takeaway: **vāṇī has lifetimes -- they're just always
 implicit.** The single-param elision rule + automatic
 source-tracking covers the cases most user code needs;
 advanced shapes that would require `'a` syntax are

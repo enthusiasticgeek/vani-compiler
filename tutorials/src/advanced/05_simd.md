@@ -28,7 +28,7 @@ pair, then the next, a SIMD instruction loads several numbers into
 one wide register and adds all of them in a single step -- one
 "press" that produces several results at once. The three layers
 below are three different levels of control over how and when
-vāṇी reaches for the four-shape cutter instead of the one-shape
+vāṇī reaches for the four-shape cutter instead of the one-shape
 cutter.
 
 ## Why three layers?
@@ -143,7 +143,7 @@ cores like Cortex-A53.
 ## Layer 3 — `vec128<T>` and the `simd_*` builtins
 
 `vec128<T>` is a **128-bit SIMD register value** holding `N` lanes
-of type `T`. It is a first-class vāṇी type: you can declare variables,
+of type `T`. It is a first-class vāṇī type: you can declare variables,
 pass them to functions, and return them.
 
 ### Lane counts

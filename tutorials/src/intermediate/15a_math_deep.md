@@ -10,7 +10,7 @@
 
 ## Logarithms and exponentials
 
-vāṇी ships all standard transcendental functions:
+vāṇī ships all standard transcendental functions:
 
 ```vani
 intent "logs and exps";

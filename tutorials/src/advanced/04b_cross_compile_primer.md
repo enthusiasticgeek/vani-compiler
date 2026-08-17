@@ -105,7 +105,7 @@ A **target triple** is a string in the form:
 | `x86_64-unknown-linux-musl` | x86-64 | Linux with musl libc |
 | `arm-unknown-linux-gnueabihf` | ARMv6/7 hard-float | Linux userspace (Debian armhf, Raspberry Pi OS 32-bit) |
 
-vāṇी tells bare-metal apart from a real Linux cross-target by
+vāṇī tells bare-metal apart from a real Linux cross-target by
 checking for an actual OS component (`linux`, `darwin`,
 `windows`, ...) FIRST -- only when the triple names no real OS
 does it fall back to the `none` / `eabi` / `-elf` substrings as
@@ -230,7 +230,7 @@ zeroes `.bss` for you, but on bare metal there is no loader, so
 copy `.data`'s initial values out of Flash and zero `.bss` by hand,
 before `main` (`intent_main`) is called.
 
-By default all vāṇी functions land in `.text`. To place a
+By default all vāṇī functions land in `.text`. To place a
 function in a specific section:
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>

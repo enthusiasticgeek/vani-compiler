@@ -1,6 +1,6 @@
 # Intermediate 16a -- Testing your vāṇी code: `#[test]`, `vanic test`, and `assert_eq_*`
 
-> **Learning goal**: write real, TDD-style tests *in* vāṇी itself --
+> **Learning goal**: write real, TDD-style tests *in* vāṇī itself --
 > discovery, isolation, filtering, expected-failure tests, and
 > value-showing assertions -- and know when `vanic test` reaches for
 > your Kosh package automatically.

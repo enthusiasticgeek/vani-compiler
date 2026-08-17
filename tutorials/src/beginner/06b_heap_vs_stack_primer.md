@@ -87,7 +87,7 @@ clipboard. When the function returns, the clipboard's
 contents are discarded.
 
 But what about a `Vec<i64>` with a million items? A clipboard
-is too small. So vāṇी splits it:
+is too small. So vāṇī splits it:
 
 ```
 The clipboard holds a small SLIP:
@@ -144,13 +144,13 @@ Then I don't have to think about it." Three reasons:
    real time (the warehouse has to find a free spot, mark it
    used, return the slip).
 
-So vāṇी puts small + bounded things on the stack (free, fast,
+So vāṇī puts small + bounded things on the stack (free, fast,
 auto-cleaned) and only goes to the warehouse for things that
 need to be big or whose size isn't known up front.
 
 ## "But who tells the librarian to give the space back?"
 
-The answer is what makes vāṇी's design interesting.
+The answer is what makes vāṇī's design interesting.
 
 In some languages, the *programmer* does -- they explicitly call
 `free()` when done with each heap allocation. Forget, and you
@@ -162,7 +162,7 @@ process roams the heap, finds anything nobody points to
 anymore, and frees it. Reliable but slow and unpredictable.
 Python, Java, Go do this.
 
-vāṇी picks a third path: the *compiler* does, automatically,
+vāṇī picks a third path: the *compiler* does, automatically,
 at compile time. When the variable holding the handle goes out
 of scope (its clipboard slot is being returned), the compiler
 inserts the `free()` call right before. No background process.
@@ -181,7 +181,7 @@ form) will explain it.
   space. Holds dynamic data (Vec, OwnedStr, Box).
 - Most "smart" containers are a HYBRID: small handle on the
   stack, big data on the heap.
-- vāṇी's compiler tracks heap items via **ownership** and
+- vāṇī's compiler tracks heap items via **ownership** and
   inserts `free()` calls automatically when the owning binding
   goes out of scope. No GC, no leaks, no manual free.
 

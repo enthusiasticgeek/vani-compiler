@@ -146,7 +146,7 @@ Inside your WSL2 shell, follow the **Linux (Debian/Ubuntu)** steps above.
 
 ### Option 2 -- Native Windows 11
 
-Verified: all **2089 compiler tests** pass on Windows 11 with this setup.
+Verified: all **3,332 compiler tests** (3,001 lib tests + 331 integration/e2e tests) pass on Windows 11 with this setup.
 
 #### Step 1 -- Rust (GNU toolchain)
 
@@ -286,7 +286,7 @@ If you see `42`, your install is healthy and you're ready for [Lesson 1 ->](begi
 
 ## Editor integration (LSP)
 
-vāṇी ships a Language Server implementing the **Language Server
+vāṇī ships a Language Server implementing the **Language Server
 Protocol (LSP)** -- the standard JSON-RPC interface most editors use
 to talk to a language's tooling. It gives you hover types,
 go-to-definition, find-references, rename, completion, quick-fix code

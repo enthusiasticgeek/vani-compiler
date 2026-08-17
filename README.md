@@ -1,7 +1,7 @@
 # vāṇī (वाणी) — the vāṇī compiler & programming language
 
 <p align="center">
-<img src="vani_logo2.png" alt="vāṇी logo" width="420">
+<img src="vani_logo2.png" alt="vāṇī logo" width="420">
 </p>
 
 <p align="center">
@@ -276,7 +276,7 @@ The standard library ships affine-first containers across four complexity tiers.
 
 | Document | Contents |
 |----------|---------|
-| [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) | 84 lessons: Beginner (25) → Intermediate (37) → Advanced (22) |
+| [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) | 96 lessons: Beginner (26) → Intermediate (45) → Advanced (25) |
 | [Language Manual](docs/language_manual.md) | Types, ownership, control flow, SIMD, FFI, tooling |
 | [Language Coverage](docs/languages.md) | All 62 human-language dialects + verification status |
 | [Tools](tools/README.md) | `vani_translate.py` (translate `.vani` source between all 63 dialects), leak sweep, cross-QEMU setup, LLM context bundle |
