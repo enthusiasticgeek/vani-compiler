@@ -198,7 +198,10 @@ fn main() -> i64 {
   (untested on real hardware -- no Windows host available when this
   shipped).
 - See `examples/language/english/cancel_blocking_task.vani` for the
-  full worked example above, runnable on both backends.
+  full worked example above, runnable on both backends. For `cancel`
+  combined with the `Pollable`/`Executor` pattern and a `vanic test`
+  harness, see [Advanced 3e's job scheduler
+  capstone](03e_job_scheduler_capstone.md).
 
 ## The six concurrency primitives
 

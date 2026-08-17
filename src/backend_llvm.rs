@@ -1025,6 +1025,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         ".msg.shift",
         "shift amount out of range\n",
     ));
+    // L28 fix (2026-08-16): unconditionally define the checked
+    // float-to-int cast's trap message, same "no pre-scan, so define
+    // it upfront" reasoning as `.msg.divzero`/`.msg.shift` above.
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.floatcast",
+        "float-to-int cast out of range\n",
+    ));
     // Test-fw Phase F (2026-08-14): assert_eq_* trap messages.
     // `.msg.assert_eq.str` is shared by assert_eq_bool (each side
     // resolved to a "true"/"false" i8* before formatting) and
@@ -6250,6 +6257,55 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             let dest = ctx.fresh_tmp();
             let src = llvm_type(&src_ty);
             let dst = llvm_type(ty);
+            if op == "fptosi" || op == "fptoui" {
+                // L28 fix (2026-08-16): float->int narrowing is
+                // undefined behavior (a poison value) whenever the
+                // float doesn't fit the target's range -- inline a
+                // range-check guard first, matching this backend's
+                // own established convention for checked ops
+                // (division-by-zero/overflow/shift are inlined the
+                // same way here, not routed through a shared
+                // callable helper). Boundary constants are exact
+                // powers of two, so no double-precision rounding
+                // hazard at the boundary itself; see `float_cast_bounds`.
+                let dv = if src == "float" {
+                    let widened = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = fpext float {} to double\n", widened, v));
+                    widened
+                } else {
+                    v
+                };
+                let (lo, hi) = float_cast_bounds(ty);
+                let lo_ok = ctx.fresh_tmp();
+                let hi_ok = ctx.fresh_tmp();
+                let ok_cond = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = fcmp oge double {}, {}\n", lo_ok, dv, lo));
+                out.push_str(&format!("  {} = fcmp olt double {}, {}\n", hi_ok, dv, hi));
+                out.push_str(&format!("  {} = and i1 {}, {}\n", ok_cond, lo_ok, hi_ok));
+                let ok = ctx.fresh_label("fcast_ok");
+                let fail = ctx.fresh_label("fcast_fail");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    ok_cond, ok, fail
+                ));
+                out.push_str(&format!("{}:\n", fail));
+                out.push_str(&format!(
+                    "  call void @__intent_trap(i8* {})\n",
+                    crate::ssa_backend_llvm::trap_msg_ref(
+                        ".msg.floatcast",
+                        "float-to-int cast out of range\n"
+                    )
+                ));
+                out.push_str("  unreachable\n");
+                out.push_str(&format!("{}:\n", ok));
+                // Same ctx.current_block bookkeeping every other
+                // inline branch+trap site in this file does (BUG-185-
+                // class: a later phi merge would otherwise tag this
+                // branch with the wrong predecessor block).
+                ctx.current_block = ok.clone();
+                out.push_str(&format!("  {} = {} double {} to {}\n", dest, op, dv, dst));
+                return dest;
+            }
             out.push_str(&format!("  {} = {} {} {} to {}\n", dest, op, src, v, dst));
             dest
         }
@@ -13222,6 +13278,23 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // L30 fix (2026-08-16): tcp_buf_byte_at(i: i64) -> i64.
+            // Reads the i-th byte of @intent_tcp_buf directly -- no
+            // bounds check, mirroring str_byte_at's own "caller must
+            // ensure 0 <= i < <actual byte count>" convention.
+            if name == "tcp_buf_byte_at" {
+                let i = emit_expr(&args[0], ctx, out);
+                let p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i64 {}\n",
+                    p, i
+                ));
+                let b = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8, i8* {}\n", b, p));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = zext i8 {} to i64\n", dest, b));
+                return dest;
+            }
             // Arc 8 v2 — epoll + non-blocking I/O primitives.
             if name == "epoll_new" {
                 let dest = ctx.fresh_tmp();
@@ -19882,6 +19955,30 @@ fn float_bits(ty: &Type) -> u32 {
         Type::F32 => 32,
         Type::F64 => 64,
         _ => 64,
+    }
+}
+
+/// L28 fix: (lower, upper) bound literals for a checked float->int
+/// cast's inline guard, keyed by the TARGET integer type. Both
+/// bounds are exact powers of two (2^N or -2^N), so they're bit-
+/// for-bit exact `double` literals -- no rounding hazard at the
+/// boundary itself (unlike e.g. the double value of `INT64_MAX`,
+/// which rounds UP past the real max). The upper bound is a strict
+/// `<` against 2^(width[-1 for signed]), not `<=` against the
+/// type's literal MAX. Mirrors `ssa_backend_c.rs::float_cast_bounds`
+/// and `backend_c.rs::emit_runtime_helpers`'s `float_int_kinds`
+/// exactly.
+fn float_cast_bounds(ty: &Type) -> (&'static str, &'static str) {
+    match ty {
+        Type::I8 => ("-128.0", "128.0"),
+        Type::I16 => ("-32768.0", "32768.0"),
+        Type::I32 => ("-2147483648.0", "2147483648.0"),
+        Type::I64 => ("-9223372036854775808.0", "9223372036854775808.0"),
+        Type::U8 => ("0.0", "256.0"),
+        Type::U16 => ("0.0", "65536.0"),
+        Type::U32 => ("0.0", "4294967296.0"),
+        Type::U64 => ("0.0", "18446744073709551616.0"),
+        other => unreachable!("float_cast_bounds called on non-integer target {other:?}"),
     }
 }
 
@@ -27706,6 +27803,9 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
             // @intent_tcp_buf, so the TCP helpers must emit
             // when any nonblocking recv form is used.
             | "tcp_recv_nb" | "tcp_set_nonblocking" | "tcp_accept_nb"
+            // L30 fix: tcp_buf_byte_at reads @intent_tcp_buf
+            // directly -- same global, same emission trigger.
+            | "tcp_buf_byte_at"
         )
     }
     fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {

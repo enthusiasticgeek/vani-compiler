@@ -610,6 +610,18 @@ BUG-105/106 (2026-08-04), it just wasn't called at every site.
 - `echo_loop_windows_byte_count_matches_c` e2e test de-ignored and
   green after the WSAECONNRESET fix.
 
+**Update (2026-07-28)**: a later, more specific finding narrows the
+above -- `async_showcase.vani` under `vanic run` (the LLVM `lli` JIT
+path specifically, not `vanic build`/`--backend=c`) hits an
+undefined-SSA-value error from `lli` on Windows. This wasn't caught
+by the 2026-06-16 pass above (which may not have exercised this
+exact file through the `lli`-JIT path specifically). See
+[Advanced 1's async chapter](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/advanced/01_async.md)
+for the current, tutorial-side note. Not independently re-verified
+since (no Windows hardware available to this session) -- flagged
+here so the two docs don't silently contradict each other. If you
+hit this, `--backend=c` is the documented workaround.
+
 **macOS status**: still deferred — no Darwin host available.
 `#elif defined(__APPLE__)` branches (kqueue, `EVFILT_TIMER`,
 `__error()`, `pipe+pthread` timer) are compiled-in but unrun.
@@ -1593,7 +1605,7 @@ pathological-loop case that `vanic build`/`--backend=c` already handle
 correctly. Left as a documented, understood limitation rather than
 changed unilaterally.
 
-### L28 -- `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit
+### L28 -- `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit ✅ Fixed 2026-08-16
 
 Found via `tools/localfuzz` (2026-08-12): a fuzzer-mutated program
 computed an `f32` value far outside `i64`'s representable range, then
@@ -1654,17 +1666,47 @@ clamp it explicitly before casting (e.g. `f64_clamp(x, i64::MIN as
 f64, i64::MAX as f64) as i64`) rather than relying on the cast itself
 to do anything sensible.
 
-**Fix**: not applied. The right fix is almost certainly a checked
-`as` cast for float-to-int narrowing -- either a compile-time-proven
-range fact (SMT, matching how the existing overflow/bounds checks
-work) or a runtime range check with a defined panic message on both
-backends, plus a decision on whether v1 should instead adopt
-Rust-style *saturating* float-to-int casts (defined, non-panicking,
-clamps to the target type's min/max) -- a real semantics decision, not
-a one-line patch, and one that needs to land identically on both
-backends to actually close this gap rather than just relocate it.
-Left as a documented, understood limitation rather than changed
-unilaterally.
+**Fix (2026-08-16)**: chose the runtime-range-check option, not
+saturating casts -- consistent with how every other checked operation
+in v1 behaves (overflow, division/shift-by-zero, out-of-bounds access:
+all trap with a defined message and `exit(3)`, none silently clamp).
+Every float-to-int `as` cast (`f32`/`f64` -> any of `i8/i16/i32/i64/
+u8/u16/u32/u64`) now emits a range check comparing the source value
+against the target type's min/max, expressed as exact power-of-two
+double-literal bounds (`-128.0`/`128.0` for `i8`, ...,
+`-9223372036854775808.0`/`9223372036854775808.0` for `i64`,
+`0.0`/`18446744073709551616.0` for `u64`, etc.) so the bounds
+themselves are exactly representable and never round the wrong way.
+The upper bound uses a strict `<` (not `<=`), and because any
+floating-point comparison against NaN is always false, `NaN as i64`
+correctly traps too with no separate `isnan` check needed. On
+out-of-range input the program traps with `float-to-int cast out of
+range` and exits 3 -- on both backends, closing the exit-code
+divergence this entry originally documented (255 vs. 0).
+
+Implemented identically in effect but idiomatically per backend,
+since each of the 4 emission paths (tree-C, SSA-C, tree-LLVM,
+SSA-LLVM) already had its own established convention for checked
+operations and this fix matches each rather than introducing a new,
+inconsistent pattern: tree-C emits a named, reusable
+`intent_check_float_to_<ty>` helper function (only for the type
+combinations actually used in the program, `src/backend_c.rs`); SSA-C
+inlines the check directly at each cast site as a C `if` statement,
+matching how SSA-C already inlines every other checked op
+(`src/ssa_backend_c.rs`); SSA-LLVM pre-scans the whole module for the
+`(source, target)` type pairs actually needed and emits one
+`alwaysinline` LLVM function per pair (`src/ssa_backend_llvm.rs`);
+tree-LLVM inlines the check via fresh basic blocks at each cast site,
+since the tree-walking emitter has no whole-module pre-scan pass
+(`src/backend_llvm.rs`). `InstrKind::Cast` gained a `checked: bool`
+field in `src/ssa.rs` (mirroring the existing `InstrKind::Binary`
+precedent), set to true only when the source is `F32`/`F64` and the
+target is an integer type -- integer-to-integer and int-to-float
+casts are unaffected. Verified across in-range, out-of-range,
+negative-to-unsigned, and NaN cases on both backends, plus the full
+`cargo test --release --workspace` / `backend_crosscheck.py` /
+`leak_sweep.py` battery against the whole example corpus with zero
+regressions.
 
 ### L29 -- `for i from lo to hi` is ascending-only ✅ Partially resolved 2026-08-13 (`downto` added; `step`/stride-N still unsupported)
 
@@ -1750,7 +1792,7 @@ See [Beginner 5's "Counting down with `downto`, or stepping by more
 than 1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-with-downto-or-stepping-by-more-than-1)
 for the tutorial-side coverage.
 
-### L30 -- `tcp_recv`'s received bytes are not inspectable from vani code
+### L30 -- `tcp_recv`'s received bytes are not inspectable from vani code ✅ Fixed 2026-08-16
 
 `tcp_recv(fd, max) -> i64` fills an opaque, thread-local 4KB scratch
 buffer and returns the byte count -- but there is no builtin to read
@@ -1775,14 +1817,28 @@ supports -- but that's a workaround for a real gap, not a general
 solution (it can't carry more than one small integer per message,
 and doesn't scale to arbitrary payloads/text).
 
-**Still open**: no fix attempted this pass -- a byte-accessor
-(`tcp_buf_byte_at(i: i64) -> i64`, mirroring `str_byte_at`'s shape)
-would need the same treatment on both backends as the other `tcp_*`
-builtins (`src/checker.rs::check_tcp_builtin`, `src/backend_c.rs`,
-`src/backend_llvm.rs`'s native IR emission), plus deciding whether it
-should also work against `tcp_recv_nb`/`io_recv_async`'s buffer (Arc
-8 v2/v3 non-blocking paths) or only the blocking v1.6 `tcp_recv`
-family.
+**Fix (2026-08-16)**: added `tcp_buf_byte_at(i: i64) -> i64`, mirroring
+`str_byte_at`'s exact shape and contract -- returns the byte at index
+`i` of the shared thread-local `intent_tcp_buf` scratch buffer
+(0-255), no bounds check, same "caller's responsibility" convention
+`str_byte_at` already uses. Registered in `src/checker.rs`'s builtin
+table and routed through the existing `check_tcp_builtin` dispatch
+(1 argument, `i64` return, same validation path as `tcp_close`/
+`tcp_accept`). Implemented on tree-C (`src/backend_c.rs`, a plain
+`intent_tcp_buf[i]` array index) and tree-LLVM (`src/backend_llvm.rs`,
+`getelementptr` + `load i8` + `zext` to `i64`) only -- confirmed
+empirically (by inspecting generated C's variable-naming convention
+across several `tcp_recv`-shaped test programs) that every `tcp_*`
+builtin already falls back to the tree backends in practice even
+though `tcp_recv` is nominally SSA-eligible, so the SSA-C/SSA-LLVM
+paths were correctly left untouched rather than speculatively
+implemented. Works only against the blocking v1.6 `tcp_recv` family's
+buffer, as originally scoped -- `tcp_recv_nb`/`io_recv_async`'s
+Arc 8 non-blocking buffers are a separate, still-open question if a
+future need arises. Verified end-to-end (buffer written by
+`tcp_recv`, read back via `tcp_buf_byte_at` against known byte
+values) on both backends, plus the same zero-regression full
+verification battery as L28.
 
 ### L31 -- `detach`'d tasks still running when `main` returns can crash under `vanic run` (LLVM `lli` JIT only)
 

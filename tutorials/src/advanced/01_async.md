@@ -324,6 +324,13 @@ handing it to the executor is ASan/LeakSanitizer-verified clean --
 see [`async_executor.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/async_executor.vani)
 for the full worked example, including this cancellation case.
 
+**Combining it with real-thread `cancel <name>;` and `vanic test`**:
+see [Advanced 3e](03e_job_scheduler_capstone.md), a capstone that runs
+this Executor pattern on the main thread at the same time as a
+separate OS thread blocked in a real `tcp_accept()`, bounded by
+`cancel` -- plus a `vanic test` harness asserting the two genuinely
+don't interfere with each other.
+
 ## Common patterns
 
 **Sequential awaits**: write them as you would Rust. The

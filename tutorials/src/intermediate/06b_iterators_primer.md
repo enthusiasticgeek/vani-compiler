@@ -149,9 +149,11 @@ asks for the next one. **vāṇी v1 does NOT work this way.** Every
 adapter is **eager**: `.filter(...)` walks the whole input right
 then and there and materializes a brand-new `Vec` holding the
 results, before the next step ever runs. `.map(...)` does the
-same. There is no on-demand pulling, no fused single pass across
-`.filter(...).map(...)` unless you reach for the combined
-builtins in the next section.
+same. There is no on-demand pulling in the Rust/Python sense --
+but see the "Combined builtins" section below: a `let`-by-`let`
+chain in this exact shape is one case where the compiler *does*
+quietly collapse the passes for you, without you reaching for
+anything by name.
 
 Concretely:
 
@@ -235,21 +237,44 @@ contrasting with combinators. For this specific "filter by a
 captured value" shape, the loop isn't a fallback for people who
 don't like combinators; it is, today, the only way that works.
 
-## Combined builtins -- v1's real answer to "too many passes"
+## Combined builtins -- and the compiler's own quiet fusion
 
 A common worry: "doesn't all this chaining make a lot of
 intermediate Vecs and slow things down?" Given the previous
-section, the honest answer is: yes, exactly that much -- each
-step in a `let`-by-`let` chain is its own full pass and its own
-fresh allocation. **v1 does not have a general-purpose compiler
-"fuser"** that automatically collapses an arbitrary chain into
-one loop (that's an explicitly-tracked follow-up, not shipped
-functionality).
+section, the naive answer would be: yes, exactly that much --
+each step in a `let`-by-`let` chain is its own full pass and its
+own fresh allocation. **But v1's compiler actually auto-fuses
+exactly this shape for you**, transparently, with no action
+required: write `let m = xs.map(f); let t = m.fold(init, g);`
+(with `m` used nowhere else), and the compiler rewrites it into a
+single fused `map_fold` call before codegen -- confirmed directly
+by inspecting the generated C, which contains one call to the
+fused helper and no intermediate `m` Vec anywhere. The same pass
+recognizes `filter` then `fold`, `map` then `filter`, and (by
+fusing twice) the full 3-stage `map` then `filter` then `fold`
+chain written as three separate `let`s -- also confirmed directly,
+collapsing all the way down to a single `map_filter_fold` call.
+It isn't limited to strictly back-to-back `let`s either -- it
+still fires across intervening statements as long as none of them
+reference the intermediate binding or the original source Vec.
 
-What v1 ships instead is a small, fixed set of **hand-written,
-pre-fused combined builtins** covering the most common 2- and
-3-step shapes, each doing everything in ONE pass with ZERO
-intermediate Vecs:
+This is **not** a general-purpose fuser, though, and it's worth
+being precise about the boundary: it only recognizes this specific
+"one `let` produces, a later `let`'s RHS is the sole consumer"
+shape -- not the chained single-expression form
+`xs.map(...).filter(...).fold(...)` (which, as covered above,
+doesn't even parse without intermediate `let`s), and not
+combinator shapes outside the four recognized producer/consumer
+pairs. If your chain doesn't fit, it costs one pass + one
+allocation per step, same as any other eager language without a
+fuser for that shape.
+
+For the cases the auto-fuser doesn't reach -- or when you'd
+rather be explicit about the fusion instead of relying on the
+compiler noticing it -- v1 also ships a small, fixed set of
+**hand-written, pre-fused combined builtins** you can call by
+name, covering the most common 2- and 3-step shapes, each doing
+everything in ONE pass with ZERO intermediate Vecs:
 
 - **`.map_fold(init, mapper, folder)`** -- map then fold.
 - **`.filter_fold(init, predicate, folder)`** -- filter then fold.
@@ -275,15 +300,15 @@ for x in xs:
     total = total + y    // fold step
 ```
 
-ONE pass, ZERO intermediate allocations -- but you get there by
-reaching for the specific combined builtin whose shape matches
-your chain, not by writing `.map(...).filter(...).fold(...)`
-and trusting the compiler to collapse it (it won't -- and as
-covered above, that exact chain doesn't even parse without
-intermediate `let`s in the first place). If your chain doesn't
-match one of the four combined shapes above, it costs one pass
-+ one allocation per step, same as any other eager language
-without a fuser.
+ONE pass, ZERO intermediate allocations -- and the same result the
+auto-fuser above would already give you for free if you'd instead
+written it as three separate `let`s (`let m = xs.map(...); let g
+= m.filter(...); let t = g.fold(...);`). Reach for the named
+builtin when you want the fusion to be visible in the source
+itself, or when your chain doesn't fit the `let`-sequence shape
+the auto-fuser looks for. Either way, the chained single-expression
+form `.map(...).filter(...).fold(...)` still doesn't even parse --
+that restriction is unrelated to fusion and covered above.
 
 ## When NOT to use combinators
 
@@ -319,15 +344,30 @@ state, write the loop.
   chained directly on one expression doesn't parse).
 - **Consumers**: `fold`, `sum`, `count`, `collect` -- end the
   chain.
-- **v1 is eager, not lazy**: every adapter walks its whole input
-  and materializes a fresh `Vec` immediately -- unlike Rust/
-  Python, nothing is pulled on-demand, and `.take(3)` still
-  requires its input already fully computed.
-- **No general fusion, but combined builtins**: the compiler
-  doesn't auto-fuse arbitrary chains (that's unshipped, tracked
-  future work) -- but `.map_fold`, `.filter_fold`, `.map_filter`,
-  and `.map_filter_fold` are hand-written, pre-fused, single-pass
-  builtins covering the common 2- and 3-step shapes.
+- **v1 is eager, not lazy, at the source-code level**: each
+  `.map`/`.filter`/`.take`/`.drop` call you write is semantically
+  a full pass that materializes a fresh `Vec` before the next
+  step runs -- unlike Rust/Python, nothing is pulled on-demand,
+  and `.take(3)` still requires its input already fully computed.
+- **The compiler auto-fuses the common two-`let` shape for you**:
+  write `let m = xs.map(f); let t = m.fold(init, g);` (with `m`
+  used only by that one `fold`) and the compiler transparently
+  rewrites it into a single fused `map_fold` call under the hood
+  -- confirmed directly by inspecting the generated C, which
+  contains one `..._map_fold(...)` call and no intermediate `m`
+  Vec at all. The same fusion recognizes `filter`+`fold`,
+  `map`+`filter`, and (by fusing twice) the 3-stage
+  `map`+`filter`+`fold` chain, and isn't limited to strictly
+  adjacent `let`s -- it still fires across intervening statements
+  as long as none of them touch `m` or the original source Vec.
+  This is a real, currently-shipped optimization, not "future
+  work" -- but it's also not *general* fusion: it only recognizes
+  these specific producer-then-consumer `let` shapes, not
+  arbitrary combinator combinations or chains that don't fit this
+  pattern. `.map_fold`, `.filter_fold`, `.map_filter`, and
+  `.map_filter_fold` also exist as hand-written builtins you can
+  call directly -- useful when you'd rather be explicit about the
+  fusion than rely on the compiler noticing it.
 
 That's iterators. The next chapter ([Intermediate 6](06_closures.md))
 shows the actual `.map` / `.filter` / `.fold` syntax + worked
