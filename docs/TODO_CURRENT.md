@@ -15960,4 +15960,59 @@ Confirmed the exact repro above now correctly fails with an SMT
 counterexample (`c__n = -1`, i.e. unconstrained) instead of "ok".
 Full `cargo test --release --workspace` clean after the fix.
 
-Next free bug number is **BUG-209**.
+## BUG-209
+
+Found 2026-08-17 by continuing the sibling-sweep audit into the
+dialect/lexer subsystem, per the user's explicit request, right after
+investigating BUG-175's own fix location for a possible unswept
+sibling.
+
+**Root cause**: `lex_ident` (`src/lexer.rs`) -- the ASCII-starting
+identifier lexer, used by English and every Latin-script dialect
+(French, Italian, Spanish, German, Portuguese, and the rest) -- never
+got BUG-175's mid-word-apostrophe fix at all. BUG-175 fixed
+`lex_unicode_ident` (the SEPARATE function for non-ASCII-starting
+identifiers) because its original Hebrew geresh repro happened to
+route through that function; `lex_ident` handles the exact same
+"an apostrophe can be legitimate mid-word orthography, not just a
+`'label:` loop-label token" ambiguity, but was never touched. A
+classic case of a fix landing in the specific function that happened
+to trigger the original repro, not the general pattern's actual root
+(both functions share the same identifier-continuation byte loop by
+design -- see the comment already on `lex_ident` referencing
+`lex_unicode_ident` as its sibling).
+
+**Confirmed via direct repro**: French `soit l'arbre: i64 = 5;`
+(`l'arbre`, "the tree" -- ordinary elision, exactly as legitimate a
+mid-word apostrophe as Hebrew's geresh case) failed to parse
+("attendu '='" -- expected '=') because the lexer stopped consuming
+at the apostrophe and the rest fell through to `lex_label`.
+
+**Fix**: applied BUG-175's exact same disambiguation logic to
+`lex_ident` -- fold `'` into the current identifier only when another
+identifier-continuation byte follows immediately after it; a genuine
+loop label is never glued directly onto a preceding identifier this
+way (always separated by whitespace/a keyword), so `'label:` still
+lexes correctly.
+
+Regression: `src/lib.rs`'s
+`bug209_ascii_ident_with_mid_word_apostrophe_lexes_as_one_identifier`
+(mirrors BUG-175's own test shape) +
+`bug209_loop_label_immediately_after_identifier_still_lexes_as_label`
+(confirms labeled `for`/`continue` still work), both passing. Also
+manually re-verified `examples/language/english/break_value.vani`'s
+existing output is unchanged and a labeled nested-for-loop repro
+produces identical output on both backends. Full `cargo test --release
+--workspace` clean.
+
+**This closes out today's sibling-sweep audit series**, run across
+four independent bug families at the user's request: the Vec/Array
+bounds-check family (BUG-108 through BUG-206), the `ctx.current_block`
+LLVM family (through BUG-207), the SMT-facts-invalidation family
+(through BUG-208), and now the apostrophe-lexing family (BUG-209).
+Four real, previously-undiscovered bugs found and fixed in one
+session (BUG-206/207/208/209) by systematically checking sibling
+functions and related language features after each fix, rather than
+considering a fix complete once its own triggering repro passes.
+
+Next free bug number is **BUG-210**.

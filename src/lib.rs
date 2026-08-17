@@ -45782,6 +45782,65 @@ função main() -> i64 {
     }
 
     #[test]
+    fn bug209_ascii_ident_with_mid_word_apostrophe_lexes_as_one_identifier() {
+        // BUG-209 (2026-08-17): sibling of BUG-175's fix, found by
+        // continuing the sibling-sweep audit into `lex_ident` (the
+        // ASCII-starting identifier lexer, used by English and every
+        // Latin-script dialect) -- BUG-175 only fixed
+        // `lex_unicode_ident` (non-ASCII-starting identifiers)
+        // because its original Hebrew repro happened to route through
+        // that function. `lex_ident` never got the same fix, so a
+        // completely ordinary Latin-script elision like French
+        // `l'arbre` ("the tree") or Italian `dell'anno` failed to
+        // lex as one identifier -- the lexer stopped at the `'` and
+        // the rest fell through to `lex_label`, producing a
+        // misleading parse error. Fixed with the exact same
+        // disambiguation BUG-175 already established: fold `'` into
+        // the identifier only when another identifier-continuation
+        // byte follows immediately after it.
+        let source = r#"
+            fn main() -> i64 {
+              let l'arbre: i64 = 5;
+              return l'arbre + 1;
+            }
+        "#;
+        let checked = compile(source)
+            .expect("an ASCII identifier with a mid-word apostrophe must lex as one token and compile");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+        assert!(c.contains("fn_main"), "expected a main function in emitted C:\n{}", &c[..c.len().min(500)]);
+    }
+
+    #[test]
+    fn bug209_loop_label_immediately_after_identifier_still_lexes_as_label() {
+        // Regression guard for the BUG-209 fix above: a genuine
+        // `'label:` immediately following an identifier-like keyword
+        // (not glued onto a preceding identifier's own text -- e.g.
+        // separated only by whitespace/newline, the normal case) must
+        // still lex as a label, not get swallowed into the fix's new
+        // apostrophe-folding logic.
+        let source = r#"
+            fn main() -> i64 {
+              let total: i64 = 0;
+              'outer: for i from 0 to 3 {
+                for j from 0 to 3 {
+                  if j == 1 {
+                    continue 'outer;
+                  }
+                  total = total + 1;
+                }
+              }
+              return total;
+            }
+        "#;
+        let checked = compile(source).expect("labeled for-loops must still compile after the BUG-209 fix");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        crate::ssa_backend_c::emit(&module).expect("must emit via SSA-C");
+    }
+
+    #[test]
     fn bug176_positional_break_inner_outer_middle_resolve_by_depth() {
         // BUG-176 (2026-08-11): `break inner|outer|middle;` /
         // `continue inner|outer|middle;` are reserved positional
