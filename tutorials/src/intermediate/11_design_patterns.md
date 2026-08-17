@@ -49,11 +49,18 @@ examples/language/english/design_patterns/
     +-- mediator.vani
     +-- memento.vani
     +-- observer.vani
+    +-- observer_self_deregistering.vani
     +-- state.vani
     +-- strategy.vani
     +-- template_method.vani
     +-- visitor.vani
 ```
+
+That's 23 files for 22 patterns: `observer_self_deregistering.vani`
+is a bonus variant of Observer (an observer that removes itself
+from the subject mid-notification -- a real ownership/aliasing
+gotcha worth its own example), not a distinct pattern. Interpreter
+is the one canonical GoF pattern with no example here.
 
 Each file:
 

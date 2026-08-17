@@ -184,7 +184,7 @@ writeup: item 27.1 in
 Two consequences for anyone adding a language feature or builtin:
 1. **Test through `vanic run` / `vanic emit`**, not just
    `compile_to_c` / `compile_to_llvm`. The latter two (what
-   `src/lib.rs`'s ~1900 tests mostly use) call the tree backends
+   `src/lib.rs`'s ~3000 tests mostly use) call the tree backends
    *directly*, bypassing the SSA path entirely -- they would not
    have caught the bug above.
 2. If the new construct isn't SSA-supported, add a

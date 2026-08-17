@@ -43,7 +43,7 @@ chapters then assume you've built the mental model first.
 > concept*. The English path is unaffected.
 
 These tutorials walk you through the language progressively.
-The 155 English examples and 22 GoF design-pattern examples
+The 188 English examples and 23 GoF design-pattern examples
 that live in [`examples/language/english/`](https://github.com/enthusiasticgeek/vani-compiler/tree/main/examples/language/english)
 are great reference, but they don't teach progressively -- they
 assume you already know the surface. The lessons here funnel
@@ -101,13 +101,13 @@ a feature that's planned but not implemented in v1 yet; see
 
 ## Tracks
 
-- **[Beginner](beginner/01_hello_world.md)** (25 lessons,
+- **[Beginner](beginner/01_hello_world.md)** (26 lessons,
   ~30 min each) -- the language surface. After this track you can
   read most of the English-keyword example corpus on your own.
-- **[Intermediate](intermediate/01_struct_methods.md)** (37
+- **[Intermediate](intermediate/01_struct_methods.md)** (45
   lessons) -- structs, generics, dyn dispatch, design patterns,
   SMT verification.
-- **[Advanced](advanced/01_async.md)** (22 lessons) -- async,
+- **[Advanced](advanced/01_async.md)** (25 lessons) -- async,
   parallel, embedded, vtable internals, dialect contribution,
   compiler internals.
 
