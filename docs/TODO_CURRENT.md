@@ -16058,4 +16058,63 @@ Regression: `src/lib.rs`'s
 mirroring BUG-208's test shape. Full `cargo test --release --workspace`
 clean.
 
-Next free bug number is **BUG-211**.
+## BUG-211
+
+Found 2026-08-17, a 4th gap at the same `drop_facts_for_mut_ref_call_args`
+call site BUG-198/208/210 already extended three times. This one
+isn't a `VarInfo` `Option<...>` cache -- it's the SMT array-
+VERSIONING counter itself, `array_version: u32`.
+
+**Root cause**: `Stmt::IndexAssign` (`xs[i] = v;`) correctly bumps
+`array_version` and pins prior facts to the OLD version before adding
+a synthetic store-eq axiom bridging old and new, so the solver's
+`arr_<name>_v{N}` array-theory encoding stays sound. A `mut ref` call
+mutating the same Vec (builtin or user function) never bumped
+`array_version` at all, so any LATER bare `Var(xs)` reference still
+resolved to whatever version was current BEFORE the mut-ref call --
+letting `prove` see straight through a real mutation to array-theory
+facts established before it.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+xs[0] = 100;              // IndexAssign: establishes arr_xs_v1[0] = 100
+set(mut ref xs, 0, 5);    // mut-ref call: array_version never bumped
+prove xs[0] == 100;       // silently ACCEPTED before this fix
+```
+`--smt-debug` showed the query still reasoning against `arr_v_xs_v1`
+(the version `xs[0] = 100` created) -- `set`'s own mutation never
+advanced the version, so the solver never saw a fresh, unconstrained
+array for the post-`set` state.
+
+**Fix**: `info.array_version += 1;` added right after the three
+existing cache clears in the same `if let Some(info) =
+env.lookup_mut(&name)` block. No synthetic store-eq axiom is added
+(unlike `IndexAssign`, which knows exactly `i`/`v`) -- bumping alone
+forces every later reference to a fresh, fact-free array version,
+matching the same "conservative: forget everything" shape as the
+three `Option`-cache clears.
+
+This is now the 4th independent fix at this one call site: `smt_facts`
+(BUG-198), `struct_literal_fields`/`.constant` (BUG-208),
+`vec_literal_elements` (BUG-210), `array_version` (BUG-211).
+
+**Also checked, per explicit request, and confirmed CLEAN**: whether
+tuple/struct/enum-payload access has an analogous "missing runtime
+check" gap. It does not -- tuple field access uses a compile-time-
+constant index with a compile-time bounds error (`t.2` on a 2-tuple
+produces "tuple index 2 out of bounds for tuple of arity 2" at
+compile time, verified directly, not a runtime gap); struct field
+access resolves a compile-time-constant field name; enum payload
+access is only reachable through `match`'s exhaustive tag-gated
+dispatch (`option_unwrap_or` always requires an explicit default --
+there is no `unwrap_unchecked`-style raw-payload-read function). None
+of these three share Vec/Array's genuinely-dynamic-runtime-index
+vulnerability shape, so there was nothing to fix -- a real, worthwhile
+check that came back negative rather than one that was skipped.
+
+Regression: `src/lib.rs`'s
+`bug211_mut_ref_builtin_call_bumps_stale_array_version`. Full `cargo
+test --release --workspace` clean.
+
+Next free bug number is **BUG-212**.

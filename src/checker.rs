@@ -39290,6 +39290,33 @@ fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>, env:
                         // mut-ref call, the exact path BUG-198 was
                         // supposed to cover) before this fix.
                         info.vec_literal_elements = None;
+                        // BUG-211: a FOURTH gap at this same call site,
+                        // this time not a `VarInfo` Option cache but the
+                        // SMT array-VERSIONING counter itself.
+                        // `Stmt::IndexAssign` (`xs[i] = v;`) bumps
+                        // `array_version` and pins prior facts to the
+                        // OLD version so the solver's `arr_<name>_v{N}`
+                        // array-theory encoding stays sound -- a `mut
+                        // ref` call mutating the same Vec never did,
+                        // leaving `array_version` frozen at whatever it
+                        // was before the call. Any later bare `Var(xs)`
+                        // reference still resolved to the STALE version,
+                        // so `prove` could see straight through a real
+                        // mutation to array-theory facts established
+                        // before it. Confirmed exploitable: `let xs:
+                        // Vec<i64> = vec(1,2,3); xs[0] = 100; set(mut
+                        // ref xs, 0, 5); prove xs[0] == 100;` was
+                        // silently accepted -- the solver reasoned
+                        // against `arr_xs_v1` (the version xs[0]=100
+                        // created), never advancing to a fresh version
+                        // for `set`'s own mutation. Bumping the version
+                        // here (with no synthetic store-eq axiom, since
+                        // the call's actual effect isn't statically
+                        // known) forces every later reference to an
+                        // unconstrained fresh array, the same
+                        // "conservative: forget everything" fix shape
+                        // as the three Option-cache clears just above.
+                        info.array_version += 1;
                     }
                 }
             }

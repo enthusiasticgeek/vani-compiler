@@ -10044,6 +10044,41 @@ mod tests {
     }
 
     #[test]
+    fn bug211_mut_ref_builtin_call_bumps_stale_array_version() {
+        // BUG-211 (2026-08-17): a FOURTH gap at the same
+        // `drop_facts_for_mut_ref_call_args` call site (BUG-198/208/
+        // 210 already extended it three times) -- this one isn't a
+        // VarInfo Option<...> cache, it's the SMT array-VERSIONING
+        // counter itself. `Stmt::IndexAssign` (`xs[i] = v;`) bumps
+        // `array_version` so the solver's `arr_<name>_v{N}`
+        // array-theory encoding advances to a fresh, unconstrained
+        // array after a real mutation; a `mut ref` call mutating the
+        // same Vec never bumped it, so a later bare `Var(xs)`
+        // reference still resolved against a STALE version whose
+        // facts predate the mut-ref call's own (unknown) effect.
+        // Confirmed exploitable: IndexAssign establishes a real
+        // array-theory fact (`xs[0] == 100`), then a subsequent
+        // mut-ref builtin call (`set`) silently leaves that fact
+        // provable even though `set` just changed the value to `5`.
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<i64> = vec(1, 2, 3);
+                xs[0] = 100;
+                set(mut ref xs, 0, 5);
+                prove xs[0] == 100;
+                return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("xs[0] is 5 after set(mut ref xs, 0, 5); proving xs[0] == 100 must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("proof failed")),
+            "expected proof-failed diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn block_expression_with_lets_then_tail_compiles() {
         // T-block MVP: `let r = { let a = …; let b = …;
         // a + b };` — block-expr as let RHS. Inner `let`s
