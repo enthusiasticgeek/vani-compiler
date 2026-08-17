@@ -1,5 +1,91 @@
 # Changelog
 
+## [v0.9.4] — 2026-08-17
+
+Consolidates 15 bug fixes (BUG-185 through BUG-199) plus two limitations
+closed (L28, L30) since v0.9.3 (2026-08-12), alongside a feature-heavy
+batch for a `0.9.x` release. See `RELEASE_NOTES/v0.9.4.md` for the full
+writeup; full per-bug detail lives in `docs/TODO_CURRENT.md`.
+
+### Added
+
+- **`detach()` for `Task<R>`**: a second, mutually-exclusive way to
+  consume a spawned task handle — the thread keeps running independently
+  instead of being `join`ed. Five new real-world examples.
+- **`cancel <name>;`**: interrupts a `task` thread blocked in a real
+  syscall (`tcp_accept`, `tcp_recv`) via `pthread_kill`/`EINTR` on POSIX
+  (`CancelSynchronousIo` on Windows).
+- **Real compiler warnings** (`Severity::Warning`, non-fatal): to/downto
+  bounds-direction contradiction, self-assignment, unused var/param,
+  identical if/else branches — plus `--deny-warnings` to escalate any
+  warning to a build failure.
+- **`downto`** descending for-loops rolled out to all 62 dialects
+  (English-only previously).
+- **Inline print format specs**: `print x:03;` / `print y:.2;`.
+- **`vanic test`, phases A–F**: `#[test]`+`fn main` coexistence,
+  `--filter=<substring>`, `#[should_panic]`, parallel execution by
+  default (`--test-threads=N`), package-level default discovery, and
+  `assert_eq_i64/f64/bool/str` builtins.
+- **`tools/backend_crosscheck.py`**: new CI-wired tool running every
+  passing example through both backends and asserting matching exit
+  codes; found a real bug (see BUG-194 below) on its first run.
+- **`\xHH`** hex byte escape in string literals (00–7f).
+- **Cross-language "did you mean" parser hints** for common C/Rust/
+  Python/JS/Pascal mistakes (`foreach`, `do...while`, `switch`, C-style
+  `for(;;)`, `let mut`, etc.).
+- Build-time caching for `sort_runtime.c`/`parallel_runtime.c` (~66%
+  wall-time reduction on a typical single-file build).
+
+### Fixed
+
+- **BUG-185**: `print(bool)` on tree-LLVM never updated
+  `ctx.current_block` after its branch/merge, corrupting later phi-node
+  predecessors — `lli` rejected the module outright on any program
+  printing a bool then hitting a phi-consuming construct.
+- **BUG-186**: `task`/`join` inside any loop body crashed `vanic check`
+  unconditionally.
+- **BUG-187**: `implement` blocks were never checked against their
+  interface's declared parameter *types* — a mismatch produced silently
+  wrong, backend-divergent output through a `Vec<dyn Iface>` vtable call.
+- **BUG-191**: `Vec<Mutex<T>>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+  `WriteGuard<T>` collapsed onto one C typedef regardless of `T`.
+- **BUG-192**: a bare `assert expr;` (no custom message) on tree-LLVM,
+  and `parallel for`'s internal overflow guard, both silently dropped
+  their runtime-trap message.
+- **BUG-193**: a fresh `OwnedStr` passed as an argument to an ordinary
+  user-defined function leaked — closes the general case BUG-159–161
+  only fixed for specific builtins.
+- **BUG-194**: bounds-check traps exited `abort()` (134) on C but
+  `exit(3)` on LLVM for the identical program — now consistent.
+- **BUG-195**: a same-scope shadowed `let` inside a match-arm/`try`-
+  desugar block body produced a C "redefinition" compile error.
+- **BUG-196**: `while`-loop codegen on tree-LLVM never updated
+  `ctx.current_block`, corrupting short-circuit `&&`/`||` PHI nodes.
+- **BUG-197**: `vanic publish` could silently drop a registry-index
+  entry under rapid repeated publishes (stale CDN read).
+- **BUG-198**: a `mut ref` Vec mutation didn't invalidate stale SMT
+  length facts, eliding a real bounds check.
+- **BUG-199**: `FieldAssign` didn't invalidate stale struct-field SMT
+  facts, letting the checker prove directly false claims.
+- **L28**: float-to-int `as` casts were unchecked UB on both backends,
+  diverging in observable exit code — now a defined runtime range check.
+- **L30**: added `tcp_buf_byte_at(i: i64) -> i64` so `tcp_recv`'s
+  received bytes are inspectable from vāṇी code.
+- `vani_translate.py` (dev tool) was silently broken for ~24% of
+  dialects — its keyword-alias table had drifted from `src/lexer.rs`;
+  now regenerated mechanically with a permanent regression suite.
+
+### Documentation
+
+A large tutorial-accuracy pass (acronym/glossary expansion, 25 primer
+chapters' false "no compiler code" claims fixed, stale language/example
+counts fixed), plus L31 documented: a `detach()`'d task still running
+when `main` returns can segfault under `vanic run`'s default LLVM
+`lli`-JIT path — root-caused to upstream `lli`'s own teardown, not
+vāṇी's emitted IR; use `vanic build` or `--backend=c` instead.
+
+---
+
 ## [v0.9.3] — 2026-08-12
 
 Patch release. No new language features, no breaking changes — consolidates
