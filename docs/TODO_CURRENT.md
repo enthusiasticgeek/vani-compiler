@@ -15759,4 +15759,42 @@ execution + assertion catches). vani-ml's own
 passes clean post-fix and is the real-world coverage-gap closure this
 was written for in the first place.
 
-Next free bug number is **BUG-204**.
+## BUG-204
+
+Found 2026-08-17 via localfuzz backend-divergence
+(`20260817-160254-backend-divergence-c8ae24438d`), a mutated copy of
+`examples/language/english/set_mut.vani` whose sieve-loop bound had been
+fuzzed from a small constant up to `9223372036854775807` (i64::MAX),
+driving the loop's `set(mut ref flags, j as u64, 0)` call far past the
+10-element Vec's real length almost immediately.
+
+**Root cause**: the generic (non-bool) `set(xs, i, v)` and `set_mut(*xs,
+i, v)` LLVM helpers (`src/backend_llvm.rs`, in the per-element-type
+`emit_vec_helpers` generator) had **no bounds check at all** -- both
+went straight from the raw index `%i` to a `getelementptr` + `store`,
+unlike every other Vec accessor in the same file (Index reads, `push`,
+and even the packed-bit `Vec<bool>`'s own specialized `set_mut`), which
+all call the shared `@__intent_bounds_check(idx, len)` helper (exit(3)
+on failure, matching the C backend's convention). The C backend's own
+`intent_vec_<T>__set`/`__set_mut` were already correctly bounds-checked
+(`if (i >= xs->len) { fprintf(stderr, "set_mut: index out of
+bounds\n"); abort(); }` equivalent), so this was a genuine LLVM-only
+behavior divergence, not just a missing diagnostic: an out-of-bounds
+`set`/`set_mut` corrupted the heap (`malloc(): unaligned tcache chunk
+detected`) and segfaulted instead of exiting cleanly.
+
+**Fix**: added an `@__intent_bounds_check(i64 %i, i64 %len)` call to
+both helpers, loading `%len` the same way each function already had to
+load `%data` (an `extractvalue` on the by-value struct for `set`, a
+`getelementptr`+`load` on the struct pointer's field 1 for `set_mut`).
+
+Regression: `examples/language/english/bug204_set_mut_bounds_check.vani`
+(an out-of-bounds `set` on a 3-element Vec) +
+`tests/run_end_to_end.rs`'s
+`bug204_set_mut_bounds_check_example_fails_cleanly_on_both_backends`,
+asserting `exit(3)` and that the post-`set` `print` never runs, on both
+backends -- matching this file's own convention that only a real
+subprocess run can distinguish "exited 3 as designed" from "segfaulted."
+Full `cargo test --release --workspace` clean after the fix (0 failed).
+
+Next free bug number is **BUG-205**.

@@ -44961,6 +44961,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         "define {} {}({} %xs, i64 %i, {} %v) {{\n",
         s_ty, set_name, s_ty, elt_ty
     ));
+    // BUG-204: this generic (non-bool) `set` helper had no bounds check
+    // at all -- unlike every other Vec accessor (Index reads, push,
+    // and the bool-specific `set_mut`), an out-of-bounds `set` silently
+    // wrote past the allocated buffer instead of exiting cleanly like
+    // the C backend's equivalent does. Found via localfuzz backend-
+    // divergence: C backend printed "set_mut: index out of bounds" and
+    // exited 3; LLVM segfaulted with heap corruption ("malloc():
+    // unaligned tcache chunk detected").
+    out.push_str(&format!("  %len = extractvalue {} %xs, 1\n", s_ty));
+    out.push_str("  call void @__intent_bounds_check(i64 %i, i64 %len)\n");
     out.push_str(&format!("  %data = extractvalue {} %xs, 0\n", s_ty));
     out.push_str(&format!(
         "  %p = getelementptr {}, {}* %data, i64 %i\n",
@@ -45101,6 +45111,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
             "define i64 {}({}* %xs_p, i64 %i, {} %v) alwaysinline {{\n",
             set_mut_name, s_ty, elt_ty
         ));
+        // BUG-204: see the matching comment on the consuming `set`
+        // helper above -- this in-place form had the exact same missing
+        // bounds check (out-of-bounds writes corrupted the heap instead
+        // of exiting cleanly like the C backend does).
+        out.push_str(&format!(
+            "  %sm_len_p = getelementptr {}, {}* %xs_p, i32 0, i32 1\n",
+            s_ty, s_ty
+        ));
+        out.push_str("  %sm_len = load i64, i64* %sm_len_p\n");
+        out.push_str("  call void @__intent_bounds_check(i64 %i, i64 %sm_len)\n");
         out.push_str(&format!(
             "  %data_p = getelementptr {}, {}* %xs_p, i32 0, i32 0\n",
             s_ty, s_ty
