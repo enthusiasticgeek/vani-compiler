@@ -8686,3 +8686,12 @@ The CANDIDATE bug report has been drafted based on the provided source code and 
 The mutant/generated source includes a deep clone of a `Vec<Node>` element, which is then used within closures capturing by reference. The results differ between the LLVM and C backends, with the LLVM version crashing due to an error related to the base element of a getelementptr instruction.
 
 To fully address this issue, a root cause analysis is required to determine the underlying differences in how the `clone_at` function behaves across these two environments. This may involve examining compiler optimizations, type system intricacies, or any other factors that could influence the behavior of `clone_at` in different backends. Once the root cause is identified, it can be addressed in the vani-compiler project's source code to ensure consistent and predictable behavior across all targets.
+
+---
+
+### Candidate: 20260817-013737-run-crash-36adb701c2
+
+Repro: `tools/localfuzz/findings/20260817-013737-run-crash-36adb701c2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-013737-run-crash-36adb701c2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
