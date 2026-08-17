@@ -8671,3 +8671,18 @@ Repro: `tools/localfuzz/findings/20260816-193855-run-crash-2cf7804a7e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260816-193855-run-crash-2cf7804a7e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-002925-backend-divergence-1c107a0f88
+
+Repro: `tools/localfuzz/findings/20260817-002925-backend-divergence-1c107a0f88/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-002925-backend-divergence-1c107a0f88/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+The CANDIDATE bug report has been drafted based on the provided source code and the observed symptom of divergent output between the LLVM backend and the C backend. The core issue is identified as a backend-divergence due to a mismatch in the behavior of `clone_at` when applied to a `Vec<Struct>` element in different compilation environments.
+
+The mutant/generated source includes a deep clone of a `Vec<Node>` element, which is then used within closures capturing by reference. The results differ between the LLVM and C backends, with the LLVM version crashing due to an error related to the base element of a getelementptr instruction.
+
+To fully address this issue, a root cause analysis is required to determine the underlying differences in how the `clone_at` function behaves across these two environments. This may involve examining compiler optimizations, type system intricacies, or any other factors that could influence the behavior of `clone_at` in different backends. Once the root cause is identified, it can be addressed in the vani-compiler project's source code to ensure consistent and predictable behavior across all targets.
