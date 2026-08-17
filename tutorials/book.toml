@@ -19,6 +19,10 @@ no-section-label = false
 # manas -- the vāṇी mascot. Small inline emotion icons next to code
 # blocks, styled the same way the Rust book uses Ferris.
 additional-css = ["theme/manas.css"]
+# "Translate this page" button in the menu bar, for readers not fluent
+# in English -- opens Google Translate's proxy view for the current
+# page in a new tab. No external script/widget embedded.
+additional-js = ["theme/translate-link.js"]
 # Search is built-in for mdBook; surface it prominently.
 [output.html.search]
 enable = true
