@@ -16328,3 +16328,45 @@ fn bug201_closure_captures_vec_struct_example_produces_correct_output_on_both_ba
         );
     }
 }
+
+// BUG-202/BUG-203 (LLVM backend, found while adding vani-ml test coverage
+// for `shuffled_indices`, 2026-08-17): the packed-bit `Vec<bool>` layout's
+// empty-vec constructor recorded `cap` in the wrong unit (elements, not
+// bits), which crashed `lli` with a null-pointer deref on the vec's
+// second `push`; separately, `push`/`set_mut` built the bit to OR in via
+// `sext i1 %v to i64` instead of `zext`, which for `true` silently
+// corrupted every higher-indexed bit in the same 64-bit word. Only a real
+// `lli` run catches either (BUG-202 crashes outright; BUG-203 produces
+// wrong-but-plausible output), matching this file's own convention for
+// backend-specific regressions.
+#[test]
+fn bug202_203_vec_bool_push_and_set_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug202_203_vec_bool_push_and_set.vani",
+        manifest_dir
+    );
+    let expected = "true count: 1\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-202/BUG-203: Vec<bool> push/set corrupted or crashed for {:?}",
+            backend_args
+        );
+    }
+}

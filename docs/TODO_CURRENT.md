@@ -15700,4 +15700,63 @@ known-non-compiling baseline, no new failures), and both the original
 qwen-generated repro and the minimal 12-line isolation now produce
 byte-identical output on both backends.
 
-Next free bug number is **BUG-202**.
+## BUG-202 / BUG-203
+
+Found 2026-08-17 while closing a documentation-tooling-flagged test-
+coverage gap in vani-ml (`shuffled_indices` had zero test/example
+call sites; `tools/gen_api_tutorial.py`'s auto-generated
+`api_reference.md` correctly surfaced this as "no usage example
+found"). Writing a real test for it (a Fisher-Yates permutation check
+using a `Vec<bool>` seen-set built via `push`+`set` in a loop) hit two
+independent, previously-undiscovered LLVM-backend-only bugs in the
+packed-bit `Vec<bool>` layout (`%intent_vec_bool = { i64*, i64, i64 }`,
+`len`/`cap` in BITS, data = `ceil(n/64)` i64 words). The C backend's
+`intent_vec_bool` (also bit-packed) was unaffected by either.
+
+**BUG-202** (crash): `emit_vec_bool_let_from_literal` /
+`emit_vec_bool_literal_value` (`src/backend_llvm.rs`) built the
+initial `%intent_vec_bool` struct's `cap` field as an ELEMENT count
+(`if n == 0 { 1 } else { n }`), but every other op on this type
+(critically, `push`'s own growth arithmetic) treats `cap` as a BIT
+count and divides it by 64. A `Vec<bool>` constructed via `vec()`
+(empty, `n=0`) got `cap=1` instead of the correct `64` (the real bit
+capacity of the 8-byte/1-word buffer just malloc'd). The very next
+`push` past that undersized `cap` computed `nc = cap*2 = 2`, then
+`nw = nc/64 = 0` (LLVM `udiv`, no rounding up) -> a 0-byte `realloc`
+-> a null/invalid pointer dereference on the following load. Minimal
+repro: `let seen: Vec<bool> = vec(); push(mut ref seen, false); push(mut
+ref seen, false);` crashed `lli` on the second push. Fix: `cap =
+word_count * 64` in both functions (the true bit capacity of the
+buffer actually allocated), matching the unit `push`'s own grow logic
+expects.
+
+**BUG-203** (silent corruption, found immediately after fixing
+BUG-202 let the test run far enough to fail on a plain assertion
+instead of crashing): `push` and `set_mut`'s bit-OR logic
+(`emit_vec_bool_helpers_llvm`) built the bit to insert via `%bit =
+sext i1 %v to i64`. `sext` of an i1 `true` sign-extends to ALL ONES
+(`-1i64`), not `1` -- shifted left by the target bit index `bi`, that
+sets every bit from `bi` through 63, not just bit `bi`, silently
+corrupting every higher-indexed element in the same 64-bit word the
+instant any element is pushed/set `true`. Traced by hand-simulating a
+10-element `Vec<bool>` seen-set against a known permutation and
+matching the exact "already true" pattern the corruption produced at
+every step. Fix: `zext` instead of `sext` (i1 `false`/`true` ->
+i64 `0`/`1`, no sign extension) -- the only correct choice for a
+1-bit-wide payload being OR'd into a specific position. `pop_mut`'s
+read path (`lshr` + `and 1`, no sign-extension) was already correct
+and untouched.
+
+Regression: `examples/language/english/bug202_203_vec_bool_push_and_set.vani`
+(4 pushes + 1 `set` at a low index, checks the higher indices stayed
+false) + `tests/run_end_to_end.rs`'s
+`bug202_203_vec_bool_push_and_set_example_produces_correct_output_on_both_backends`,
+matching BUG-201's real-subprocess-`vanic-run` shape (a `compile_to_llvm`-
+only test wouldn't catch either bug: BUG-202 needs an actual `lli` run to
+crash, BUG-203 produces wrong-but-plausible output that only a real
+execution + assertion catches). vani-ml's own
+`tests/test_shuffled_indices.vani` (the test that found both bugs)
+passes clean post-fix and is the real-world coverage-gap closure this
+was written for in the first place.
+
+Next free bug number is **BUG-204**.
