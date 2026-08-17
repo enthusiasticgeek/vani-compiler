@@ -26,6 +26,17 @@ is the artifact that gets deployed (eventually — see TUT-5 in
   (`.github/workflows/deploy-tutorials.yml`) builds with mdBook 0.4.40
   and deploys to GitHub Pages on every push that touches `tutorials/`.
   Live at <https://enthusiasticgeek.github.io/vani-compiler/>.
+- **TUT-6** ✅ SHIPPED 2026-08-17 — a "Translate this page" language-picker
+  dropdown in the menu bar (`theme/translate-link.js`), for readers not
+  fluent in English. Links directly to Google's `<host>.translate.goog`
+  proxy (not `translate.google.com/translate`'s own redirect page, which
+  Chrome for Android intercepts with a native flow that fails
+  independently of the link) for whichever of ~34 languages the reader
+  picks — not auto-guessed from the browser locale, so a reader fluent in
+  more than one language isn't stuck with just their default. CI's pinned
+  mdBook 0.4.40 renders the menu bar as `#menu-bar`, not the newer
+  `#mdbook-menu-bar` a local 0.5.x build produces — the script matches
+  both.
 
 ## Build it locally
 
@@ -59,13 +70,20 @@ edit under `src/` triggers a rebuild + page reload.
 tutorials/
 ├── README.md                # this file
 ├── book.toml                # mdBook config (theme / search / git URLs)
+├── theme/                   # additional-css/additional-js (manas mascot,
+│                             # the "Translate this page" language-picker
+│                             # dropdown in the menu bar)
 ├── src/
 │   ├── SUMMARY.md           # Table of contents — mdBook entry
 │   ├── introduction.md      # Landing page
 │   ├── contributing.md      # How to write a lesson
-│   ├── beginner/            # 12 lessons (1 written, 11 stubs)
-│   ├── intermediate/        # 12 stubs
-│   └── advanced/            # 10 stubs
+│   ├── why_vani.md, glossary.md, installation.md
+│   ├── beginner/            # 26 lessons, all written (Hello World through
+│   │                         # the Big-O primer)
+│   ├── intermediate/        # 45 lessons, all written (struct methods
+│   │                         # through the tic-tac-toe capstone)
+│   └── advanced/            # 25 lessons, all written (async through the
+│                             # job-scheduler capstone)
 └── book/                    # gitignored — produced by `mdbook build`
 ```
 
