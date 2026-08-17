@@ -8704,3 +8704,14 @@ Repro: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-142322-run-crash-850be4a744
+
+Repro: `tools/localfuzz/findings/20260817-142322-run-crash-850be4a744/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-142322-run-crash-850be4a744/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani compiler was run against a test case that caused a segmentation fault (SEGV) in the LLVM backend during execution of the `control_flow.vani` program. The exact repro source is not provided here, but it involved running the compiler with the specified arguments and observing the crash on the C backend.
