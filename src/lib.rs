@@ -9689,6 +9689,89 @@ mod tests {
         compile(source).expect("Sanskrit-aliased program should compile");
     }
 
+    /// Sanskrit gap-fill (session: primitives/concurrency keyword
+    /// audit): `Str`/`OwnedStr` and the Mutex/RwLock/Guard/Barrier/
+    /// Channel/Atomic/Condvar/Handle concurrency-primitive family
+    /// compiled as literal English words inside a Sanskrit-pragma
+    /// file even before this pass (the purity gate only classifies
+    /// `is_structure_keyword_kind` tokens, and these are all parser-
+    /// level string-matched type names, not lexer keywords) -- but
+    /// forced non-Devanagari words into otherwise-pure Sanskrit
+    /// source. This test locks in the new native spellings.
+    #[test]
+    fn devanagari_type_name_aliases_compile_sanskrit() {
+        let source = r#"
+            // vani-lang: sanskrit
+            उद्देश्य "Devanagari type-name alias coverage";
+
+            कार्य मुख्य() -> i64 {
+              माना क: पाठ = "hi";
+              माना ख: स्वपाठ = क + "";
+              माना _ग: अवरोध = barrier_new(1);
+              माना _म: ताला<i64> = mutex_new(5);
+              माना _र: पठनलेख्यताला<i64> = rwlock_new(7);
+              माना _च: वाहिनी<i64> = channel_new();
+              माना _अ: अणु<i64> = atomic_new(9);
+              माना _स: प्रतीक्षाचर = condvar_new();
+              माना पूल: Pool<i64> = pool_new();
+              माना _ह: हस्तक<i64> = pool_alloc(परिवर्तनीय दृष्ट्या पूल, 3);
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("Sanskrit type-name aliases should compile");
+    }
+
+    /// detach/cancel (वियोजन/निरसन) had NO Devanagari spelling at
+    /// all before this pass -- English-only reserved keywords.
+    /// वियोजन ("disjoining") is संयोजन's ("joining") own natural
+    /// antonym, same "yoj" root with vi-/sam- prefixes, mirroring
+    /// join/detach's own English antonym pairing.
+    #[test]
+    fn devanagari_detach_and_cancel_compile_sanskrit() {
+        let source = r#"
+            // vani-lang: sanskrit
+            उद्देश्य "detach/cancel Devanagari alias coverage";
+
+            कार्य विलम्ब() -> i64 {
+              पुनरागम 7;
+            }
+
+            कार्य मुख्य() -> i64 {
+              माना कार्यभार = नियोग विलम्ब();
+              वियोजन कार्यभार;
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("Sanskrit detach/cancel aliases should compile");
+    }
+
+    /// चयन (select) previously had no Devanagari spelling. This also
+    /// pins down a real, separate bug found while adding it: both
+    /// `for await` and `select`'s own `await` arm checked the raw
+    /// ASCII string `"await"` directly instead of calling the
+    /// shared `is_await_ident` helper -- so even the EXISTING
+    /// Sanskrit/Mandarin/Japanese `await` spellings
+    /// (प्रतीक्षा/等候/待機) never worked inside these two
+    /// constructs specifically, in any dialect, before this fix.
+    #[test]
+    fn devanagari_select_and_await_arm_compile_sanskrit() {
+        let source = r#"
+            // vani-lang: sanskrit
+            उद्देश्य "select/await-arm Devanagari alias coverage";
+
+            कार्य मुख्य() -> i64 {
+              माना द्वार: i64 = tcp_listen(0);
+              चयन {
+                प्रतीक्षा(tcp_recv_nb(द्वार, 64)) तदा न {
+                  पुनरागम न;
+                }
+              }
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("Sanskrit select/await-arm aliases should compile");
+    }
+
     #[test]
     fn devanagari_and_english_in_same_file_rejected_as_language_mismatch() {
         // Per-file language purity (closure #236): the lexer

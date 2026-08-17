@@ -1891,3 +1891,41 @@ itself explicitly draining/joining detached OS threads before
 outside the JIT'd program (`vanic`'s own subprocess wrapper around
 `lli`), not from generated IR -- worth a dedicated design pass if this
 turns out to bite real (non-fuzzer-manufactured) programs.
+
+### L32 -- `नियोग<T>` (Task<R>'s Devanagari spelling) can't be used as a type annotation
+
+Found auditing Sanskrit primitive/concurrency keyword coverage
+(2026-08-17): `Task<R>`'s type-annotation position relies on ASCII
+case to distinguish itself from the `task` spawn-statement keyword --
+lowercase `task` lexes to the reserved `TokenKind::Task`, while
+capitalized `Task` never matches that keyword-table entry (Rust `match`
+is case-sensitive) and falls through to a plain `TokenKind::Ident("Task")`,
+which `parse_type`'s string-matched type-name block then recognizes.
+Devanagari has no case distinction at all, so नियोग (task's own
+Sanskrit spelling) *always* lexes to the same reserved
+`TokenKind::Task`, regardless of position -- it can never fall through
+to an identifier the way `Task` does, so `माना x: नियोग<i64> = ...`
+fails with "expected type like 'i32', 'u64', 'f64', 'bool', 'Str', ...".
+
+Confirmed the underlying spawn syntax (`नियोग <fn_call>()`) and
+`detach`/`join` both work fine on the resulting binding -- only the
+explicit type annotation is affected, and only for this one type
+(every other type name added this session -- `Barrier`/`Mutex<T>`/
+`RwLock<T>`/`Channel<T>`/`Atomic<T>`/`Condvar`/`Handle<T>`/`Str`/
+`OwnedStr` -- is matched via the same Ident-string mechanism `Task`
+itself uses, so their Devanagari aliases (अवरोध/ताला/पठनलेख्यताला/
+वाहिनी/अणु/प्रतीक्षाचर/हस्तक/पाठ/स्वपाठ) all work as type
+annotations too). Workaround: omit the explicit annotation and let
+inference fill in the `Task<R>` type from the spawn expression's
+return type, same as `examples/language/sanskrit/
+concurrency_primitives.vani` does.
+
+**Not fixed this pass**: a real fix means teaching `parse_type` to
+also recognize a bare `TokenKind::Task` token (not just
+`Ident("Task")`) with `<`-lookahead disambiguation against the
+statement-form spawn, mirroring the existing Ident-based logic --
+same shape, different token-kind check, but needs its own design/
+test pass to get the lookahead right without breaking `नियोग
+<fn_call>()` spawn parsing. Matches this file's `async_cancel_auto.vani`
+precedent: known Devanagari async-surface gaps get documented and
+queued rather than rushed.

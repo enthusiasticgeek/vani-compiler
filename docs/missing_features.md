@@ -480,6 +480,35 @@ shipped; works for the common cases.
 `_mm_aesenc_si128`, etc.). For these, use an `extern "C"` FFI shim compiled
 with the target's intrinsic headers. See `docs/simd_ffi_shims.md`.
 
+### GPU / hardware-accelerated math (CUDA, ROCm, TensorRT, DLA)
+
+**Not in vāṇी, and no compiler backend is planned.** There's no PTX/
+SPIR-V/HSA lowering path — vāṇी only ever emits LLVM IR or C. Same
+answer applies to any dedicated hardware-acceleration API (CUDA
+Runtime/cuBLAS/cuDNN, ROCm/HIP, TensorRT, DLA via TensorRT's
+execution-provider flag).
+
+**Workaround: `extern "C"` FFI, the same mechanism SIMD intrinsics
+above already uses**, not a new compiler feature. This is
+lower-risk than it sounds — confirmed directly against the existing
+FFI ABI rules (`tutorials/src/intermediate/09a_ffi_primer.md`):
+scalars/`Str`/`ref T`/`mut ref T`/`#[repr(C)]` structs already cross
+the boundary cleanly, and `ref Vec<T>` passing a contiguous buffer
+pointer to a C function is already proven end-to-end by the SIMD
+shims above (`docs/simd_ffi_shims.md`'s `neon_matmul(a: ref Vec<i64>,
+b: ref Vec<i64>, ...)`). A device pointer can be carried as an opaque
+`i64` handle (`mut ref i64` for an out-parameter like
+`cudaMalloc(void**, size_t)`'s device-pointer slot) rather than a raw
+pointer type, which does NOT cross the FFI boundary in v1. The GPU
+kernel/device code itself still has to be written and compiled by the
+vendor's own toolchain (`nvcc`, `hipcc`) and linked in via
+`--link-with`/`-l<name>` — vāṇी can never emit device code without a
+real GPU backend, independent of the FFI question.
+
+Full scoping + effort estimate for building this as Kosh packages
+(`vani-cuda`, `vani-rocm`, `vani-tensorrt`): see kosh-index/ROADMAP.md's
+"Planned: hardware-acceleration tier".
+
 ---
 
 ## Modules + packages
