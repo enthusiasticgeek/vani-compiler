@@ -8733,3 +8733,12 @@ Repro: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260817-174249-run-crash-a2b2c2cfa5
+
+Repro: `tools/localfuzz/findings/20260817-174249-run-crash-a2b2c2cfa5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-174249-run-crash-a2b2c2cfa5/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
