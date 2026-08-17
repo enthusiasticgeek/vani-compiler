@@ -9977,6 +9977,41 @@ mod tests {
     }
 
     #[test]
+    fn bug208_mut_ref_call_to_user_fn_invalidates_stale_struct_field_facts() {
+        // BUG-208 (2026-08-17): `drop_facts_for_mut_ref_call_args`
+        // only ever cleared the smt_facts Vec (BUG-198's own fix) --
+        // it never invalidated env's `struct_literal_fields`/
+        // `.constant` caches (the two caches BUG-199 already fixed
+        // for a DIRECT `obj.field = value;`) when the mutation
+        // instead happened INSIDE a user-defined function taking a
+        // `mut ref` parameter. `bump` mutates `c.n` via an ordinary
+        // FieldAssign inside its own body; the checker must forget
+        // its stale "c.n == 0" belief about the CALLER's `c` once
+        // `bump(mut ref c)` returns, or `prove c.n == 0;` gets
+        // silently (and wrongly) accepted -- a real path to proving
+        // arbitrary false claims, same severity class as BUG-199.
+        let source = r#"
+            struct Counter { n: i64 }
+            fn bump(c: mut ref Counter) {
+                c.n = c.n + 1;
+            }
+            fn main() -> i64 {
+                let c: Counter = Counter { n: 0 };
+                bump(mut ref c);
+                prove c.n == 0;
+                return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("c.n is 1 after bump(mut ref c); proving c.n == 0 must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("proof failed")),
+            "expected proof-failed diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn block_expression_with_lets_then_tail_compiles() {
         // T-block MVP: `let r = { let a = …; let b = …;
         // a + b };` — block-expr as let RHS. Inner `let`s

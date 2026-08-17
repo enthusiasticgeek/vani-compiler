@@ -15903,4 +15903,61 @@ after the fix (0 failed). The C backend has no equivalent concept
 (`ctx.current_block`/phi tracking is LLVM-SSA-specific), confirmed
 unaffected on both new examples.
 
-Next free bug number is **BUG-208**.
+## BUG-208
+
+Found 2026-08-17 by auditing the SMT-facts-invalidation family
+(BUG-198/199's own family) at the user's explicit request to also
+audit the SMT verifier subsystem, right after closing the Vec-bounds-
+check and `ctx.current_block` families the same day.
+
+**Root cause**: `drop_facts_for_mut_ref_call_args` (`checker.rs`) --
+the function BUG-198 added to invalidate stale `smt_facts` when a
+`mut ref` call argument gets mutated -- only ever cleared the
+`smt_facts: Vec<Expr>` list. It never took `env` as a parameter at
+all, so it could never invalidate the two SEPARATE env-level caches
+BUG-199 already fixed for a DIRECT `obj.field = value;`:
+`VarInfo.struct_literal_fields` and `VarInfo.constant`. This meant
+any USER-DEFINED function taking a `mut ref StructType` parameter and
+mutating a field inside its own body left the CALLER's checker
+believing the field's OLD value forever afterward -- a real path to
+`prove`/`requires`/`ensures` vacuously accepting FALSE claims, not
+just a missed-optimization gap. This is exactly the open risk BUG-198's
+own write-up predicted: "env's VarInfo carries at least two SEPARATE
+fact-adjacent caches that both need invalidation-on-mutation scrutiny
+going forward."
+
+Severity: same class as BUG-199 (a real soundness hole, not merely an
+elided optimization), but a WIDER blast radius -- "take a `mut ref`
+parameter and mutate a field" is an extremely common, idiomatic
+pattern in this language, not a narrow builtin-call case.
+
+**Confirmed via direct repro**:
+```vani
+struct Counter { n: i64 }
+fn bump(c: mut ref Counter) { c.n = c.n + 1; }
+fn main() -> i64 {
+    let c: Counter = Counter { n: 0 };
+    bump(mut ref c);
+    prove c.n == 0;   // silently ACCEPTED before this fix
+    return 0;
+}
+```
+`--smt-debug` showed the query asserting the stale fact `v_c__n ==
+bv0` directly, making the negated goal trivially unsat ("proven").
+
+**Fix**: added `env: &mut Env` as a parameter to
+`drop_facts_for_mut_ref_call_args` (3 call sites updated), clearing
+`struct_literal_fields`/`.constant` for the mut-ref'd root variable
+alongside the existing `drop_facts_mentioning` call -- mirroring
+BUG-199's own invalidation pattern exactly.
+
+Regression: `src/lib.rs`'s
+`bug208_mut_ref_call_to_user_fn_invalidates_stale_struct_field_facts`,
+a compile-time diagnostic test matching the existing
+`smt_struct_field_disproof_surfaces_counterexample` test's shape
+(`expect_err` + assert the "proof failed" message is present).
+Confirmed the exact repro above now correctly fails with an SMT
+counterexample (`c__n = -1`, i.e. unconstrained) instead of "ok".
+Full `cargo test --release --workspace` clean after the fix.
+
+Next free bug number is **BUG-209**.
