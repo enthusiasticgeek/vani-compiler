@@ -8703,7 +8703,14 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-141110-run-crash-4a96c72857/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, not a compiler bug. The
+mutation duplicated `let c: i64 = tcp_connect_local(port);` into two
+back-to-back calls (shadowing `c`), so peer sends "abcd" on the
+SECOND connection while the server only ever accepted the FIRST --
+the accepted socket legitimately never receives data, so
+`io_recv_async` blocks forever. Both backends hang identically
+(confirmed on a freshly-rebuilt binary); this is a genuine infinite
+wait in the mutated source, not a divergence or crash.
 
 ---
 
@@ -8712,7 +8719,13 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-142322-run-crash-850be4a744/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-142322-run-crash-850be4a744/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, not a compiler bug (the
+"SEGV"/"crash" text below this line is stale/inaccurate -- both
+backends actually TIME OUT, they don't crash). The mutation deleted
+the decrement statement from `laske_alas`'s (Finnish "count down")
+while loop -- `kun i > 0 { summa = summa + i; }` never updates `i`,
+so it's a genuine infinite loop in the mutated source. Confirmed
+hanging identically on both backends on a freshly-rebuilt binary.
 
 The vani compiler was run against a test case that caused a segmentation fault (SEGV) in the LLVM backend during execution of the `control_flow.vani` program. The exact repro source is not provided here, but it involved running the compiler with the specified arguments and observing the crash on the C backend.
 
@@ -8723,7 +8736,16 @@ The vani compiler was run against a test case that caused a segmentation fault (
 Repro: `tools/localfuzz/findings/20260817-160254-backend-divergence-c8ae24438d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-160254-backend-divergence-c8ae24438d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: CONFIRMED REAL BUG, filed and fixed as **BUG-204** on main
+(commit 96b8807a, 2026-08-17). The mutation blew the sieve loop's
+bound up to i64::MAX, driving `set(mut ref flags, ...)` out of bounds
+almost immediately. Root cause: the LLVM backend's generic (non-bool)
+`set`/`set_mut` helpers had NO bounds check at all (every other Vec
+accessor did) -- an out-of-bounds write corrupted the heap and
+segfaulted instead of exiting cleanly like the C backend already did.
+Fixed by adding the same `@__intent_bounds_check` call every other
+accessor already used. See `docs/TODO_CURRENT.md`'s BUG-204 entry on
+`vani-compiler` main for the full writeup.
 
 ---
 
@@ -8732,7 +8754,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-173836-run-crash-3eb740e33e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, not a compiler bug. Same
+mutation shape as 20260817-142322 above: the Sinhala `control_flow.vani`
+while loop's increment `i = i + 1;` was mutated to `i = i + 0;`, a
+genuine infinite loop in the mutated source (i never reaches 5).
+Confirmed hanging identically on both backends on a freshly-rebuilt
+binary.
 
 ---
 
@@ -8741,4 +8768,10 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260817-174249-run-crash-a2b2c2cfa5/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260817-174249-run-crash-a2b2c2cfa5/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: reviewed 2026-08-17, FALSE POSITIVE, not a compiler bug. The
+mutation blew `delay`'s first `sleep_ms(...)` call up to
+`9223372036854775807` (i64::MAX ms) -- the Konkani async smoke test
+now legitimately awaits a multi-million-year sleep before its second
+`delay` even starts. Confirmed hanging identically on both backends
+on a freshly-rebuilt binary; same "large-constant mutation" false-
+positive shape as the two infinite-loop findings above.
