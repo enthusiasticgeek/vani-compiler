@@ -8775,3 +8775,53 @@ now legitimately awaits a multi-million-year sleep before its second
 `delay` even starts. Confirmed hanging identically on both backends
 on a freshly-rebuilt binary; same "large-constant mutation" false-
 positive shape as the two infinite-loop findings above.
+
+---
+
+### Candidate: 20260817-192153-run-crash-7a09d47656
+
+Repro: `tools/localfuzz/findings/20260817-192153-run-crash-7a09d47656/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-192153-run-crash-7a09d47656/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+### RUN CRASH REPORT FOR vani-compiler
+
+#### Base Corpus File: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/echo_pool.vani`
+
+#### Mutant/generated Source:
+```vani
+// Arc 1 v3.1 — A4.3 + A4.6 acceptance: echo_pool.
+//
+// Single-threaded server handling N concurrent client tasks
+// via a dynamic Vec<Task__handle> with round-robin polling
+// and epoll multiplex. The load-bearing language piece is
+// `mut ref pool[i]` — the new RefMutIndex form added 2026-06-08
+// to support `__poll_X(mut ref pool[i])` over a `Vec<Task__X>`.
+//
+// Before this commit: `mut ref pool[i]` was rejected with
+// "can only borrow a named variable or a struct field".
+// Concurrent N-task scheduling had to use named-slot patterns
+// (`struct Pool { t0: Task, t1: Task, ... }`) which scaled to
+// fixed N only.
+//
+// build & run:
+//   vanic run examples/language/english/echo_pool.vani                # LLVM
+//   vanic run examples/language/english/echo_pool.vani --backend=c    # C
+
+intent "A4.3 echo_pool — N concurrent v3.1 Tasks on one reactor";
+
+async fn handle(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  // Three
