@@ -18852,8 +18852,10 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 Type::Vec(element) => (vec_c_struct(element), c_leaf_type(element).to_string()),
                 _ => ("intent_vec_int64_t".to_string(), "int64_t".to_string()),
             };
+            // BUG-206: had no bounds check on either index at all --
+            // mirrors vec_remove_at's own BUG-148 fix right below.
             format!(
-                "({{ {sn}* __vs_xs = ({xs}); int64_t __vs_i = ({i}); int64_t __vs_j = ({j}); {ct} __vs_t = __vs_xs->data[__vs_i]; __vs_xs->data[__vs_i] = __vs_xs->data[__vs_j]; __vs_xs->data[__vs_j] = __vs_t; (int64_t)0; }})",
+                "({{ {sn}* __vs_xs = ({xs}); int64_t __vs_i = intent_check_bounds((int64_t)({i}), (int64_t)__vs_xs->len); int64_t __vs_j = intent_check_bounds((int64_t)({j}), (int64_t)__vs_xs->len); {ct} __vs_t = __vs_xs->data[__vs_i]; __vs_xs->data[__vs_i] = __vs_xs->data[__vs_j]; __vs_xs->data[__vs_j] = __vs_t; (int64_t)0; }})",
                 sn = sn, ct = ct,
                 xs = emit_expr(&args[0]),
                 i = emit_expr(&args[1]),

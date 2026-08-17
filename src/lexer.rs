@@ -7067,6 +7067,32 @@ impl<'a> Lexer<'a> {
                 || b >= 0x80
             {
                 self.advance();
+            } else if b == b'\'' {
+                // BUG-209: sibling of BUG-175's `lex_unicode_ident`
+                // fix, applied here to the ASCII-starting identifier
+                // lexer -- French/Italian elision (`l'arbre`,
+                // `dell'anno`) is exactly as legitimate a mid-word
+                // apostrophe as Hebrew geresh was, but this function
+                // never got the fix since BUG-175's repro happened to
+                // start with a non-ASCII byte (routing through
+                // `lex_unicode_ident` instead). Confirmed via a direct
+                // repro: `soit l'arbre: i64 = 5;` failed to parse
+                // ("attendu '='") because the lexer stopped at the
+                // apostrophe and treated the rest as a new token.
+                // Same disambiguation as BUG-175: fold the `'` into
+                // this identifier only when another identifier-
+                // continuation byte follows immediately after it; a
+                // genuine loop label is never glued directly onto a
+                // preceding identifier this way.
+                let next_continues_ident = self
+                    .peek_next()
+                    .map(|nb| matches!(nb, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || nb >= 0x80)
+                    .unwrap_or(false);
+                if next_continues_ident {
+                    self.advance();
+                } else {
+                    break;
+                }
             } else {
                 break;
             }

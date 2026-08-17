@@ -4644,6 +4644,17 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let exit = ctx.fresh_label("for_exit");
             out.push_str(&format!("  br label %{}\n", header));
             out.push_str(&format!("{}:\n", header));
+            // BUG-207: mirrors BUG-190's `If` fix -- `ctx.current_block`
+            // must track each of this loop's own blocks (header/body_lbl/
+            // step/exit) as they're entered, not just once via a single
+            // post-construct assignment (`TypedStmt::For` previously
+            // never updated it at all). Confirmed via the same repro
+            // shape as BUG-190: `vec_fill` as the first statement in a
+            // `for i from LOW to HIGH` body (no intervening branch) read
+            // a stale `ctx.current_block` for its phi's entry-edge
+            // predecessor, producing the identical "PHI node entries do
+            // not match predecessors!" LLVM verifier error.
+            ctx.current_block = header.clone();
             let cur = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", cur, lty, lty, i_addr));
             let cmp = ctx.fresh_tmp();
@@ -4657,6 +4668,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", body_lbl));
+            ctx.current_block = body_lbl.clone();
             ctx.loops.push(LoopFrame {
                 header: step.clone(),
                 exit: exit.clone(),
@@ -4673,6 +4685,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.pop();
             // Step block: increment i_addr, jump to header.
             out.push_str(&format!("{}:\n", step));
+            ctx.current_block = step.clone();
             let now = ctx.fresh_tmp();
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", now, lty, lty, i_addr));
@@ -4690,6 +4703,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx.locals.remove(var);
             }
             out.push_str(&format!("{}:\n", exit));
+            ctx.current_block = exit;
         }
         TypedStmt::FieldAssign {
             object,
@@ -5198,6 +5212,12 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let exit = ctx.fresh_label("iter_exit");
             out.push_str(&format!("  br label %{}\n", header));
             out.push_str(&format!("{}:\n", header));
+            // BUG-207: same gap as TypedStmt::For's own fix above --
+            // `ctx.current_block` was never updated anywhere in this
+            // duplicate walker copy either (matches the "checker.rs
+            // has >=2 duplicate walker copies to fix in tandem"
+            // pattern already known from BUG-188/189/190).
+            ctx.current_block = header.clone();
             let cur = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load i64, i64* {}\n", cur, i_addr));
             let cmp = ctx.fresh_tmp();
@@ -5211,6 +5231,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
 
             out.push_str(&format!("{}:\n", body_lbl));
+            ctx.current_block = body_lbl.clone();
             // Load element at `cur` into `var`'s alloca.
             let elem_val = elem_gep(&cur, ctx, out);
             out.push_str(&format!(
@@ -5233,12 +5254,14 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.pop();
             // Step block: bump i_addr then jump to header.
             out.push_str(&format!("{}:\n", step));
+            ctx.current_block = step.clone();
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = add i64 {}, 1\n", next, cur));
             out.push_str(&format!("  store i64 {}, i64* {}\n", next, i_addr));
             out.push_str(&format!("  br label %{}\n", header));
             ctx.terminated = outer_terminated;
             out.push_str(&format!("{}:\n", exit));
+            ctx.current_block = exit.clone();
 
             // If we consumed an owned Vec, free its buffer here.
             // For non-Copy elements each slot was loaded into x and
@@ -8703,8 +8726,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     ("%intent_vec_i64", "i64", "i64*", "i64**")
                 };
                 let xs = emit_expr(&args[0], ctx, out);
-                let i = emit_expr(&args[1], ctx, out);
-                let j = emit_expr(&args[2], ctx, out);
+                let i_raw = emit_expr(&args[1], ctx, out);
+                let i = widen_index_to_i64(&args[1], i_raw, ctx, out);
+                let j_raw = emit_expr(&args[2], ctx, out);
+                let j = widen_index_to_i64(&args[2], j_raw, ctx, out);
+                // BUG-206: vec_swap had NO bounds check on either index --
+                // every other index-taking Vec accessor already does
+                // (swap_remove/insert since BUG-120, vec_remove_at right
+                // below this since BUG-148). Confirmed real on both
+                // backends: LLVM segfaults on a far out-of-bounds index,
+                // C silently reads/writes adjacent heap memory.
+                let vs_lp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    vs_lp, svty, svty, xs
+                ));
+                let vs_len = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", vs_len, vs_lp));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    i, vs_len
+                ));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    j, vs_len
+                ));
                 let dp = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
@@ -44961,6 +45007,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         "define {} {}({} %xs, i64 %i, {} %v) {{\n",
         s_ty, set_name, s_ty, elt_ty
     ));
+    // BUG-204: this generic (non-bool) `set` helper had no bounds check
+    // at all -- unlike every other Vec accessor (Index reads, push,
+    // and the bool-specific `set_mut`), an out-of-bounds `set` silently
+    // wrote past the allocated buffer instead of exiting cleanly like
+    // the C backend's equivalent does. Found via localfuzz backend-
+    // divergence: C backend printed "set_mut: index out of bounds" and
+    // exited 3; LLVM segfaulted with heap corruption ("malloc():
+    // unaligned tcache chunk detected").
+    out.push_str(&format!("  %len = extractvalue {} %xs, 1\n", s_ty));
+    out.push_str("  call void @__intent_bounds_check(i64 %i, i64 %len)\n");
     out.push_str(&format!("  %data = extractvalue {} %xs, 0\n", s_ty));
     out.push_str(&format!(
         "  %p = getelementptr {}, {}* %data, i64 %i\n",
@@ -45101,6 +45157,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
             "define i64 {}({}* %xs_p, i64 %i, {} %v) alwaysinline {{\n",
             set_mut_name, s_ty, elt_ty
         ));
+        // BUG-204: see the matching comment on the consuming `set`
+        // helper above -- this in-place form had the exact same missing
+        // bounds check (out-of-bounds writes corrupted the heap instead
+        // of exiting cleanly like the C backend does).
+        out.push_str(&format!(
+            "  %sm_len_p = getelementptr {}, {}* %xs_p, i32 0, i32 1\n",
+            s_ty, s_ty
+        ));
+        out.push_str("  %sm_len = load i64, i64* %sm_len_p\n");
+        out.push_str("  call void @__intent_bounds_check(i64 %i, i64 %sm_len)\n");
         out.push_str(&format!(
             "  %data_p = getelementptr {}, {}* %xs_p, i32 0, i32 0\n",
             s_ty, s_ty

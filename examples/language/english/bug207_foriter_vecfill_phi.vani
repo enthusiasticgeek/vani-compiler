@@ -1,0 +1,20 @@
+// Regression example for BUG-207 (LLVM backend, `TypedStmt::ForIter` --
+// collection-based `for x in xs`).
+//
+// Same bug class as bug207_for_vecfill_phi.vani's `TypedStmt::For`
+// fix, but in the SEPARATE duplicate-walker copy that handles `for x
+// in xs` -- confirming the "checker.rs has >=2 duplicate walker
+// copies to fix in tandem" pattern already known from BUG-188/189/190
+// extends to this bug class too. `ctx.current_block` was never
+// updated anywhere in this codegen copy either.
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(10, 20, 30);
+    let k: i64 = 4;
+    let total: i64 = 0;
+    for x in xs {
+        let v: Vec<i64> = vec_fill(k, x);
+        total = total + (len(ref v) as i64);
+    }
+    print "total:", total;
+    return 0;
+}

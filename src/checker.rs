@@ -13530,7 +13530,7 @@ fn check_one_stmt(
             // length fact surviving a `pop(mut ref zs)` wrongly elided
             // a bounds check on `zs[2]`, producing a silent OOB read
             // on the C backend).
-            drop_facts_for_mut_ref_call_args(expr, smt_facts);
+            drop_facts_for_mut_ref_call_args(expr, smt_facts, env);
 
             // Nested-path move of a non-Copy field isn't
             // tracked yet (`moved_fields` is one level deep).
@@ -13993,7 +13993,7 @@ fn check_one_stmt(
             // length fact surviving a `pop(mut ref zs)` wrongly elided
             // a bounds check on `zs[2]`, producing a silent OOB read
             // on the C backend).
-            drop_facts_for_mut_ref_call_args(expr, smt_facts);
+            drop_facts_for_mut_ref_call_args(expr, smt_facts, env);
             consume_if_moved_var(expr, &coerced, env);
             // BUG-36 fix (2026-08-02): `x = ...;` writes directly to
             // `x`'s own storage -- if `x` is NOT itself a ref binding
@@ -14142,7 +14142,7 @@ fn check_one_stmt(
             // length fact surviving a `pop(mut ref zs)` wrongly elided
             // a bounds check on `zs[2]`, producing a silent OOB read
             // on the C backend).
-            drop_facts_for_mut_ref_call_args(expr, smt_facts);
+            drop_facts_for_mut_ref_call_args(expr, smt_facts, env);
             consume_if_moved_var(expr, &checked, env);
 
             // Materialize the return expression into a fresh temp
@@ -39242,12 +39242,34 @@ fn drop_facts_mentioning(smt_facts: &mut Vec<Expr>, name: &str) {
 /// `drop_facts_mentioning` already makes at every other call site.
 /// Safe to call unconditionally: a call with no `mut ref` arguments
 /// (the overwhelming majority) is a no-op here.
-fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>) {
+fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>, env: &mut Env) {
     if let ExprKind::Call { args, .. } = &expr.kind {
         for arg in args {
             if let ExprKind::RefMut { inner } = &arg.kind {
                 if let Some(name) = root_var_of_expr(inner) {
                     drop_facts_mentioning(smt_facts, &name);
+                    // BUG-208: this only ever cleared the smt_facts Vec
+                    // (BUG-198's own fix) -- it never invalidated the two
+                    // separate env-level caches BUG-199 already fixed for
+                    // direct `obj.field = value;`: `struct_literal_fields`
+                    // and `.constant`. A `mut ref` argument to a USER-
+                    // DEFINED function (not just a builtin) can mutate the
+                    // callee's fields exactly the same way a direct
+                    // FieldAssign does, but this call site is the ONLY
+                    // place a caller-side `mut ref X` argument's effect on
+                    // X gets acknowledged at all -- so it's also the only
+                    // place that can invalidate these two caches for that
+                    // case. Confirmed exploitable: `fn bump(c: mut ref
+                    // Counter) { c.n = c.n + 1; } ... bump(mut ref c);
+                    // prove c.n == 0;` was silently accepted (the checker
+                    // "proved" a demonstrably false claim) before this fix,
+                    // via the exact same "contradictory fact base makes
+                    // everything provable" mechanism BUG-199's write-up
+                    // already documented.
+                    if let Some(info) = env.lookup_mut(&name) {
+                        info.struct_literal_fields = None;
+                        info.constant = None;
+                    }
                 }
             }
         }

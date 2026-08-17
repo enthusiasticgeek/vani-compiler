@@ -1,0 +1,22 @@
+// Regression example for BUG-204 (LLVM backend, found via localfuzz
+// backend-divergence 20260817-160254 -- a mutated copy of
+// examples/language/english/set_mut.vani whose sieve-loop bound had
+// been fuzzed up to i64::MAX, driving `set`/`set_mut` far past the
+// Vec's real length).
+//
+// Both the consuming `set(xs, i, v)` and in-place `set_mut(mut ref
+// xs, i, v)` LLVM helpers had NO bounds check at all -- every other
+// Vec accessor (Index reads, push, and the packed-bit Vec<bool>
+// set_mut) already called `@__intent_bounds_check`, but these two
+// generic (non-bool) helpers skipped straight to a raw `getelementptr`
+// + store. An out-of-bounds `set`/`set_mut` silently wrote past the
+// allocated buffer instead of exiting cleanly -- the C backend's
+// equivalent already bounds-checked and exited 3 with "set_mut: index
+// out of bounds", so this was a real behavior divergence, not just a
+// missing diagnostic.
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let _ = set(mut ref xs, 10 as u64, 99);
+    print "should not reach here";
+    return 0;
+}

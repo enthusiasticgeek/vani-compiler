@@ -1,0 +1,18 @@
+// Regression example for BUG-206 -- found by systematically re-checking
+// Vec's other index-taking accessors immediately after fixing BUG-204
+// (set/set_mut's missing bounds check).
+//
+// vec_swap(mut ref xs, i, j) had NO bounds check on EITHER index at
+// all, on BOTH backends (unlike BUG-204, which was an LLVM-only
+// divergence -- here the C backend was equally unchecked). Confirmed
+// real: a far out-of-bounds index segfaulted the LLVM backend and
+// silently read/wrote adjacent heap memory on the C backend, neither
+// of which is what `vec_remove_at` (fixed for the same gap as BUG-148,
+// right next to vec_swap in both backend source files) already did
+// correctly.
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let _ = vec_swap(mut ref xs, 0, 99999999);
+    print "should not reach here";
+    return 0;
+}

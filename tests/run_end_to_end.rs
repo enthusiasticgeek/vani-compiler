@@ -16370,3 +16370,163 @@ fn bug202_203_vec_bool_push_and_set_example_produces_correct_output_on_both_back
         );
     }
 }
+
+// BUG-204 (LLVM backend, found via localfuzz backend-divergence
+// 20260817-160254): the generic (non-bool) `set`/`set_mut` LLVM helpers
+// had no bounds check at all -- an out-of-bounds `set` silently wrote
+// past the allocated buffer (heap corruption, "malloc(): unaligned
+// tcache chunk detected") instead of exiting cleanly like every other
+// Vec accessor and the C backend's equivalent already did. Expected
+// behavior on both backends is a clean bounds-check failure (exit 3,
+// no stdout reaching the unreachable `print`), not a crash or silent
+// corruption -- only a real subprocess run can distinguish "exited 3
+// as designed" from "segfaulted," matching this file's own convention.
+#[test]
+fn bug204_set_mut_bounds_check_example_fails_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug204_set_mut_bounds_check.vani",
+        manifest_dir
+    );
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-204: expected a clean bounds-check exit(3) for {:?}, got status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout.contains("should not reach here"),
+            "BUG-204: out-of-bounds set should have aborted before the print for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-206 (both backends, found via the "check sibling functions after a
+// fix" sweep right after BUG-204): vec_swap had no bounds check on
+// either index at all -- unlike vec_remove_at right next to it in both
+// backend source files (already fixed for the same gap as BUG-148).
+#[test]
+fn bug206_vec_swap_bounds_check_example_fails_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug206_vec_swap_bounds_check.vani",
+        manifest_dir
+    );
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-206: expected a clean bounds-check exit(3) for {:?}, got status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout.contains("should not reach here"),
+            "BUG-206: out-of-bounds vec_swap should have aborted before the print for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-207 (LLVM backend, found via the same "check siblings after a
+// bugfix" sweep that found BUG-206, applied to the ctx.current_block
+// family this time): TypedStmt::For never updated ctx.current_block
+// anywhere in its own codegen, so a PHI-based construct (vec_fill) as
+// the first statement in a for-loop body read a stale current_block
+// for its phi's entry-edge predecessor, crashing the LLVM verifier
+// with "PHI node entries do not match predecessors!" -- the 4th
+// instance of the same bug class as BUG-190 (`If`). Unlike BUG-204/
+// BUG-206, the fix makes the program run to completion successfully
+// rather than fail cleanly, so this test asserts success + exact
+// stdout, not exit(3).
+#[test]
+fn bug207_for_vecfill_phi_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug207_for_vecfill_phi.vani",
+        manifest_dir
+    );
+    let expected = "total: 15\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-207: intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-207: for-loop + vec_fill produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-207's TypedStmt::ForIter counterpart -- a SEPARATE duplicate-
+// walker copy in backend_llvm.rs with the exact same gap, confirming
+// the "checker.rs has >=2 duplicate walker copies to fix in tandem"
+// pattern already known from BUG-188/189/190 extends to this bug
+// class too.
+#[test]
+fn bug207_foriter_vecfill_phi_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug207_foriter_vecfill_phi.vani",
+        manifest_dir
+    );
+    let expected = "total: 12\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-207: intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-207: for-in-collection + vec_fill produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}

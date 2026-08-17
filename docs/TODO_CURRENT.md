@@ -15759,4 +15759,260 @@ execution + assertion catches). vani-ml's own
 passes clean post-fix and is the real-world coverage-gap closure this
 was written for in the first place.
 
-Next free bug number is **BUG-204**.
+## BUG-204
+
+Found 2026-08-17 via localfuzz backend-divergence
+(`20260817-160254-backend-divergence-c8ae24438d`), a mutated copy of
+`examples/language/english/set_mut.vani` whose sieve-loop bound had been
+fuzzed from a small constant up to `9223372036854775807` (i64::MAX),
+driving the loop's `set(mut ref flags, j as u64, 0)` call far past the
+10-element Vec's real length almost immediately.
+
+**Root cause**: the generic (non-bool) `set(xs, i, v)` and `set_mut(*xs,
+i, v)` LLVM helpers (`src/backend_llvm.rs`, in the per-element-type
+`emit_vec_helpers` generator) had **no bounds check at all** -- both
+went straight from the raw index `%i` to a `getelementptr` + `store`,
+unlike every other Vec accessor in the same file (Index reads, `push`,
+and even the packed-bit `Vec<bool>`'s own specialized `set_mut`), which
+all call the shared `@__intent_bounds_check(idx, len)` helper (exit(3)
+on failure, matching the C backend's convention). The C backend's own
+`intent_vec_<T>__set`/`__set_mut` were already correctly bounds-checked
+(`if (i >= xs->len) { fprintf(stderr, "set_mut: index out of
+bounds\n"); abort(); }` equivalent), so this was a genuine LLVM-only
+behavior divergence, not just a missing diagnostic: an out-of-bounds
+`set`/`set_mut` corrupted the heap (`malloc(): unaligned tcache chunk
+detected`) and segfaulted instead of exiting cleanly.
+
+**Fix**: added an `@__intent_bounds_check(i64 %i, i64 %len)` call to
+both helpers, loading `%len` the same way each function already had to
+load `%data` (an `extractvalue` on the by-value struct for `set`, a
+`getelementptr`+`load` on the struct pointer's field 1 for `set_mut`).
+
+Regression: `examples/language/english/bug204_set_mut_bounds_check.vani`
+(an out-of-bounds `set` on a 3-element Vec) +
+`tests/run_end_to_end.rs`'s
+`bug204_set_mut_bounds_check_example_fails_cleanly_on_both_backends`,
+asserting `exit(3)` and that the post-`set` `print` never runs, on both
+backends -- matching this file's own convention that only a real
+subprocess run can distinguish "exited 3 as designed" from "segfaulted."
+Full `cargo test --release --workspace` clean after the fix (0 failed).
+
+## BUG-206
+
+Found 2026-08-17 immediately after BUG-204, via a new standing
+practice: after fixing a bug in one function, deliberately check
+sibling functions on the same type for the same bug class before
+calling the fix done. Grepping Vec's other index-taking accessors
+right after fixing `set`/`set_mut`'s missing bounds check turned up
+`vec_swap(mut ref xs, i, j)`.
+
+**Root cause**: `vec_swap` had **no bounds check on either index at
+all**, on **both** backends -- worse than BUG-204 (which was an
+LLVM-only divergence; the C backend there was already correct). Here
+both `src/backend_llvm.rs`'s inline `vec_swap` codegen and
+`src/backend_c.rs`'s `vec_swap` closure went straight to raw
+pointer/array-index arithmetic on `i`/`j` with zero validation. This
+sat right next to `vec_remove_at` in both files, which had already
+been fixed for the exact same gap as BUG-148 -- the fix simply never
+got applied to its neighbor.
+
+Confirmed real via a minimal repro (`vec_swap(mut ref xs, 0,
+99999999)` on a 3-element `Vec<i64>`): LLVM segfaults (`lli` crash,
+exit 139); C backend silently reads/writes adjacent heap memory and
+returns exit 0 (no crash, no error -- the more dangerous outcome of
+the two, since nothing signals anything went wrong).
+
+**Fix**: added an `@__intent_bounds_check` call for both `i` and `j`
+in the LLVM codegen (loading the Vec's `len` field the same way the
+`set`/`set_mut` BUG-204 fix did), and wrapped both indices in
+`intent_check_bounds(...)` in the C codegen, matching
+`vec_remove_at`'s existing pattern in both files exactly.
+
+Regression: `examples/language/english/bug206_vec_swap_bounds_check.vani`
++ `tests/run_end_to_end.rs`'s
+`bug206_vec_swap_bounds_check_example_fails_cleanly_on_both_backends`,
+asserting `exit(3)` on both backends, same shape as BUG-204's test.
+Full `cargo test --release --workspace` clean after the fix (0 failed).
+Manually re-verified a legitimate in-bounds `vec_swap` still produces
+identical output on both backends post-fix.
+
+**This is the 7th bug in a recurring missing-bounds-check family**
+across many sessions, all in the same handful of Vec/Array accessor
+functions: BUG-108 (Index read/write), BUG-120 (`swap_remove`/`insert`),
+BUG-147 (`clone_at`), BUG-148 (`vec_remove_at`), BUG-149 (Array-index
+write), BUG-204 (`set`/`set_mut`), and now BUG-206 (`vec_swap`). Every
+prior fix in this family was scoped narrowly to the one function that
+triggered it rather than to the whole family of similar accessors --
+which is exactly why the family kept growing. Any NEW Vec/Array
+accessor added in the future should get a bounds check from day one.
+
+## BUG-207
+
+Found 2026-08-17 immediately after BUG-206, by deliberately auditing
+a second known-recurring bug family (the `ctx.current_block`-not-
+updated LLVM family) right after closing the Vec-bounds-check family
+-- per the same standing "check siblings/related features after every
+bugfix" practice that found BUG-206.
+
+**Root cause**: both `TypedStmt::For` (range-based `for i from LOW to
+HIGH`) and `TypedStmt::ForIter` (collection-based `for x in xs`) in
+`src/backend_llvm.rs` never updated `ctx.current_block` **anywhere**
+in their own codegen -- not for the loop's header, body, step, or
+exit blocks. These are two SEPARATE duplicate-walker copies (one per
+loop kind), matching the already-known "checker.rs has >=2 duplicate
+walker copies to fix in tandem" pattern from BUG-188/189/190. Any
+PHI-based construct (e.g. `vec_fill`'s hand-rolled SSA loop, the exact
+same trigger BUG-190 used) placed as the first statement in a loop
+body -- with no intervening branch to accidentally self-correct
+`ctx.current_block` as a side effect -- read a STALE block name for
+its phi's entry-edge predecessor, producing the identical "PHI node
+entries do not match predecessors!" LLVM verifier crash `lli` refuses
+to run.
+
+This is the **4th confirmed instance** of this exact bug class:
+`Assert` (BUG-185), `If` (BUG-190), `While` (already correct), and now
+`For`+`ForIter` (BUG-207). BUG-190's own write-up explicitly flagged
+"worth specifically re-auditing every label-emission site in
+`backend_llvm.rs` for a missing paired `ctx.current_block` assignment"
+as a to-do -- this is the first time that re-audit actually happened,
+three days later.
+
+**Confirmed real** via the exact same repro shape as BUG-190: a `for`
+loop whose body's first (and only) statement is `vec_fill(k, v)` with
+`k`/`v` plain variables (no arithmetic, so nothing else updates
+`ctx.current_block` as a side effect before `vec_fill` runs). Verified
+the emitted `.ll`'s phi node directly (`%t13 = phi i64 [ 0, %entry ],
+[...]`, when the true predecessor was `%for_body1`) before touching
+any Rust source, then confirmed `lli` rejects it with exactly BUG-190's
+error text.
+
+**Fix**: mirrored BUG-190's exact per-block `ctx.current_block`
+assignment pattern in both `TypedStmt::For` and `TypedStmt::ForIter`
+-- set `ctx.current_block` right after emitting each of the header,
+body, and step block labels (and once more after the exit label, for
+any code that runs after the loop).
+
+Regression: `examples/language/english/bug207_for_vecfill_phi.vani` +
+`bug207_foriter_vecfill_phi.vani`, plus `tests/run_end_to_end.rs`'s
+`bug207_for_vecfill_phi_example_produces_correct_output_on_both_backends`
+and `bug207_foriter_vecfill_phi_example_produces_correct_output_on_both_backends`
+-- both assert success + exact stdout (not `exit(3)` like BUG-204/206,
+since this fix makes the program run to completion correctly rather
+than fail cleanly). Full `cargo test --release --workspace` clean
+after the fix (0 failed). The C backend has no equivalent concept
+(`ctx.current_block`/phi tracking is LLVM-SSA-specific), confirmed
+unaffected on both new examples.
+
+## BUG-208
+
+Found 2026-08-17 by auditing the SMT-facts-invalidation family
+(BUG-198/199's own family) at the user's explicit request to also
+audit the SMT verifier subsystem, right after closing the Vec-bounds-
+check and `ctx.current_block` families the same day.
+
+**Root cause**: `drop_facts_for_mut_ref_call_args` (`checker.rs`) --
+the function BUG-198 added to invalidate stale `smt_facts` when a
+`mut ref` call argument gets mutated -- only ever cleared the
+`smt_facts: Vec<Expr>` list. It never took `env` as a parameter at
+all, so it could never invalidate the two SEPARATE env-level caches
+BUG-199 already fixed for a DIRECT `obj.field = value;`:
+`VarInfo.struct_literal_fields` and `VarInfo.constant`. This meant
+any USER-DEFINED function taking a `mut ref StructType` parameter and
+mutating a field inside its own body left the CALLER's checker
+believing the field's OLD value forever afterward -- a real path to
+`prove`/`requires`/`ensures` vacuously accepting FALSE claims, not
+just a missed-optimization gap. This is exactly the open risk BUG-198's
+own write-up predicted: "env's VarInfo carries at least two SEPARATE
+fact-adjacent caches that both need invalidation-on-mutation scrutiny
+going forward."
+
+Severity: same class as BUG-199 (a real soundness hole, not merely an
+elided optimization), but a WIDER blast radius -- "take a `mut ref`
+parameter and mutate a field" is an extremely common, idiomatic
+pattern in this language, not a narrow builtin-call case.
+
+**Confirmed via direct repro**:
+```vani
+struct Counter { n: i64 }
+fn bump(c: mut ref Counter) { c.n = c.n + 1; }
+fn main() -> i64 {
+    let c: Counter = Counter { n: 0 };
+    bump(mut ref c);
+    prove c.n == 0;   // silently ACCEPTED before this fix
+    return 0;
+}
+```
+`--smt-debug` showed the query asserting the stale fact `v_c__n ==
+bv0` directly, making the negated goal trivially unsat ("proven").
+
+**Fix**: added `env: &mut Env` as a parameter to
+`drop_facts_for_mut_ref_call_args` (3 call sites updated), clearing
+`struct_literal_fields`/`.constant` for the mut-ref'd root variable
+alongside the existing `drop_facts_mentioning` call -- mirroring
+BUG-199's own invalidation pattern exactly.
+
+Regression: `src/lib.rs`'s
+`bug208_mut_ref_call_to_user_fn_invalidates_stale_struct_field_facts`,
+a compile-time diagnostic test matching the existing
+`smt_struct_field_disproof_surfaces_counterexample` test's shape
+(`expect_err` + assert the "proof failed" message is present).
+Confirmed the exact repro above now correctly fails with an SMT
+counterexample (`c__n = -1`, i.e. unconstrained) instead of "ok".
+Full `cargo test --release --workspace` clean after the fix.
+
+## BUG-209
+
+Found 2026-08-17 by continuing the sibling-sweep audit into the
+dialect/lexer subsystem, per the user's explicit request, right after
+investigating BUG-175's own fix location for a possible unswept
+sibling.
+
+**Root cause**: `lex_ident` (`src/lexer.rs`) -- the ASCII-starting
+identifier lexer, used by English and every Latin-script dialect
+(French, Italian, Spanish, German, Portuguese, and the rest) -- never
+got BUG-175's mid-word-apostrophe fix at all. BUG-175 fixed
+`lex_unicode_ident` (the SEPARATE function for non-ASCII-starting
+identifiers) because its original Hebrew geresh repro happened to
+route through that function; `lex_ident` handles the exact same
+"an apostrophe can be legitimate mid-word orthography, not just a
+`'label:` loop-label token" ambiguity, but was never touched. A
+classic case of a fix landing in the specific function that happened
+to trigger the original repro, not the general pattern's actual root
+(both functions share the same identifier-continuation byte loop by
+design -- see the comment already on `lex_ident` referencing
+`lex_unicode_ident` as its sibling).
+
+**Confirmed via direct repro**: French `soit l'arbre: i64 = 5;`
+(`l'arbre`, "the tree" -- ordinary elision, exactly as legitimate a
+mid-word apostrophe as Hebrew's geresh case) failed to parse
+("attendu '='" -- expected '=') because the lexer stopped consuming
+at the apostrophe and the rest fell through to `lex_label`.
+
+**Fix**: applied BUG-175's exact same disambiguation logic to
+`lex_ident` -- fold `'` into the current identifier only when another
+identifier-continuation byte follows immediately after it; a genuine
+loop label is never glued directly onto a preceding identifier this
+way (always separated by whitespace/a keyword), so `'label:` still
+lexes correctly.
+
+Regression: `src/lib.rs`'s
+`bug209_ascii_ident_with_mid_word_apostrophe_lexes_as_one_identifier`
+(mirrors BUG-175's own test shape) +
+`bug209_loop_label_immediately_after_identifier_still_lexes_as_label`
+(confirms labeled `for`/`continue` still work), both passing. Also
+manually re-verified `examples/language/english/break_value.vani`'s
+existing output is unchanged and a labeled nested-for-loop repro
+produces identical output on both backends. Full `cargo test --release
+--workspace` clean.
+
+**This closes out today's sibling-sweep audit series**, run across
+four independent bug families at the user's request: the Vec/Array
+bounds-check family (BUG-108 through BUG-206), the `ctx.current_block`
+LLVM family (through BUG-207), the SMT-facts-invalidation family
+(through BUG-208), and now the apostrophe-lexing family (BUG-209).
+Four real, previously-undiscovered bugs found and fixed in one
+session (BUG-206/207/208/209) by systematically checking sibling
+functions and related language features after each fix, rather than
+considering a fix complete once its own triggering repro passes.
+
+Next free bug number is **BUG-210**.
