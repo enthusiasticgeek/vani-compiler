@@ -15797,4 +15797,53 @@ backends -- matching this file's own convention that only a real
 subprocess run can distinguish "exited 3 as designed" from "segfaulted."
 Full `cargo test --release --workspace` clean after the fix (0 failed).
 
-Next free bug number is **BUG-205**.
+## BUG-206
+
+Found 2026-08-17 immediately after BUG-204, via a new standing
+practice: after fixing a bug in one function, deliberately check
+sibling functions on the same type for the same bug class before
+calling the fix done. Grepping Vec's other index-taking accessors
+right after fixing `set`/`set_mut`'s missing bounds check turned up
+`vec_swap(mut ref xs, i, j)`.
+
+**Root cause**: `vec_swap` had **no bounds check on either index at
+all**, on **both** backends -- worse than BUG-204 (which was an
+LLVM-only divergence; the C backend there was already correct). Here
+both `src/backend_llvm.rs`'s inline `vec_swap` codegen and
+`src/backend_c.rs`'s `vec_swap` closure went straight to raw
+pointer/array-index arithmetic on `i`/`j` with zero validation. This
+sat right next to `vec_remove_at` in both files, which had already
+been fixed for the exact same gap as BUG-148 -- the fix simply never
+got applied to its neighbor.
+
+Confirmed real via a minimal repro (`vec_swap(mut ref xs, 0,
+99999999)` on a 3-element `Vec<i64>`): LLVM segfaults (`lli` crash,
+exit 139); C backend silently reads/writes adjacent heap memory and
+returns exit 0 (no crash, no error -- the more dangerous outcome of
+the two, since nothing signals anything went wrong).
+
+**Fix**: added an `@__intent_bounds_check` call for both `i` and `j`
+in the LLVM codegen (loading the Vec's `len` field the same way the
+`set`/`set_mut` BUG-204 fix did), and wrapped both indices in
+`intent_check_bounds(...)` in the C codegen, matching
+`vec_remove_at`'s existing pattern in both files exactly.
+
+Regression: `examples/language/english/bug206_vec_swap_bounds_check.vani`
++ `tests/run_end_to_end.rs`'s
+`bug206_vec_swap_bounds_check_example_fails_cleanly_on_both_backends`,
+asserting `exit(3)` on both backends, same shape as BUG-204's test.
+Full `cargo test --release --workspace` clean after the fix (0 failed).
+Manually re-verified a legitimate in-bounds `vec_swap` still produces
+identical output on both backends post-fix.
+
+**This is the 7th bug in a recurring missing-bounds-check family**
+across many sessions, all in the same handful of Vec/Array accessor
+functions: BUG-108 (Index read/write), BUG-120 (`swap_remove`/`insert`),
+BUG-147 (`clone_at`), BUG-148 (`vec_remove_at`), BUG-149 (Array-index
+write), BUG-204 (`set`/`set_mut`), and now BUG-206 (`vec_swap`). Every
+prior fix in this family was scoped narrowly to the one function that
+triggered it rather than to the whole family of similar accessors --
+which is exactly why the family kept growing. Any NEW Vec/Array
+accessor added in the future should get a bounds check from day one.
+
+Next free bug number is **BUG-207**.

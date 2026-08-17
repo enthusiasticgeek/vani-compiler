@@ -16412,3 +16412,39 @@ fn bug204_set_mut_bounds_check_example_fails_cleanly_on_both_backends() {
         );
     }
 }
+
+// BUG-206 (both backends, found via the "check sibling functions after a
+// fix" sweep right after BUG-204): vec_swap had no bounds check on
+// either index at all -- unlike vec_remove_at right next to it in both
+// backend source files (already fixed for the same gap as BUG-148).
+#[test]
+fn bug206_vec_swap_bounds_check_example_fails_cleanly_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug206_vec_swap_bounds_check.vani",
+        manifest_dir
+    );
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "BUG-206: expected a clean bounds-check exit(3) for {:?}, got status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout.contains("should not reach here"),
+            "BUG-206: out-of-bounds vec_swap should have aborted before the print for {:?}",
+            backend_args
+        );
+    }
+}

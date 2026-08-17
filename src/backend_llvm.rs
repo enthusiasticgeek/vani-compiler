@@ -8703,8 +8703,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     ("%intent_vec_i64", "i64", "i64*", "i64**")
                 };
                 let xs = emit_expr(&args[0], ctx, out);
-                let i = emit_expr(&args[1], ctx, out);
-                let j = emit_expr(&args[2], ctx, out);
+                let i_raw = emit_expr(&args[1], ctx, out);
+                let i = widen_index_to_i64(&args[1], i_raw, ctx, out);
+                let j_raw = emit_expr(&args[2], ctx, out);
+                let j = widen_index_to_i64(&args[2], j_raw, ctx, out);
+                // BUG-206: vec_swap had NO bounds check on either index --
+                // every other index-taking Vec accessor already does
+                // (swap_remove/insert since BUG-120, vec_remove_at right
+                // below this since BUG-148). Confirmed real on both
+                // backends: LLVM segfaults on a far out-of-bounds index,
+                // C silently reads/writes adjacent heap memory.
+                let vs_lp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    vs_lp, svty, svty, xs
+                ));
+                let vs_len = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", vs_len, vs_lp));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    i, vs_len
+                ));
+                out.push_str(&format!(
+                    "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                    j, vs_len
+                ));
                 let dp = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
