@@ -8859,3 +8859,12 @@ Fix attempt: `tools/localfuzz/findings/20260817-211147-run-crash-560c3a3267/fix_
 STATUS: needs human/frontier root-cause review.
 
 This bug report was run against the vani-compiler project's local staging log using the `/home/virgo/source/vani-compiler-localfuzz/examples/language/catalan/async_cancel_auto.vani` base corpus file with the `delay` function implemented in both LLVM and C backends. The resulting executable exhibited a crash or hang upon execution, indicating that the vani compiler was unable to correctly handle or execute the provided mutant code within the specified time constraints.
+
+---
+
+### Candidate: 20260817-214002-run-crash-5e913aec11
+
+Repro: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260817-214002-run-crash-5e913aec11/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
