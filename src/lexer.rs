@@ -454,6 +454,12 @@ pub(crate) fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "प्रयास" => TokenKind::Try,        // prayās (Sanskrit/Hindi/Marathi: "attempt")
         "नियोग" => TokenKind::Task,        // niyog (Sanskrit/Hindi/Marathi: "assignment/task")
         "संयोजन" => TokenKind::Join,       // saṁyojan (Sanskrit/Hindi/Marathi: "joining")
+        // detach / cancel — English-only until this pass. वियोजन
+        // (viyojana, "disjoining") is sam-yojana's own natural
+        // antonym (same "yoj" root, "vi-" apart vs. "sam-"
+        // together), mirroring join/detach's own antonym pairing.
+        "वियोजन" => TokenKind::Detach,     // viyojan (Sanskrit/Hindi/Marathi: "disjoining")
+        "निरसन" => TokenKind::Cancel,      // nirasan (Sanskrit/Hindi/Marathi: "annulment/cancellation")
         // unsafe — tatsama Sanskrit-root form, shared across all
         // three languages. Layer 1.1 of the embedded plan.
         "असुरक्षित" => TokenKind::Unsafe,  // asurakṣita (Sanskrit/Hindi/Marathi: "unprotected")
@@ -6280,6 +6286,8 @@ pub(crate) fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bo
         "प्रयास" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "नियोग" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "संयोजन" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "वियोजन" => &[Sanskrit, Hindi, Marathi],  // tatsama (detach)
+        "निरसन" => &[Sanskrit, Hindi, Marathi],  // tatsama (cancel)
         // === EMBEDDED ===
         "असुरक्षित" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "क्षेत्र" => &[Sanskrit, Hindi, Marathi],  // tatsama

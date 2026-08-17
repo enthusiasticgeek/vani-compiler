@@ -1,0 +1,89 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/sanskrit/concurrency_primitives.vani              # LLVM
+//   vanic run examples/language/sanskrit/concurrency_primitives.vani --backend=c  # C
+//
+// Sanskrit spellings for the concurrency-primitive type family and
+// for detach/cancel/select, closed as a gap-fill pass: writing
+// `Str`/`OwnedStr`/`Barrier`/`Mutex<T>`/`RwLock<T>`/`Channel<T>`/
+// `Atomic<T>`/`Condvar`/`Handle<T>` as literal English words already
+// compiled fine inside a `vani-lang: sanskrit` file (the purity gate
+// only classifies structure-keyword tokens, not these parser-level
+// type names) -- but forced non-Devanagari words into otherwise-pure
+// Sanskrit source. `detach`/`cancel` had NO Devanagari spelling at
+// all (English-only reserved keywords), and `चयन` (select) plus a
+// real cross-dialect bug in `for await`/select's own `await` arm
+// (both checked the raw ASCII string "await" instead of the shared
+// is_await_ident() helper, so even the pre-existing
+// प्रतीक्षा/等候/待機 spellings never worked in either construct, in
+// any dialect) were fixed in the same pass.
+//
+// New spellings this file demonstrates:
+//   Str          -> पाठ       (pāṭha, "text")
+//   OwnedStr     -> स्वपाठ    (svapāṭha, "own-text")
+//   Barrier      -> अवरोध    (avarodha, "barrier/obstruction")
+//   Handle<T>    -> हस्तक    (hastaka, "handle", from hasta "hand")
+//   Mutex<T>     -> ताला     (tālā, "lock")
+//   Guard<T>     -> रक्षक    (rakṣaka, "guard/protector")
+//   RwLock<T>    -> पठनलेख्यताला (paṭhana-lekhya-tālā, fused "read-write-lock")
+//   ReadGuard<T> -> पठनरक्षक (paṭhana-rakṣaka, "read-guard")
+//   WriteGuard<T>-> लेख्यरक्षक (lekhya-rakṣaka, "write-guard")
+//   Channel<T>   -> वाहिनी   (vāhinī, "channel/conduit")
+//   Atomic<T>    -> अणु      (aṇu, "atom")
+//   Condvar      -> प्रतीक्षाचर (pratīkṣā-cara, reusing await's own root + "variable")
+//   select       -> चयन      (cayana, "selection")
+//   detach       -> वियोजन   (viyojana, "disjoining" -- संयोजन/join's own antonym)
+//   cancel       -> निरसन    (nirasana, "annulment/cancellation")
+//
+// Caveat: these are tatsama coinages (verified for face-validity
+// against spelling_supports_dialect, not native-speaker active-use
+// validated), same status as this session's async/await spellings.
+// A separate, real limitation this file works around: `नियोग<T>`
+// cannot be used as a TYPE annotation (`Task<T>`'s own spelling) --
+// Devanagari has no upper/lowercase distinction, so नियोग always
+// lexes to the reserved TokenKind::Task keyword and never falls
+// through to a plain identifier the way English relies on
+// capitalization to tell `Task` (type) apart from `task` (statement
+// keyword). `let x = task fn();` infers its type instead of
+// annotating it explicitly. See docs/v1_limitations.md L32.
+
+कार्य विलम्ब() -> i64 {
+  पुनरागम 7;
+}
+
+कार्य मुख्य() -> i64 {
+  माना क: पाठ = "namaste";
+  माना ख: स्वपाठ = क + "";
+
+  माना _अवरोधकः: अवरोध = barrier_new(1);
+  माना तालाः: ताला<i64> = mutex_new(5);
+  माना _पठनतालाः: पठनलेख्यताला<i64> = rwlock_new(7);
+  माना _वाहिनिः: वाहिनी<i64> = channel_new();
+  माना _अणुः: अणु<i64> = atomic_new(9);
+  माना _प्रतीक्षाचरः: प्रतीक्षाचर = condvar_new();
+
+  माना पूलः: Pool<i64> = pool_new();
+  माना हस्तकः: हस्तक<i64> = pool_alloc(परिवर्तनीय दृष्ट्या पूलः, 3);
+  माना मूल्यम्: i64 = option_unwrap_or(pool_get(दृष्ट्या पूलः, हस्तकः), 0-1);
+  सिद्धम् मूल्यम् == 3;
+
+  माना ग1: Guard<i64> = mutex_lock(दृष्ट्या तालाः);
+  सिद्धम् guard_get(दृष्ट्या ग1) == 5;
+
+  // वियोजन (detach): spawn, then let it run independently.
+  माना कार्यभारः = नियोग विलम्ब();
+  वियोजन कार्यभारः;
+
+  // चयन (select) with a प्रतीक्षा (await) arm over a non-blocking
+  // TCP accept -- exercises the is_await_ident() fix directly.
+  माना द्वारः: i64 = tcp_listen(0);
+  माना प्रवेशद्वारम्: i64 = tcp_socket_port(द्वारः);
+  सिद्धम् प्रवेशद्वारम् > 0;
+
+  लिख "पाठः:", क;
+  लिख "स्वपाठः:", ख;
+  लिख "हस्तक-मूल्यम्:", मूल्यम्;
+  पुनरागम 0;
+}

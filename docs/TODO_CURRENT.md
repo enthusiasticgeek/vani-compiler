@@ -15589,4 +15589,60 @@ BUG-199 (a real, separate, more severe bug found along the way, for
 struct-field mutation rather than async specifically), and this
 anomaly resolved as expected, sound behavior, not a defect.
 
-Next free bug number is **BUG-200**.
+## BUG-200 -- `for await`/`select`'s own `await` arm checked the raw ASCII string "await", bypassing `is_await_ident` in every non-English dialect (2026-08-17, FIXED)
+
+Found while auditing Sanskrit primitive/concurrency keyword coverage
+at the user's direction ("do primitives/advanced features like task,
+async, barrier, handle have Devanagari equivalents?"). `async`/
+`await` already had multi-dialect spellings via
+`is_async_ident`/`is_await_ident` (English/Devanagari/Mandarin/
+Japanese, fixed for mojibake corruption as BUG-166) -- but two of the
+three call sites that need to recognize `await` never used that
+helper at all:
+
+- `parse_for_stmt_inner`'s `for await <var> in <expr> { body }`
+  desugar (`if let TokenKind::Ident(n) = ...; if n == "await"`)
+- `parse_select_stmt`'s per-arm `await <poll_call> then <binding>`
+  (`TokenKind::Ident(n) if n == "await" => { self.bump(); }`)
+
+Both matched the literal ASCII string `"await"` directly, so
+प्रतीक्षा/等候/待機 (Sanskrit/Hindi/Marathi, Mandarin, Japanese)
+never worked inside either construct specifically, in ANY dialect,
+since these two constructs shipped -- a `select { प्रतीक्षा(...) तदा
+n { ... } }` written in Sanskrit failed with "expected `await` in
+select arm, got Ident(...)" even though every OTHER `await` call site
+(ordinary `await(expr)` expressions, async fn bodies) already
+correctly recognized the translated word.
+
+Fixed by routing both sites through `is_await_ident(n)` instead of the
+raw string comparison -- the exact same one-line fix at each site.
+Locked in with 3 new Sanskrit regression tests in `src/lib.rs`
+(`devanagari_type_name_aliases_compile_sanskrit`,
+`devanagari_detach_and_cancel_compile_sanskrit`,
+`devanagari_select_and_await_arm_compile_sanskrit`) plus a new example,
+`examples/language/sanskrit/concurrency_primitives.vani`.
+
+Found alongside a real, separate vocabulary gap (not a bug, a genuine
+missing feature) in the same audit: `Str`/`OwnedStr` and the
+`Barrier`/`Handle<T>`/`Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+`WriteGuard<T>`/`Channel<T>`/`Atomic<T>`/`Condvar` type-name family,
+plus `detach`/`cancel`/`select`, had no Devanagari spelling at all --
+closed with 15 new tatsama coinages (पाठ/स्वपाठ/अवरोध/हस्तक/ताला/
+रक्षक/पठनलेख्यताला/पठनरक्षक/लेख्यरक्षक/वाहिनी/अणु/प्रतीक्षाचर/
+चयन/वियोजन/निरसन), same face-validity-not-native-speaker-verified
+status as this project's existing async/await/downto coinages. Full
+list and rationale in `examples/language/sanskrit/
+concurrency_primitives.vani`'s header comment. A separate, genuinely
+harder gap surfaced along the way and was NOT fixed this pass, only
+documented: `नियोग<T>` (Task<R>'s own Devanagari spelling) can't be
+used as a type annotation, since Devanagari has no case distinction to
+fall back on the way English's `Task`-vs-`task` capitalization trick
+relies on -- see `docs/v1_limitations.md`'s new **L32**.
+
+Verification: `cargo test --release --lib` (3000 tests, 0 failed, up
+from 2997 -- the 3 new Sanskrit tests above), `cargo test --release
+--test run_end_to_end` clean, both new example probes compile and run
+correctly on both backends, `vanic check` re-confirmed against the
+existing Sanskrit example corpus with no regressions.
+
+Next free bug number is **BUG-201**.

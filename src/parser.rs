@@ -2411,11 +2411,23 @@ impl Parser {
                 let ret = self.parse_type()?;
                 return Ok(Type::Closure(params, Box::new(ret)));
             }
-            if name == "Str" {
+            // Devanagari aliases (Sanskrit-root tatsama, shared as
+            // loanwords across Hindi/Marathi like the other type-name
+            // aliases above `पूर्णांक`/`सूची` -- these two, plus the
+            // concurrency-primitive family below, were the confirmed
+            // gap: writing `Str`/`OwnedStr`/`Barrier`/`Mutex`/etc.
+            // as literal English words already compiled fine inside
+            // a Sanskrit-pragma file (the purity gate only classifies
+            // structure-keyword tokens, not these parser-level
+            // string-matched type names), but forced non-Devanagari
+            // words into otherwise-pure Sanskrit source.
+            if name == "Str" || name == "पाठ" {
+                // pāṭha (Sanskrit/Hindi/Marathi: "text")
                 self.bump();
                 return Ok(Type::Str);
             }
-            if name == "OwnedStr" {
+            if name == "OwnedStr" || name == "स्वपाठ" {
+                // svapāṭha ("own" sva- + pāṭha "text")
                 self.bump();
                 return Ok(Type::OwnedStr);
             }
@@ -2433,11 +2445,14 @@ impl Parser {
                 }
                 return Ok(Type::Task);
             }
-            if name == "Condvar" {
+            if name == "Condvar" || name == "प्रतीक्षाचर" {
+                // pratīkṣācara ("wait" pratīkṣā, reusing await's own
+                // root, + cara "variable") -- condition variable
                 self.bump();
                 return Ok(Type::Condvar);
             }
-            if name == "Barrier" {
+            if name == "Barrier" || name == "अवरोध" {
+                // avarodha (Sanskrit/Hindi/Marathi: "barrier/obstruction")
                 self.bump();
                 return Ok(Type::Barrier);
             }
@@ -2549,7 +2564,8 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Pool(Box::new(element)));
             }
-            if name == "Handle" {
+            if name == "Handle" || name == "हस्तक" {
+                // hastaka (Sanskrit/Hindi/Marathi: "handle", from hasta "hand")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
@@ -2595,14 +2611,16 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::ArenaRef(Box::new(element)));
             }
-            if name == "Atomic" {
+            if name == "Atomic" || name == "अणु" {
+                // aṇu (Sanskrit/Hindi/Marathi: "atom")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 self.expect_close_angle()?;
                 return Ok(Type::Atomic(Box::new(element)));
             }
-            if name == "Channel" {
+            if name == "Channel" || name == "वाहिनी" {
+                // vāhinī (Sanskrit/Hindi/Marathi: "channel/conduit")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
@@ -2632,35 +2650,41 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Channel(Box::new(element), capacity));
             }
-            if name == "Mutex" {
+            if name == "Mutex" || name == "ताला" {
+                // tālā (Sanskrit-derived Hindi/Marathi: "lock")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 self.expect_close_angle()?;
                 return Ok(Type::Mutex(Box::new(element)));
             }
-            if name == "Guard" {
+            if name == "Guard" || name == "रक्षक" {
+                // rakṣaka (Sanskrit/Hindi/Marathi: "guard/protector")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 self.expect_close_angle()?;
                 return Ok(Type::Guard(Box::new(element)));
             }
-            if name == "RwLock" {
+            if name == "RwLock" || name == "पठनलेख्यताला" {
+                // paṭhana-lekhya-tālā ("read-write-lock", fused compound,
+                // same coinage convention as the `downto`-family keywords)
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 self.expect_close_angle()?;
                 return Ok(Type::RwLock(Box::new(element)));
             }
-            if name == "ReadGuard" {
+            if name == "ReadGuard" || name == "पठनरक्षक" {
+                // paṭhana-rakṣaka ("read-guard")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 self.expect_close_angle()?;
                 return Ok(Type::ReadGuard(Box::new(element)));
             }
-            if name == "WriteGuard" {
+            if name == "WriteGuard" || name == "लेख्यरक्षक" {
+                // lekhya-rakṣaka ("write-guard")
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
@@ -4229,7 +4253,7 @@ impl Parser {
         // to `while let Option.Some(<var>) = <expr> { body }`. No new AST node
         // needed; the existing WhileLet/checker machinery handles it.
         if let TokenKind::Ident(n) = &self.current().kind {
-            if n == "await" {
+            if is_await_ident(n) {
                 if parallel {
                     return Err(Diagnostic::new(
                         start_tok.span,
@@ -6534,7 +6558,11 @@ impl Parser {
 
     fn looks_like_select_stmt(&self) -> bool {
         let TokenKind::Ident(name) = &self.current().kind else { return false; };
-        name == "select"
+        // चयन (cayana, Sanskrit/Hindi/Marathi: "selection") -- same
+        // contextual-identifier mechanism as is_async_ident/
+        // is_await_ident, not a lexer-level TokenKind, so it isn't
+        // classified by the dialect-purity gate either way.
+        (name == "select" || name == "चयन")
             && matches!(
                 self.tokens.get(self.pos + 1).map(|t| &t.kind),
                 Some(TokenKind::LBrace)
@@ -6555,7 +6583,7 @@ impl Parser {
             let arm_start = self.current().span;
             // consume `await`
             match &self.current().kind {
-                TokenKind::Ident(n) if n == "await" => { self.bump(); }
+                TokenKind::Ident(n) if is_await_ident(n) => { self.bump(); }
                 _ => {
                     return Err(Diagnostic::new(
                         self.current().span,

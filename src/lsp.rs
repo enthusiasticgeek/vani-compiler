@@ -1178,6 +1178,14 @@ const DEVANAGARI_KEYWORDS: &[&str] = &[
     "पूर्णांक८", "पूर्णांक१६", "पूर्णांक३२", "पूर्णांक६४", "अहस्ताक्षरित८",
     "अहस्ताक्षरित१६", "अहस्ताक्षरित३२", "अहस्ताक्षरित६४", "दशांश",
     "दशांश३२", "दशांश६४", "तर्क", "बूल", "सूची",
+    // detach/cancel (session: Sanskrit concurrency keyword gap-fill).
+    // Note: this array only covers real lexer-level TokenKind
+    // keywords (mechanically verified against devanagari_keyword()
+    // by lsp_keyword_lists_match_lexer below) -- the same session's
+    // new Str/OwnedStr/Barrier/Mutex/etc. type-name aliases and
+    // चयन (select) are parser-level string matches, not TokenKind
+    // keywords, so they're intentionally NOT listed here.
+    "वियोजन", "निरसन",
 ];
 
 const BENGALI_KEYWORDS: &[&str] = &[
