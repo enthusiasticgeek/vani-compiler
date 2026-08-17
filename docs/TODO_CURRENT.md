@@ -16015,4 +16015,47 @@ session (BUG-206/207/208/209) by systematically checking sibling
 functions and related language features after each fix, rather than
 considering a fix complete once its own triggering repro passes.
 
-Next free bug number is **BUG-210**.
+## BUG-210
+
+Found 2026-08-17 by continuing to audit `VarInfo`'s fact-adjacent
+caches immediately after BUG-208 (same day) -- BUG-208 covered
+`struct_literal_fields`/`.constant`; this is the third such cache,
+found by simply asking "does `env`'s `VarInfo` have any OTHER field
+the SMT machinery reads out-of-band from `smt_facts`?"
+
+**Root cause**: `vec_literal_elements` (`checker.rs`) lets
+`substitute_literal_vec_indices` rewrite `xs[K]` (K a compile-time-
+constant index) directly into `xs`'s ORIGINAL construction-time
+element expression, bypassing SMT entirely -- the exact same
+mechanism `struct_literal_fields` uses for struct fields, just for
+`let xs = vec(a, b, c);`-style Vec-literal bindings.
+`drop_facts_for_mut_ref_call_args` (the one call site BUG-198 and
+BUG-208 already extended) never cleared it. `Stmt::IndexAssign`
+(`xs[i] = v;`) already correctly clears this same field (it has its
+own array-versioning invalidation logic, ~line 15388) -- only the
+mut-ref-call-argument path had the gap, one field over from BUG-208's
+own finding.
+
+**Confirmed via direct repro** -- notably reachable through a plain
+BUILTIN call, not even a user function, meaning this gap has existed
+since BUG-198's original fix landed:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+set(mut ref xs, 0, 999);
+prove xs[0] == 1;   // silently ACCEPTED before this fix
+```
+
+**Fix**: one more line (`info.vec_literal_elements = None;`) in the
+same `if let Some(info) = env.lookup_mut(&name)` block BUG-208 already
+added to `drop_facts_for_mut_ref_call_args`.
+
+This closes out all 3 currently-known fact-adjacent `VarInfo` caches
+at this one call site: `smt_facts` (BUG-198), `struct_literal_fields`/
+`.constant` (BUG-208), `vec_literal_elements` (BUG-210).
+
+Regression: `src/lib.rs`'s
+`bug210_mut_ref_builtin_call_invalidates_stale_vec_literal_facts`,
+mirroring BUG-208's test shape. Full `cargo test --release --workspace`
+clean.
+
+Next free bug number is **BUG-211**.

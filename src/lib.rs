@@ -10012,6 +10012,38 @@ mod tests {
     }
 
     #[test]
+    fn bug210_mut_ref_builtin_call_invalidates_stale_vec_literal_facts() {
+        // BUG-210 (2026-08-17): a THIRD fact-adjacent VarInfo cache,
+        // found by re-auditing `env`'s VarInfo fields right after
+        // BUG-208 fixed the first two. `vec_literal_elements` lets
+        // `substitute_literal_vec_indices` rewrite `xs[K]` (K a
+        // compile-time-constant index) directly into `xs`'s ORIGINAL
+        // construction-time element expression, bypassing SMT
+        // entirely -- mirrors `struct_literal_fields`'s role for
+        // struct fields, just for `let xs = vec(a, b, c);`-style
+        // Vec-literal bindings. `drop_facts_for_mut_ref_call_args`
+        // never cleared it either. Confirmed exploitable via a plain
+        // BUILTIN call (`set`), not even a user function -- this gap
+        // has existed since BUG-198's original fix, for a different
+        // cache than BUG-198 covered.
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<i64> = vec(1, 2, 3);
+                set(mut ref xs, 0, 999);
+                prove xs[0] == 1;
+                return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("xs[0] is 999 after set(mut ref xs, 0, 999); proving xs[0] == 1 must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("proof failed")),
+            "expected proof-failed diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn block_expression_with_lets_then_tail_compiles() {
         // T-block MVP: `let r = { let a = …; let b = …;
         // a + b };` — block-expr as let RHS. Inner `let`s

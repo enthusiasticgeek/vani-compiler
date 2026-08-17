@@ -39269,6 +39269,27 @@ fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>, env:
                     if let Some(info) = env.lookup_mut(&name) {
                         info.struct_literal_fields = None;
                         info.constant = None;
+                        // BUG-210: a THIRD fact-adjacent VarInfo cache,
+                        // found by re-auditing every field the SMT
+                        // machinery reads out-of-band from `smt_facts`
+                        // after BUG-208 fixed the first two.
+                        // `vec_literal_elements` lets
+                        // `substitute_literal_vec_indices` rewrite
+                        // `xs[K]` (K a compile-time-constant index)
+                        // directly into xs's ORIGINAL construction-time
+                        // element expression, bypassing SMT entirely --
+                        // exactly like `struct_literal_fields` does for
+                        // struct fields, just for Vec-literal bindings.
+                        // `Stmt::IndexAssign` (`xs[i] = v;`) already
+                        // clears it correctly, but this call site (the
+                        // only place a `mut ref` argument's effect on
+                        // its target gets acknowledged) never did.
+                        // Confirmed exploitable: `let xs: Vec<i64> =
+                        // vec(1, 2, 3); set(mut ref xs, 0, 999); prove
+                        // xs[0] == 1;` was silently accepted (a builtin
+                        // mut-ref call, the exact path BUG-198 was
+                        // supposed to cover) before this fix.
+                        info.vec_literal_elements = None;
                     }
                 }
             }
