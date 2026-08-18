@@ -8963,3 +8963,12 @@ intent "Channels + Mutex / Guard: escape hatches for shared state the affine mod
 //                  `guard_get` / `guard_set` access the value
 //                  under the lock. The guard's scope-exit drop
 //                 
+
+---
+
+### Candidate: 20260818-010527-run-crash-89b3546f6c
+
+Repro: `tools/localfuzz/findings/20260818-010527-run-crash-89b3546f6c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-010527-run-crash-89b3546f6c/fix_attempt.md`
+
+**STATUS: needs human/frontier root-cause review.**
