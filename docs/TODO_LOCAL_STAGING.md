@@ -9063,3 +9063,54 @@ fn main() -> i64 {
 ```
 
 The observed symptom is a run-crash in both the base corpus file and the generated source, specifically with the second `mutex_lock` call causing a crash. The backend(s) affected are all.
+
+---
+
+### Candidate: 20260818-183420-run-crash-c0ac99f66d
+
+Repro: `tools/localfuzz/findings/20260818-183420-run-crash-c0ac99f66d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-183420-run-crash-c0ac99f66d/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Base Corpus File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/echo_nested_if.vani`
+
+**Mutant/generated Source**:
+```vani
+// Arc 8 v3.1 Phase 2.1c — nested ifs inside suspending branches.
+//
+// Phase 2.1a/b accepted `if cond { suspend; return } else
+// { return }` but rejected nested ifs INSIDE suspending
+// branches. Phase 2.1c lifts that restriction: the recursive
+// `collect_into` in the segment collector already handles
+// arbitrary depth via recursive state allocation; only the
+// branch validator was blocking it.
+//
+// build & run:
+//   vanic run examples/language/english/echo_nested_if.vani                # LLVM
+//   vanic run examples/language/english/echo_nested_if.vani --backend=c    # C
+
+intent "Phase 2.1c — nested ifs inside a suspending branch";
+
+async fn echo_nested(fd: i64, mode: i64, retries: i64) -> i64 {
+  if mode > 0 {
+    // Suspending branch with a NESTED if inside.
+    let n: i64 = io_recv_async(fd, 64);
+    if retries > 0 {
+      // Nested then-branch returns — Phase 2.1c handles this
+      // recursively, allocating its own state chain.
+      return n + retries;
+    } else {
+      // Nested else-branch falls through to the outer return.
+      return n;
+    }
+  }
+  return 0 - 1;
+}
+
+fn drive(ep: i64, t: mut ref Task__echo_nested) -> i64 {
+  while true {
+    let r: i64 = __poll_echo_nested(t);
+    if r != 0 - 2 { return r;
