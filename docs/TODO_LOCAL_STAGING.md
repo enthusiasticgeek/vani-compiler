@@ -9114,3 +9114,12 @@ fn drive(ep: i64, t: mut ref Task__echo_nested) -> i64 {
   while true {
     let r: i64 = __poll_echo_nested(t);
     if r != 0 - 2 { return r;
+
+---
+
+### Candidate: 20260818-190327-check-crash-60b98b4b6c
+
+Repro: `tools/localfuzz/findings/20260818-190327-check-crash-60b98b4b6c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-190327-check-crash-60b98b4b6c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
