@@ -9217,3 +9217,33 @@ Repro: `tools/localfuzz/findings/20260818-221421-run-crash-d669b7fd24/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260818-221421-run-crash-d669b7fd24/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260818-235449-run-crash-31e17cc97c
+
+Repro: `tools/localfuzz/findings/20260818-235449-run-crash-31e17cc97c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-235449-run-crash-31e17cc97c/fix_attempt.md`
+
+Staging Entry:
+
+**COMPILER**: vani-compiler-localfuzz
+
+**BUILD NUMBER**: N/A
+
+**DATE**: [Insert Date]
+
+**REPRO SCRIPT**:
+```sh
+vanic run examples/language/english/union_find.vani --backend=c
+```
+
+**EXPECTED RESULT**:
+The program should compile and execute without crashing.
+
+**OBSERVED RESULT**:
+Crashes with `free(): invalid pointer` when attempting to execute the compiled code.
+
+**BACKEND AFFECTED**: C backend
+
+**STATUS: needs human/frontier root-cause review.
