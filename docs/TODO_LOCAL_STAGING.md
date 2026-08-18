@@ -9017,3 +9017,24 @@ Repro: `tools/localfuzz/findings/20260818-163808-run-crash-0b4d45a95c/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260818-163808-run-crash-0b4d45a95c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260818-173941-run-crash-21107af75e
+
+Repro: `tools/localfuzz/findings/20260818-173941-run-crash-21107af75e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-173941-run-crash-21107af75e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The `/home/virgo/source/vani-compiler-localfuzz/examples/language/thai/early_exit.vani` file, when run with vanic, exhibits a crash that is likely related to the ` early-exit` functionality in the Thai language. This issue has been observed on both the LLVM backend and the C backend. The error message indicates a null return code (`rc: null`) and empty stdout, stderr, and timed_out values. The program attempts to execute a `break` statement when `n` equals 5, which is within the loop range but should not terminate the loop prematurely.
+
+To reproduce this issue, you can run the following command:
+
+```sh
+vanic run examples/language/thai/early_exit.vani --backend=c
+```
+
+The observed crash suggests that there might be a bug in the way the `break` statement is being handled within the loop. This could involve incorrect checks for the break condition or improper interaction with other parts of the code.
+
+Please ensure that you have thoroughly reviewed the relevant compiler source and its documentation to identify any potential issues causing this crash.
