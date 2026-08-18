@@ -8999,3 +8999,12 @@ Repro: `tools/localfuzz/findings/20260818-083205-run-crash-118b9e5d66/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260818-083205-run-crash-118b9e5d66/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260818-141432-run-crash-ee47f053b7
+
+Repro: `tools/localfuzz/findings/20260818-141432-run-crash-ee47f053b7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-141432-run-crash-ee47f053b7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
