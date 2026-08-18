@@ -9160,3 +9160,51 @@ Repro: `tools/localfuzz/findings/20260818-210645-run-crash-86509155b2/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260818-210645-run-crash-86509155b2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260818-212318-run-crash-da288a8a53
+
+Repro: `tools/localfuzz/findings/20260818-212318-run-crash-da288a8a53/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-212318-run-crash-da288a8a53/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This bug report describes a crash in the vani compiler's local staging log when running a specific mutant on a control flow benchmark. The mutant generates a C program that attempts to compute the sum of elements in a vector, then checks if the total is greater than 5. However, during execution, the program crashes with an error message indicating memory corruption.
+
+The reproduction source for this bug report is:
+
+```vani
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/control_flow.vani              # LLVM
+//   vanic run examples/language/bengali/control_flow.vani --backend=c  # C
+
+উদ্দেশ्य "if/else and while loops with Vec mutation";
+
+// `যতক্ষণ` = while, `দেখ` = ref
+
+কাজ sum(xs: দেখ Vec<i64>) -> i64 {
+  মান total: i64 = 0;
+  মান i: u64 = 0;
+  মান n: u64 = len(xs);
+  যতক্ষণ i < n {
+    total = total + xs[i];
+  }
+  ফেরত total;
+}
+
+কাজ build_range(n: i64) -> Vec<i64> {
+  মান xs: Vec<i64> = vec(0);
+  মান i: i64 = 1;
+  যতক্ষণ i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  ফেরত xs;
+}
+
+কাজ main() -> i64 {
+  মান xs: Vec<i64> = build_range(5);
+  ম
