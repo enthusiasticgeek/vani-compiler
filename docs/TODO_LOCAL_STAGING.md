@@ -9208,3 +9208,12 @@ The reproduction source for this bug report is:
 কাজ main() -> i64 {
   মান xs: Vec<i64> = build_range(5);
   ম
+
+---
+
+### Candidate: 20260818-221421-run-crash-d669b7fd24
+
+Repro: `tools/localfuzz/findings/20260818-221421-run-crash-d669b7fd24/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-221421-run-crash-d669b7fd24/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
