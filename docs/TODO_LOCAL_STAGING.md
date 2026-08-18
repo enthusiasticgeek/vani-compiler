@@ -8972,3 +8972,12 @@ Repro: `tools/localfuzz/findings/20260818-010527-run-crash-89b3546f6c/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260818-010527-run-crash-89b3546f6c/fix_attempt.md`
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260818-013446-backend-divergence-236122a05b
+
+Repro: `tools/localfuzz/findings/20260818-013446-backend-divergence-236122a05b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-013446-backend-divergence-236122a05b/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
