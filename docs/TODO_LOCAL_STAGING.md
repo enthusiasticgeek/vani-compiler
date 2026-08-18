@@ -9123,3 +9123,31 @@ Repro: `tools/localfuzz/findings/20260818-190327-check-crash-60b98b4b6c/repro.va
 Fix attempt: `tools/localfuzz/findings/20260818-190327-check-crash-60b98b4b6c/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260818-210209-backend-divergence-1f739c3467
+
+Repro: `tools/localfuzz/findings/20260818-210209-backend-divergence-1f739c3467/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-210209-backend-divergence-1f739c3467/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "loop bound out of vec range\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "index out of bounds: 3, len 3\n",
+    "timed_out": false
+  }
+}
+```
+
