@@ -386,16 +386,21 @@ const RETURN_NAME: &str = "_return";
 #[derive(Clone, Debug)]
 struct VarInfo {
     ty: Type,
+    /// FACT-ADJACENT (see `VarInfo::invalidate_facts_on_opaque_mutation`):
+    /// this binding's known compile-time-constant value, if any. Read
+    /// directly by the SMT fact-assembly machinery.
     constant: Option<TypedConst>,
     moved: Option<Span>,
     /// Source span where this binding was declared (let / param / for-var).
     /// Used to add a "previously declared here" note on shadow-type errors.
     decl_span: Span,
+    /// FACT-ADJACENT (see `VarInfo::invalidate_facts_on_opaque_mutation`).
     /// Element expressions when this binding was initialized with a
     /// `vec(a, b, c, ...)` literal. Lets the SMT prove-rewriter
     /// substitute `xs[k]` (constant index) with `a_k` so proofs over
     /// known vec contents discharge. Reset on any reassignment.
     vec_literal_elements: Option<Vec<Expr>>,
+    /// FACT-ADJACENT (see `VarInfo::invalidate_facts_on_opaque_mutation`).
     /// SMT-array version counter for Vec/Array bindings. Each
     /// `xs[i] = v` IndexAssign bumps this; the SMT encoder declares
     /// `arr_<name>_v0..vN` so existing facts about earlier versions
@@ -426,6 +431,7 @@ struct VarInfo {
     /// sees an unbound `v_NAME` reference. Default false.
     /// T4.15.
     is_const: bool,
+    /// FACT-ADJACENT (see `VarInfo::invalidate_facts_on_opaque_mutation`).
     /// Field expressions when this binding was initialized
     /// with a struct literal `let p: P = P { x: e1, y: e2 };`.
     /// The SMT prove-rewriter synthesizes a per-field SMT
@@ -458,6 +464,50 @@ struct VarInfo {
     /// scope-escape analyzer resolves a Var-typed ref through
     /// this list to find the depth bound.
     ref_aliases: Vec<String>,
+}
+
+impl VarInfo {
+    /// Invalidate every fact-adjacent field this binding carries,
+    /// because its value just changed through a means the checker
+    /// can't precisely model -- e.g. a `mut ref` call (builtin or
+    /// user function) whose exact effect on the target isn't
+    /// statically known, unlike a direct `Stmt::FieldAssign`/
+    /// `Stmt::IndexAssign` (which know exactly which field/index
+    /// changed and to what, and invalidate/pin/rebridge just that
+    /// piece themselves -- they should NOT call this method, it would
+    /// throw away more than necessary).
+    ///
+    /// **This is THE place to add invalidation for any NEW fact-
+    /// adjacent field added to `VarInfo` above.** Do not hand-add a
+    /// field-specific reset at individual call sites -- that pattern
+    /// already produced four independent, reactively-discovered fixes
+    /// to the same call site in one session (BUG-198: `smt_facts`;
+    /// BUG-208: `struct_literal_fields`/`.constant`; BUG-210:
+    /// `vec_literal_elements`; BUG-211: `array_version`), each found
+    /// only because a *different* stale-fact soundness hole was
+    /// exploited first. A field is "fact-adjacent" if any function
+    /// under `src/smt.rs` or this file's own proof/elision machinery
+    /// (`prove_with_calls*`, `substitute_literal_vec_indices`,
+    /// `try_elide_bounds_in_typed_expr`, ...) reads it to answer a
+    /// question about what's currently true of this binding's value
+    /// -- if you add such a field, add its reset here too, in the
+    /// SAME commit, not as a follow-up bug report.
+    fn invalidate_facts_on_opaque_mutation(&mut self) {
+        self.constant = None;
+        self.vec_literal_elements = None;
+        self.struct_literal_fields = None;
+        // A real (`Stmt::IndexAssign`-driven) version bump also pins
+        // existing facts to the old version and adds a synthetic
+        // store-eq axiom bridging old->new, because it knows the
+        // exact index/value that changed. Here we only know SOMETHING
+        // about this binding changed, not what -- so there's nothing
+        // sound to bridge; the caller's own `drop_facts_mentioning`
+        // (or equivalent) is responsible for clearing any smt_facts
+        // that referenced the old version, and bumping alone ensures
+        // every LATER reference resolves to a fresh, fact-free array
+        // symbol rather than silently reusing pre-mutation knowledge.
+        self.array_version += 1;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -12363,14 +12413,35 @@ fn validate_loop_balance(
     }
 }
 
-/// Drop `info.constant` only on the bindings whose names appear in
-/// `names`. Used by `if`/`else` / `while` / `for` / `for-iter`
-/// merges to preserve constant facts about bindings the body
-/// provably didn't touch. Soundness: callers populate `names` via
+/// Invalidate ALL fact-adjacent state (see
+/// `VarInfo::invalidate_facts_on_opaque_mutation`) on the bindings
+/// whose names appear in `names`. Used by `if`/`else` / `while` /
+/// `for` / `for-iter` merges to forget facts about bindings the body
+/// provably (possibly) touched, while preserving facts about bindings
+/// it provably didn't. Soundness: callers populate `names` via
 /// `collect_branch_mutations` which is the conservative union of
 /// `Stmt::Assign` LHS, `Stmt::IndexAssign` LHS, and `&mut <name>`
 /// argument targets (anything that can flow back into the outer
 /// binding's value).
+///
+/// BUG-212 (2026-08-17): this only ever cleared `info.constant`
+/// (hence the name, kept for git-blame continuity even though it now
+/// does more) -- it never invalidated `vec_literal_elements`,
+/// `struct_literal_fields`, or bumped `array_version`, even though
+/// its OWN doc comment already listed `&mut <name>` argument targets
+/// (i.e. a `mut ref` call, the exact BUG-198/208/210/211 trigger) as
+/// one of the mutation shapes `names` covers. Confirmed exploitable:
+/// `let xs: Vec<i64> = vec(1,2,3); if cond { set(mut ref xs, 0,
+/// 999); } prove xs[0] == 1;` was silently accepted with `cond ==
+/// true` (branch definitely executes) -- found by checking whether
+/// the OTHER known "acknowledges a mutation" call sites in this file
+/// had the same gap `drop_facts_for_mut_ref_call_args` did, right
+/// after consolidating that function's four independent fixes into
+/// `VarInfo::invalidate_facts_on_opaque_mutation`. Given branch
+/// merges are pervasive (every `if`/`while`/`for` in the language),
+/// this had a substantially larger blast radius than BUG-208/210/211
+/// combined. Fixed by calling the same consolidated method instead of
+/// hand-clearing one field.
 fn clear_constants_for(
     env: &mut Env,
     names: &std::collections::HashSet<String>,
@@ -12378,7 +12449,7 @@ fn clear_constants_for(
     for scope in env.scopes.iter_mut() {
         for (name, info) in scope.iter_mut() {
             if names.contains(name) {
-                info.constant = None;
+                info.invalidate_facts_on_opaque_mutation();
             }
         }
     }
@@ -14043,7 +14114,24 @@ fn check_one_stmt(
             });
             // Update the binding in place (wherever it lives in the scope stack).
             if let Some(info) = env.lookup_mut(name) {
-                info.constant = None;
+                // BUG-213 (2026-08-17): this used to clear only
+                // `info.constant`, leaving `vec_literal_elements` /
+                // `struct_literal_fields` / `array_version` all stale
+                // after a plain reassignment (`xs = vec(9,9,9);`) --
+                // `substitute_literal_vec_indices` would then keep
+                // substituting indices against the OLD literal's
+                // elements as if `xs` still held them. A reassignment
+                // could in principle re-derive a fresh
+                // `vec_literal_elements`/`struct_literal_fields` from
+                // the new RHS when it's itself a literal, but that's
+                // more code/risk for a rare precision win; using the
+                // same conservative consolidated invalidation the
+                // opaque-mutation call sites use is sound and
+                // consistent. Found by sweeping every other place in
+                // this file that only clears `.constant` right after
+                // the same gap was found and fixed at
+                // `clear_constants_for` (branch merges).
+                info.invalidate_facts_on_opaque_mutation();
                 info.moved = None;
                 if let Some(aliases) = new_ref_aliases {
                     info.ref_aliases = aliases;
@@ -39248,27 +39336,17 @@ fn drop_facts_for_mut_ref_call_args(expr: &Expr, smt_facts: &mut Vec<Expr>, env:
             if let ExprKind::RefMut { inner } = &arg.kind {
                 if let Some(name) = root_var_of_expr(inner) {
                     drop_facts_mentioning(smt_facts, &name);
-                    // BUG-208: this only ever cleared the smt_facts Vec
-                    // (BUG-198's own fix) -- it never invalidated the two
-                    // separate env-level caches BUG-199 already fixed for
-                    // direct `obj.field = value;`: `struct_literal_fields`
-                    // and `.constant`. A `mut ref` argument to a USER-
-                    // DEFINED function (not just a builtin) can mutate the
-                    // callee's fields exactly the same way a direct
-                    // FieldAssign does, but this call site is the ONLY
-                    // place a caller-side `mut ref X` argument's effect on
-                    // X gets acknowledged at all -- so it's also the only
-                    // place that can invalidate these two caches for that
-                    // case. Confirmed exploitable: `fn bump(c: mut ref
-                    // Counter) { c.n = c.n + 1; } ... bump(mut ref c);
-                    // prove c.n == 0;` was silently accepted (the checker
-                    // "proved" a demonstrably false claim) before this fix,
-                    // via the exact same "contradictory fact base makes
-                    // everything provable" mechanism BUG-199's write-up
-                    // already documented.
+                    // Refactored 2026-08-17 (post-BUG-211) from four
+                    // independent, reactively-discovered inline field
+                    // resets (BUG-198's smt_facts drop above, then
+                    // BUG-208/210/211 each hand-adding one more
+                    // VarInfo field here in the same session) into one
+                    // call to the canonical invalidation method. See
+                    // `VarInfo::invalidate_facts_on_opaque_mutation`'s
+                    // doc comment for why this consolidation exists
+                    // and where to extend it for a future field.
                     if let Some(info) = env.lookup_mut(&name) {
-                        info.struct_literal_fields = None;
-                        info.constant = None;
+                        info.invalidate_facts_on_opaque_mutation();
                     }
                 }
             }

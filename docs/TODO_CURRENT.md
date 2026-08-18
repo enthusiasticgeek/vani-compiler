@@ -16015,4 +16015,209 @@ session (BUG-206/207/208/209) by systematically checking sibling
 functions and related language features after each fix, rather than
 considering a fix complete once its own triggering repro passes.
 
-Next free bug number is **BUG-210**.
+## BUG-210
+
+Found 2026-08-17 by continuing to audit `VarInfo`'s fact-adjacent
+caches immediately after BUG-208 (same day) -- BUG-208 covered
+`struct_literal_fields`/`.constant`; this is the third such cache,
+found by simply asking "does `env`'s `VarInfo` have any OTHER field
+the SMT machinery reads out-of-band from `smt_facts`?"
+
+**Root cause**: `vec_literal_elements` (`checker.rs`) lets
+`substitute_literal_vec_indices` rewrite `xs[K]` (K a compile-time-
+constant index) directly into `xs`'s ORIGINAL construction-time
+element expression, bypassing SMT entirely -- the exact same
+mechanism `struct_literal_fields` uses for struct fields, just for
+`let xs = vec(a, b, c);`-style Vec-literal bindings.
+`drop_facts_for_mut_ref_call_args` (the one call site BUG-198 and
+BUG-208 already extended) never cleared it. `Stmt::IndexAssign`
+(`xs[i] = v;`) already correctly clears this same field (it has its
+own array-versioning invalidation logic, ~line 15388) -- only the
+mut-ref-call-argument path had the gap, one field over from BUG-208's
+own finding.
+
+**Confirmed via direct repro** -- notably reachable through a plain
+BUILTIN call, not even a user function, meaning this gap has existed
+since BUG-198's original fix landed:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+set(mut ref xs, 0, 999);
+prove xs[0] == 1;   // silently ACCEPTED before this fix
+```
+
+**Fix**: one more line (`info.vec_literal_elements = None;`) in the
+same `if let Some(info) = env.lookup_mut(&name)` block BUG-208 already
+added to `drop_facts_for_mut_ref_call_args`.
+
+This closes out all 3 currently-known fact-adjacent `VarInfo` caches
+at this one call site: `smt_facts` (BUG-198), `struct_literal_fields`/
+`.constant` (BUG-208), `vec_literal_elements` (BUG-210).
+
+Regression: `src/lib.rs`'s
+`bug210_mut_ref_builtin_call_invalidates_stale_vec_literal_facts`,
+mirroring BUG-208's test shape. Full `cargo test --release --workspace`
+clean.
+
+## BUG-211
+
+Found 2026-08-17, a 4th gap at the same `drop_facts_for_mut_ref_call_args`
+call site BUG-198/208/210 already extended three times. This one
+isn't a `VarInfo` `Option<...>` cache -- it's the SMT array-
+VERSIONING counter itself, `array_version: u32`.
+
+**Root cause**: `Stmt::IndexAssign` (`xs[i] = v;`) correctly bumps
+`array_version` and pins prior facts to the OLD version before adding
+a synthetic store-eq axiom bridging old and new, so the solver's
+`arr_<name>_v{N}` array-theory encoding stays sound. A `mut ref` call
+mutating the same Vec (builtin or user function) never bumped
+`array_version` at all, so any LATER bare `Var(xs)` reference still
+resolved to whatever version was current BEFORE the mut-ref call --
+letting `prove` see straight through a real mutation to array-theory
+facts established before it.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+xs[0] = 100;              // IndexAssign: establishes arr_xs_v1[0] = 100
+set(mut ref xs, 0, 5);    // mut-ref call: array_version never bumped
+prove xs[0] == 100;       // silently ACCEPTED before this fix
+```
+`--smt-debug` showed the query still reasoning against `arr_v_xs_v1`
+(the version `xs[0] = 100` created) -- `set`'s own mutation never
+advanced the version, so the solver never saw a fresh, unconstrained
+array for the post-`set` state.
+
+**Fix**: `info.array_version += 1;` added right after the three
+existing cache clears in the same `if let Some(info) =
+env.lookup_mut(&name)` block. No synthetic store-eq axiom is added
+(unlike `IndexAssign`, which knows exactly `i`/`v`) -- bumping alone
+forces every later reference to a fresh, fact-free array version,
+matching the same "conservative: forget everything" shape as the
+three `Option`-cache clears.
+
+This is now the 4th independent fix at this one call site: `smt_facts`
+(BUG-198), `struct_literal_fields`/`.constant` (BUG-208),
+`vec_literal_elements` (BUG-210), `array_version` (BUG-211).
+
+**Also checked, per explicit request, and confirmed CLEAN**: whether
+tuple/struct/enum-payload access has an analogous "missing runtime
+check" gap. It does not -- tuple field access uses a compile-time-
+constant index with a compile-time bounds error (`t.2` on a 2-tuple
+produces "tuple index 2 out of bounds for tuple of arity 2" at
+compile time, verified directly, not a runtime gap); struct field
+access resolves a compile-time-constant field name; enum payload
+access is only reachable through `match`'s exhaustive tag-gated
+dispatch (`option_unwrap_or` always requires an explicit default --
+there is no `unwrap_unchecked`-style raw-payload-read function). None
+of these three share Vec/Array's genuinely-dynamic-runtime-index
+vulnerability shape, so there was nothing to fix -- a real, worthwhile
+check that came back negative rather than one that was skipped.
+
+Regression: `src/lib.rs`'s
+`bug211_mut_ref_builtin_call_bumps_stale_array_version`. Full `cargo
+test --release --workspace` clean.
+
+## Refactor: `VarInfo::invalidate_facts_on_opaque_mutation` (2026-08-17)
+
+Per explicit user request ("refactor and aim for generic solutions
+rather than a patchwork wherever possible"), consolidated the four
+independent, reactively-discovered field resets BUG-198/208/210/211
+each hand-added to `drop_facts_for_mut_ref_call_args` into one method
+on `VarInfo`:
+
+```rust
+impl VarInfo {
+    fn invalidate_facts_on_opaque_mutation(&mut self) {
+        self.constant = None;
+        self.vec_literal_elements = None;
+        self.struct_literal_fields = None;
+        self.array_version += 1;
+    }
+}
+```
+
+`constant`/`vec_literal_elements`/`struct_literal_fields` got a
+"FACT-ADJACENT" doc-comment cross-reference pointing back at this
+method, so a future field added to `VarInfo` for the same purpose has
+an obvious place to register its own invalidation, in the SAME commit,
+instead of becoming a 5th reactive bug report.
+`drop_facts_for_mut_ref_call_args` now just calls this method instead
+of carrying ~75 lines of inline per-field commentary.
+
+Doing this refactor properly -- auditing the file for OTHER call sites
+with the same "acknowledges a mutation but only clears one fact-
+adjacent field" shape, rather than declaring the consolidation done
+once `drop_facts_for_mut_ref_call_args` itself was clean -- surfaced
+two more real instances of the exact same gap, below.
+
+## BUG-212
+
+`clear_constants_for` (used by `if`/`else`/`while`/`for`/`for-iter`
+branch-merge logic across 6 call sites to forget facts about bindings
+a branch may have mutated) only ever cleared `info.constant`, despite
+its own doc comment already listing `&mut <name>` argument targets --
+i.e. exactly a `mut ref` call, the BUG-198/208/210/211 trigger -- as
+one of the mutation shapes it's supposed to cover.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+let cond: bool = true;
+if cond {
+    set(mut ref xs, 0, 999);
+}
+prove xs[0] == 1;   // silently ACCEPTED before this fix (cond is
+                    // `true`, so the branch definitely executes)
+```
+`ok:` before the fix -- the stale `vec_literal_elements`-derived fact
+`xs[0] == 1` survived the branch merge because only `.constant` was
+cleared.
+
+**Fix**: `info.constant = None;` replaced with a call to
+`info.invalidate_facts_on_opaque_mutation()`. Function name kept as
+`clear_constants_for` for git-blame continuity even though it now
+invalidates more than just constants (documented in its own doc
+comment).
+
+Since branch merges are pervasive (every `if`/`while`/`for` in the
+language goes through this function), this had a substantially larger
+blast radius than BUG-208/210/211 combined -- found only because the
+refactor's own sibling-sweep looked for other sites sharing the
+pattern, rather than stopping once the original call site was fixed.
+
+Regression: `src/lib.rs`'s
+`bug212_branch_merge_only_cleared_constant_not_other_facts`.
+
+## BUG-213
+
+Found in the same sweep as BUG-212. `Stmt::Reassign`'s handling
+(`xs = <new value>;`) only cleared `info.constant`/`info.moved`, never
+`vec_literal_elements`/`struct_literal_fields`/`array_version` -- so a
+COMPLETE reassignment to a brand-new literal still left
+`substitute_literal_vec_indices` compile-time-substituting indices
+against the ORIGINAL, pre-reassignment literal's elements.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+xs = vec(9, 9, 9);
+prove xs[0] == 1;   // silently ACCEPTED before this fix
+```
+
+**Fix**: same consolidated `info.invalidate_facts_on_opaque_mutation()`
+call, replacing the bare `info.constant = None;`. Note Reassign isn't
+truly "opaque" -- when the RHS is itself a literal, a fresh
+`vec_literal_elements`/`struct_literal_fields` could in principle be
+re-derived from it for better precision -- but the conservative
+invalidate-everything approach was chosen for consistency and safety
+over that extra precision/risk, matching every other fix in this
+family.
+
+Regression: `src/lib.rs`'s
+`bug213_reassign_only_cleared_constant_not_other_facts`.
+
+Both BUG-212 and BUG-213 verified via direct repro (`ok:` before ->
+`proof failed` SMT counterexample after) and full `cargo test --release
+--workspace` clean.
+
+Next free bug number is **BUG-214**.
