@@ -9038,3 +9038,28 @@ vanic run examples/language/thai/early_exit.vani --backend=c
 The observed crash suggests that there might be a bug in the way the `break` statement is being handled within the loop. This could involve incorrect checks for the break condition or improper interaction with other parts of the code.
 
 Please ensure that you have thoroughly reviewed the relevant compiler source and its documentation to identify any potential issues causing this crash.
+
+---
+
+### Candidate: 20260818-175934-run-crash-d8f20b7050
+
+Repro: `tools/localfuzz/findings/20260818-175934-run-crash-d8f20b7050/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-175934-run-crash-d8f20b7050/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The given mutant script produces a run-crash in both the base corpus file and the generated source. The exact repro source is:
+
+```vani
+// CONC + STRT: Mutex<i64> as a struct field; lock + guard_get.
+struct State { m: Mutex<i64> }
+fn main() -> i64 {
+  let s: State = State { m: mutex_new(42) };
+  let g: Guard<i64> = mutex_lock(ref s.m);
+  let g: Guard<i64> = mutex_lock(ref s.m);  // This line causes a crash
+  let v: i64 = guard_get(ref g);
+  return v;
+}
+```
+
+The observed symptom is a run-crash in both the base corpus file and the generated source, specifically with the second `mutex_lock` call causing a crash. The backend(s) affected are all.
