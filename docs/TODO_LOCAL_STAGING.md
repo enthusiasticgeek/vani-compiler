@@ -9151,3 +9151,12 @@ Fix attempt: `tools/localfuzz/findings/20260818-210209-backend-divergence-1f739c
 }
 ```
 
+
+---
+
+### Candidate: 20260818-210645-run-crash-86509155b2
+
+Repro: `tools/localfuzz/findings/20260818-210645-run-crash-86509155b2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260818-210645-run-crash-86509155b2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
