@@ -10079,6 +10079,70 @@ mod tests {
     }
 
     #[test]
+    fn bug212_branch_merge_only_cleared_constant_not_other_facts() {
+        // BUG-212 (2026-08-17): found while refactoring
+        // `drop_facts_for_mut_ref_call_args`'s BUG-198/208/210/211
+        // patchwork into `VarInfo::invalidate_facts_on_opaque_mutation`
+        // and sweeping the file for OTHER call sites with the same
+        // shape. `clear_constants_for` -- used by if/while/for/for-iter
+        // branch-merge logic to forget facts about bindings a branch
+        // may have mutated -- only ever cleared `info.constant`, never
+        // `vec_literal_elements`/`struct_literal_fields`/
+        // `array_version`. A `mut ref` call inside a branch that
+        // definitely executes (`if true { set(mut ref xs, 0, 999); }`)
+        // left the stale `vec_literal_elements`-derived fact `xs[0] ==
+        // 1` provable after the merge, even though `set` genuinely
+        // changed it to `999`.
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<i64> = vec(1, 2, 3);
+                let cond: bool = true;
+                if cond {
+                    set(mut ref xs, 0, 999);
+                }
+                prove xs[0] == 1;
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err(
+            "xs[0] is 999 after the true branch's set(mut ref xs, 0, 999); proving xs[0] == 1 must fail",
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("proof failed")),
+            "expected proof-failed diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn bug213_reassign_only_cleared_constant_not_other_facts() {
+        // BUG-213 (2026-08-17): found in the same sweep as BUG-212.
+        // `Stmt::Reassign`'s handling (`xs = <new value>;`) only
+        // cleared `info.constant`/`info.moved`, never
+        // `vec_literal_elements`/`struct_literal_fields`/
+        // `array_version` -- so a COMPLETE reassignment to a brand-new
+        // literal still let `substitute_literal_vec_indices` compile-
+        // time-substitute indices against the ORIGINAL, pre-reassignment
+        // literal's elements.
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<i64> = vec(1, 2, 3);
+                xs = vec(9, 9, 9);
+                prove xs[0] == 1;
+                return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err(
+            "xs was reassigned to vec(9, 9, 9); proving xs[0] == 1 (the pre-reassignment value) must fail",
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("proof failed")),
+            "expected proof-failed diagnostic, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn block_expression_with_lets_then_tail_compiles() {
         // T-block MVP: `let r = { let a = …; let b = …;
         // a + b };` — block-expr as let RHS. Inner `let`s

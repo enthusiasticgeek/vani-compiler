@@ -16117,4 +16117,107 @@ Regression: `src/lib.rs`'s
 `bug211_mut_ref_builtin_call_bumps_stale_array_version`. Full `cargo
 test --release --workspace` clean.
 
-Next free bug number is **BUG-212**.
+## Refactor: `VarInfo::invalidate_facts_on_opaque_mutation` (2026-08-17)
+
+Per explicit user request ("refactor and aim for generic solutions
+rather than a patchwork wherever possible"), consolidated the four
+independent, reactively-discovered field resets BUG-198/208/210/211
+each hand-added to `drop_facts_for_mut_ref_call_args` into one method
+on `VarInfo`:
+
+```rust
+impl VarInfo {
+    fn invalidate_facts_on_opaque_mutation(&mut self) {
+        self.constant = None;
+        self.vec_literal_elements = None;
+        self.struct_literal_fields = None;
+        self.array_version += 1;
+    }
+}
+```
+
+`constant`/`vec_literal_elements`/`struct_literal_fields` got a
+"FACT-ADJACENT" doc-comment cross-reference pointing back at this
+method, so a future field added to `VarInfo` for the same purpose has
+an obvious place to register its own invalidation, in the SAME commit,
+instead of becoming a 5th reactive bug report.
+`drop_facts_for_mut_ref_call_args` now just calls this method instead
+of carrying ~75 lines of inline per-field commentary.
+
+Doing this refactor properly -- auditing the file for OTHER call sites
+with the same "acknowledges a mutation but only clears one fact-
+adjacent field" shape, rather than declaring the consolidation done
+once `drop_facts_for_mut_ref_call_args` itself was clean -- surfaced
+two more real instances of the exact same gap, below.
+
+## BUG-212
+
+`clear_constants_for` (used by `if`/`else`/`while`/`for`/`for-iter`
+branch-merge logic across 6 call sites to forget facts about bindings
+a branch may have mutated) only ever cleared `info.constant`, despite
+its own doc comment already listing `&mut <name>` argument targets --
+i.e. exactly a `mut ref` call, the BUG-198/208/210/211 trigger -- as
+one of the mutation shapes it's supposed to cover.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+let cond: bool = true;
+if cond {
+    set(mut ref xs, 0, 999);
+}
+prove xs[0] == 1;   // silently ACCEPTED before this fix (cond is
+                    // `true`, so the branch definitely executes)
+```
+`ok:` before the fix -- the stale `vec_literal_elements`-derived fact
+`xs[0] == 1` survived the branch merge because only `.constant` was
+cleared.
+
+**Fix**: `info.constant = None;` replaced with a call to
+`info.invalidate_facts_on_opaque_mutation()`. Function name kept as
+`clear_constants_for` for git-blame continuity even though it now
+invalidates more than just constants (documented in its own doc
+comment).
+
+Since branch merges are pervasive (every `if`/`while`/`for` in the
+language goes through this function), this had a substantially larger
+blast radius than BUG-208/210/211 combined -- found only because the
+refactor's own sibling-sweep looked for other sites sharing the
+pattern, rather than stopping once the original call site was fixed.
+
+Regression: `src/lib.rs`'s
+`bug212_branch_merge_only_cleared_constant_not_other_facts`.
+
+## BUG-213
+
+Found in the same sweep as BUG-212. `Stmt::Reassign`'s handling
+(`xs = <new value>;`) only cleared `info.constant`/`info.moved`, never
+`vec_literal_elements`/`struct_literal_fields`/`array_version` -- so a
+COMPLETE reassignment to a brand-new literal still left
+`substitute_literal_vec_indices` compile-time-substituting indices
+against the ORIGINAL, pre-reassignment literal's elements.
+
+**Confirmed via direct repro**:
+```vani
+let xs: Vec<i64> = vec(1, 2, 3);
+xs = vec(9, 9, 9);
+prove xs[0] == 1;   // silently ACCEPTED before this fix
+```
+
+**Fix**: same consolidated `info.invalidate_facts_on_opaque_mutation()`
+call, replacing the bare `info.constant = None;`. Note Reassign isn't
+truly "opaque" -- when the RHS is itself a literal, a fresh
+`vec_literal_elements`/`struct_literal_fields` could in principle be
+re-derived from it for better precision -- but the conservative
+invalidate-everything approach was chosen for consistency and safety
+over that extra precision/risk, matching every other fix in this
+family.
+
+Regression: `src/lib.rs`'s
+`bug213_reassign_only_cleared_constant_not_other_facts`.
+
+Both BUG-212 and BUG-213 verified via direct repro (`ok:` before ->
+`proof failed` SMT counterexample after) and full `cargo test --release
+--workspace` clean.
+
+Next free bug number is **BUG-214**.
