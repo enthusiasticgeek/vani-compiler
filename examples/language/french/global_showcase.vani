@@ -1,0 +1,23 @@
+// vani-lang: french
+//
+// build & run:
+//   vanic run examples/language/french/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/french/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/french/global_showcase.vani -o /tmp/global_showcase_french && /tmp/global_showcase_french   # native binary
+
+but "sum 1..10, checked correct, then printed";
+
+fonction sum_to(n: i64) -> i64 {
+  soit total: i64 = 0;
+  pour i depuis 1 vers n + 1 {
+    total = total + i;
+  }
+  retourner total;
+}
+
+fonction main() -> i64 {
+  soit result: i64 = sum_to(10);
+  affirmer result == 55;
+  imprimer result;
+  retourner 0;
+}

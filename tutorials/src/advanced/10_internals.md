@@ -347,22 +347,6 @@ is the canonical catalog of documented v1 deviations.
 
 ---
 
-**Congratulations -- you've completed the Advanced track!**
-
-That's the whole tutorial set (Beginner + Intermediate +
-Advanced -- 96 lessons). The next-best thing is to:
-
-- Read `examples/language/english/` end to end. With all three
-  tracks behind you, every file should be navigable.
-- File issues for rough patches you hit. The compiler's most
-  honest design feedback is from real programs.
-- Contribute a fix or a dialect. The execution plan in
-  [`TODO.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md)
-  has phase-by-phase queued work; pick whatever calls to you.
-
-
----
-
 **Previous**: [Sec.9 -- Adding a new dialect ->](09_new_dialect.md)
 
 **Next**: [Sec.11 -- Using vani with an LLM ->](11_llm_workflows.md)

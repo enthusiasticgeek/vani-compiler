@@ -1,0 +1,23 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/japanese/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/japanese/global_showcase.vani -o /tmp/global_showcase_japanese && /tmp/global_showcase_japanese   # native binary
+
+目的 "sum 1..10, checked correct, then printed";
+
+関数 sum_to(n: i64) -> i64 {
+  代入 total: i64 = 0;
+  対象 i から 1 まで n + 1 {
+    total = total + i;
+  }
+  total 戻る;
+}
+
+関数 main() -> i64 {
+  代入 result: i64 = sum_to(10);
+  result == 55 確認;
+  result 表示;
+  0 戻る;
+}

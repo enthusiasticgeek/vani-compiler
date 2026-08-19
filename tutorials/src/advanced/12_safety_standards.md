@@ -501,3 +501,5 @@ Recommended `.github/workflows/safety.yml` gates:
 
 **Previous**: [Sec.11 -- Using vani with an LLM ->](11_llm_workflows.md)
 
+**Next**: [Sec.13 -- A world tour: vāṇी in your language ->](13_global_showcase.md)
+

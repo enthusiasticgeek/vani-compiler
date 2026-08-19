@@ -1,0 +1,21 @@
+// build & run:
+//   vanic run examples/language/english/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/global_showcase.vani -o /tmp/global_showcase && /tmp/global_showcase   # native binary
+
+intent "sum 1..10, checked correct, then printed";
+
+fn sum_to(n: i64) -> i64 {
+  let total: i64 = 0;
+  for i from 1 to n + 1 {
+    total = total + i;
+  }
+  return total;
+}
+
+fn main() -> i64 {
+  let result: i64 = sum_to(10);
+  assert result == 55;
+  print result;
+  return 0;
+}

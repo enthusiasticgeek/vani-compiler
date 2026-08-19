@@ -1,0 +1,23 @@
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/spanish/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/spanish/global_showcase.vani -o /tmp/global_showcase_spanish && /tmp/global_showcase_spanish   # native binary
+
+intencion "sum 1..10, checked correct, then printed";
+
+funcion sum_to(n: i64) -> i64 {
+  sea total: i64 = 0;
+  para i desde 1 hasta n + 1 {
+    total = total + i;
+  }
+  regresar total;
+}
+
+funcion main() -> i64 {
+  sea result: i64 = sum_to(10);
+  afirmar result == 55;
+  imprimir result;
+  regresar 0;
+}

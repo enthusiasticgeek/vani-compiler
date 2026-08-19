@@ -1,0 +1,23 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/cherokee/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/cherokee/global_showcase.vani -o /tmp/global_showcase_cherokee && /tmp/global_showcase_cherokee   # native binary
+
+ᎤᎲᏍᏛ "sum 1..10, checked correct, then printed";
+
+ᏗᎦᏬᏂᎯᏍᏗ sum_to(n: i64) -> i64 {
+  ᎠᏁᎳ total: i64 = 0;
+  ᏌᏊ i ᏓᏓᎴᏂᏍᎬ 1 ᎬᏛ n + 1 {
+    total = total + i;
+  }
+  ᏗᎬᏎᏗ total;
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ result: i64 = sum_to(10);
+  ᎯᏍᏗᏎᏍᏗ result == 55;
+  ᎠᎴᏂᏍᎬᎢ result;
+  ᏗᎬᏎᏗ 0;
+}

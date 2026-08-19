@@ -1,0 +1,23 @@
+// vani-lang: german
+//
+// build & run:
+//   vanic run examples/language/german/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/german/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/german/global_showcase.vani -o /tmp/global_showcase_german && /tmp/global_showcase_german   # native binary
+
+absicht "sum 1..10, checked correct, then printed";
+
+funktion sum_to(n: i64) -> i64 {
+  sei total: i64 = 0;
+  für i von 1 bis n + 1 {
+    total = total + i;
+  }
+  zurück total;
+}
+
+funktion main() -> i64 {
+  sei result: i64 = sum_to(10);
+  überprüfen result == 55;
+  drucken result;
+  zurück 0;
+}
