@@ -9247,3 +9247,18 @@ Crashes with `free(): invalid pointer` when attempting to execute the compiled c
 **BACKEND AFFECTED**: C backend
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-014502-run-crash-18a0937a83
+
+Repro: `tools/localfuzz/findings/20260819-014502-run-crash-18a0937a83/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-014502-run-crash-18a0937a83/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The provided CANDIDATE bug report for the vani-compiler project's local staging log outlines a scenario where a Turkish `for` loop is executed on the command line, but it crashes or hangs due to an internal error in the compiler. The repro source demonstrates a `for` loop that iterates from 1 to 5 and calculates their sum. However, the bug report does not provide any specific details about the crash or hang.
+
+The backend(s) affected by this bug are LLVM and C. The staging entry suggests running the vanic compiler with the specified arguments and observing whether the program crashes, hangs, or diverges.
+
+The raw result data provided indicates that the build and run commands were executed successfully, but they encountered a timeout issue, which could be due to resource constraints or a long-running process. This is consistent with the observed symptom of a crash or hang.
