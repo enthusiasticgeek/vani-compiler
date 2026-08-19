@@ -9262,3 +9262,12 @@ The provided CANDIDATE bug report for the vani-compiler project's local staging 
 The backend(s) affected by this bug are LLVM and C. The staging entry suggests running the vanic compiler with the specified arguments and observing whether the program crashes, hangs, or diverges.
 
 The raw result data provided indicates that the build and run commands were executed successfully, but they encountered a timeout issue, which could be due to resource constraints or a long-running process. This is consistent with the observed symptom of a crash or hang.
+
+---
+
+### Candidate: 20260819-020048-backend-divergence-6c0f534e6f
+
+Repro: `tools/localfuzz/findings/20260819-020048-backend-divergence-6c0f534e6f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-020048-backend-divergence-6c0f534e6f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
