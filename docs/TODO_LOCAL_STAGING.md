@@ -9271,3 +9271,12 @@ Repro: `tools/localfuzz/findings/20260819-020048-backend-divergence-6c0f534e6f/r
 Fix attempt: `tools/localfuzz/findings/20260819-020048-backend-divergence-6c0f534e6f/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-025622-run-crash-216ec53b96
+
+Repro: `tools/localfuzz/findings/20260819-025622-run-crash-216ec53b96/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-025622-run-crash-216ec53b96/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
