@@ -9533,3 +9533,12 @@ I have run `vanic run examples/language/english/echo_p3d_vec_struct.vani` and ob
 //   vanic run examples/echo_p3d_vec_struct.vani --backend=c    # C
 
 intent "Phase 3d —
+
+---
+
+### Candidate: 20260819-191637-run-crash-18fbca549d
+
+Repro: `tools/localfuzz/findings/20260819-191637-run-crash-18fbca549d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-191637-run-crash-18fbca549d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
