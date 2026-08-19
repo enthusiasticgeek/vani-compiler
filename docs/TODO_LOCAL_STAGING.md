@@ -9491,3 +9491,45 @@ vanic run examples/language/english/echo_loop.vani --backend=c
       "rc": null,
       "stdout": "",
       "stderr": "/tmp/localfuzz/candidate.vani:34:10: warning: unused parameter 'ep' -- never referenced in the body of 'drive'\nfn drive
+
+---
+
+### Candidate: 20260819-182550-run-crash-b36ccbb674
+
+Repro: `tools/localfuzz/findings/20260819-182550-run-crash-b36ccbb674/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-182550-run-crash-b36ccbb674/fix_attempt.md`
+
+**Staging Entry:**
+
+I have run `vanic run examples/language/english/echo_p3d_vec_struct.vani` and observed a crash in the LLVM backend. The exact repro source is as follows:
+
+```vani
+// Arc 8 v3.1 Phase 3d — Vec + Struct locals in async fn.
+//
+// Phase 3d extends Phase 3a-c's non-i64 locals to include
+// container types: Vec<T> (any v31-allowed element T) and
+// Struct(name) (user struct with all v31-allowed fields).
+// Default-init synthesis:
+//   - Vec<T>: 1-element `vec(default_T)`. An empty `vec()`
+//     can't infer its element type in StructLit field position.
+//     The throwaway element is overwritten by the state
+//     machine before any read.
+//   - Struct(name): `StructName { f0: default(T0), f1:
+//     default(T1), ... }`. Recursive per-field defaults; cycle-
+//     safe via a thread-local visited set.
+//
+// Deferred to a future sub-phase:
+//   - Array `[T; N]`: C backend can't do array-to-array
+//     assignment (the synthesizer's NonSuspendLet emits a
+//     FieldAssign that hits invalid C). Future work: element-
+//     wise copy loop or memcpy escape hatch in the synthesizer.
+//
+// Caveat: Vec default-init allocates 1 throwaway element per
+// task. For tasks created in a hot path with many Vec locals,
+// this is a minor cost. Reasonable users won't notice.
+//
+// build & run:
+//   vanic run examples/echo_p3d_vec_struct.vani                # LLVM
+//   vanic run examples/echo_p3d_vec_struct.vani --backend=c    # C
+
+intent "Phase 3d —
