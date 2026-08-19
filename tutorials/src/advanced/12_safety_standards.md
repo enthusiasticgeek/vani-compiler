@@ -9,6 +9,92 @@ pipeline.
 
 ---
 
+## Why this chapter exists
+
+Most software bugs are an inconvenience: a crashed app, a wrong
+number on a screen, a page that needs a refresh. **Safety-critical
+software runs where a bug can kill someone or destroy something
+expensive and irreplaceable** -- the code steering a car, controlling
+an aircraft's flight surfaces, dosing a patient's medication pump, or
+running an industrial robot arm next to a human worker. "Ship it and
+patch the bug next week" isn't an option when the software is already
+airborne, already implanted, or already braking a car at highway
+speed.
+
+Because the stakes are that high, several industries don't just
+*hope* engineers write careful code -- they require **documented
+proof**, checked by an independent certifying body, that specific
+classes of bugs are structurally impossible before the software is
+allowed to ship. That's what the four standards below are: each one
+is a checklist of properties a regulator or certifying body demands
+evidence for, in a specific industry.
+
+- **MISRA C 2012** -- a C coding-style rulebook originally written for
+  the automotive industry by the Motor Industry Software Reliability
+  Association (UK, 1998), now used far beyond cars (aerospace,
+  medical, industrial control). Its rules exist because plain C makes
+  it easy to write code whose behavior isn't fully pinned down by the
+  language spec -- multiple exit points that hide which cleanup code
+  actually ran, expressions whose evaluation order silently differs
+  between compilers, branches a reviewer assumes are reachable but
+  aren't. In a 2013 product-liability trial (*Bookout v. Toyota*),
+  independent embedded-systems experts examined Toyota's throttle-
+  control firmware and testified to finding MISRA C violations,
+  thousands of global variables, and a stack-overflow risk in code
+  that was supposed to be safety-critical -- a widely cited case study
+  in why "it compiled and passed testing" isn't the same as "this
+  code's behavior is fully understood."
+- **ISO 26262 (ASIL)** -- the international functional-safety
+  standard for road vehicles. It grades every safety-relevant function
+  by an **ASIL** (Automotive Safety Integrity Level), from A (lowest)
+  to **D** (highest), based on how severe the harm would be, how
+  likely the situation is, and how much control a driver realistically
+  has if it goes wrong. Braking, steering, and airbag deployment are
+  textbook ASIL-D: failure there can be immediately life-threatening
+  and the driver has little to no chance to compensate.
+- **DO-178C Level A** -- the standard commercial aircraft software
+  must satisfy to be certified airworthy by the FAA (US) or EASA
+  (Europe). Its five levels (A, most severe, through E, no safety
+  effect) grade software by the worst plausible outcome of it failing;
+  Level A means the failure condition is "catastrophic" -- potential
+  loss of the aircraft. Aviation's zero-tolerance culture around
+  software exists because software failure in flight has no safe
+  fallback the way a car can pull over. The 1996 loss of Ariane 5
+  Flight 501 -- not itself an FAA-certified aircraft, but the
+  textbook cautionary tale this whole category of standard exists to
+  prevent -- is a stark illustration: a guidance-software module
+  reused from Ariane 4 hit a floating-point-to-integer conversion it
+  had never been tested against under Ariane 5's faster flight
+  profile, overflowed, and triggered the rocket's self-destruct 37
+  seconds after launch.
+- **IEC 62304 Class C** -- the medical-device software lifecycle
+  standard, adopted by the FDA (US) and EU medical-device regulators.
+  Class C is its highest severity tier: software whose failure could
+  cause death or serious injury. The case most safety engineers learn
+  this standard's history from is the **Therac-25** (1985-1987), a
+  radiation-therapy machine whose control software had a race
+  condition: a specific fast sequence of operator keystrokes could
+  slip past a safety interlock and deliver a radiation dose roughly
+  100x the intended amount. Several patients died or were severely
+  injured before the root cause -- a software bug, not a hardware
+  fault -- was found. It remains one of the most-cited case studies in
+  software-safety engineering precisely because nothing about the
+  *hardware* was unusual; the danger was entirely in code nobody had
+  proven correct.
+
+The common thread: every one of these disasters involved code that
+compiled, passed its tests, and shipped -- the gap was between "we
+tested the cases we thought of" and "we can *prove* the dangerous
+cases are unreachable." That's the gap vāṇी's safety layer targets.
+The composite tags below aren't paperwork bolted on after the fact --
+each one tells the compiler to refuse to produce a binary at all until
+it can demonstrate, mechanically, that the property the standard cares
+about (no unbounded stack growth, no unbounded execution time, no
+hidden dynamic allocation, no unreachable-looking-but-actually-live
+branches, ...) genuinely holds for that function.
+
+---
+
 ## Composite standard tags
 
 Place one composite tag on a function to opt it into a full constraint
