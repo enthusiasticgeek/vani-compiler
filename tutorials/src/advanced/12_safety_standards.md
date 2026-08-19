@@ -391,6 +391,24 @@ runs this same check against the package entry and hard-blocks on any gap,
 with `--allow-partial-safety-coverage` as an explicit escape hatch -- see
 [Sec.16 -- Kosh Packages](../intermediate/16_packages.md#safety-coverage-gate).
 
+**Two different things, easy to conflate**: this gate and the
+composite tags earlier in this chapter check *different* properties,
+and `vanic publish` only enforces the former.
+`vanic audit-safety`/`vanic publish` don't care whether a function
+carries `#[misra_c_2012]`, `#[asil_d]`, or no composite tag at all --
+they only ask "wherever a stack/time bound is computable, is it
+declared?" So a package passing `vanic publish`'s gate means its
+stack/time bounds are proven wherever computable; it does **not** mean
+the package is MISRA/ASIL-D/DO-178C/IEC-62304 compliant -- that
+requires the package's own functions to actually carry the relevant
+composite tag, which is a separate, opt-in choice by the package
+author. **As of this writing, none of the published kosh packages
+(`vani-algebra`, `vani-calculus`, `vani-ml`, etc.) use the composite
+standard tags** -- they only carry this baseline coverage. Check a
+specific package's source (or run `vanic safety-attrs` against it
+yourself) before assuming "published on kosh" implies certification to
+any of the four standards above.
+
 ---
 
 ## Cyclomatic complexity

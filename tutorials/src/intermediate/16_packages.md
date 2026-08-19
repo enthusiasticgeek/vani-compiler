@@ -315,6 +315,16 @@ You can also run the check standalone, any time, without publishing:
 vanic audit-safety src/lib.vani
 ```
 
+**This gate is not the same as MISRA/ASIL-D/DO-178C/IEC-62304
+compliance.** It only checks that stack/time bounds are declared
+wherever computable -- it never requires a package's functions to
+carry any of the composite safety tags (`#[misra_c_2012]`,
+`#[asil_d]`, etc.) covered in
+[Sec.12 -- Safety-Critical Standards](../advanced/12_safety_standards.md#safety-attribute-coverage-gate).
+As of this writing, none of the published kosh packages use those
+composite tags -- passing this gate means "stack/time bounds are
+proven wherever computable," not "certified to an industry standard."
+
 The publisher list lives in the registry's
 [`governance.json`](https://enthusiasticgeek.github.io/kosh-index/governance.json)
 -- governance can be handed to a committee without any compiler change.
