@@ -9370,3 +9370,14 @@ Repro: `tools/localfuzz/findings/20260819-130126-run-crash-2fce8c1e5b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260819-130126-run-crash-2fce8c1e5b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-135427-backend-divergence-a0cc6811d7
+
+Repro: `tools/localfuzz/findings/20260819-135427-backend-divergence-a0cc6811d7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-135427-backend-divergence-a0cc6811d7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The provided `candidate.vani` source file exhibits a backend-divergence issue when compiled with either the LLVM or C backends. The observed symptom is that the `detach hb;` line causes the main computation to diverge, producing an incorrect result and displaying unnecessary heartbeat messages. The `hb` variable remains unused after its declaration, leading to potential issues in the program's behavior. This is a genuine race condition between the background heartbeat and the main computation, as evidenced by the warning message about an unused variable.
