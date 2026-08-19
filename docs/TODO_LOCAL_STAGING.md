@@ -9404,3 +9404,12 @@ async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
 When this mutation is applied to the `main` function in the provided corpus file, it causes the program to terminate unexpectedly during runtime. The observed symptom is a crash, and no additional information about the nature of the crash or the exact state of the program can be determined from the given data.
 
 To resolve this issue, further investigation is required to understand the root cause of the problem and develop appropriate fixes for both LLVM and C backends. Once these are identified and implemented, the bug should be marked as resolved in the staging log, indicating that the candidate has been validated and ready for further review by a human or a frontier model.
+
+---
+
+### Candidate: 20260819-152408-run-crash-38af208c55
+
+Repro: `tools/localfuzz/findings/20260819-152408-run-crash-38af208c55/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-152408-run-crash-38af208c55/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
