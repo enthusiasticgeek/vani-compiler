@@ -9361,3 +9361,12 @@ Repro: `tools/localfuzz/findings/20260819-124004-backend-divergence-237b64a557/r
 Fix attempt: `tools/localfuzz/findings/20260819-124004-backend-divergence-237b64a557/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-130126-run-crash-2fce8c1e5b
+
+Repro: `tools/localfuzz/findings/20260819-130126-run-crash-2fce8c1e5b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-130126-run-crash-2fce8c1e5b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
