@@ -9280,3 +9280,47 @@ Repro: `tools/localfuzz/findings/20260819-025622-run-crash-216ec53b96/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260819-025622-run-crash-216ec53b96/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-054222-run-crash-b7cce562d8
+
+Repro: `tools/localfuzz/findings/20260819-054222-run-crash-b7cce562d8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-054222-run-crash-b7cce562d8/fix_attempt.md`
+
+STAGING ENTRY:
+
+**Vani Compiler Local Fuzzing Candidate Bug Report**
+
+**Description:**
+A candidate bug report has been generated for the vani-compiler project's local staging log, based on a mutation of the `echo_fall_through.vani` file. The mutation introduces an identical `if` branch in both paths, causing the program to crash or hang.
+
+**Details:**
+
+1. **Mutant/Generated Source:**
+   ```vani
+   // Arc 8 v3.1 Phase 2.1b — fall-through merge state.
+   //
+   // Phase 2.1a required both `if` branches to end with `return`.
+   // Phase 2.1b lifts that: a branch can fall through to a merge
+   // state holding the post-if code. The compiler allocates the
+   // merge state AFTER both branch recursions (so its index is
+   // monotonically highest), and emits a `Jump` at the tail of
+   // each non-return-terminated branch to transfer control to
+   // the merge state.
+   //
+   // build & run:
+   //   vanic run examples/language/english/echo_fall_through.vani                # LLVM
+   //   vanic run examples/language/english/echo_fall_through.vani --backend=c    # C
+
+   intent "Phase 2.1b fall-through — branch without return + merge state";
+
+   async fn cond_recv_then_merge(fd: i64, mode: i64) -> i64 {
+     if mode > 0 {
+       // Suspend, then fall through (no Return here) — Jumps to merge.
+       let _ = io_recv_async(fd, 64);
+     } else {
+       // Explicit Return — Phase 2.1a path within Phase 2.1b mix.
+       return 0 - 5;
+     }
+     // Merge-state code: runs
