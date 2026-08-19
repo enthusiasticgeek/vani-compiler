@@ -9324,3 +9324,31 @@ A candidate bug report has been generated for the vani-compiler project's local 
        return 0 - 5;
      }
      // Merge-state code: runs
+
+---
+
+### Candidate: 20260819-105459-backend-divergence-96c5f4fdf8
+
+Repro: `tools/localfuzz/findings/20260819-105459-backend-divergence-96c5f4fdf8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-105459-backend-divergence-96c5f4fdf8/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "registered 4 sensors\n[dashboard] still processing...\nworker 0 derived 2 arena values from raw reading 5\nworker 2 derived 2 arena values from raw reading 15\nworker 1 derived 2 arena values from raw reading 10\nworker 3 derived 2 arena values from raw reading 20\ncheckpoint reached, running total: 204\ngrand total: 204\nmutex total confirms: 204\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "registered 4 sensors\n[dashboard] still processing...\nworker 0 derived 2 arena values from raw reading 5\nworker 1 derived 2 arena values from raw reading 10\nworker 2 derived 2 arena values from raw reading 15\nworker 3 derived 2 arena values from raw reading 20\ncheckpoint reached, running total: 204\ngrand total: 204\nmutex total confirms: 204\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n",
+    "timed_out": false
+  }
+}
+```
+
