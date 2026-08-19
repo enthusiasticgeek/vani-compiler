@@ -9381,3 +9381,26 @@ Fix attempt: `tools/localfuzz/findings/20260819-135427-backend-divergence-a0cc68
 STATUS: needs human/frontier root-cause review.
 
 The provided `candidate.vani` source file exhibits a backend-divergence issue when compiled with either the LLVM or C backends. The observed symptom is that the `detach hb;` line causes the main computation to diverge, producing an incorrect result and displaying unnecessary heartbeat messages. The `hb` variable remains unused after its declaration, leading to potential issues in the program's behavior. This is a genuine race condition between the background heartbeat and the main computation, as evidenced by the warning message about an unused variable.
+
+---
+
+### Candidate: 20260819-141841-run-crash-f428477ea7
+
+Repro: `tools/localfuzz/findings/20260819-141841-run-crash-f428477ea7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-141841-run-crash-f428477ea7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+This bug report pertains to a CANDIDATE bug in the vani-compiler project, specifically targeting the local staging log for the given corpus file and mutant/generated source. The core issue is observed crash during runtime on both LLVM and C backends due to an incorrect handling of asynchronous operations within the code. The backend(s) affected by this bug are C and LLVM.
+
+The specific mutation that led to the crash is as follows:
+```vani
+async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  திருப்பு v;
+}
+```
+
+When this mutation is applied to the `main` function in the provided corpus file, it causes the program to terminate unexpectedly during runtime. The observed symptom is a crash, and no additional information about the nature of the crash or the exact state of the program can be determined from the given data.
+
+To resolve this issue, further investigation is required to understand the root cause of the problem and develop appropriate fixes for both LLVM and C backends. Once these are identified and implemented, the bug should be marked as resolved in the staging log, indicating that the candidate has been validated and ready for further review by a human or a frontier model.
