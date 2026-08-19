@@ -9352,3 +9352,12 @@ Fix attempt: `tools/localfuzz/findings/20260819-105459-backend-divergence-96c5f4
 }
 ```
 
+
+---
+
+### Candidate: 20260819-124004-backend-divergence-237b64a557
+
+Repro: `tools/localfuzz/findings/20260819-124004-backend-divergence-237b64a557/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-124004-backend-divergence-237b64a557/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
