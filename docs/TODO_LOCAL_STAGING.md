@@ -9542,3 +9542,30 @@ Repro: `tools/localfuzz/findings/20260819-191637-run-crash-18fbca549d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260819-191637-run-crash-18fbca549d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260819-222502-backend-divergence-b01b4635c4
+
+Repro: `tools/localfuzz/findings/20260819-222502-backend-divergence-b01b4635c4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-222502-backend-divergence-b01b4635c4/fix_attempt.md`
+
+STAGING ENTRY:
+
+**Subject**: Crashing Backend Divergence in `detach_heartbeat.vani` (vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani)
+
+**Description**:
+A small local model has identified a backend-divergence issue in the `detach_heartbeat.vani` example, which is part of the vani-compiler project's local staging log. This example demonstrates a scenario where a background task with no result is detached from main and immediately stops tracking it. The heartbeat task continues to tick without being joined, leading to divergent output across different backends (LLVM and C).
+
+**Repro Source**:
+The repro source for this bug can be found in the provided base corpus file at `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani`.
+
+**Observed Symptom**:
+The observed symptom is a crash or hang when running the `detach_heartbeat.vani` example using different backends (LLVM and C). The exact behavior varies across the two backends, but it generally leads to divergent output, where the main computation result does not match the expected value.
+
+**Affects Backends**:
+This bug affects both the LLVM and C backends of the vani-compiler project.
+
+**Status: needs human/frontier root-cause review.**
+
+The staging entry captures the key details of the bug report, including the repro source, observed symptom, affects backends, and a request for human/root-cause review to assist in identifying the root cause of the issue.
