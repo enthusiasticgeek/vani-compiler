@@ -9461,3 +9461,33 @@ fn main() -> i64 {
 
   // Fire the heartbeat and immediately stop tracking it -- no
   // Task<R> handle survives past this point for main to join
+
+---
+
+### Candidate: 20260819-161942-run-crash-059e467721
+
+Repro: `tools/localfuzz/findings/20260819-161942-run-crash-059e467721/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260819-161942-run-crash-059e467721/fix_attempt.md`
+
+**Staging Entry:**
+
+---
+
+**Compiling:**
+```sh
+vanic run examples/language/english/echo_loop.vani --backend=c
+```
+- **Result:**
+  ```json
+  {
+    "kind": "run-crash",
+    "c": {
+      "rc": null,
+      "stdout": "",
+      "stderr": "/tmp/localfuzz/candidate.vani:34:10: warning: unused parameter 'ep' -- never referenced in the body of 'drive'\nfn drive(ep: i64, t: mut ref Task__read_n) -> i64 {\n         ^^\n  help: 1. 'ep' is declared as a parameter but never appears anywhere in 'drive's body.\n  help: 2. If this is intentional (e.g. matching a required call signature, or a callback parameter the implementation doesn't need), prefix the name with an underscore ('_name') to silence this warning.\n/tmp/localfuzz/candidate.vani:23:3: warning: this 'if' has identical 'then' and 'else' branches -- the condition has no effect on behavior\n  while i < count {\n  ^^^^^^^^^^^^^^^^^\n  help: 1. Both branches execute the exact same code, so whichever way the condition evaluates, the outcome is identical.\n  help: 2. This is often a copy-paste leftover, or a sign one branch was meant to diverge but didn't. If the duplication is intentional (e.g. a placeholder for future divergence), no fix is needed.",
+      "timed_out": true
+    },
+    "llvm": {
+      "rc": null,
+      "stdout": "",
+      "stderr": "/tmp/localfuzz/candidate.vani:34:10: warning: unused parameter 'ep' -- never referenced in the body of 'drive'\nfn drive
