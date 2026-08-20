@@ -9714,3 +9714,61 @@ Repro: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260820-180156-run-crash-a398ee1426
+
+Repro: `tools/localfuzz/findings/20260820-180156-run-crash-a398ee1426/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-180156-run-crash-a398ee1426/fix_attempt.md`
+
+**STATUS: needs human/frontier root-cause review.**
+
+**Summary of Mutation Testing Findings:**
+The mutation testing tool identified a crash in the `async_cancel_auto.vani` file when run with the specified backend (`c`). The mutant that caused the crash is:
+
+```vani
+intenção "Portuguese async/await smoke";
+
+async função delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  retornar v;
+}
+
+função main() -> i64 {
+  seja b: i64 = await(delay(10, 7));
+  seja a: i64 = await(delay(9223372036854775807, 42));
+
+  afirmar a == 42;
+  afirmar b == 7;
+  imprimir "delays:", a, b;
+  retornar 0;
+}
+```
+
+**Mutant Source:**
+```vani
+intenção "Portuguese async/await smoke";
+
+async função delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  retornar v;
+}
+
+função main() -> i64 {
+  seja b: i64 = await(delay(10, 7));
+  seja a: i64 = await(delay(9223372036854775807, 42));
+
+  afirmar a == 42;
+  afirmar b == 7;
+  imprimir "delays:", a, b;
+  retornar 0;
+}
+```
+
+**Mutant Details:**
+- **Mutation Type:** Run-Crash
+- **Input Source:** The original `async_cancel_auto.vani` file.
+- **Output:** A crash occurred while running the program in either LLVM or C backend.
+
+**Re
