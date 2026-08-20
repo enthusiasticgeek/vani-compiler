@@ -9569,3 +9569,12 @@ This bug affects both the LLVM and C backends of the vani-compiler project.
 **Status: needs human/frontier root-cause review.**
 
 The staging entry captures the key details of the bug report, including the repro source, observed symptom, affects backends, and a request for human/root-cause review to assist in identifying the root cause of the issue.
+
+---
+
+### Candidate: 20260820-030606-run-crash-78e3566150
+
+Repro: `tools/localfuzz/findings/20260820-030606-run-crash-78e3566150/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-030606-run-crash-78e3566150/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
