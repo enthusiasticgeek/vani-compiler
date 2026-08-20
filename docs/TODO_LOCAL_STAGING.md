@@ -9677,3 +9677,31 @@ fn main() -> i64 {
   let hb: Task<i64> = task heartbeat();
 
   //
+
+---
+
+### Candidate: 20260820-113332-run-crash-0689162d8b
+
+Repro: `tools/localfuzz/findings/20260820-113332-run-crash-0689162d8b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-113332-run-crash-0689162d8b/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:68:5: warning: this 'if' has identical 'then' and 'else' branches -- the condition has no effect on behavior\n    Action.Recv then io_recv_async(fd, 64),\n    ^^^^^^^^^^^\n  help: 1. Both branches execute the exact same code, so whichever way the condition evaluates, the outcome is identical.\n  help: 2. This is often a copy-paste leftover, or a sign one branch was meant to diverge but didn't. If the duplication is intentional (e.g. a placeholder for future divergence), no fix is needed.\n",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:68:5: warning: this 'if' has identical 'then' and 'else' branches -- the condition has no effect on behavior\n    Action.Recv then io_recv_async(fd, 64),\n    ^^^^^^^^^^^\n  help: 1. Both branches execute the exact same code, so whichever way the condition evaluates, the outcome is identical.\n  help: 2. This is often a copy-paste leftover, or a sign one branch was meant to diverge but didn't. If the duplication is intentional (e.g. a placeholder for future divergence), no fix is needed.\n",
+    "timed_out": true
+  }
+}
+```
+
