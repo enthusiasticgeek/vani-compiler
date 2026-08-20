@@ -107,7 +107,7 @@ a feature that's planned but not implemented in v1 yet; see
 - **[Intermediate](intermediate/01_struct_methods.md)** (45
   lessons) -- structs, generics, dyn dispatch, design patterns,
   SMT verification.
-- **[Advanced](advanced/01_async.md)** (25 lessons) -- async,
+- **[Advanced](advanced/01_async.md)** (26 lessons) -- async,
   parallel, embedded, vtable internals, dialect contribution,
   compiler internals.
 

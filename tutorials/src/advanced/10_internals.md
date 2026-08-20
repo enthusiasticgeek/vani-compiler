@@ -4,22 +4,70 @@
 > source tree so you can read a diagnostic, find the
 > responsible pass, and contribute a fix.
 
-A compiler is an assembly line that transforms text into a
-running program in five broad stages:
-1. **Lexer** -- reads characters, groups them into tokens
-   (`let`, `42`, `+`). Like a copy editor who circles every
-   word on the page.
-2. **Parser** -- reads tokens, builds a tree of the program's
-   structure (the AST). Like the editor grouping circled words
-   into sentences and paragraphs.
-3. **Checker** -- verifies types, ownership, contract
-   obligations. Like a fact-checker who verifies every claim
-   before publication.
-4. **Codegen** -- translates the checked tree into LLVM IR or C.
-   Like a translator who renders the document in another
-   language.
-5. **Backend** -- LLVM compiles IR to machine code; `cc`
-   compiles C.
+A compiler is an assembly line that turns text into a running
+program. vāṇī's assembly line has five stations. Compilers use a
+lot of jargon and abbreviations -- every acronym below is spelled
+out the first time it shows up, so nothing here should require
+outside lookup.
+
+1. **Lexer** (short for "lexical analyzer") -- reads raw
+   characters one at a time and groups them into **tokens**, the
+   smallest meaningful chunks of the language (`let`, `42`, `+`).
+   Like a copy editor circling every word on a page before anyone
+   tries to read it as sentences.
+   - Figures out which script a word belongs to (Devanagari,
+     Latin, etc.) and rejects a file that improperly mixes
+     scripts -- the "script-purity gate."
+   - Has no idea yet whether the program makes sense as a whole --
+     only what the individual words/symbols are.
+
+2. **Parser** -- reads the token stream and builds a tree
+   capturing the program's *structure*: which tokens form a
+   statement, which statements form a function, and so on. That
+   tree is the **AST** -- **Abstract Syntax Tree** ("abstract"
+   because it keeps only the meaning-bearing structure and throws
+   away things like extra whitespace). Like the editor grouping
+   circled words into sentences and paragraphs.
+   - Turns a flat token list like `let x: i64 = 5;` into a tree
+     node that says "this is a `let` statement; its name is `x`;
+     its declared type is `i64`; its value is the literal `5`."
+   - Only checks *shape* (is this legal grammar?) -- it does not
+     yet know whether `5` actually fits inside an `i64`, or
+     whether `x` is used correctly later on.
+
+3. **Checker** -- walks the AST and verifies it isn't just
+   grammatically legal but actually *correct*: every type matches,
+   every ownership rule is respected, and every `prove`/`assert`
+   the programmer wrote can genuinely be shown true. Like a
+   fact-checker who verifies every claim in an article before it's
+   allowed to publish.
+   - Type-checks every expression and enforces vāṇī's "affine"
+     ownership rule (most values can be used only once unless
+     explicitly borrowed) -- this is what catches
+     use-after-move bugs before the program ever runs.
+   - Calls out to an automated theorem prover to check any `prove`
+     statement (see the SMT step in the next section).
+   - Produces a **TypedProgram**: the same tree, but now every
+     expression has a known type and every proof obligation has
+     been discharged -- or the compile has already stopped with a
+     diagnostic pointing at the problem.
+
+4. **Codegen** (short for "code generation") -- translates the
+   checked, typed tree into a lower-level language a machine (or
+   another compiler) can work with: either **LLVM IR** or plain
+   **C**. **IR** stands for **Intermediate Representation** -- a
+   language-neutral middle format that sits between "what the
+   programmer wrote" and "what the processor actually runs." Like
+   a translator rendering the fact-checked article into another
+   language for a different printing press.
+
+5. **Backend** -- takes that lower-level output the rest of the
+   way to a runnable program. **LLVM** is a widely used
+   open-source compiler toolkit (the letters originally stood for
+   "Low-Level Virtual Machine," though the project has long
+   outgrown that name and today just goes by "LLVM"); it compiles
+   its IR down to real machine code. If plain C was produced
+   instead, an ordinary C compiler (`cc`) does the equivalent job.
 
 Each Rust source file in `src/` maps closely to one stage.
 This chapter walks each one.
@@ -56,12 +104,31 @@ This chapter walks each one.
     +-> src/ssa_backend_llvm.rs -- SSA-LLVM emit
 ```
 
+**SSA** stands for **Static Single Assignment** -- a common
+compiler-internals trick where every variable is assigned exactly
+once, and any place the original code reassigns a variable gets
+rewritten as a *new* name instead (`x`, `x1`, `x2`, ...). This
+makes a lot of downstream optimization and analysis simpler, at
+the cost of an extra lowering step. vāṇī has two families of
+backends: "tree" backends (`backend_c.rs`, `backend_llvm.rs`) that
+codegen straight from the `TypedProgram`, and "SSA" backends
+(`ssa_backend_c.rs`, `ssa_backend_llvm.rs`) that codegen from the
+SSA-lowered `Module` instead.
+
 Each backend gets the same `TypedProgram`; the SSA backends
 additionally lower to `Module` first. The driver (`src/main.rs`)
 tries the SSA path; if a feature isn't supported there, it
 falls back to the tree backend automatically.
 
 ## Module-by-module pointers
+
+One more acronym shows up in the table below: **SMT** stands for
+**Satisfiability Modulo Theories** -- a class of automated solver
+that answers "can these logical constraints all be true at once?"
+vāṇī uses one such solver, **Z3** (built by Microsoft Research),
+to actually check every `prove`/`assert`/`requires`/`ensures` the
+programmer writes, instead of just trusting the programmer's word
+for it.
 
 All function names below confirmed by testing/grepping the real
 source (an earlier version of this table had six wrong names --
@@ -73,7 +140,7 @@ doesn't exist as a file at all).
 | File | Purpose | What to look for |
 |---|---|---|
 | `src/lexer.rs` | Tokens + multi-script purity | `Script::classify`, `enforce_language_purity`, the per-script `*_keyword` functions |
-| `src/parser.rs` | Recursive-descent parser | `parse_function`, `parse_let_stmt`, the SOV-shape detectors |
+| `src/parser.rs` | Recursive-descent parser | `parse_function`, `parse_let_stmt`, the SOV-shape (Subject-Object-Verb word order, used by some dialects) detectors |
 | `src/ast.rs` | Untyped AST | `enum Stmt`, `enum Expr`, the `CLOSURE_MAKE_REGISTRY` thread-locals |
 | `src/checker.rs` | Type checker + affine borrow checker | `check` (the top-level entry point), `check_call`, `make_dyn_coerce` |
 | `src/smt.rs` | SMT encoder (Z3 backend) | `try_prove` (the top-level discharge entry point, returns a `Verdict`), `build_query`, the `VANIC_SMT_DEBUG` env var |
@@ -84,7 +151,7 @@ doesn't exist as a file at all).
 | `src/backend_llvm.rs` | Tree-LLVM codegen | `emit_llvm`, `emit_print_items`, `emit_brahmi_print_helper_ll` |
 | `src/ssa_backend_llvm.rs` | SSA-LLVM codegen | `emit`, the LLVM IR helper emitter |
 | `src/diagnostic.rs` | Error rendering | `localize_label`, `localize_message`, the per-dialect prefix tables |
-| `src/main.rs` | CLI driver | Subcommand dispatch, the SSA-vs-tree fallback logic |
+| `src/main.rs` | CLI (Command-Line Interface) driver | Subcommand dispatch, the SSA-vs-tree fallback logic |
 
 ## How a compile flows
 
@@ -111,12 +178,19 @@ When you run `vanic run foo.vani`:
 7. **SMT discharge** (`src/smt.rs`). For every `prove`,
    `assert`, `requires` at a call site, `ensures` at a return,
    and loop `invariant`, encode the predicate as Z3 input and
-   discharge. Failures surface as diagnostics with the
-   counterexample.
+   *discharge* it -- compiler-speak for "prove it and check it off
+   the list." Failures surface as diagnostics with the
+   counterexample (a concrete input that breaks the claim).
 8. **Codegen**. SSA backend tries first; falls back to tree
    on any unsupported feature. The output is C or LLVM IR.
-9. **Linking + run**. Tree-C invokes `cc`; LLVM uses `lli` to
-   JIT or `llc + cc` to produce a binary.
+9. **Linking + run**. Tree-C invokes `cc` (an ordinary C
+   compiler) to produce a binary. LLVM either uses `lli` --
+   LLVM's built-in interpreter, which runs the IR immediately
+   without a separate compile step (this is what **JIT**,
+   **Just-In-Time** compilation, means: compile-and-run happen
+   together, on the fly) -- or `llc + cc`, LLVM's real
+   ahead-of-time compiler pipeline, which produces a normal saved
+   executable file instead.
 
 ## SSA vs. tree codegen: what actually gates the fallback
 
@@ -200,11 +274,16 @@ Two consequences for anyone adding a language feature or builtin:
 ## How to contribute a fix
 
 1. **Find the failing test or symptom**. The test ledger lives
-   in `src/lib.rs` (2400+ tests as of 2026-08-01, up from an
-   earlier "1900+" -- the count only grows, check
+   in `src/lib.rs` (2,800+ `#[test]` functions as of 2026-08-19,
+   up from an earlier "1900+" -- the count only grows, check
    `grep -c '#\[test\]' src/lib.rs` for the current figure rather
    than trusting a number in prose) and `tests/run_end_to_end.rs`
-   (100+ tests, similarly grown from an earlier "54").
+   (300+ tests, similarly grown from an earlier "54"). Note the
+   grep count undercounts what actually *runs*: some tests are
+   generated by a macro (one dialect-sweeping test that expands
+   into many at compile time) rather than written out literally --
+   `cargo test --release --lib` reports the true executed total
+   (currently 3,007 passing).
 2. **Reproduce locally**: `cargo test --release --lib <name>`.
 3. **Trace the diagnostic** with `VANIC_SMT_DEBUG=1` if it's an
    SMT failure; for codegen issues, run `vanic emit foo.vani
@@ -220,8 +299,8 @@ Two consequences for anyone adding a language feature or builtin:
 
 | Suite | Where | What it covers |
 |---|---|---|
-| Lib tests (2400+) | `src/lib.rs` | Per-pass unit tests -- checker, lower, codegen shape pins, regression for each phase |
-| Parity + regression sweep (100+) | `tests/run_end_to_end.rs` | Real `vanic run`/`emit` invocations through the actual CLI (the only layer that exercises the SSA-vs-tree fallback -- see the warning above) -- backend-parity tests, real end-to-end bug regressions, and the `llvm_backend_run_produces_same_output_as_c` test, which iterates 60+ examples internally |
+| Lib tests (2,800+ written, 3,000+ executed) | `src/lib.rs` | Per-pass unit tests -- checker, lower, codegen shape pins, regression for each phase |
+| Parity + regression sweep (300+) | `tests/run_end_to_end.rs` | Real `vanic run`/`emit` invocations through the actual CLI (the only layer that exercises the SSA-vs-tree fallback -- see the warning above) -- backend-parity tests, real end-to-end bug regressions, and the `llvm_backend_run_produces_same_output_as_c` test, which iterates 60+ examples internally |
 | Example walks | `tests/run_end_to_end.rs` | Cover the design-pattern + dialect examples |
 
 ## Where the dialect surface lives
@@ -265,22 +344,6 @@ has the running language reference;
 is the time-ordered changelog;
 [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)
 is the canonical catalog of documented v1 deviations.
-
----
-
-**Congratulations -- you've completed the Advanced track!**
-
-That's the whole tutorial set (Beginner + Intermediate +
-Advanced -- 34 lessons). The next-best thing is to:
-
-- Read `examples/language/english/` end to end. With all three
-  tracks behind you, every file should be navigable.
-- File issues for rough patches you hit. The compiler's most
-  honest design feedback is from real programs.
-- Contribute a fix or a dialect. The execution plan in
-  [`TODO.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md)
-  has phase-by-phase queued work; pick whatever calls to you.
-
 
 ---
 

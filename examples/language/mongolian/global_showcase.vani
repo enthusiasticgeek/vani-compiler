@@ -1,0 +1,23 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/mongolian/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/mongolian/global_showcase.vani -o /tmp/global_showcase_mongolian && /tmp/global_showcase_mongolian   # native binary
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "sum 1..10, checked correct, then printed";
+
+ᠴᠠᠭ sum_to(n: i64) -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ total: i64 = 0;
+  ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ i ᠠᠴᠠ 1 ᠬᠦᠷᠲᠡᠯᠡ n + 1 {
+    total = total + i;
+  }
+  total ᠪᠤᠴᠠ;
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ result: i64 = sum_to(10);
+  result == 55 ᠪᠠᠲᠤᠯ;
+  result ᠬᠡᠪᠯᠡ;
+  0 ᠪᠤᠴᠠ;
+}

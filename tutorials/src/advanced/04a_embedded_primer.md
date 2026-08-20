@@ -149,6 +149,52 @@ What remains is straight-line code + bounded loops + bounded
 recursion -- execution time you can analyze with
 worst-case-execution-time (WCET) tools.
 
+## Before that: what makes a raw pointer different from `ref`?
+
+[Beginner 6a](../beginner/06a_pointers_refs_primer.md) built the
+library-card picture: a `ref` is like telling a friend a book's shelf
+location instead of handing them the book. That picture already
+covers 95% of vāṇी code -- but it left out one detail on purpose,
+because it only applies here, in embedded/unsafe territory.
+
+A real library has a librarian. When you say "Aisle 3, Shelf 5,
+Position 12," the librarian's system already guarantees that position
+exists, that it currently holds a book (not empty space), and that
+nobody is going to reshelve it out from under you mid-checkout. That
+guarantee is exactly what `ref`/`mut ref` give you -- the compiler
+plays librarian, and it refuses to compile code where the guarantee
+could be broken. That's WHY chapters before this one never mention
+"what if the address is wrong."
+
+A **raw pointer** (`*const T` / `*mut T`) is the same "aisle, shelf,
+position" address -- but written on a sticky note with no librarian
+attached. Nothing checks that the position you wrote down is real.
+Nothing stops you writing down a position for a shelf that was already
+cleared out. Nothing stops two different notes claiming the exact same
+spot at once, one of them about to overwrite what the other expects to
+still be there. The note is just three numbers -- it's on YOU to know
+they're still good before you act on them.
+
+This isn't a flaw in raw pointers -- it's the whole reason they exist.
+Sometimes the "shelf" isn't managed by any librarian at all: a
+hardware register at a fixed memory address that the CPU itself
+defines, not vāṇी's allocator; a buffer handed to you by C code that
+was never taught about `ref`; a block you're managing yourself because
+you know its lifetime better than the compiler's rules can express.
+`unsafe(reason = "...")`, `Tainted<T>`, and `BoundedPtr<T>` (all
+covered below and in [Advanced 4](04_embedded.md)) are vāṇी's way of
+saying: "fine, no librarian here -- but you still have to sign your
+name every time you skip the checkout desk, and here are some optional
+guard rails (bounds-checked wrappers) you can bolt back on yourself."
+
+| | `ref T` / `mut ref T` | `*const T` / `*mut T` |
+|---|---|---|
+| Who checks the address is valid? | The compiler, always | Nobody -- you |
+| Can two conflicting ones exist at once? | Compiler rejects it | Yes, silently |
+| Can it point at freed/reused memory? | Compiler rejects it | Yes, silently (a "dangling pointer" / "use-after-free") |
+| Needs an `unsafe` block? | Never | Yes, to read or write through it |
+| Where you'll actually meet it | Everywhere in ordinary vāṇी code | Hardware registers, C interop, hand-written allocators |
+
 ## The fourth feature: `unsafe(reason = "...")`
 
 Sometimes you genuinely need to:
@@ -173,7 +219,12 @@ via a linker symbol instead (`#[link_section]`, covered in
 [Advanced 4b](04b_cross_compile_primer.md)), not pointer casting.
 
 `unsafe` genuinely IS required for the second and third cases --
-raw pointer arithmetic and legacy C interop:
+raw pointer arithmetic and legacy C interop. One prerequisite before
+the example below will actually run: `unsafe(reason = "...")` itself
+is also gated to `INTENT_TARGET_EMBEDDED=1` (rejected outright without
+it, on a normal hosted build) -- see the note at the top of
+[Advanced 4's "The unsafe block"](04_embedded.md#the-unsafe-block)
+for why.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 

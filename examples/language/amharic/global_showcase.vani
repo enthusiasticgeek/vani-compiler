@@ -1,0 +1,23 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/amharic/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/amharic/global_showcase.vani -o /tmp/global_showcase_amharic && /tmp/global_showcase_amharic   # native binary
+
+ዓላማ "sum 1..10, checked correct, then printed";
+
+ተግባር sum_to(n: i64) -> i64 {
+  ይሁን total: i64 = 0;
+  ለ i ጀምሮ 1 ድረስ n + 1 {
+    total = total + i;
+  }
+  መልስ total;
+}
+
+ተግባር main() -> i64 {
+  ይሁን result: i64 = sum_to(10);
+  አረጋግጥ result == 55;
+  ህትመት result;
+  መልስ 0;
+}

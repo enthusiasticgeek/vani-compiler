@@ -108,6 +108,7 @@
 - [Compiler internals tour](advanced/10_internals.md)
 - [Using vāṇī with an LLM (Claude / GPT / MCP)](advanced/11_llm_workflows.md)
 - [Safety-critical standards (MISRA / ASIL-D / DO-178C / IEC 62304)](advanced/12_safety_standards.md)
+- [A world tour: vāṇी in your language](advanced/13_global_showcase.md)
 
 ---
 

@@ -1,0 +1,23 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/tibetan/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/tibetan/global_showcase.vani -o /tmp/global_showcase_tibetan && /tmp/global_showcase_tibetan   # native binary
+
+དམིགས་ཡུལ "sum 1..10, checked correct, then printed";
+
+ལས་ཀ sum_to(n: i64) -> i64 {
+  ཡོད་པར་ཤོག total: i64 = 0;
+  ལ i ནས 1 བར་དུ n + 1 {
+    total = total + i;
+  }
+  total ལོག;
+}
+
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག result: i64 = sum_to(10);
+  result == 55 ངེས;
+  result པར;
+  0 ལོག;
+}

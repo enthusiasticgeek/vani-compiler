@@ -1,0 +1,23 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/korean/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/korean/global_showcase.vani -o /tmp/global_showcase_korean && /tmp/global_showcase_korean   # native binary
+
+목적 "sum 1..10, checked correct, then printed";
+
+함수 sum_to(n: i64) -> i64 {
+  정의 total: i64 = 0;
+  각각 i 에서 1 까지 n + 1 {
+    total = total + i;
+  }
+  total 반환;
+}
+
+함수 main() -> i64 {
+  정의 result: i64 = sum_to(10);
+  result == 55 확인;
+  result 출력;
+  0 반환;
+}

@@ -1,0 +1,23 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/russian/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/russian/global_showcase.vani -o /tmp/global_showcase_russian && /tmp/global_showcase_russian   # native binary
+
+цель "sum 1..10, checked correct, then printed";
+
+функция sum_to(n: i64) -> i64 {
+  пусть total: i64 = 0;
+  для i от 1 до n + 1 {
+    total = total + i;
+  }
+  вернуть total;
+}
+
+функция main() -> i64 {
+  пусть result: i64 = sum_to(10);
+  утверждать result == 55;
+  печатать result;
+  вернуть 0;
+}

@@ -23,6 +23,24 @@ which code needs extra scrutiny.
 
 ## The `unsafe` block
 
+**Before running any example on this page**: `unsafe(reason = "...")`
+is rejected outright on a normal (hosted) build -- confirmed by
+testing, this applies to every example below, not just the ones that
+mention it. Set one environment variable first:
+
+```bash
+INTENT_TARGET_EMBEDDED=1 vanic run your_file.vani
+```
+
+Without it, `vanic run`/`vanic check` reject the block before even
+looking inside it: `unsafe(reason = "…") is gated to embedded build
+targets`. This is deliberate, not a bug to work around -- vāṇी's
+design promise for ordinary (hosted) programs is "no segfault surface,
+no use-after-free, no buffer overrun, full stop," and allowing
+`unsafe` there would break that promise. Opting into
+`INTENT_TARGET_EMBEDDED=1` is you explicitly saying "I know I'm
+leaving that guarantee behind for this specific code."
+
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
@@ -92,6 +110,46 @@ Unlike `raw_load`/`raw_store`, `bptr_get`/`bptr_set` don't need
 `Tainted<i64>`/`assert_safe` -- the bounds check itself is the
 safety proof, so a bad index just returns `None` / `false` instead
 of reading/writing out of bounds.
+
+### Seeing the safety net actually catch something
+
+The whole point of `BoundedPtr` is that a mistake becomes a normal,
+recoverable value instead of memory corruption. This is worth seeing
+happen rather than taking on faith -- a full, runnable example
+(`INTENT_TARGET_EMBEDDED=1 vanic run` required, per the note above):
+
+```vani
+intent "BoundedPtr catches an out-of-range access instead of corrupting memory.";
+
+fn main() -> i64 {
+  unsafe(reason = "scratch buffer via raw pointer for a bounds-check demo") {
+    let p: *mut i64 = unsafe_alloc(3);
+    let bp: BoundedPtr<i64> = bptr_new(p, 3, 3);
+    let _ = bptr_set(mut ref bp, 0, 10);
+    let _ = bptr_set(mut ref bp, 1, 20);
+    let _ = bptr_set(mut ref bp, 2, 30);
+
+    // index 5 is past the end of a 3-slot buffer.
+    let ok: bool = bptr_set(mut ref bp, 5, 999);
+    print "writing index 5 (out of range) succeeded:", ok;         // false
+
+    let v5: i64 = option_unwrap_or(bptr_get(ref bp, 5), 0 - 1);
+    print "reading index 5 (out of range, safe fallback):", v5;     // -1
+
+    let _ = unsafe_free(p);
+  }
+  return 0;
+}
+```
+
+In a language with bare C-style pointers, index 5 into a 3-slot
+buffer just reads or writes whatever memory happens to sit past the
+buffer's end -- maybe nothing visible goes wrong today, maybe it
+silently corrupts an unrelated variable, maybe it crashes, and which
+one happens can depend on the compiler, the optimization level, or
+what else is sitting in memory nearby. Here, the same mistake
+produces `false` and `-1` -- ordinary values your program can check
+and handle, confirmed identical on both backends.
 
 ### Manual heap allocation: `unsafe_alloc` / `unsafe_free`
 

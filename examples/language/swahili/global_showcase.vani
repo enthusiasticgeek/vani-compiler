@@ -1,0 +1,23 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/global_showcase.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/swahili/global_showcase.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/swahili/global_showcase.vani -o /tmp/global_showcase_swahili && /tmp/global_showcase_swahili   # native binary
+
+lengo "sum 1..10, checked correct, then printed";
+
+kazi sum_to(n: i64) -> i64 {
+  acha total: i64 = 0;
+  kwa i kutoka 1 hadi n + 1 {
+    total = total + i;
+  }
+  rudi total;
+}
+
+kazi main() -> i64 {
+  acha result: i64 = sum_to(10);
+  thibitisha result == 55;
+  chapisha result;
+  rudi 0;
+}
