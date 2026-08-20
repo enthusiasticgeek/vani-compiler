@@ -35,6 +35,20 @@ function*.
 That's a **closure**: a function that has *closed over* some
 values from the surrounding context.
 
+**A quick terminology note, since it trips people up coming from other
+languages**: "closure" and "lambda" are not two different features --
+they're two names people use for overlapping ideas. "Lambda" (or
+"anonymous function") just means "a function written inline, without
+giving it a top-level name" -- the `fn(x: i64) -> i64 { return x + x;
+}` written directly where you need it, or the shorthand `|x| x + x`.
+"Closure" specifically means such a function that ALSO captures
+something from its surroundings, like `make_greeter`'s `inc` above.
+Every anonymous `fn`/`|...|` literal in vāṇी is a lambda in that
+general sense; whether a *particular* one also counts as a closure
+depends on whether it actually captures anything -- see the capture
+rules later in this chapter for exactly when that does and doesn't
+happen.
+
 ## The post-it-note analogy
 
 Imagine functions as little robots. A regular function-robot
@@ -281,6 +295,40 @@ move if the captured value outlives the struct (subject to the
 `[ref name]` escape limits above), or restructure so the closure
 only captures Copy values and pass the heap-owning value as a
 call argument instead of capturing it.
+
+### 4. A closure that "sees" later changes
+
+Every example so far captured a value that never changed after the
+closure was created. Capturing **by reference** (`[ref name]`) is
+different: because the closure holds a reference to the ORIGINAL
+storage, not a snapshot of it, it sees whatever that storage holds
+each time it's called -- including changes made *after* the closure
+was created.
+
+```vani
+intent "A closure that sees later pushes to the Vec it captured.";
+
+fn main() -> i64 {
+  let cart: Vec<i64> = vec(500, 250);   // prices in cents
+  let cart_total = fn() -> i64 [ref cart] {
+    return vec_sum(cart);
+  };
+
+  print "total after 2 items:", cart_total();   // 750
+
+  push(mut ref cart, 100);   // add a third item -- AFTER the closure exists
+
+  print "total after 3 items:", cart_total();   // 850 -- same closure, new answer
+  return 0;
+}
+```
+
+`cart_total` doesn't get called again with new information passed
+in -- it takes no arguments at all. It sees the third item because it
+was never given a *copy* of the cart; it was given a reference to the
+one true cart, and that cart changed. This is the closure equivalent
+of "Aisle 3, Shelf 5, Position 12, whatever's there right now" versus
+a photograph of what was there when you looked.
 
 ## The capture rules
 

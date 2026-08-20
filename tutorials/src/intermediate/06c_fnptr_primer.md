@@ -165,6 +165,54 @@ fn main() -> i64 {
 
 ---
 
+## A `Vec<fn(A) -> R>` as a pipeline, not just a dispatch table
+
+The dispatch table above calls each function on the SAME starting
+value, independently. A different, equally common shape: run a value
+through every function IN ORDER, feeding each one's output into the
+next -- like a photo editing app applying "brighten," then "increase
+contrast," then "clamp to valid range," one filter after another.
+
+```vani
+intent "a photo-filter pipeline built from a Vec of function pointers";
+
+fn brighten(x: i64) -> i64 { return x + 20; }
+fn contrast(x: i64) -> i64 { return x * 2; }
+fn clamp_255(x: i64) -> i64 { if x > 255 { return 255; } return x; }
+
+fn run_pipeline(value: i64, steps: ref Vec<fn(i64) -> i64>) -> i64 {
+  let result: i64 = value;
+  let i: i64 = 0;
+  while i < len(steps) as i64 {
+    let step: fn(i64) -> i64 = steps[i];
+    result = step(result);   // this step's output feeds the next step
+    i = i + 1;
+  }
+  return result;
+}
+
+fn main() -> i64 {
+  let filters: Vec<fn(i64) -> i64> = vec(brighten, contrast, clamp_255);
+  let pixel: i64 = 100;
+  print "raw pixel:", pixel;                                // 100
+  print "after filter pipeline:", run_pipeline(pixel, ref filters);  // 240
+  return 0;
+}
+```
+
+Nothing here is a new language feature -- it's the exact same
+`Vec<fn(A) -> R>` from the dispatch-table example, just walked
+sequentially instead of independently. What makes it worth calling out
+separately: the LIST OF FILTERS can be built at runtime (read from a
+config file, chosen by a user toggling checkboxes, reordered), while
+`run_pipeline` itself never changes -- it doesn't know or care which
+filters are in the list, only that each one is a `fn(i64) -> i64`.
+That decoupling -- "the function that runs the steps" doesn't need to
+know "which steps" -- is the actual payoff of treating functions as
+values.
+
+---
+
 ## Type-checking rules
 
 | Situation | Result |
