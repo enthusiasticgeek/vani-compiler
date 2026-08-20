@@ -9858,3 +9858,12 @@ async ֆունկցիա delay(ms: i64, v: i64) -> i64 {
     "stdout": "",
     "stderr": "",
 
+
+---
+
+### Candidate: 20260820-233937-run-crash-a9a4b228f3
+
+Repro: `tools/localfuzz/findings/20260820-233937-run-crash-a9a4b228f3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-233937-run-crash-a9a4b228f3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
