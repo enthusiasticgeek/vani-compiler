@@ -9578,3 +9578,51 @@ Repro: `tools/localfuzz/findings/20260820-030606-run-crash-78e3566150/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260820-030606-run-crash-78e3566150/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260820-041330-backend-divergence-d3f77f92bf
+
+Repro: `tools/localfuzz/findings/20260820-041330-backend-divergence-d3f77f92bf/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-041330-backend-divergence-d3f77f92bf/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The staging entry for the vani-compiler project's local staging log is as follows:
+
+**Staging Entry:**
+
+**Date:** [Insert Date]
+
+**Description:** A candidate bug report has been submitted for the vani-compiler project. The base corpus file is located at `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani`. The generated source contains a `detached` task that does not finish before main exits, leading to divergent output.
+
+**Mutant Source:**
+```vani
+// build & run:
+//   vanic run examples/language/english/detach_heartbeat.vani                          # LLVM backend
+//   vanic run examples/language/english/detach_heartbeat.vani --backend=c              # C backend
+//   vanic build examples/language/english/detach_heartbeat.vani -o /tmp/detach_heartbeat && /tmp/detach_heartbeat
+
+intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat is done, because it isn't ever 'done' in any sense main cares about.";
+
+fn heartbeat() -> i64 {
+  let i: i64 = 0;
+  while i < 3 {
+    print "[heartbeat] tick", i;
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn compute_result(n: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i32 = 0;
+  while i < n {
+    total = total + i * i;
+    i = i + 1;
+  }
+  return total;
+}
+
+fn main() -> i64 {
+  // A background task with no result main will
