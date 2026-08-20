@@ -9626,3 +9626,54 @@ fn compute_result(n: i64) -> i64 {
 
 fn main() -> i64 {
   // A background task with no result main will
+
+---
+
+### Candidate: 20260820-044520-backend-divergence-4ed521f0c9
+
+Repro: `tools/localfuzz/findings/20260820-044520-backend-divergence-4ed521f0c9/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-044520-backend-divergence-4ed521f0c9/fix_attempt.md`
+
+STAGING ENTRY:
+
+**Run Details**
+- **Tool**: vanic v2.1.0
+- **Command**: `vanic run examples/language/english/detach_heartbeat.vani --backend=c`
+- **Date/Time**: [Current Date and Time]
+
+**Generated Source (Mutant)**
+```vani
+// build & run:
+//   vanic run examples/language/english/detach_heartbeat.vani                          # LLVM backend
+//   vanic run examples/language/english/detach_heartbeat.vani --backend=c              # C backend
+//   vanic build examples/language/english/detach_heartbeat.vani -o /tmp/detach_heartbeat && /tmp/detach_heartbeat
+
+intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat is done, because it isn't ever 'done' in any sense main cares about.";
+
+fn heartbeat() -> i64 {
+  let i: i64 = 0;
+  while i < 3 {
+    print "[heartbeat] tick", i;
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn compute_result(n: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < n {
+    i = i + 1;
+    total = total + i * i;
+    i = i + 1;
+  }
+  return total;
+}
+
+fn main() -> i64 {
+  // A background task with no result main will ever consume --
+  // exactly the shape `join` can't express well (join always
+  // implies "I'll wait for this and use what it hands back").
+  let hb: Task<i64> = task heartbeat();
+
+  //
