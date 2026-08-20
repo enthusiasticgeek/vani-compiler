@@ -560,7 +560,24 @@ pub fn vendor_deps(manifest: &Manifest) -> Result<Vec<(String, PathBuf)>, String
     Ok(vendored)
 }
 
-/// Recursively copy `*.vani` files and `vani.toml` from `src` to `dst`.
+/// Recursively copy `*.vani` files, `vani.toml`, and native FFI shim
+/// SOURCE files (`.c`/`.h`/`.cu`/`.cuh`) from `src` to `dst`.
+///
+/// The native-source extensions were added 2026-08-20 when the first
+/// FFI-based Kosh package (`vani-cuda`) needed to ship a C/CUDA shim
+/// file alongside its `.vani` bindings -- before this, `vanic publish`
+/// silently dropped anything that wasn't `*.vani`/`vani.toml` from the
+/// tarball, which would have made an FFI-based package fundamentally
+/// unshippable (a consumer's `vanic add` would extract a vendor/ dir
+/// with the `extern "C" fn` declarations but no shim to `--link-with`
+/// against). Deliberately source-only, NOT `.o`/`.a`: those are
+/// platform/arch-specific compiled artifacts (and for CUDA, GPU-
+/// architecture-specific), so shipping one binary blob wouldn't work
+/// across consumers' hardware -- shipping source and letting each
+/// consumer's own `vanic build --link-with` compile it locally (via
+/// `cc`/`nvcc`) is the only approach that works generally, matching
+/// the existing `09_ffi.md` UART/file-I/O shim pattern where the
+/// shim's `.c` file already sits alongside the `.vani` source.
 fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst)
         .map_err(|e| format!("create '{}': {}", dst.display(), e))?;
@@ -584,7 +601,13 @@ fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
                 continue;
             }
             copy_dir_vani(&path, &dst.join(&name))?;
-        } else if name_str.ends_with(".vani") || name_str == "vani.toml" {
+        } else if name_str.ends_with(".vani")
+            || name_str == "vani.toml"
+            || name_str.ends_with(".c")
+            || name_str.ends_with(".h")
+            || name_str.ends_with(".cu")
+            || name_str.ends_with(".cuh")
+        {
             let dest_file = dst.join(&name);
             std::fs::copy(&path, &dest_file)
                 .map_err(|e| format!("copy '{}' -> '{}': {}", path.display(), dest_file.display(), e))?;
@@ -2095,6 +2118,43 @@ mod tests {
             err,
             ManifestError::MissingField { ref key, .. } if key == "entry"
         ));
+    }
+
+    #[test]
+    fn copy_dir_vani_includes_native_ffi_shim_sources() {
+        // 2026-08-20: copy_dir_vani (used by both `vanic publish`'s
+        // tarball builder and `vanic vendor`) used to only carry
+        // *.vani + vani.toml, silently dropping a C/CUDA shim file an
+        // FFI-based package (vani-cuda) needs to ship alongside its
+        // bindings. Confirm the native-source extensions now survive
+        // the copy, and that an unrelated extension (a stray .o here)
+        // still does NOT -- compiled binaries are deliberately never
+        // vendored (platform/arch-specific, see copy_dir_vani's own
+        // doc comment for why).
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let src = std::env::temp_dir().join(format!("vani-copytest-src-{}", nanos));
+        let dst = std::env::temp_dir().join(format!("vani-copytest-dst-{}", nanos));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("lib.vani"), "fn main() -> i64 { return 0; }").unwrap();
+        std::fs::write(src.join("vani.toml"), "[package]\nname = \"x\"\n").unwrap();
+        std::fs::write(src.join("shim.c"), "int x;").unwrap();
+        std::fs::write(src.join("shim.h"), "int x;").unwrap();
+        std::fs::write(src.join("kernels.cu"), "__global__ void k() {}").unwrap();
+        std::fs::write(src.join("kernels.cuh"), "void k();").unwrap();
+        std::fs::write(src.join("stale.o"), b"\x7fELF").unwrap();
+
+        copy_dir_vani(&src, &dst).expect("copy succeeds");
+
+        for name in ["lib.vani", "vani.toml", "shim.c", "shim.h", "kernels.cu", "kernels.cuh"] {
+            assert!(dst.join(name).exists(), "expected '{}' to be copied", name);
+        }
+        assert!(!dst.join("stale.o").exists(), "'.o' files must not be vendored");
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
     }
 
     #[test]

@@ -266,9 +266,20 @@ fn main() -> i64 {
 ```
 
 If you need to write an `OwnedStr` or a formatted message, concatenate
-first: `eprint "error: " + msg;`. The C-shim approach below is
-preserved only as a historical reference for projects that cannot
-upgrade past v0.1.4.
+first, then print the binding -- `eprint` (like `print`) doesn't parse
+a bare `+` expression directly in argument position, confirmed by
+testing (`eprint "error: " + msg;` errors with `expected ';'`
+immediately after the string literal; wrapping in parens,
+`eprint ("error: " + msg);`, does parse, but building the value with a
+`let` first is the clearer form either way):
+
+```vani
+let full_msg: OwnedStr = "error: " + msg;
+eprint full_msg;
+```
+
+The C-shim approach below is preserved only as a historical reference
+for projects that cannot upgrade past v0.1.4.
 
 ### Linux serial device (RS232 / RS485 / UART)
 
