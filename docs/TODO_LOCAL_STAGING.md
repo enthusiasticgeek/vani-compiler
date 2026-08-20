@@ -9705,3 +9705,12 @@ Fix attempt: `tools/localfuzz/findings/20260820-113332-run-crash-0689162d8b/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260820-161425-run-crash-66ff4406ea
+
+Repro: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
