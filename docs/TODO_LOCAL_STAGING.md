@@ -9772,3 +9772,12 @@ função main() -> i64 {
 - **Output:** A crash occurred while running the program in either LLVM or C backend.
 
 **Re
+
+---
+
+### Candidate: 20260820-181320-run-crash-a3e4b83d70
+
+Repro: `tools/localfuzz/findings/20260820-181320-run-crash-a3e4b83d70/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-181320-run-crash-a3e4b83d70/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
