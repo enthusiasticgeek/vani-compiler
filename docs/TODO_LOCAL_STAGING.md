@@ -9790,3 +9790,12 @@ Repro: `tools/localfuzz/findings/20260820-190023-run-crash-d50738e4e8/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260820-190023-run-crash-d50738e4e8/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260820-191650-run-crash-b373fa611a
+
+Repro: `tools/localfuzz/findings/20260820-191650-run-crash-b373fa611a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-191650-run-crash-b373fa611a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
