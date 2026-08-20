@@ -9799,3 +9799,62 @@ found this batch. No `vanic` binary refresh was needed -- the
 worktree's compiler build (from vani-compiler main commit `14fa597e`)
 was already current, since every vani-compiler commit since then was
 docs-only.
+
+---
+
+### Candidate: 20260820-215023-run-crash-44dc979c83
+
+Repro: `tools/localfuzz/findings/20260820-215023-run-crash-44dc979c83/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260820-215023-run-crash-44dc979c83/fix_attempt.md`
+
+### Staging Entry
+
+#### Run Crash with ARMENIAN Backend
+
+**Build & Run Commands:**
+```sh
+vanic run examples/language/armenian/async_cancel_auto.vani              # LLVM
+vanci run examples/language/armenian/async_cancel_auto.vani --backend=c  # C
+```
+
+**Generated Source:**
+```vani
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/armenian/async_cancel_auto.vani --backend=c  # C
+
+նպատակ "Armenian async/await smoke";
+
+async ֆունկցիա delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  վերադարձ v;
+}
+
+ֆունկցիա main() -> i64 {
+  թող a: i64 = await(delay(9223372036854775807, 42));
+  թող b: i64 = await(delay(10, 7));
+
+  հաստատել a == 42;
+  հաստատել b == 7;
+  տպել "delays:", a, b;
+  վերադարձ 0;
+}
+```
+
+**Raw Result Data:**
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+
