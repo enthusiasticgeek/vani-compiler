@@ -9713,7 +9713,17 @@ Fix attempt: `tools/localfuzz/findings/20260820-113332-run-crash-0689162d8b/fix_
 Repro: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-161425-run-crash-66ff4406ea/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: triaged, NOT A BUG.** Base: `examples/edge_cases/mix_break_positional.vani`
+(positional `break outer`/`break middle`/`break inner` labels). The
+mutation deleted the outer loop's own increment (`a = a + 1;`, base
+line 31) from the second test block, while leaving `break middle;`
+inside the nested nested-while unchanged. `break middle` only exits
+the middle-depth (`b`) loop by design -- control returns to the top of
+`while a < 3` with `a` still 0 forever. Same shape as the missing-
+loop-decrement/increment false-positive class documented repeatedly
+elsewhere in this file (Finnish/Sinhala/Cherokee entries): a genuine
+infinite loop in the MUTATED source, not a compiler bug. Confirmed via
+direct diff against the base file.
 
 ---
 
@@ -9722,56 +9732,16 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260820-180156-run-crash-a398ee1426/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-180156-run-crash-a398ee1426/fix_attempt.md`
 
-**STATUS: needs human/frontier root-cause review.**
-
-**Summary of Mutation Testing Findings:**
-The mutation testing tool identified a crash in the `async_cancel_auto.vani` file when run with the specified backend (`c`). The mutant that caused the crash is:
-
-```vani
-intenção "Portuguese async/await smoke";
-
-async função delay(ms: i64, v: i64) -> i64 {
-  sleep_ms(ms);
-  retornar v;
-}
-
-função main() -> i64 {
-  seja b: i64 = await(delay(10, 7));
-  seja a: i64 = await(delay(9223372036854775807, 42));
-
-  afirmar a == 42;
-  afirmar b == 7;
-  imprimir "delays:", a, b;
-  retornar 0;
-}
-```
-
-**Mutant Source:**
-```vani
-intenção "Portuguese async/await smoke";
-
-async função delay(ms: i64, v: i64) -> i64 {
-  sleep_ms(ms);
-  retornar v;
-}
-
-função main() -> i64 {
-  seja b: i64 = await(delay(10, 7));
-  seja a: i64 = await(delay(9223372036854775807, 42));
-
-  afirmar a == 42;
-  afirmar b == 7;
-  imprimir "delays:", a, b;
-  retornar 0;
-}
-```
-
-**Mutant Details:**
-- **Mutation Type:** Run-Crash
-- **Input Source:** The original `async_cancel_auto.vani` file.
-- **Output:** A crash occurred while running the program in either LLVM or C backend.
-
-**Re
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/portuguese/async_cancel_auto.vani`. Confirmed via
+direct diff: the base has `let a = await(delay(5, 42))` then
+`let b = await(delay(10, 7))`, in that order. The mutation reordered
+the two `let`s (b's delay first) AND changed the surviving `a`
+binding's `ms` argument from `5` to `9223372036854775807` (i64::MAX).
+Same `sleep_ms`/`delay`-blown-to-i64::MAX false-positive class as
+Konkani/Catalan/Pashto/Urdu entries elsewhere in this file -- a
+legitimately absurd multi-million-year wait introduced by the
+mutation, not a compiler defect.
 
 ---
 
@@ -9780,7 +9750,15 @@ função main() -> i64 {
 Repro: `tools/localfuzz/findings/20260820-181320-run-crash-a3e4b83d70/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-181320-run-crash-a3e4b83d70/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/assamese/early_exit.vani`. Diff against the base
+shows the mutation deleted `count_positive`'s loop-increment
+`i = i + 1;` (base line 33, the fall-through path taken when
+`xs[i] > 0`). Test input `vec(1, 2, -3, 4, -5)` starts with a positive
+element (`xs[0] = 1`), so the loop hits the un-incremented path
+immediately and spins on `i = 0` forever. Same missing-loop-increment
+false-positive class as 66ff4406ea above and b373fa611a below.
+Confirmed via direct diff.
 
 ---
 
@@ -9789,7 +9767,13 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260820-190023-run-crash-d50738e4e8/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-190023-run-crash-d50738e4e8/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/urdu/async_cancel_auto.vani`. Diff against the base
+shows the mutation changed the SECOND await's argument,
+`b`'s `delay(10, 7)`, from `ms = 10` to `ms = 9223372036854775807`
+(i64::MAX). Same `sleep_ms`/`delay`-blown-to-i64::MAX false-positive
+class as a398ee1426 above -- a legitimately absurd multi-million-year
+wait introduced by the mutation, not a compiler defect.
 
 ---
 
@@ -9798,4 +9782,20 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260820-191650-run-crash-b373fa611a/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-191650-run-crash-b373fa611a/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/kannada/early_exit.vani`. Diff against the base
+shows the mutation deleted a single `i = i + 1;` loop increment inside
+`count_positive`'s early-continue branch. Same missing-loop-increment
+false-positive class as 66ff4406ea and a3e4b83d70 above -- genuine
+infinite loop in the mutated source. Confirmed via direct diff.
+
+**Session summary (2026-08-20 triage batch, 5 findings)**: all 5 are
+false positives, cleanly split across the two most common recurring
+mutation-testing artifact classes already documented throughout this
+file -- missing loop-increment mutations (3 of 5: 66ff4406ea,
+a3e4b83d70, b373fa611a) and `sleep_ms`/`delay` argument blown to
+`i64::MAX` (2 of 5: a398ee1426, d50738e4e8). No new compiler bug
+found this batch. No `vanic` binary refresh was needed -- the
+worktree's compiler build (from vani-compiler main commit `14fa597e`)
+was already current, since every vani-compiler commit since then was
+docs-only.
