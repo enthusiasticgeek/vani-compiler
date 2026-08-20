@@ -561,7 +561,8 @@ pub fn vendor_deps(manifest: &Manifest) -> Result<Vec<(String, PathBuf)>, String
 }
 
 /// Recursively copy `*.vani` files, `vani.toml`, and native FFI shim
-/// SOURCE files (`.c`/`.h`/`.cu`/`.cuh`) from `src` to `dst`.
+/// SOURCE files (`.c`/`.h`/`.cu`/`.cuh`/`.cpp`/`.hpp`) from `src` to
+/// `dst`.
 ///
 /// The native-source extensions were added 2026-08-20 when the first
 /// FFI-based Kosh package (`vani-cuda`) needed to ship a C/CUDA shim
@@ -570,14 +571,21 @@ pub fn vendor_deps(manifest: &Manifest) -> Result<Vec<(String, PathBuf)>, String
 /// tarball, which would have made an FFI-based package fundamentally
 /// unshippable (a consumer's `vanic add` would extract a vendor/ dir
 /// with the `extern "C" fn` declarations but no shim to `--link-with`
-/// against). Deliberately source-only, NOT `.o`/`.a`: those are
-/// platform/arch-specific compiled artifacts (and for CUDA, GPU-
-/// architecture-specific), so shipping one binary blob wouldn't work
-/// across consumers' hardware -- shipping source and letting each
-/// consumer's own `vanic build --link-with` compile it locally (via
-/// `cc`/`nvcc`) is the only approach that works generally, matching
-/// the existing `09_ffi.md` UART/file-I/O shim pattern where the
-/// shim's `.c` file already sits alongside the `.vani` source.
+/// against). `.cpp`/`.hpp` were added the same day for `vani-tensorrt`:
+/// TensorRT's C++-object-shaped SDK headers make a plain-C shim
+/// impossible (unlike CUDA/HIP's C-callable Runtime APIs), but
+/// `--link-with some.cpp -lstdc++` was confirmed to already work
+/// through vāṇी's existing `$CC`-based pipeline with no compiler
+/// changes needed (gcc/clang auto-select the C++ front end by
+/// extension) -- only the tarball's file filter needed extending.
+/// Deliberately source-only, NOT `.o`/`.a`: those are platform/arch-
+/// specific compiled artifacts (and for CUDA/HIP, GPU-architecture-
+/// specific), so shipping one binary blob wouldn't work across
+/// consumers' hardware -- shipping source and letting each consumer's
+/// own `vanic build --link-with` compile it locally (via `cc`/`nvcc`/
+/// `hipcc`) is the only approach that works generally, matching the
+/// existing `09_ffi.md` UART/file-I/O shim pattern where the shim's
+/// `.c` file already sits alongside the `.vani` source.
 fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst)
         .map_err(|e| format!("create '{}': {}", dst.display(), e))?;
@@ -607,6 +615,8 @@ fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
             || name_str.ends_with(".h")
             || name_str.ends_with(".cu")
             || name_str.ends_with(".cuh")
+            || name_str.ends_with(".cpp")
+            || name_str.ends_with(".hpp")
         {
             let dest_file = dst.join(&name);
             std::fs::copy(&path, &dest_file)
@@ -2144,11 +2154,16 @@ mod tests {
         std::fs::write(src.join("shim.h"), "int x;").unwrap();
         std::fs::write(src.join("kernels.cu"), "__global__ void k() {}").unwrap();
         std::fs::write(src.join("kernels.cuh"), "void k();").unwrap();
+        std::fs::write(src.join("shim.cpp"), "class X {};").unwrap();
+        std::fs::write(src.join("shim.hpp"), "class X;").unwrap();
         std::fs::write(src.join("stale.o"), b"\x7fELF").unwrap();
 
         copy_dir_vani(&src, &dst).expect("copy succeeds");
 
-        for name in ["lib.vani", "vani.toml", "shim.c", "shim.h", "kernels.cu", "kernels.cuh"] {
+        for name in [
+            "lib.vani", "vani.toml", "shim.c", "shim.h", "kernels.cu", "kernels.cuh",
+            "shim.cpp", "shim.hpp",
+        ] {
             assert!(dst.join(name).exists(), "expected '{}' to be copied", name);
         }
         assert!(!dst.join("stale.o").exists(), "'.o' files must not be vendored");
