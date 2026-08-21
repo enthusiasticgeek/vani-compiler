@@ -10228,3 +10228,128 @@ Repro: `tools/localfuzz/findings/20260821-212154-run-crash-59a0fe6789/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260821-212154-run-crash-59a0fe6789/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+## Triage closeout: 2026-08-21 (second pass) audit round -- full historical digest re-scan, BUG-215 fixed on main
+
+Per the user's request to "run another audit round," did a full
+`digest.py --all` re-scan (441 findings, 62 signatures -- the first
+full historical digest run in this doc, not just "since the last
+digest") rather than only the incremental tail, specifically to catch
+older findings that were staged as "needs human/frontier root-cause
+review" and never actually resolved.
+
+**REAL BUG, FIXED as BUG-215** (main repo commit `4ed13482`).
+`### Candidate: 20260818-235449-run-crash-31e17cc97c` above (base:
+`examples/language/english/union_find.vani`, `chain.union(
+9223372036854775807, 5)` -- fuzzer set one union() argument to
+i64::MAX) -- still reproduced identically on a freshly built binary:
+`free(): invalid pointer` (C, rc=134) / LLVM JIT SIGSEGV with an
+internal-crash stack dump (rc=139). Root cause: `UnionFind.find(x)`
+checked whether `x` was in range but, on failure, silently RETURNED
+`x` unchanged instead of trapping (the tree-LLVM codegen's own comment
+said so explicitly: "Out-of-range x returns x"). `union(a, b)` then
+used that returned (possibly still out-of-range) value DIRECTLY as a
+`parent[]`/`rank[]` array index with no further check -- a single
+out-of-range `union()` call performed a wild out-of-bounds WRITE,
+corrupting the heap. The crash surfaced far downstream of the actual
+bug (at the next `free()` on C, inside the JIT's own memory on LLVM),
+which is why two prior staging passes couldn't pin it down without a
+source-level read of the generated code. Fixed by routing `find(x)`
+through the same standard bounds-check helper every other indexed
+builtin already uses on each backend (`intent_check_bounds` on C,
+`@__intent_bounds_check` on LLVM) instead of returning `x` -- both now
+trap cleanly with `exit(3)` and an `index out of bounds: ..., len ...`
+message at the actual out-of-range call. See `docs/TODO_CURRENT.md`'s
+BUG-215 entry on vani-compiler for the full writeup and verification
+(full `cargo test --release --workspace`; one unrelated, confirmed-
+flaky `concurrent_pipeline_dashboard` failure, passed 3/3 direct runs
+and in isolation; full `tools/backend_crosscheck.py` corpus sweep,
+1079 files / 1058 clean / 0 flagged).
+
+**RE-VERIFIED CLEAN -- no longer reproduces on current main, closing
+as stale** (same convention as this doc's other "RE-VERIFIED CLEAN"
+entries; whatever fixed these wasn't traced to a specific BUG-N,
+most likely incidental side effects of unrelated work landing on
+main since these were first staged):
+- `20260815-030823-check-crash-12e964aafd` (`examples/language/
+  tamil/vec_invariants.vani`), `20260815-033840-check-crash-
+  c2bdca7efb` (`examples/language/hebrew/keywords.vani`),
+  `20260815-040936-check-crash-c0078f2383` (`examples/language/
+  english/tasks.vani`) -- all three were logged as `vanic check`
+  itself timing out. Re-ran directly against a fresh build: all three
+  type-check in well under a second (0.3s/0.04s/0.7s), `ok:`. These
+  are the UNMUTATED base example files (repro.vani is byte-identical
+  to the corpus example) -- whatever caused the check-time timeout at
+  staging time was either a since-fixed checker/SMT-verifier
+  performance issue or transient machine load, not a reproducible
+  defect.
+- `20260804-044445-backend-divergence-76db9d72d9` (`examples/
+  edge_cases/mix_simd_struct_field.vani`, a `struct { a: vec128<f32>,
+  ... }` field) -- originally C-COMPILE-FAIL (the C backend emitted a
+  placeholder `/* vec128<T> */ a;` comment instead of a real field
+  type) vs LLVM rc=12. Re-verified: now compiles and runs identically
+  on both backends, both correctly returning exit code 12 -- which is
+  the PROGRAM'S OWN correct return value (`1.0+2.0` per lane summed
+  across 4 lanes = `12.0`, cast to `i64` = `12`, returned from `main`
+  as the process exit code), not a crash. SIMD-typed struct fields
+  were fixed for the C backend by unrelated work sometime after
+  2026-08-04.
+
+**NOT bugs -- confirmed harness false-positives, no compiler change
+needed** (same root cause already documented for
+`20260803-062600-check-crash-04126cff87` above: the harness's
+`is_crash()` heuristic does a substring search for backtrace-like
+text across stderr, which false-positives on a NORMAL parse-error
+diagnostic that happens to quote source text containing that
+substring):
+- `20260818-190327-check-crash-60b98b4b6c` (qwen-generated) -- stderr
+  is a well-formed sequence of `error: expected statement`/`expected
+  identifier` parse diagnostics, exit code 1. Not a crash.
+
+**NOT bugs -- confirmed fuzzer artifacts (same established classes as
+the prior closeout above), no action taken**:
+- The 136-instance mega-cluster of `run-crash, both backends timeout`
+  (spanning the entire fuzzing history, 2026-08-02 through
+  2026-08-21) -- sampled 7 additional, structurally distinct base
+  files across the full date range beyond the ones already checked in
+  the prior closeout (`async_cancel_auto.vani` in Danish/Hungarian/
+  French, `early_exit.vani` in Russian/Odia, `concurrency.vani`,
+  `echo_p3r_nonint_returns.vani`). Every one fits one of the two
+  already-established non-bug shapes: an i64::MIN/MAX boundary literal
+  fuzzed into a `sleep_ms(...)` duration or `for`-loop bound
+  (`async_cancel_auto.vani`'s `sleep_ms(9223372036854775807, ...)`;
+  `early_exit.vani`'s `для i от 1 до limit` with `limit =
+  9223372036854775807`), or a fuzzer-deleted/reordered statement that
+  the original author placed specifically to avoid an inherent
+  deadlock (`concurrency.vani`'s `produce()`/`consume()` call order
+  swapped, so `channel_recv` on the empty channel spin-waits forever
+  in this v1 sequential-only lowering -- confirmed via diff against
+  the base file).
+- `20260821-212154-run-crash-59a0fe6789` (base: `examples/language/
+  english/async_showcase.vani`) -- fuzzer deleted `let _ =
+  tcp_close(c);` from the client task. Without the client closing its
+  socket, the server's `io_recv_async` loop never observes EOF (`n ==
+  0`) to `break` out of, so it blocks forever waiting for data that
+  will never arrive on an open-but-idle connection -- an inherent
+  consequence of removing the exact statement that was supposed to
+  signal completion, not a compiler defect.
+- `20260821-210449-run-crash-082e61337d` (base: `examples/language/
+  gujarati/async_cancel_auto.vani`) -- same i64::MAX `sleep_ms`
+  boundary-literal class as above.
+- The [53x]/[40x]/[35x]/[35x]/[7x]/[2x]/[2x]/[1x] `c.rc=134,
+  llvm.rc=3` backend-divergence clusters (140 findings total) --
+  confirmed, per this doc's own prior entries (2026-08-08), to be the
+  documented, permanent SIGABRT(134)-vs-exit(3) trap-code convention
+  difference between the two backends' abort paths, not a bug.
+- The remaining `⚠ possible match` clusters flagged by `digest.py`'s
+  keyword heuristic (BUG-76, BUG-88, BUG-177, BUG-201, and several
+  "unknown BUG-N" division-by-zero / assertion-failed / loop-bound
+  clusters) were spot-checked via their example findings' existing
+  staging entries above, already carrying `STATUS: FIXED` or `STATUS:
+  RE-VERIFIED CLEAN` markers from prior sessions -- no re-verification
+  needed beyond confirming those markers exist.
+
+No new signatures beyond BUG-215 and the artifacts above. Next free
+bug number on vani-compiler is BUG-216.
