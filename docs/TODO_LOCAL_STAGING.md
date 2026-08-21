@@ -10023,3 +10023,12 @@ Fix attempt: `tools/localfuzz/findings/20260821-100022-backend-divergence-404eda
 }
 ```
 
+
+---
+
+### Candidate: 20260821-100305-run-crash-53251a0fcd
+
+Repro: `tools/localfuzz/findings/20260821-100305-run-crash-53251a0fcd/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-100305-run-crash-53251a0fcd/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
