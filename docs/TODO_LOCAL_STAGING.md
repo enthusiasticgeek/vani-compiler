@@ -10107,3 +10107,89 @@ Fix attempt: `tools/localfuzz/findings/20260821-130858-backend-divergence-852f90
 }
 ```
 
+
+---
+
+## Triage closeout: 2026-08-21 audit round (next-round sweep, per user request "run next audit round to find bugs for features not covered earlier rounds")
+
+Reviewed every finding since the last digest (18 findings across the
+2026-08-20/21 window, collapsing to 5 signatures per
+`tools/localfuzz/digests/20260821-101026.md`) plus 3 more that landed
+after that digest ran. Re-ran a representative sample directly against
+a freshly built `vanic` (current main at the time,
+`8c315655`) rather than trusting the raw JSON, per this project's
+standing "always rebuild before trusting localfuzz repros" rule.
+
+**REAL BUG, FIXED as BUG-214** (main repo commit `3ad0fd13`).
+`### Candidate: 20260821-051000-backend-divergence-f63815c2e5` above
+(logged with `### Status: needs human/frontier root-cause review.`) --
+`parallel for ... reduce total with +;` over a struct field seeded to
+`i64::MIN` diverges C (rc=0, silently wrapped) vs LLVM (rc=3, correctly
+traps `integer overflow in i64 add`). Root cause: the C backend lowers
+integer `+`/`*` reductions to an OpenMP `reduction(op:var)` pragma;
+libgomp's own cross-thread partial-combine step has no overflow check,
+so an overflow that only manifests when summing multiple threads'
+otherwise-valid partials together silently wraps. Every per-iteration
+partial accumulate WAS already checked correctly -- only the implicit
+final combine was the gap. Fixed in both tree-C (`backend_c.rs`) and
+SSA-C (`ssa_backend_c.rs`): an integer `+`/`*` reduction now skips the
+OpenMP pragma entirely and runs sequentially instead, so the whole
+accumulation (including what would have been the cross-thread combine)
+goes through one single checked chain. `Min`/`Max`/bitwise reductions,
+and `+`/`*` on non-integer types (e.g. `f64`), are unaffected and keep
+their existing OpenMP parallelization. See `docs/TODO_CURRENT.md`'s
+BUG-214 entry on vani-compiler for the full writeup, the 4 tests
+updated to match the new behavior, and verification (full
+`cargo test --release --workspace`, 3008 tests clean; full
+`tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
+0 flagged).
+
+**NOT bugs -- confirmed fuzzer/scheduling artifacts, no action taken**:
+- The 13-instance `run-crash` timeout cluster (base:
+  `examples/edge_cases/mix_break_positional.vani`, mutated via `break
+  outer;`/`break middle;`/`break inner;`) -- every repro in the cluster
+  is missing the base example's `a = a + 1;` increment inside the
+  `while a < 3 { ... }` block. The fuzzer's statement-deletion mutation
+  removed the ONLY thing that ever advances the outer loop's condition,
+  producing a genuine (correct-per-semantics) infinite loop in the
+  mutated SOURCE PROGRAM itself -- not a compiler hang. Confirmed by
+  restoring the increment in isolation and re-running: terminates
+  immediately with the expected output.
+- `20260821-020735-backend-divergence-200a2bf8ed`,
+  `20260821-084253-backend-divergence-a542a50913`,
+  `20260821-100022-backend-divergence-404eda8ea2`,
+  `20260821-130858-backend-divergence-852f90aaa1` (base:
+  `examples/language/english/concurrent_pipeline_dashboard.vani`) --
+  stdout line-ordering differs between backends because multiple
+  worker tasks print concurrently with no synchronization; both
+  backends' exit codes and final totals agree. Matches this project's
+  own established "never assert exact stdout lines from unsynchronized
+  concurrent print()" finding from an earlier session -- expected
+  scheduling nondeterminism, not a bug.
+- `20260821-124652-backend-divergence-fc6d635b9d`
+  [sic: fc6d535b9d] (base: `examples/language/english/detach_heartbeat.vani`)
+  -- the base example's own source comment explicitly documents this
+  exact race as the honest, by-design cost of `detach`'s fire-and-
+  forget semantics (main is free to exit before a detached task's
+  prints land). qwen2.5-coder's own fix attempt for this finding
+  (above) was already discarded as not applying/building.
+- `20260821-121607-run-crash-63f9beb49e` (base:
+  `examples/language/czech/for_loops.vani`) -- fuzzer mutated a small
+  loop's start bound to `-9223372036854775808` (i64::MIN), producing a
+  genuinely enormous (not infinite, but ~9.2 quintillion-iteration)
+  loop trip count -- indistinguishable from a hang within any short
+  timeout, but not a compiler defect. Same recurring i64::MIN-boundary-
+  literal fuzzer artifact `docs/BUG_PATTERN_AUDIT_TODO_13.md`'s
+  Priority 4 already documented.
+- `20260820-113332-run-crash-0689162d8b` (base:
+  `examples/language/english/echo_match_variant.vani`) -- fuzzer
+  duplicated `let r: i64 = __poll_pick(t);` (and a `tcp_connect_local`
+  call) back-to-back, double-polling the async task's state machine
+  per loop iteration. This desyncs the poll from the epoll readiness
+  event it's meant to consume one-for-one, leaving `epoll_wait_one`
+  blocked forever waiting for a read that was already consumed by the
+  spurious extra poll -- an invalid usage pattern the mutation
+  introduced, not a real program a user would write, so not actionable
+  as a compiler fix.
+
+No other new signatures in this window beyond the ones above.
