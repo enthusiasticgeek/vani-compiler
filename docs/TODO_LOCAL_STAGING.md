@@ -9857,7 +9857,16 @@ async ֆունկցիա delay(ms: i64, v: i64) -> i64 {
     "rc": null,
     "stdout": "",
     "stderr": "",
+```
 
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/armenian/async_cancel_auto.vani`. Confirmed via
+direct diff: the mutation changed `a`'s `delay(5, 42)` to
+`delay(9223372036854775807, 42)` (i64::MAX). Same
+`sleep_ms`/`delay`-blown-to-i64::MAX false-positive class documented
+repeatedly elsewhere in this file (Konkani/Catalan/Pashto/Urdu/
+Portuguese entries) -- a legitimately absurd multi-million-year wait
+introduced by the mutation, not a compiler defect.
 
 ---
 
@@ -9866,4 +9875,26 @@ async ֆունկցիա delay(ms: i64, v: i64) -> i64 {
 Repro: `tools/localfuzz/findings/20260820-233937-run-crash-a9a4b228f3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260820-233937-run-crash-a9a4b228f3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**STATUS: triaged, NOT A BUG.** Base:
+`examples/language/english/echo_p4b_multitask.vani`. Confirmed via
+direct diff: the mutation (a) duplicated peer1's
+`let c: i64 = tcp_connect_local(port);` line, and (b) deleted peer2's
+`sleep_ms(20)` delay. The duplicated connect is the real cause:
+peer1's task now opens a first TCP connection whose `c` binding is
+immediately shadowed by the second connect's `c` -- the first
+connection's handshake genuinely completes (real socket, real fd) but
+that fd is then leaked (never written to, never closed) once peer1's
+task moves on to using the shadowing second `c`. `main()` still only
+calls `tcp_accept(server)` exactly twice (`cfd1`, `cfd2`), so with
+THREE total inbound connection attempts across the run (peer1's two +
+peer2's one) racing against only two accept slots, whichever real
+client connection (peer1's actual data-sending one, or peer2's) loses
+the race to the abandoned throwaway connection ends up starved: the
+`drive()`/epoll loop waits on `io_recv_async` for a peer that will
+never send data and never explicitly closes its socket. Same failure
+class as the earlier-documented "double tcp_connect_local + variable
+shadowing" finding elsewhere in this file -- an application-level
+deadlock in the MUTATED test program's own connection-handling logic,
+not a compiler bug. (The peer2 `sleep_ms(20)` deletion changes timing
+but isn't the root cause -- the accept-slot starvation from the
+duplicated connect is sufficient on its own to hang the program.)
