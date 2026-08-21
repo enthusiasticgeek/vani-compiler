@@ -10041,3 +10041,41 @@ Repro: `tools/localfuzz/findings/20260821-121607-run-crash-63f9beb49e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260821-121607-run-crash-63f9beb49e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260821-124652-backend-divergence-fc6d535b9d
+
+Repro: `tools/localfuzz/findings/20260821-124652-backend-divergence-fc6d535b9d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-124652-backend-divergence-fc6d535b9d/fix_attempt.md`
+
+### Staging Entry: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani`
+
+**Status:** needs human/frontier root-cause review.
+
+---
+
+The `vanic run` command executed:
+```sh
+vanic run examples/language/english/detach_heartbeat.vani --backend=c
+```
+
+This command attempts to compile and run the `detach_heartbeat.vani` file using the C backend. The output shows that there is a backend-divergence issue, where the heartbeat task (`hb`) is not used after its declaration, resulting in unused variable warnings.
+
+---
+
+**Raw Result Data:**
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "main computation result: 332833500\n[heartbeat] tick ",
+    "stderr": "/tmp/localfuzz/candidate.vani:31:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat();\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "main computation result: 332833500\n[heartbeat] tick 0\n[heartbeat] tick 1\n[heartbeat] tick 2\n",
+    "stderr": "/tmp
