@@ -9986,3 +9986,12 @@ Repro: `tools/localfuzz/findings/20260821-071113-run-crash-a48defb349/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260821-071113-run-crash-a48defb349/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260821-084253-backend-divergence-a542a50913
+
+Repro: `tools/localfuzz/findings/20260821-084253-backend-divergence-a542a50913/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-084253-backend-divergence-a542a50913/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
