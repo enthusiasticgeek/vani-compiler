@@ -1001,9 +1001,54 @@ fn emit_parallel_for_region(
     }
 
     // Pragma + reduction clauses.
+    //
+    // BUG-214: OpenMP's `reduction(op: v)` clause privatizes `v` per
+    // thread (each thread's copy seeded to the op's identity) and
+    // combines the per-thread partials back into `v` in a FINAL
+    // combine step that libgomp generates itself, invisible to this
+    // backend's own SSA instructions. Every per-iteration accumulate
+    // inside the loop body still goes through the normal checked-add
+    // `__builtin_add_overflow`/`__builtin_mul_overflow` guard above
+    // (it's an ordinary `InstrKind::Binary` like any other), so an
+    // overflow that occurs WITHIN one thread's own partial sum is
+    // still caught correctly — but an overflow that only occurs when
+    // libgomp sums the threads' partials together at the end is not:
+    // that add is emitted entirely outside our control, with no
+    // overflow check at all, silently wrapping instead of trapping.
+    // tree-SSA-LLVM's parallel-for reduction doesn't have this gap
+    // (it drives its own pthread pool and combines partials through
+    // this backend's own checked-add), which is why the same program
+    // traps `exit(3)` on LLVM but returns 0 with a wrapped value on
+    // C. Confirmed via a direct repro: `total` seeded to 0, `reduce
+    // total with +` over 4 iterations each adding i64::MIN — no
+    // single-thread partial overflows (each iteration's own partial,
+    // even if fully serialized onto one thread, is caught), but
+    // summing e.g. two threads' MIN-valued partials at the merge
+    // does overflow, and only LLVM detects it.
+    //
+    // `Add`/`Mul` are the only reduction ops where this combine step
+    // can itself overflow (`Min`/`Max` never overflow by picking one
+    // of two already-valid values; `And`/`Or`/`Bit*` don't have an
+    // overflow concept). For those, on an integer type, fall back to
+    // NOT parallelizing this region at all — emit a plain sequential
+    // `for` with no `_Pragma("omp ...")` — so every accumulate,
+    // including what would have been the cross-thread combine, goes
+    // through the same single checked-add chain the rest of this
+    // backend already relies on. This trades away the parallel
+    // speedup specifically for checked integer sum/product
+    // reductions; every other reduction kind (and non-integer
+    // Add/Mul, e.g. `f64`) keeps its existing OpenMP `reduction()`
+    // clause unchanged.
     let _ = c_type(&region.shape.counter_ty)?;
+    let has_unchecked_arith_combine = region.reductions.iter().any(|(_, op, ty)| {
+        matches!(op, ReductionOp::Add | ReductionOp::Mul) && ty.is_integer()
+    });
     if region.reductions.is_empty() {
         out.push_str("  _Pragma(\"omp parallel for\")\n");
+    } else if has_unchecked_arith_combine {
+        // No pragma at all: sequential loop, every reduction carry
+        // stays a normal (non-thread-private) variable, updated
+        // in-place by the body's own checked-add instructions.
     } else {
         let clauses: Vec<String> = region
             .reductions
@@ -3422,10 +3467,16 @@ mod tests {
             }
         "#;
         let c = lower_and_emit(src);
-        // Pragma with `+:` reduction clause appears.
+        // BUG-214: an i64 `+` reduction deliberately does NOT get
+        // an OpenMP `reduction()` pragma — libgomp's own cross-
+        // thread combine step has no overflow check, so this
+        // backend falls back to a plain sequential loop for any
+        // integer Add/Mul reduction instead (see the comment above
+        // `has_unchecked_arith_combine` in `emit_parallel_for_region`).
         assert!(
-            c.contains("_Pragma(\"omp parallel for reduction(+: v_"),
-            "expected OpenMP reduction pragma in SSA-C output:\n{}",
+            !c.contains("_Pragma(\"omp"),
+            "expected NO OpenMP pragma for a checked-integer-add \
+             reduction in SSA-C output (BUG-214):\n{}",
             c
         );
         // Structured for-loop (no leading type — uses the

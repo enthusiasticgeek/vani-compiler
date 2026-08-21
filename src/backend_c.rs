@@ -18,7 +18,7 @@
 //! - Audit and remove the C-pinned tests in `lib.rs` that assert on
 //!   `intent_check_*` / `v_*` C-specific identifiers.
 
-use crate::ast::{BinaryOp, Type, UnaryOp};
+use crate::ast::{BinaryOp, ReductionOp, Type, UnaryOp};
 use crate::backend::Backend;
 use crate::ir::{TypedExpr, TypedExprKind, TypedFunction, TypedProgram, TypedStmt};
 use std::collections::BTreeSet;
@@ -15129,15 +15129,58 @@ return __intent_ret; }}\n",
                 // Compilers without `-fopenmp` issue an "unknown
                 // pragma" warning and fall back to sequential —
                 // also correct.
-                let mut pragma = String::from("omp parallel for");
-                for r in reductions {
-                    pragma.push_str(&format!(
-                        " reduction({}:{})",
-                        r.op.display_symbol(),
-                        local_name(&r.var)
-                    ));
+                //
+                // BUG-214: `reduction(+:var)`/`reduction(*:var)` on
+                // an integer type has a checked-arithmetic soundness
+                // gap this backend can't close without dropping the
+                // clause entirely. Every per-iteration accumulate
+                // inside the loop body still goes through the normal
+                // checked-add/checked-mul emission (it's an ordinary
+                // assignment expression like any other), so overflow
+                // WITHIN one thread's own partial sum is still
+                // caught correctly -- but libgomp generates the
+                // FINAL cross-thread combine (`total = seed +
+                // partial_thread0 + partial_thread1 + ...`) itself,
+                // entirely outside this backend's control, with no
+                // overflow check at all. A sum that only overflows
+                // at that combine step (e.g. two threads' partials
+                // each individually in-range but summing past
+                // i64::MAX/MIN) silently wraps on this backend while
+                // ssa-LLVM's own pthread-pool-based reduction (which
+                // combines partials through its own checked-add)
+                // correctly traps. `Add`/`Mul` are the only ops
+                // where the combine itself can overflow (`Min`/`Max`
+                // just pick one of two already-valid values;
+                // `And`/`Or`/bitwise ops have no overflow concept)
+                // -- for those on an integer type, don't parallelize
+                // this loop at all, so every accumulate (including
+                // what would have been the cross-thread combine)
+                // goes through one single checked chain. Every other
+                // reduction shape (including non-integer Add/Mul,
+                // e.g. `f64`) keeps the OpenMP `reduction()` clause
+                // unchanged.
+                let has_unchecked_arith_combine = reductions.iter().any(|r| {
+                    matches!(r.op, ReductionOp::Add | ReductionOp::Mul) && r.ty.is_integer()
+                });
+                if has_unchecked_arith_combine {
+                    // No pragma at all -- plain sequential loop. Not
+                    // `GCC ivdep` (that asserts no loop-carried
+                    // dependency, which is false here: the whole
+                    // point is the reduction accumulator DOES carry
+                    // across iterations, and that's exactly the
+                    // dependency chain the checked-add guard needs
+                    // to stay intact).
+                } else {
+                    let mut pragma = String::from("omp parallel for");
+                    for r in reductions {
+                        pragma.push_str(&format!(
+                            " reduction({}:{})",
+                            r.op.display_symbol(),
+                            local_name(&r.var)
+                        ));
+                    }
+                    out.push_str(&format!("  _Pragma(\"{}\")\n", pragma));
                 }
-                out.push_str(&format!("  _Pragma(\"{}\")\n", pragma));
             } else {
                 // Same ivdep hint as for while-loops: vāṇī affine
                 // ownership guarantees no iteration carries a

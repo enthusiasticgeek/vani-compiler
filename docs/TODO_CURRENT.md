@@ -16220,4 +16220,85 @@ Both BUG-212 and BUG-213 verified via direct repro (`ok:` before ->
 `proof failed` SMT counterexample after) and full `cargo test --release
 --workspace` clean.
 
-Next free bug number is **BUG-214**.
+## BUG-214
+
+Found via a fresh `localfuzz` digest (2026-08-21), in the recurring
+"backend-divergence, both exit codes 0" bucket -- but unlike the other
+findings in that bucket (which turned out to be legitimate concurrent-
+print-ordering nondeterminism, not bugs), one repro had DIFFERENT exit
+codes (C: 0, LLVM: 3) once re-run against a freshly built binary.
+
+`parallel for ... reduce <var> with +/*;` on an INTEGER type has a
+checked-arithmetic soundness gap on the C backend (both tree-C in
+`backend_c.rs` and SSA-C in `ssa_backend_c.rs` -- confirmed as two
+independent copies of the same bug, since which one a given program
+hits depends on whether it uses a construct SSA-C's lowering still
+falls back to tree-C for, e.g. struct field access). The C backend
+lowers `reduce <var> with +;` to an OpenMP `#pragma omp parallel for
+reduction(+:<var>)` clause. OpenMP privatizes `<var>` per thread
+(seeded to the op's identity) and combines every thread's partial sum
+back together in a FINAL combine step that libgomp itself generates,
+invisible to this compiler's own SSA/tree instructions. Every
+PER-ITERATION accumulate inside the loop body still goes through the
+normal checked-add/checked-mul guard (`__builtin_add_overflow` +
+`exit(3)`) -- it's an ordinary assignment expression like any other --
+so an overflow that occurs WITHIN one thread's own running partial is
+still caught correctly. But an overflow that only occurs when libgomp
+sums the different threads' otherwise-individually-valid partials
+together at the very end has NO check at all, and silently wraps.
+
+**Confirmed via direct repro**:
+```vani
+struct Scale { factor: i64 }
+fn main() -> i64 {
+  let s: Scale = Scale { factor: -9223372036854775808 };  // i64::MIN
+  let total: i64 = 0;
+  parallel for i from 0 to 4
+  reduce total with +;
+  {
+    total = total + s.factor;
+  }
+  print total;
+  return 0;
+}
+```
+No single iteration's partial overflows (each is `0 + i64::MIN` in
+isolation), but two threads' partials summed together does. LLVM
+(which drives its own persistent pthread pool and combines partials
+through its own checked-add, not libgomp) correctly traps `exit(3)`
+with `integer overflow in i64 add`; the C backend silently returned
+`0` before this fix.
+
+**Fix**: `Add`/`Mul` are the only reduction ops where the cross-thread
+combine step can itself overflow (`Min`/`Max` just pick one of two
+already-valid values; `And`/`Or`/bitwise ops have no overflow
+concept). For those, on an integer type, both C backends now skip the
+`omp parallel for` pragma entirely and fall back to a plain sequential
+loop -- every accumulate, including what would have been the
+cross-thread combine, goes through one single checked chain. Every
+other reduction shape (including non-integer `+`/`*`, e.g. `f64`, and
+`Min`/`Max`/bitwise reductions of any type) keeps its existing OpenMP
+`reduction()` clause unchanged, so those loops stay parallelized.
+
+This trades away real parallelism specifically for checked integer
+sum/product reductions -- a correctness-over-performance call
+consistent with every other checked-arithmetic guard in this backend
+(exit(3) traps over silent wraparound everywhere else already).
+
+Updated `examples/language/english/parallel.vani`'s comments (which
+had documented the now-removed `reduction(+:total)`/`reduction(*:
+product)` C lowering) and the three existing tests that asserted the
+old pragma was present for an integer `+`/`*` reduction:
+- `src/ssa_backend_c.rs::parallel_for_emit_scaffolding_recognizes_canonical_shape`
+- `src/lib.rs::parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c`
+- `src/lib.rs::ssa_c_emits_multi_block_parallel_for_body`
+- `tests/run_end_to_end.rs::emit_c_parallel_for_pragma_appears_in_output`
+  (pragma count 11 -> 9; the example's own `+`/`*` reductions are both
+  `i64`)
+
+Verified: full `cargo test --release --workspace` clean (3008 tests),
+`tools/backend_crosscheck.py` full corpus sweep (1079 files, 1058
+clean, 0 flagged), and `parallel.vani` itself runs to identical output
+on both backends.
+
+Next free bug number is **BUG-215**.

@@ -18020,19 +18020,39 @@ fn main() -> i64 {
             }
         "#;
         let c = compile_to_c(source).expect("compiles to C");
+        // BUG-214: `reduce prod with *` is an integer Mul reduction,
+        // so this loop no longer gets an OpenMP `reduction()` pragma
+        // at all (libgomp's own cross-thread combine has no overflow
+        // check -- see `has_unchecked_arith_combine` in
+        // `backend_c.rs`'s `TypedStmt::For` emit). The trip-count
+        // overflow guard this test originally exists for is emitted
+        // unconditionally for any signed loop-var type regardless of
+        // the pragma decision, so it must still be present.
         assert!(
-            c.contains("intent_check_i64_sub(") && c.contains("_Pragma(\"omp parallel for"),
-            "expected an intent_check_i64_sub(...) overflow guard immediately \
-             before the omp-pragma'd loop, got:\n{c}"
+            c.contains("intent_check_i64_sub("),
+            "expected an intent_check_i64_sub(...) overflow guard \
+             before the loop, got:\n{c}"
         );
-        // The guard call must come BEFORE the pragma/loop, not after --
-        // otherwise GCC's own trip-count computation still runs first.
-        let guard_pos = c.find("intent_check_i64_sub(").unwrap();
-        let pragma_pos = c.find("_Pragma(\"omp parallel for").unwrap();
         assert!(
-            guard_pos < pragma_pos,
-            "expected the overflow guard before the omp pragma, got guard at \
-             {guard_pos}, pragma at {pragma_pos} in:\n{c}"
+            !c.contains("_Pragma(\"omp"),
+            "expected NO OpenMP pragma for a checked-integer-mul \
+             reduction (BUG-214), got:\n{c}"
+        );
+        // The guard call must come BEFORE the loop itself, not after
+        // -- otherwise GCC's own trip-count computation still runs
+        // first (moot once the OMP pragma is gone, but the guard's
+        // own C-level UB concern -- `end - start` overflow -- is
+        // independent of whether OpenMP is involved at all).
+        let guard_pos = c.find("intent_check_i64_sub(").unwrap();
+        // Tree-C (this test calls `compile_to_c`, which always uses
+        // the tree backend) names loop variables after the source
+        // identifier, not SSA-C's `v_N` scheme, so anchor on a bare
+        // `for (` instead.
+        let for_pos = c.find("for (").unwrap();
+        assert!(
+            guard_pos < for_pos,
+            "expected the overflow guard before the for-loop, got guard at \
+             {guard_pos}, for-loop at {for_pos} in:\n{c}"
         );
     }
 
@@ -35476,18 +35496,27 @@ fn main() -> i64 {
         let (module, errs) = crate::ssa::lower_program(&checked.ir);
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
-        // Pragma carries the `+` reduction clause for `total`.
+        // BUG-214: `reduce total with +` is an integer Add
+        // reduction, so this loop no longer gets an OpenMP
+        // `reduction()` pragma at all (libgomp's own cross-thread
+        // combine has no overflow check) — falls back to a plain
+        // sequential loop instead. The multi-block-body emit shape
+        // this test exists for (labels/gotos surfacing correctly
+        // inside the loop) is unaffected by whether a pragma
+        // precedes the loop, so anchor on the `for (` opener
+        // directly instead of the now-absent pragma.
         assert!(
-            c.contains("_Pragma(\"omp parallel for reduction(+:"),
-            "expected reduction clause:\n{}",
+            !c.contains("_Pragma(\"omp"),
+            "expected NO OpenMP pragma for a checked-integer-add \
+             reduction (BUG-214):\n{}",
             c
         );
         // The body's if-guard surfaces inside the for-loop as a
         // standard `if (…) { goto bbX; } else { goto bbY; }`. The
         // then/else target labels MUST be defined inside the
         // loop body — that's the regression the emit half fixes.
-        let pragma_pos = c.find("_Pragma(\"omp parallel for").expect("pragma present");
-        let after_pragma = &c[pragma_pos..];
+        let for_pos = c.find("for (v_").expect("for-loop present");
+        let after_pragma = &c[for_pos..];
         let for_open = after_pragma.find("for ").expect("for-loop present");
         let body_start = after_pragma[for_open..]
             .find('{')
