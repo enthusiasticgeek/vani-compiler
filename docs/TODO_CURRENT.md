@@ -16365,3 +16365,47 @@ file, not caused by this change); full `tools/backend_crosscheck.py`
 corpus sweep (1079 files, 1058 clean, 0 flagged).
 
 Next free bug number is **BUG-216**.
+
+## Audit round, 2026-08-21 (third pass) -- sibling-sweep of BUG-215, clean
+
+Per this session's established "sweep sibling functions after a
+bugfix" practice: BUG-215's shape was a builtin data-structure method
+that accepts a raw user-supplied `i64` index, validates it, but on
+failure returns the unchecked value itself instead of trapping --
+letting a caller reuse it as an array subscript with no further check.
+Localfuzz produced no new findings during this pass (checked twice,
+~10 minutes apart, harness actively running clean cycles both times),
+so this round was a manual sweep for the same pattern elsewhere
+instead.
+
+Checked every other builtin data structure exposing a user-facing
+index/id parameter, on both backends:
+- **`Graph`** (`add_edge`/`bfs_reach`/`dfs_reach`/`dijkstra`/
+  `mst_kruskal`/`mst_prim`) -- `add_edge` itself doesn't validate
+  `src`/`dst` before storing them (a lenient design gap, not a safety
+  bug), but every DOWNSTREAM consumer (`build_csr_if_needed` and
+  every traversal entry point) independently re-validates before using
+  an edge endpoint as an index, on both C and LLVM. Confirmed via a
+  direct repro (`graph_add_edge(g, i64::MAX, 2, 3)` on a 4-node graph,
+  then `bfs_reach`/`dijkstra`/`mst_kruskal`/`mst_prim`/`has_cycle`/
+  `topo_sort` all called afterward) -- clean under both `valgrind`
+  (C) and a normal LLVM run: the malformed edge is silently dropped
+  by the CSR builder, no corruption.
+- **`BoundedPtr` (`intent_bptr_i64_set`/`_get`)** -- different, safe
+  pattern: returns `false`/`None` on an out-of-range index and never
+  touches the buffer, rather than returning the bad index itself for a
+  caller to reuse.
+- **`Trie`/`Bst`/`SkipList`** -- no user-facing raw index/node
+  parameter at all; their public APIs take values/strings, and
+  internal node indices are always compiler-managed (arena-appended),
+  never attacker-controlled.
+- Capacity-growth doubling (`intent_trie__grow_node`,
+  `intent_skiplist_i64_ensure_cap`) -- bounded by the number of actual
+  insert calls (`node_count`/`num_nodes`, `uint16_t`-capped at 256 for
+  trie's per-node key slots), not a single arbitrary user-supplied
+  value the way `UnionFind`'s index parameter was -- not the same
+  vulnerability shape, no overflow risk in practice.
+
+No new bug found. `UnionFind` was confirmed to be the sole instance of
+this exact vulnerability shape in the codebase, not one of a broader
+family -- the fix in BUG-215 fully closes it.
