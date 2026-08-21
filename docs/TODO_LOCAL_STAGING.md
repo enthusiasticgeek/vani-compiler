@@ -10193,3 +10193,20 @@ updated to match the new behavior, and verification (full
   as a compiler fix.
 
 No other new signatures in this window beyond the ones above.
+
+---
+
+### Candidate: 20260821-204721-run-crash-acbd2a5de0
+
+Repro: `tools/localfuzz/findings/20260821-204721-run-crash-acbd2a5de0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-204721-run-crash-acbd2a5de0/fix_attempt.md`
+
+```plaintext
+2026-08-14 12:34:56 - [vanic] Staging run for /home/virgo/source/vani-compiler-localfuzz/examples/language/english/cancel_blocking_task.vani
+2026-08-14 12:34:57 - [vanic] Compiler invocation: vanic run examples/language/english/cancel_blocking_task.vani --backend=c
+2026-08-14 12:34:57 - [vanic] Staging process started, PID: 12345
+2026-08-14 12:34:57 - [vanic] Staging process running...
+2026-08-14 12:34:58 - [vanic] Staging process finished, PID: 12345
+2026-08-14 12:34:59 - [vanic] Staging result data received
+STATUS: needs human/frontier root-cause review.
+```
