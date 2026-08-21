@@ -9926,3 +9926,12 @@ Fix attempt: `tools/localfuzz/findings/20260821-020735-backend-divergence-200a2b
 }
 ```
 
+
+---
+
+### Candidate: 20260821-032859-run-crash-035f697a8d
+
+Repro: `tools/localfuzz/findings/20260821-032859-run-crash-035f697a8d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-032859-run-crash-035f697a8d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
