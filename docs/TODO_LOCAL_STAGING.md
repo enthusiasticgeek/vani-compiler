@@ -9959,3 +9959,12 @@ Generated a mutant from the base corpus file `/home/virgo/source/vani-compiler-l
 - **NVPTX-ARCH=SM_70 Backend**: Although the compiler attempted to compile the mutant code, it resulted in a runtime error due to an internal error within the compiler.
 
 ### Status: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260821-052047-run-crash-15f0e99353
+
+Repro: `tools/localfuzz/findings/20260821-052047-run-crash-15f0e99353/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-052047-run-crash-15f0e99353/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
