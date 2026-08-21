@@ -9935,3 +9935,27 @@ Repro: `tools/localfuzz/findings/20260821-032859-run-crash-035f697a8d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260821-032859-run-crash-035f697a8d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260821-051000-backend-divergence-f63815c2e5
+
+Repro: `tools/localfuzz/findings/20260821-051000-backend-divergence-f63815c2e5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-051000-backend-divergence-f63815c2e5/fix_attempt.md`
+
+**STAGING ENTRY**
+
+### Task:
+Generated a mutant from the base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_conc_parallel_struct_capture.vani` to trigger a backend-divergence in the vani-compiler project.
+
+### Steps Executed:
+1. **Mutant Generation**: Generated a new function (`main`) using `vani-compiler-localfuzz` with a specific mutation strategy that includes capturing a struct inside a parallel-for body.
+2. **Code Execution**:
+   - The mutant was compiled and executed on the `x86_64` backend.
+   - A variant of the code was also compiled and executed on the `nvptx-arch=sm_70` backend.
+
+### Observations:
+- **X86_64 Backend**: The original base function executed successfully, but when a mutant with struct capture was generated, the compiler encountered an integer overflow error during the addition of two large integers.
+- **NVPTX-ARCH=SM_70 Backend**: Although the compiler attempted to compile the mutant code, it resulted in a runtime error due to an internal error within the compiler.
+
+### Status: needs human/frontier root-cause review.
