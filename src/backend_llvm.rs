@@ -35610,18 +35610,20 @@ fn emit_intent_union_find_helpers_llvm(out: &mut String) {
          \x20 store i64 0, i64* %sp\n\
          \x20 ret void\n\
          }\n\
-         ; find with iterative path compression. Out-of-range x returns x.\n\
+         ; find with iterative path compression. Out-of-range x traps\n\
+         ; (BUG-215): x is used as a raw array index into parent[]/\n\
+         ; rank[] both here and, via ra/rb, inside union()/connected()\n\
+         ; -- silently returning x unchecked let union() perform a\n\
+         ; wild out-of-bounds GEP+store with an attacker/fuzzer-\n\
+         ; controlled offset (e.g. i64::MAX), corrupting the heap\n\
+         ; instead of trapping cleanly.\n\
          define i64 @intent_union_find_find(%intent_union_find* %uf, i64 %x) {\n\
          \x20 %pp = getelementptr %intent_union_find, %intent_union_find* %uf, i32 0, i32 0\n\
          \x20 %np = getelementptr %intent_union_find, %intent_union_find* %uf, i32 0, i32 2\n\
          \x20 %parent = load i64*, i64** %pp\n\
          \x20 %n = load i64, i64* %np\n\
-         \x20 %lo = icmp slt i64 %x, 0\n\
-         \x20 %hi = icmp sge i64 %x, %n\n\
-         \x20 %oob = or i1 %lo, %hi\n\
-         \x20 br i1 %oob, label %ff_ret_x, label %ff_walk\n\
-         ff_ret_x:\n\
-         \x20 ret i64 %x\n\
+         \x20 call void @__intent_bounds_check(i64 %x, i64 %n)\n\
+         \x20 br label %ff_walk\n\
          ff_walk:\n\
          \x20 ; Walk to root.\n\
          \x20 %r_p = alloca i64\n\

@@ -16301,4 +16301,67 @@ Verified: full `cargo test --release --workspace` clean (3008 tests),
 clean, 0 flagged), and `parallel.vani` itself runs to identical output
 on both backends.
 
-Next free bug number is **BUG-215**.
+## BUG-215
+
+Found via a full historical re-scan of the localfuzz digest (441
+findings, 62 signatures) as part of the next audit round. Most
+clusters were already-triaged noise (the documented C-exits-134-vs-
+LLVM-exits-3 trap convention; the recurring i64::MIN/MAX-boundary-
+literal fuzzer artifact inflating loop bounds/`sleep_ms` durations
+into huge-but-finite runs; concurrent-print ordering nondeterminism;
+etc.) or already fixed elsewhere on main, re-verified stale. One
+finding, still open and still reproducing on a fresh build, was a
+genuine heap-corruption bug: `20260818-235449-run-crash-31e17cc97c`
+(base: `examples/language/english/union_find.vani`, fuzzer mutated one
+`.union(...)` call's argument to `9223372036854775807`, i64::MAX).
+
+`UnionFind`'s `find(x)` (`intent_union_find_find` in both
+`backend_c.rs` and `backend_llvm.rs` -- UnionFind never routes through
+either SSA backend) checked whether `x` was in `[0, n)` but, on
+failure, silently returned `x` UNCHANGED instead of trapping (the tree-
+LLVM version's own comment said so explicitly: "Out-of-range x returns
+x"). Every other bounds-checked builtin in this compiler traps on an
+out-of-range index; this one instead handed the caller back an
+attacker/fuzzer-controlled out-of-range value disguised as a
+legitimate "root". `union(a, b)` calls `find(a)`/`find(b)` to get
+`ra`/`rb`, then uses them DIRECTLY as array indices into `parent[]`/
+`rank[]` with no further check (`uf->rank[ra]`, `uf->parent[rb] = ra;`
+on C; `getelementptr i64, i64* %rank, i64 %ra` on LLVM) -- so a single
+out-of-range `union()` call performed a wild out-of-bounds WRITE at an
+arbitrary offset, corrupting the heap. This surfaced downstream, not
+at the point of the actual bug: C crashed with `free(): invalid
+pointer` (rc=134) when the corrupted allocator metadata was later
+freed at scope-exit `Drop`, and LLVM's JIT segfaulted (rc=139) with an
+internal-crash stack dump -- neither backend produced a clean,
+attributable trap at the actual fault site.
+
+**Confirmed via direct repro** (`chain.union(9223372036854775807,
+5)` on a 6-element `UnionFind`): C backend `free(): invalid pointer`,
+LLVM backend SIGSEGV in the JIT, both non-deterministic-looking
+crashes far from the real defect.
+
+**Fix**: both backends' `find(x)` now call the same standard bounds-
+check helper every other indexed builtin already uses --
+`intent_check_bounds(x, uf->n)` on C (already unconditionally emitted
+whenever any bounds-checked construct is used, matched via the
+existing `body.contains("intent_check_bounds(")` gate), and
+`@__intent_bounds_check(i64 %x, i64 %n)` on LLVM (unconditionally
+defined in tree-LLVM's preamble already) -- instead of silently
+returning `x`. Both now trap cleanly with `index out of bounds:
+9223372036854775807, len 6` and `exit(3)` on both backends (matching
+every other bounds-checked builtin's convention), right at the actual
+out-of-range `find()` call, instead of a confusing downstream crash
+with no attributable message.
+
+Verified: the mutated repro now traps identically and cleanly on both
+backends; the unmutated `union_find.vani` example still produces
+identical, correct output on both backends (no regression); full
+`cargo test --release --workspace` clean (one unrelated, confirmed-
+flaky failure in `concurrent_pipeline_dashboard_example_produces_
+correct_output_on_both_backends` -- passed 3/3 direct runs and in
+isolation via `cargo test`, matching this exact example's known
+concurrent-print-ordering nondeterminism documented earlier in this
+file, not caused by this change); full `tools/backend_crosscheck.py`
+corpus sweep (1079 files, 1058 clean, 0 flagged).
+
+Next free bug number is **BUG-216**.

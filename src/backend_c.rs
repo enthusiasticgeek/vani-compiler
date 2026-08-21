@@ -5614,7 +5614,7 @@ fn emit_intent_union_find_helpers_c_body(out: &mut String) {
          \x20 uf->n = 0; uf->sets = 0;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_union_find_find(intent_union_find* uf, int64_t x) {\n\
-         \x20 if (x < 0 || (uint64_t)x >= uf->n) return x;\n\
+         \x20 (void)intent_check_bounds(x, uf->n);\n\
          \x20 /* Walk to the root. */\n\
          \x20 int64_t r = x;\n\
          \x20 while (uf->parent[r] != r) r = uf->parent[r];\n\
