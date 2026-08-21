@@ -10079,3 +10079,31 @@ This command attempts to compile and run the `detach_heartbeat.vani` file using 
     "rc": 0,
     "stdout": "main computation result: 332833500\n[heartbeat] tick 0\n[heartbeat] tick 1\n[heartbeat] tick 2\n",
     "stderr": "/tmp
+
+---
+
+### Candidate: 20260821-130858-backend-divergence-852f90aaa1
+
+Repro: `tools/localfuzz/findings/20260821-130858-backend-divergence-852f90aaa1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260821-130858-backend-divergence-852f90aaa1/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 3,
+    "stdout": "registered 4 sensors\n[dashboard] still processing...\nworker 0 derived 2 arena values from raw reading 5\nworker 1 derived 2 arena values from raw reading 10\nworker ",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\ninteger overflow in i64 mul\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "registered 4 sensors\nworker 0 derived 2 arena values from raw reading 5\n[dashboard] still processing...\nworker 1 derived 2 arena values from raw reading 10\nworker 2 derived 2 arena values from raw reading 15\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\ninteger overflow in i64 mul\n",
+    "timed_out": false
+  }
+}
+```
+
