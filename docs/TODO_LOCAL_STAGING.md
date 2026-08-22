@@ -10468,3 +10468,14 @@ a quick follow-up.
 Verified: valgrind --leak-check=full clean (0 errors, both backends)
 on the Box/Region fixes; full cargo test clean; full
 backend_crosscheck.py corpus sweep (0 flagged).
+
+---
+
+### Candidate: 20260822-102420-run-crash-16f9bed6e7
+
+Repro: `tools/localfuzz/findings/20260822-102420-run-crash-16f9bed6e7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-102420-run-crash-16f9bed6e7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The compiler generated a crash during execution of the `early_exit.vani` program with the mutant/generated source above when run on LLVM. The observed symptom was a crash, and the backend that affected it was LLVM.
