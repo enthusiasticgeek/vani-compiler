@@ -10625,3 +10625,51 @@ This bug affects both the LLVM backend and the C backend of the vani-compiler pr
 ---
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260822-225752-backend-divergence-62b8e97c1f
+
+Repro: `tools/localfuzz/findings/20260822-225752-backend-divergence-62b8e97c1f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-225752-backend-divergence-62b8e97c1f/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**COMPILER RUN:**
+The compiler successfully generated a new version of `mix_parallel_vec_read_capture.vani` with the specified mutant/generated source.
+
+**REPROSOURCE:**
+The reproducing source provided is:
+
+```vani
+// श्री।.
+// Regression for bug #13: SSA-LLVM emitted a self-bitcast
+// (`%v_X = bitcast %intent_vec_i64 %cap_0 to %intent_vec_i64`)
+// when aliasing aggregate-typed captures into the parallel-for
+// outline's body SSA namespace. LLVM rejects self-bitcasts on
+// aggregate types — `lli` aborted with "invalid cast opcode".
+// The fix uses `select i1 true, V, V` for aggregates instead.
+pure fn double(n: i64) -> i64 { return n * 2; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+  let total: i64 = 0 + 0;
+  parallel for i from 0 to 5
+  reduce total with +;
+  reduce total with +;
+  {
+    total = total + double(xs[i]);
+  }
+  return total;
+}
+```
+
+**OBSERVED SYMPTOM:**
+The compiler encountered a backend-divergence error, specifically an LLVM error related to multiple definition of local values. The specific error message was:
+
+```
+lli: lli: /tmp/vanic-candidate-1671059-1787439471161567739.ll:3522:3: error: multiple definition of local value named 'loc_red_0'
+  %loc_red_0 = alloca i64
+  ^
+```
+
+**AFFECTED BACKENDS
