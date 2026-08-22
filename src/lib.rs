@@ -60102,6 +60102,15 @@ fn main() -> i64 { return 0; }
     // explicit rejection in `mutex_new`/`rwlock_new`'s own type-
     // checking, covering all four nesting combinations
     // (Mutex<Mutex>, Mutex<RwLock>, RwLock<Mutex>, RwLock<RwLock>).
+    //
+    // BUG-218 follow-up (2026-08-22): the original narrow "nested
+    // concurrency handles are not supported" check was generalized
+    // to reject ANY non-Copy T (Mutex<Mutex<U>> is just one instance
+    // of a non-Copy T -- Mutex/RwLock themselves aren't Copy -- the
+    // same real double-free risk `Mutex<Box<T>>`/`Mutex<Vec<T>>` were
+    // separately found to have). The rejection message changed
+    // accordingly; still asserts these four nesting combinations are
+    // rejected, just checks the new, more general message text.
     #[test]
     fn nested_concurrency_handles_are_cleanly_rejected() {
         let mutex_in_mutex = r#"
@@ -60113,7 +60122,7 @@ fn main() -> i64 { return 0; }
         "#;
         let c_err = compile_to_c(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (C)");
         assert!(
-            format!("{:?}", c_err).contains("nested concurrency handles are not supported"),
+            format!("{:?}", c_err).contains("'mutex_new' requires a Copy type"),
             "unexpected rejection message: {:?}", c_err
         );
         compile_to_llvm(mutex_in_mutex).err().expect("Mutex<Mutex<T>> must be rejected (LLVM)");

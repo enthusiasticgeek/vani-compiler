@@ -403,7 +403,30 @@ fn ty_contains_vec_of_atomic_or_channel(ty: &Type) -> bool {
     match ty {
         Type::Vec(inner) => matches!(
             &**inner,
-            Type::Atomic(_) | Type::Channel(_, _)
+            // BUG-218: `Vec<Mutex<T>>`/`Vec<Guard<T>>`/
+            // `Vec<RwLock<T>>`/`Vec<ReadGuard<T>>`/
+            // `Vec<WriteGuard<T>>` fail to link on LLVM for ANY T,
+            // including `i64` (unlike the bare-type gate in
+            // `ty_contains_non_i64_mutex_family`, which only
+            // rejects non-i64 T) -- confirmed via a direct
+            // `Vec<Mutex<i64>>` repro: `opt`/`llc` reject
+            // "base element of getelementptr must be sized" for
+            // `%intent_mutex_int64_t`. Root cause: a program mixing
+            // `Vec<Mutex<T>>` with otherwise-SSA-eligible code
+            // reuses tree-LLVM's generic Vec-bundle machinery
+            // (`vec_element_size_expr`/`llvm_mutex_struct`, which
+            // references the per-element-type name from BUG-19),
+            // while `ssa_backend_llvm.rs`'s OWN Mutex/Guard
+            // declaration (used for any non-Vec Mutex ops in the
+            // SAME function) hardcodes the OLDER, disconnected name
+            // -- a cross-file/cross-representation type-name
+            // mismatch, same failure family as Atomic/Channel just
+            // below but triggered by naming rather than pointer-vs-
+            // value shape. C doesn't have this problem (confirmed
+            // clean via the same repro on `--backend=c`) so this
+            // stays LLVM-only, mirroring Atomic/Channel's own scope.
+            Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_)
+                | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_)
         ) || ty_contains_vec_of_atomic_or_channel(inner),
         Type::Array { element, .. } => ty_contains_vec_of_atomic_or_channel(element),
         Type::Ref(inner) | Type::RefMut(inner) => {
@@ -550,6 +573,52 @@ fn ssa_c_extra_reject(stmt: &TypedStmt) -> bool {
         || stmt_calls_vec_with_capacity(stmt)
 }
 
+/// BUG-218: `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+/// `WriteGuard<T>` for any T OTHER than `i64` are silently broken on
+/// both SSA backends -- confirmed via a direct repro, a plain (no
+/// Vec involved) `Mutex<i32>` fails LLVM IR verification
+/// (`'%v_0' defined with type 'i32' but expected 'i64'`) and fails
+/// to compile on the C side (`implicit declaration of function
+/// 'intent_mutex_int32_t_new'`). Root cause: `ssa_backend_llvm.rs`
+/// and `ssa_backend_c.rs` each unconditionally emit ONLY the
+/// hardcoded i64 Mutex/Guard bundle (`emit_intent_mutex_helpers_c`,
+/// literally named "Legacy: emit full i64 mutex helpers") --
+/// neither SSA backend was ever updated to the per-element-type
+/// generic bundle emission tree-C/tree-LLVM got in BUG-19
+/// (2026-07-27), which loops over every DISTINCT element type the
+/// program actually uses (`collect_mutex_specs`/
+/// `collect_rwlock_specs`). The checker happily accepts `Mutex<i32>`
+/// (nothing stops it type-checking), so this reaches codegen and
+/// breaks. Rather than duplicate tree's generic per-T bundle
+/// emission into both SSA backends (a substantially larger, riskier
+/// change touching `Module`-level codegen in two files that don't
+/// currently have access to the original `TypedProgram` to scan),
+/// gate the whole module out of the SSA fast path whenever a non-
+/// i64 element appears anywhere in this type -- the tree backends
+/// already handle arbitrary T correctly and unconditionally.
+fn ty_contains_non_i64_mutex_family(ty: &Type) -> bool {
+    match ty {
+        Type::Mutex(inner)
+        | Type::Guard(inner)
+        | Type::RwLock(inner)
+        | Type::ReadGuard(inner)
+        | Type::WriteGuard(inner) => {
+            !matches!(**inner, Type::I64) || ty_contains_non_i64_mutex_family(inner)
+        }
+        Type::Vec(inner) | Type::Atomic(inner) | Type::Box(inner) => {
+            ty_contains_non_i64_mutex_family(inner)
+        }
+        Type::Array { element, .. } => ty_contains_non_i64_mutex_family(element),
+        Type::Ref(inner) | Type::RefMut(inner) => ty_contains_non_i64_mutex_family(inner),
+        Type::Tuple(elements) => elements.iter().any(ty_contains_non_i64_mutex_family),
+        Type::FnPtr(params, ret) => {
+            params.iter().any(ty_contains_non_i64_mutex_family)
+                || ty_contains_non_i64_mutex_family(ret)
+        }
+        _ => false,
+    }
+}
+
 fn ssa_type_supported(ty: &Type) -> bool {
     // Every concurrency primitive now flows through SSA
     // (Atomic + Mutex/Guard + Channel) on both SSA-C and
@@ -566,6 +635,11 @@ fn ssa_type_supported(ty: &Type) -> bool {
     // gating away from SSA when an array return appears
     // anywhere in the program.
     if matches!(ty, Type::Array { .. }) {
+        return false;
+    }
+    // BUG-218: see `ty_contains_non_i64_mutex_family`'s own doc
+    // comment above.
+    if ty_contains_non_i64_mutex_family(ty) {
         return false;
     }
     true

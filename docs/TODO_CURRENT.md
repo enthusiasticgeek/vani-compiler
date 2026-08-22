@@ -16637,6 +16637,128 @@ repros; full `cargo test --release --workspace` clean; full
 `tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
 0 flagged, matching baseline exactly.
 
-Next free bug number is **BUG-218** (reserved for the open Mutex/Guard
-SSA-LLVM naming-mismatch investigation above, if/when it's picked
-up).
+## BUG-218: Mutex/Guard/RwLock SSA-LLVM naming mismatch + a real
+## soundness gap found along the way
+
+Picked up the open item from BUG-217's writeup. Root cause was as
+diagnosed there: `ssa_backend_llvm.rs`'s Mutex/Guard support is a
+simpler, i64-only implementation (`%intent_mutex_i64`, hardcoded)
+entirely disconnected from tree-LLVM's BUG-19 fix (per-element-type
+`%intent_mutex_int64_t` naming, used by the generic Vec-bundle
+machinery a mixed program reuses) -- and `ssa_backend_c.rs` has the
+identical gap on the C side (`emit_intent_mutex_helpers_c`, literally
+named "Legacy: emit full i64 mutex helpers", called unconditionally
+regardless of what element types the program actually uses; tree-C's
+own `emit_c` never calls this legacy shim at all, relying purely on
+the correct generic per-T mechanism).
+
+**Decision: gate out of the SSA fast path rather than duplicate
+tree's generic per-T bundle emission into both SSA backends.**
+Neither `ssa_backend_llvm.rs` nor `ssa_backend_c.rs` currently has
+access to the original `TypedProgram` (SSA's `Module` is already
+lowered) needed to scan for actual element-type usage the way tree's
+`collect_mutex_specs`/`collect_rwlock_specs` do -- threading that
+through would be a substantially larger, riskier change than adding
+two focused type-level gates in `main.rs`, mirroring the EXISTING
+precedent already there for `Vec<Atomic<T>>`/`Vec<Channel<T,N>>`.
+
+Two new gates, both in `main.rs`:
+1. `ty_contains_non_i64_mutex_family` (new, feeds into the shared
+   `ssa_type_supported`, so it applies to BOTH SSA backends): rejects
+   the whole module from SSA whenever `Mutex<T>`/`Guard<T>`/
+   `RwLock<T>`/`ReadGuard<T>`/`WriteGuard<T>` appears ANYWHERE with a
+   non-`i64` `T` (recursing through Vec/Array/Ref/RefMut/Tuple/FnPtr/
+   Atomic/Box). This is the fix for the plain (no-Vec-involved) bug:
+   confirmed via direct repro, a bare `Mutex<i32>` failed LLVM IR
+   verification outright (`'%v_0' defined with type 'i32' but
+   expected 'i64'`) and failed to compile on C (`implicit declaration
+   of function 'intent_mutex_int32_t_new'`) -- `Mutex<T>` may only
+   ever have been correctly lowered for `T = i64` on the SSA fast
+   path, despite the checker accepting any T. `RwLock<i32>` (same
+   underlying gap) confirmed fixed by the same change.
+2. Extended `ty_contains_vec_of_atomic_or_channel` (LLVM-only,
+   mirrors why Atomic/Channel are LLVM-only exclusions there already
+   -- confirmed C doesn't have this problem via the same repro on
+   `--backend=c`): also flags `Vec<Mutex<T>>`/`Vec<Guard<T>>`/
+   `Vec<RwLock<T>>`/`Vec<ReadGuard<T>>`/`Vec<WriteGuard<T>>` for ANY
+   T, including `i64` -- this is the fix for the specific `Vec<
+   Mutex<i64>>` link failure BUG-217 originally surfaced (a mixed
+   program's Vec-bundle code referencing the new per-T name while
+   SSA-LLVM's own Mutex declaration in the SAME function uses the
+   old one).
+
+**A real, more serious soundness bug found while sweeping bool and
+nested-RAII cases per the user's follow-up questions.** `RwLock<bool>`
+crashed LLVM IR verification even AFTER falling back to tree-LLVM via
+gate 1 above (`'%t16' defined with type 'i8' but expected 'i1'`) --
+`read_guard_get`/`write_guard_set` in `backend_llvm.rs` never got the
+exact `i1`-vs-`i8` conversion `guard_get`/`guard_set` already have (a
+2026-08-03 "Gap-audit fix" comment explicitly documents why: bool's
+payload storage is `i8`, not byte-addressable `i1`, so returning/
+storing the raw SSA value without `icmp ne i8 _, 0` / `zext i1 _ to
+i8` is an LLVM type mismatch the instant the caller uses it as a
+bool). A sibling-function gap the 2026-08-03 fix should have covered
+but didn't. Fixed by mirroring `guard_get`/`guard_set`'s exact
+conversions into `read_guard_get`/`write_guard_set`.
+
+Then, checking whether `Box<Mutex<T>>` has the same issue (it
+doesn't -- `box()` already rejects `Mutex<T>` as an inner type in v1,
+same as it rejects the 12 Level-4 types) led to checking the REVERSE
+nesting, `Mutex<Box<T>>` -- which IS accepted by the checker, and
+turned out to be a genuine, more serious pre-existing soundness bug,
+unrelated to BUG-218's SSA-routing fix: `mutex_new`/`rwlock_new`'s
+checker code already had a narrow rejection for `Mutex<Mutex<T>>`/
+`Mutex<RwLock<T>>` (a 2026-08-03 "Gap-audit fix", on the reasoning
+that nested-lock codegen was never implemented) -- but a non-lock,
+non-Copy `T` like `Box<i64>`, `Vec<i64>`, `OwnedStr`, or a struct with
+a non-Copy field was NOT rejected, and compiled straight through to a
+REAL runtime bug: `guard_get`/`mutex_lock` (and RwLock's equivalents)
+unconditionally return `T` BY VALUE, which is only sound when `T`
+actually is Copy. For an affine `T`, that "copy" aliases the SAME
+heap allocation the lock itself still owns. Confirmed via direct
+repros: `Mutex<Box<i64>>` produced `free(): double free detected in
+tcache 2` on C, and panicked the COMPILER ITSELF on LLVM (`internal
+error: entered unreachable code: llvm_type: use llvm_type_string for
+aggregate / ref type Box(I64)` -- never even reached runtime).
+`Mutex<Vec<i64>>` failed to compile on C with undefined bundle
+symbols, a different symptom of the identical root cause. This is a
+genuine soundness gap, not a missing codegen arm -- there is no sound
+way to return an affine value out of a lock by copy, so the fix is a
+compile-time rejection, not an attempt to "fix" the codegen. Fixed by
+generalizing the existing `Mutex<Mutex<T>>`/`Mutex<RwLock<T>>`-only
+check in both `mutex_new` and `rwlock_new` to `!element.is_copy()`
+(which correctly subsumes the original nested-lock case, since
+Mutex/RwLock themselves aren't Copy, and correctly distinguishes a
+genuinely-Copy struct like the docs' own `Mutex<SharedCounter>`
+example from a struct with a non-Copy field via the existing
+`struct_has_non_copy_field` registry) -- with a new diagnostic
+message explaining the double-free risk directly, not just "not
+implemented". `Channel<T,N>`/`Atomic<T>` were separately confirmed to
+already have their own, pre-existing Copy/scalar-only restrictions
+(`Channel<Vec<i64>,4>`/`Atomic<Box<i64>>` were both already cleanly
+rejected before this session touched anything), so they were never at
+risk of this specific gap.
+
+Also swept, confirmed clean, no fix needed: `Mutex<bool>` standalone
+and nested in `Vec<Mutex<bool>>` (works correctly on both backends,
+both before and after every fix in this entry); `RwLock<i64>`/
+`Atomic<i64>` (already correct); the existing nested-lock rejection
+test (`nested_concurrency_handles_are_cleanly_rejected`) still
+correctly rejects all 4 nesting combinations, just via the new, more
+general diagnostic message (updated to match).
+
+Verified: `Mutex<i32>`/`RwLock<i32>`/`Vec<Mutex<i64>>`/`Vec<Mutex<
+i32>>`/`RwLock<bool>`/write_guard round-trip all confirmed correct
+via direct runs and `valgrind --leak-check=full` (0 errors, 0 leaks)
+on both backends; `Mutex<Box<i64>>`/`Mutex<Vec<i64>>`/`Mutex<Struct-
+WithVecField>`/`Mutex<OwnedStr>` all confirmed cleanly rejected at
+compile time with the new diagnostic, while the legitimate `Mutex<
+SharedCounter>`-style all-Copy-fields struct case still compiles and
+runs correctly on both backends; full `cargo test --release
+--workspace` clean (one pre-existing test's assertion string updated
+to match the new, more general rejection message -- not a behavior
+regression, still rejects the same 4 nesting combinations); full
+`tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
+0 flagged, matching baseline exactly.
+
+Next free bug number is **BUG-219**.

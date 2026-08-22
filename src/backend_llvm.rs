@@ -8392,6 +8392,25 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let val = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = load {}, {}* {}\n", val, payload_ty, payload_ty, val_p));
+                // BUG-218 follow-up: mirror of `guard_get`'s own
+                // Gap-audit fix (2026-08-03) above -- `RwLock<bool>`/
+                // `ReadGuard<bool>`/`WriteGuard<bool>` store their
+                // payload as `i8` (same reasoning: `i1` isn't byte-
+                // addressable), but this sibling function returned
+                // the raw `i8` SSA value directly instead of
+                // converting back to `i1` -- confirmed via a direct
+                // `RwLock<bool>` repro crashing LLVM IR verification
+                // ("defined with type 'i8' but expected 'i1'") the
+                // instant the caller used the result as a bool. That
+                // 2026-08-03 fix covered `guard_get`/`guard_set` but
+                // was never extended to this Mutex-vs-RwLock sibling
+                // pair, even though both share the identical i1-vs-i8
+                // storage shape.
+                if matches!(elt, Type::Bool) {
+                    let truncd = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", truncd, val));
+                    return truncd;
+                }
                 return val;
             }
             if name == "write_guard_set" {
@@ -8417,7 +8436,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
                     val_p, rw_ty, rw_ty, rw_ptr
                 ));
-                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, v, payload_ty, val_p));
+                // BUG-218 follow-up: mirror of `guard_set`'s own
+                // Gap-audit fix (2026-08-03) -- `v` is an `i1` bool
+                // value but the slot's real storage type is `i8`,
+                // same class of mismatch as `read_guard_get` just
+                // above, on the write side this time. `zext i1 to
+                // i8` matches `guard_set`'s existing Bool handling.
+                let stored = if matches!(elt, Type::Bool) {
+                    let promoted = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = zext i1 {} to i8\n", promoted, v));
+                    promoted
+                } else {
+                    v.clone()
+                };
+                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, stored, payload_ty, val_p));
                 return v;
             }
             // Closure #358: i64_to_str.

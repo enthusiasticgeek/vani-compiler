@@ -26958,17 +26958,49 @@ fn check_mutex_builtin(
             // either is fine" framing -- full nested-lock codegen
             // support is a substantive follow-up, not a missing-arm
             // fix.
-            if matches!(inferred_element, Type::Mutex(_) | Type::RwLock(_)) {
+            //
+            // BUG-218 follow-up (2026-08-22): generalized from just
+            // Mutex/RwLock to EVERY non-Copy T, after `Mutex<Box<i64>>`
+            // and `Mutex<Vec<i64>>` were both found to compile straight
+            // through this same gap and then fail at runtime, not just
+            // compile time -- `guard_get`/`mutex_lock` unconditionally
+            // return T BY VALUE (an implicit Copy), which is only sound
+            // when T actually is Copy. For an affine T, that "copy" is
+            // really an alias to the SAME heap allocation the Mutex
+            // itself still owns: confirmed via direct repros, C hit a
+            // real double-free ("free(): double free detected in
+            // tcache 2") because both the returned "copy" and the
+            // Mutex's own payload got dropped independently, and LLVM
+            // didn't even reach runtime -- the compiler itself panicked
+            // internally (`llvm_type: use llvm_type_string for
+            // aggregate / ref type Box(I64)`) trying to size a non-
+            // scalar payload the Mutex/Guard bundle machinery was never
+            // built to hold as a plain by-value SSA operand. This is a
+            // real soundness gap, not just a "missing codegen arm" --
+            // there's no sound way to return an affine value by copy,
+            // so the fix is to reject it at the type-inference site
+            // (matching `unbox(ref b)`'s existing identical restriction
+            // for non-Copy Box contents), not to attempt "fixing" the
+            // codegen. Same restriction applies uniformly to Mutex/
+            // Guard/RwLock/ReadGuard/WriteGuard, so it's enforced once
+            // here (at construction, the earliest point T is known)
+            // rather than separately at every accessor.
+            if !inferred_element.is_copy() {
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
-                        "nested concurrency handles are not supported in v1: \
-                         'mutex_new' was given a value of type {}, which is itself \
-                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
-                         data instead of wrapping one lock in another.",
-                        inferred_element
+                        "'mutex_new' requires a Copy type: got {}. Mutex<T>/Guard<T> (and \
+                         RwLock<T>/ReadGuard<T>/WriteGuard<T>) return their payload BY VALUE \
+                         from guard_get/mutex_lock -- for a non-Copy (affine) T like {}, that \
+                         would alias the SAME heap allocation the lock itself still owns, \
+                         causing a double-free once both the returned value and the lock are \
+                         dropped. There is no sound way to move a value out of a lock without \
+                         consuming the lock itself, which Mutex<T> doesn't support in v1. Wrap \
+                         a Copy handle (e.g. an index into an outer Vec, or an i64 identifier) \
+                         instead, or restructure so the lock guards a Copy summary of the data.",
+                        inferred_element, inferred_element
                     ),
-                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &inferred_element.to_string())));
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a Copy type", &inferred_element.to_string())));
                 return CheckedExpr::fallback(Type::Mutex(Box::new(Type::I64)), span);
             }
             let inferred_mutex_ty = Type::Mutex(Box::new(inferred_element.clone()));
@@ -27802,22 +27834,26 @@ fn check_rwlock_builtin(
             }
             let v = check_expr(&args[0], env, signatures, diagnostics);
             let element = v.ty().clone();
-            // Gap-audit fix (2026-08-03): see the matching check in
-            // `mutex_new` above for the full root-cause writeup --
-            // nested concurrency handles were never actually
-            // implemented in either backend and used to crash the
-            // native toolchain instead of failing cleanly.
-            if matches!(element, Type::Mutex(_) | Type::RwLock(_)) {
+            // Gap-audit fix (2026-08-03) + BUG-218 follow-up
+            // (2026-08-22): see the matching check in `mutex_new`
+            // above for the full root-cause writeup -- `read_guard_
+            // get`/`write_guard_get` return T BY VALUE the same way
+            // `guard_get` does, so a non-Copy T has the identical
+            // double-free-or-compiler-panic risk (confirmed for
+            // Mutex; RwLock shares the exact same accessor shape).
+            if !element.is_copy() {
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
-                        "nested concurrency handles are not supported in v1: \
-                         'rwlock_new' was given a value of type {}, which is itself \
-                         a lock. Use a single Mutex<T>/RwLock<T> around the innermost \
-                         data instead of wrapping one lock in another.",
-                        element
+                        "'rwlock_new' requires a Copy type: got {}. RwLock<T> (and Mutex<T>) \
+                         return their payload BY VALUE from read_guard_get/write_guard_get -- \
+                         for a non-Copy (affine) T like {}, that would alias the SAME heap \
+                         allocation the lock itself still owns, causing a double-free once both \
+                         the returned value and the lock are dropped. Wrap a Copy handle instead \
+                         (e.g. an index into an outer Vec, or an i64 identifier).",
+                        element, element
                     ),
-                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a non-lock T", &element.to_string())));
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("a Copy type", &element.to_string())));
                 return CheckedExpr::fallback(Type::RwLock(Box::new(Type::I64)), span);
             }
             let ret_ty = Type::RwLock(Box::new(element));
