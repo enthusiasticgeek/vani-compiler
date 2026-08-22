@@ -10385,3 +10385,47 @@ Mutant/generated source:
 ```
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+## Audit round: 2026-08-21/22 -- feature-combination sweep (not localfuzz-sourced), BUG-216 fixed on main
+
+Per the user's explicit request to "think of feature combinations not
+tested before": localfuzz had nothing new queued at the time (harness
+running clean cycles), so this round hand-constructed novel
+combinations of recently-touched features instead of triaging fresh
+findings. Most combos tested clean (`cancel`+`Task<R>`, `cancel`+
+`detach`, `downto`+`parallel for` -- cleanly rejected at compile time,
+correctly). One combination found a real, previously-unexercised bug.
+
+**REAL BUG, FIXED as BUG-216** (main repo commit `13f29c82`).
+`Vec<T>` where `T` is one of the 12 Level-4 builtin data-structure
+types (`UnionFind`, `Graph`, `Bst<i64>`, `Trie`, `SkipList<i64>`,
+`BinaryHeap<i64>`, `BloomFilter`, `BTreeSet<i64>`,
+`BTreeMap<i64,i64>`, `HashSet<i64>`, `HashMap<i64,i64>`,
+`Deque<i64>`) crashed on both backends -- `Vec<Graph>`/
+`Vec<UnionFind>` corrupted the heap on LLVM (`corrupted size vs.
+prev_size`) and failed to compile on C (`unknown type name`). Two
+independent root causes: (1) LLVM's element byte-size estimator had
+no arm for any of these 12 types, defaulting to 8 bytes/element
+regardless of the real size (up to 96 bytes) -- the same
+under-allocation failure class this file's own history shows
+repeatedly (Vec128/256/512, Box<dyn Iface>, Channel/Mutex/Guard/
+RwLock, payloaded enums), just never extended to these types; (2) the
+C backend emitted each type's typedef AFTER the Vec-bundle loop that
+references it -- the same ordering gap BUG-189 fixed for Pool/Handle,
+never extended here either. A follow-up `valgrind` run on the crash
+fix's own repro also found a related leak (none of these 12 types'
+`_drop` was ever called for a Vec element on scope-exit/clear/
+overwrite) -- fixed alongside the crash. See `docs/TODO_CURRENT.md`'s
+BUG-216 entry on vani-compiler for the full writeup, including a
+first attempted fix that was reverted after `tools/
+backend_crosscheck.py` caught 4 new regressions it introduced.
+
+**NOT a bug**: `20260822-030602-run-crash-c1adddc749` (base:
+`examples/language/italian/async_cancel_auto.vani`) -- same
+established i64::MAX-`sleep_ms`-duration fuzzer artifact as the
+danish/hungarian/french/gujarati instances of this same base file
+already closed out in prior rounds.
+
+Next free bug number on vani-compiler is BUG-217.
