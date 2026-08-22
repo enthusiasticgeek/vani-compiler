@@ -18,7 +18,7 @@
 //! - Audit and remove the C-pinned tests in `lib.rs` that assert on
 //!   `intent_check_*` / `v_*` C-specific identifiers.
 
-use crate::ast::{BinaryOp, Type, UnaryOp};
+use crate::ast::{BinaryOp, ReductionOp, Type, UnaryOp};
 use crate::backend::Backend;
 use crate::ir::{TypedExpr, TypedExprKind, TypedFunction, TypedProgram, TypedStmt};
 use std::collections::BTreeSet;
@@ -1477,6 +1477,106 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_i64_pool(program) {
         emit_intent_pool_helpers_c_body(&mut body);
     }
+    // BUG-216: bare struct typedefs ONLY for every Level-4
+    // builtin data-structure type, hoisted ahead of the
+    // `element_types` Vec-bundle loop below -- same ordering gap
+    // as BUG-189 (`Pool`/`Handle`, just above), but split
+    // differently. Unlike Pool, several of these types' own
+    // FUNCTION bodies (`graph_topo_sort`/`graph_astar`,
+    // `btreeset_range`, `btreemap_range_keys`/`_values`, ...) in
+    // turn depend on `intent_vec_int64_t` from the SAME Vec-bundle
+    // loop -- moving each type's ENTIRE emission block ahead
+    // (tried first, reverted) fixes `Vec<Graph>`/`Vec<UnionFind>`/
+    // etc. but breaks THOSE functions the same way, just in the
+    // opposite direction (confirmed via `tools/backend_crosscheck.py`
+    // flagging `graph_algo2.vani`/`btreeset.vani`/`btreemap.vani`/
+    // `hashmap_veck.vani`). Mirrors BUG-31's own typedef/functions
+    // split (`emit_vec_bundle_typedef` vs `emit_vec_bundle`) for
+    // exactly this "T needs forward-declaring, T's functions need
+    // a later dependency" shape: emit ONLY the bare typedef here
+    // (each `emit_intent_*_helpers_c_body` below has had its own
+    // now-redundant leading typedef line removed -- C rejects a
+    // literal duplicate typedef of an ANONYMOUS struct as
+    // "conflicting types", even though the text is identical, so
+    // it truly has to be removed from the later site, not just
+    // harmlessly repeated), so `Vec<T>`'s bundle (which only needs
+    // T forward-declared, never calls into T's functions) can
+    // reference a real type either way.
+    if program_uses_i64_deque(program) {
+        body.push_str(
+            "typedef struct { int64_t* data; uint64_t front; uint64_t len; uint64_t capacity; } intent_deque_i64;\nstatic void intent_deque_i64_drop(intent_deque_i64* p);\n",
+        );
+    }
+    if program_uses_i64_hashset(program) {
+        body.push_str(
+            "typedef struct { int64_t* keys; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; } intent_hashset_i64;\nstatic void intent_hashset_i64_drop(intent_hashset_i64* p);\n",
+        );
+    }
+    if program_uses_i64_i64_hashmap(program) {
+        body.push_str(
+            "typedef struct { int64_t* keys; int64_t* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; } intent_hashmap_i64_i64;\nstatic void intent_hashmap_i64_i64_drop(intent_hashmap_i64_i64* p);\n",
+        );
+    }
+    if program_uses_i64_btreeset(program) {
+        body.push_str(
+            "typedef struct { int64_t* keys; uint64_t len; uint64_t capacity; } intent_btreeset_i64;\nstatic void intent_btreeset_i64_drop(intent_btreeset_i64* p);\n",
+        );
+    }
+    if program_uses_i64_i64_btreemap(program) {
+        body.push_str(
+            "typedef struct { int64_t* keys; int64_t* values; uint64_t len; uint64_t capacity; } intent_btreemap_i64_i64;\nstatic void intent_btreemap_i64_i64_drop(intent_btreemap_i64_i64* p);\n",
+        );
+    }
+    if program_uses_union_find(program) {
+        body.push_str(
+            "typedef struct { int64_t* parent; int64_t* rank; uint64_t n; uint64_t sets; } intent_union_find;\nstatic void intent_union_find_drop(intent_union_find* p);\n",
+        );
+    }
+    if program_uses_i64_binary_heap(program) {
+        body.push_str(
+            "typedef struct { int64_t* data; uint64_t len; uint64_t capacity; } intent_binary_heap_i64;\nstatic void intent_binary_heap_i64_drop(intent_binary_heap_i64* p);\n",
+        );
+    }
+    if program_uses_bloom_filter(program) {
+        body.push_str(
+            "typedef struct { uint8_t* bits; int64_t num_bits; int64_t num_hashes; int64_t insert_count; } intent_bloom_filter;\nstatic void intent_bloom_filter_drop(intent_bloom_filter* p);\n",
+        );
+    }
+    if program_uses_i64_bst(program) {
+        body.push_str(
+            "typedef struct { int64_t* keys; int32_t* left; int32_t* right; int64_t root; int64_t len; int64_t capacity; uint8_t* heights; } intent_bst_i64;\nstatic void intent_bst_i64_drop(intent_bst_i64* p);\n",
+        );
+    }
+    if program_uses_graph(program) {
+        body.push_str(
+            "typedef struct { int64_t num_nodes; int32_t* edge_src; int32_t* edge_dst; int64_t* edge_weight; int64_t num_edges; int64_t edge_capacity; int32_t* adj_start; int32_t* adj_csr_dst; int64_t* adj_csr_weight; int32_t* rev_adj_start; int32_t* rev_adj_csr_src; int64_t* rev_adj_csr_weight; } intent_graph;\nstatic void intent_graph_drop(intent_graph* p);\n",
+        );
+    }
+    if program_uses_trie(program) {
+        body.push_str(
+            "typedef struct { uint8_t** node_keys; int32_t** node_children; uint16_t* node_count; uint16_t* node_cap; int64_t* free_next; uint8_t* is_end; int64_t num_nodes; int64_t capacity; int64_t num_words; int64_t free_head; int64_t free_count; } intent_trie;\nstatic void intent_trie_drop(intent_trie* p);\n",
+        );
+    }
+    if program_uses_skiplist(program) {
+        body.push_str(
+            "#define INTENT_SKIPLIST_MAX_LEVEL 8\ntypedef struct { int64_t* keys; int32_t* forward; int32_t* node_levels; uint64_t rng_state; int64_t num_nodes; int64_t capacity; int64_t num_keys; int64_t tail_node; } intent_skiplist_i64;\nstatic void intent_skiplist_i64_drop(intent_skiplist_i64* p);\n",
+        );
+    }
+    // BUG-216 follow-up: `Region` (Layer 5 v2 of `unsafe.md`) has
+    // the exact same C typedef-ordering gap as the 12 types above,
+    // confirmed via a direct `Vec<Region>` repro ("unknown type
+    // name 'intent_region'") -- it's just a `Type::Region` unit
+    // variant like `Type::Graph`/`Type::Trie`, not one of the
+    // originally-audited "Level-4 data structure" types, so it
+    // wasn't in that first sweep. `Pool<i64>` (`Type::Pool`), the
+    // other Layer-2/5 `unsafe.md` sibling, was ALREADY fixed by
+    // BUG-189 -- confirmed clean via the same `Vec<Pool<i64>>`
+    // repro -- so it needs no change here.
+    if program_uses_region(program) {
+        body.push_str(
+            "typedef struct { int64_t* data; size_t len; size_t capacity; } intent_region;\nstatic void intent_region_drop(intent_region* p);\n",
+        );
+    }
     for element in &element_types {
         // Skip Vec bundles already emitted in the pre-struct
         // pass for fields like `struct Bag { contents: Vec<i64> }`.
@@ -2779,7 +2879,7 @@ fn stmt_uses_i64_deque(stmt: &crate::ir::TypedStmt) -> bool {
 /// pop/peek gated on `has_option_i64` flag from the caller.
 fn emit_intent_deque_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
-        "typedef struct { int64_t* data; uint64_t front; uint64_t len; uint64_t capacity; } intent_deque_i64;\n\
+        "\
          static INTENT_UNUSED intent_deque_i64 intent_deque_i64_new(void) {\n\
          \x20 intent_deque_i64 d; d.data = (int64_t*)0; d.front = 0; d.len = 0; d.capacity = 0; return d;\n\
          }\n\
@@ -3340,8 +3440,7 @@ fn emit_intent_bptr_helpers_c_body(out: &mut String, has_option_i64: bool) {
 /// a future `region_with_capacity` builtin.
 fn emit_intent_region_helpers_c_body(out: &mut String) {
     out.push_str(
-        "typedef struct { int64_t* data; size_t len; size_t capacity; } intent_region;\n\
-         static INTENT_UNUSED intent_region intent_region_new(void) {\n\
+        "static INTENT_UNUSED intent_region intent_region_new(void) {\n\
          \x20 intent_region r;\n\
          \x20 r.data = (int64_t*)0;\n\
          \x20 r.len = 0; r.capacity = 0;\n\
@@ -3378,7 +3477,7 @@ fn emit_intent_region_helpers_c_body(out: &mut String) {
 /// only; hashset_remove deferred.
 fn emit_intent_hashset_helpers_c_body(out: &mut String) {
     out.push_str(
-        "typedef struct { int64_t* keys; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; } intent_hashset_i64;\n\
+        "\
          /* occ byte states (closure #342):\n\
           *   0 = empty       — terminates probe chains\n\
           *   1 = occupied    — slot in use\n\
@@ -5035,7 +5134,7 @@ fn emit_intent_hashmap_pair_c_body_vec_i64k(
 
 fn emit_intent_hashmap_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
-        "typedef struct { int64_t* keys; int64_t* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; } intent_hashmap_i64_i64;\n\
+        "\
          /* occ byte states (closure #343):\n\
           *   0 = empty       — terminates probe chains\n\
           *   1 = occupied    — slot in use\n\
@@ -5237,7 +5336,7 @@ fn stmt_uses_i64_btreeset(stmt: &crate::ir::TypedStmt) -> bool {
 /// arena variant queued for Level 4.
 fn emit_intent_btreeset_helpers_c_body(out: &mut String, has_option_i64: bool, emit_vec_dep: bool) {
     out.push_str(
-        "typedef struct { int64_t* keys; uint64_t len; uint64_t capacity; } intent_btreeset_i64;\n\
+        "\
          static INTENT_UNUSED intent_btreeset_i64 intent_btreeset_i64_new(void) {\n\
          \x20 intent_btreeset_i64 s; s.keys = (int64_t*)0; s.len = 0; s.capacity = 0; return s;\n\
          }\n\
@@ -5398,7 +5497,7 @@ fn stmt_uses_i64_i64_btreemap(stmt: &crate::ir::TypedStmt) -> bool {
 /// `_len` are always emitted.
 fn emit_intent_btreemap_helpers_c_body(out: &mut String, has_option_i64: bool, emit_vec_dep: bool) {
     out.push_str(
-        "typedef struct { int64_t* keys; int64_t* values; uint64_t len; uint64_t capacity; } intent_btreemap_i64_i64;\n\
+        "\
          static INTENT_UNUSED intent_btreemap_i64_i64 intent_btreemap_i64_i64_new(void) {\n\
          \x20 intent_btreemap_i64_i64 m;\n\
          \x20 m.keys = (int64_t*)0; m.values = (int64_t*)0; m.len = 0; m.capacity = 0;\n\
@@ -5592,7 +5691,7 @@ fn stmt_uses_union_find(stmt: &crate::ir::TypedStmt) -> bool {
 /// successful merge.
 fn emit_intent_union_find_helpers_c_body(out: &mut String) {
     out.push_str(
-        "typedef struct { int64_t* parent; int64_t* rank; uint64_t n; uint64_t sets; } intent_union_find;\n\
+        "\
          static INTENT_UNUSED intent_union_find intent_union_find_new(int64_t n) {\n\
          \x20 intent_union_find uf;\n\
          \x20 if (n < 0) n = 0;\n\
@@ -5614,7 +5713,7 @@ fn emit_intent_union_find_helpers_c_body(out: &mut String) {
          \x20 uf->n = 0; uf->sets = 0;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_union_find_find(intent_union_find* uf, int64_t x) {\n\
-         \x20 if (x < 0 || (uint64_t)x >= uf->n) return x;\n\
+         \x20 (void)intent_check_bounds(x, uf->n);\n\
          \x20 /* Walk to the root. */\n\
          \x20 int64_t r = x;\n\
          \x20 while (uf->parent[r] != r) r = uf->parent[r];\n\
@@ -5722,7 +5821,7 @@ fn stmt_uses_i64_binary_heap(stmt: &crate::ir::TypedStmt) -> bool {
 /// Option__i64 enum being registered. v1 i64 element only.
 fn emit_intent_binary_heap_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
-        "typedef struct { int64_t* data; uint64_t len; uint64_t capacity; } intent_binary_heap_i64;\n\
+        "\
          static INTENT_UNUSED intent_binary_heap_i64 intent_binary_heap_i64_new(void) {\n\
          \x20 intent_binary_heap_i64 h; h.data = (int64_t*)0; h.len = 0; h.capacity = 0; return h;\n\
          }\n\
@@ -5850,7 +5949,7 @@ fn stmt_uses_bloom_filter(stmt: &crate::ir::TypedStmt) -> bool {
 /// impossible. v1 keys are i64.
 fn emit_intent_bloom_filter_helpers_c_body(out: &mut String) {
     out.push_str(
-        "typedef struct { uint8_t* bits; int64_t num_bits; int64_t num_hashes; int64_t insert_count; } intent_bloom_filter;\n\
+        "\
          static INTENT_UNUSED uint64_t intent_bloom_filter_hash2(int64_t x) {\n\
          \x20 uint64_t h = 0x84222325cbf29ce4ULL;\n\
          \x20 uint64_t u = (uint64_t)x;\n\
@@ -5977,7 +6076,7 @@ fn stmt_uses_i64_bst(stmt: &crate::ir::TypedStmt) -> bool {
 /// min/max return `Option<i64>` and gate on Option__i64.
 fn emit_intent_bst_i64_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
-        "typedef struct { int64_t* keys; int32_t* left; int32_t* right; int64_t root; int64_t len; int64_t capacity; uint8_t* heights; } intent_bst_i64;\n\
+        "\
          static INTENT_UNUSED intent_bst_i64 intent_bst_i64_new(void) {\n\
          \x20 intent_bst_i64 b;\n\
          \x20 b.keys = (int64_t*)0; b.left = (int32_t*)0; b.right = (int32_t*)0;\n\
@@ -6535,7 +6634,7 @@ fn stmt_uses_graph(stmt: &crate::ir::TypedStmt) -> bool {
 /// returns Option<i64>, gated on Option__i64 being registered.
 fn emit_intent_graph_helpers_c_body(out: &mut String, has_option_i64: bool, emit_vec_dep: bool) {
     out.push_str(
-        "typedef struct { int64_t num_nodes; int32_t* edge_src; int32_t* edge_dst; int64_t* edge_weight; int64_t num_edges; int64_t edge_capacity; int32_t* adj_start; int32_t* adj_csr_dst; int64_t* adj_csr_weight; int32_t* rev_adj_start; int32_t* rev_adj_csr_src; int64_t* rev_adj_csr_weight; } intent_graph;\n\
+        "\
          static INTENT_UNUSED intent_graph intent_graph_new(int64_t n) {\n\
          \x20 intent_graph g;\n\
          \x20 g.num_nodes = (n < 0) ? 0 : n;\n\
@@ -7095,7 +7194,7 @@ fn emit_intent_trie_helpers_c_body(out: &mut String) {
     // entries — ~30–100× savings for sparse alphabets (DNA, ASCII
     // digits, hex). Live node count is still num_nodes - free_count.
     out.push_str(
-        "typedef struct { uint8_t** node_keys; int32_t** node_children; uint16_t* node_count; uint16_t* node_cap; int64_t* free_next; uint8_t* is_end; int64_t num_nodes; int64_t capacity; int64_t num_words; int64_t free_head; int64_t free_count; } intent_trie;\n\
+        "\
          /* Closure #345: alphabet generalized to the full u8 range.\n\
           * Every nonzero byte is a valid character. C strings are\n\
           * nul-terminated, so byte 0 still terminates a word; the\n\
@@ -7405,9 +7504,7 @@ fn stmt_uses_skiplist(stmt: &crate::ir::TypedStmt) -> bool {
 /// min/max return Option<i64> and gate on Option__i64.
 fn emit_intent_skiplist_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
-        "#define INTENT_SKIPLIST_MAX_LEVEL 8\n\
-         typedef struct { int64_t* keys; int32_t* forward; int32_t* node_levels; uint64_t rng_state; int64_t num_nodes; int64_t capacity; int64_t num_keys; int64_t tail_node; } intent_skiplist_i64;\n\
-         static INTENT_UNUSED uint64_t intent_skiplist_i64_rand(intent_skiplist_i64* sl) {\n\
+        "static INTENT_UNUSED uint64_t intent_skiplist_i64_rand(intent_skiplist_i64* sl) {\n\
          \x20 sl->rng_state = sl->rng_state * 6364136223846793005ULL + 1442695040888963407ULL;\n\
          \x20 return sl->rng_state;\n\
          }\n\
@@ -13291,6 +13388,34 @@ pub(crate) fn c_element_drop_old(slot: &str, ty: &Type) -> String {
             ),
             _ => format!("\n        free({slot});", slot = slot),
         },
+        // BUG-216 follow-up: every Level-4 builtin data-structure
+        // type owns its own heap buffers (freed by its `_drop`
+        // function, taking a `T*`), same as `Struct`/`Enum`/`Box`
+        // above -- but none of them had an arm here, so a
+        // `Vec<UnionFind>`/`Vec<Graph>`/etc. never called the
+        // element's own drop on scope exit, leaking every element's
+        // internal allocations (confirmed via `valgrind
+        // --leak-check=full` on a `Vec<UnionFind>` repro: the
+        // parent/rank arrays of every pushed `UnionFind` were
+        // "definitely lost"). `xs.data[k]`/`xs->data[i]` is the
+        // VALUE at the slot; `_drop` needs its address.
+        Type::UnionFind => format!("\n        intent_union_find_drop(&{slot});", slot = slot),
+        Type::Graph => format!("\n        intent_graph_drop(&{slot});", slot = slot),
+        Type::Bst(_) => format!("\n        intent_bst_i64_drop(&{slot});", slot = slot),
+        Type::Trie => format!("\n        intent_trie_drop(&{slot});", slot = slot),
+        Type::SkipList => format!("\n        intent_skiplist_i64_drop(&{slot});", slot = slot),
+        Type::BinaryHeap(_) => format!("\n        intent_binary_heap_i64_drop(&{slot});", slot = slot),
+        Type::BloomFilter => format!("\n        intent_bloom_filter_drop(&{slot});", slot = slot),
+        Type::BTreeSet(_) => format!("\n        intent_btreeset_i64_drop(&{slot});", slot = slot),
+        Type::BTreeMap(_, _) => format!("\n        intent_btreemap_i64_i64_drop(&{slot});", slot = slot),
+        Type::HashSet(_) => format!("\n        intent_hashset_i64_drop(&{slot});", slot = slot),
+        Type::HashMap(_, _) => format!("\n        intent_hashmap_i64_i64_drop(&{slot});", slot = slot),
+        Type::Deque(_) => format!("\n        intent_deque_i64_drop(&{slot});", slot = slot),
+        // BUG-216 follow-up: `Region` needs the same per-element
+        // drop dispatch as the 12 Level-4 types above (see the
+        // typedef-ordering fix's comment for why it wasn't in the
+        // original sweep).
+        Type::Region => format!("\n        intent_region_drop(&{slot});", slot = slot),
         _ => String::new(),
     }
 }
@@ -15129,15 +15254,58 @@ return __intent_ret; }}\n",
                 // Compilers without `-fopenmp` issue an "unknown
                 // pragma" warning and fall back to sequential —
                 // also correct.
-                let mut pragma = String::from("omp parallel for");
-                for r in reductions {
-                    pragma.push_str(&format!(
-                        " reduction({}:{})",
-                        r.op.display_symbol(),
-                        local_name(&r.var)
-                    ));
+                //
+                // BUG-214: `reduction(+:var)`/`reduction(*:var)` on
+                // an integer type has a checked-arithmetic soundness
+                // gap this backend can't close without dropping the
+                // clause entirely. Every per-iteration accumulate
+                // inside the loop body still goes through the normal
+                // checked-add/checked-mul emission (it's an ordinary
+                // assignment expression like any other), so overflow
+                // WITHIN one thread's own partial sum is still
+                // caught correctly -- but libgomp generates the
+                // FINAL cross-thread combine (`total = seed +
+                // partial_thread0 + partial_thread1 + ...`) itself,
+                // entirely outside this backend's control, with no
+                // overflow check at all. A sum that only overflows
+                // at that combine step (e.g. two threads' partials
+                // each individually in-range but summing past
+                // i64::MAX/MIN) silently wraps on this backend while
+                // ssa-LLVM's own pthread-pool-based reduction (which
+                // combines partials through its own checked-add)
+                // correctly traps. `Add`/`Mul` are the only ops
+                // where the combine itself can overflow (`Min`/`Max`
+                // just pick one of two already-valid values;
+                // `And`/`Or`/bitwise ops have no overflow concept)
+                // -- for those on an integer type, don't parallelize
+                // this loop at all, so every accumulate (including
+                // what would have been the cross-thread combine)
+                // goes through one single checked chain. Every other
+                // reduction shape (including non-integer Add/Mul,
+                // e.g. `f64`) keeps the OpenMP `reduction()` clause
+                // unchanged.
+                let has_unchecked_arith_combine = reductions.iter().any(|r| {
+                    matches!(r.op, ReductionOp::Add | ReductionOp::Mul) && r.ty.is_integer()
+                });
+                if has_unchecked_arith_combine {
+                    // No pragma at all -- plain sequential loop. Not
+                    // `GCC ivdep` (that asserts no loop-carried
+                    // dependency, which is false here: the whole
+                    // point is the reduction accumulator DOES carry
+                    // across iterations, and that's exactly the
+                    // dependency chain the checked-add guard needs
+                    // to stay intact).
+                } else {
+                    let mut pragma = String::from("omp parallel for");
+                    for r in reductions {
+                        pragma.push_str(&format!(
+                            " reduction({}:{})",
+                            r.op.display_symbol(),
+                            local_name(&r.var)
+                        ));
+                    }
+                    out.push_str(&format!("  _Pragma(\"{}\")\n", pragma));
                 }
-                out.push_str(&format!("  _Pragma(\"{}\")\n", pragma));
             } else {
                 // Same ivdep hint as for while-loops: vāṇī affine
                 // ownership guarantees no iteration carries a
@@ -16095,102 +16263,143 @@ fn emit_index_assign(
     };
 
     if let (Some(lv), Some(lty)) = (slot_lvalue.as_ref(), leaf_ty.as_ref()) {
-        // Mixed-place leaf drop (closure #126 / F2): when the
-        // assignment writes through a field path, free the OLD
-        // leaf field's heap before storing the new value.
-        if !field_path.is_empty() {
-            match lty {
-                Type::OwnedStr => {
-                    out.push_str(&format!("  free((void*){});\n", lv));
-                }
-                Type::Vec(elem) => {
-                    out.push_str(&format!("  {}({});\n", vec_helper(elem, "free"), lv));
-                }
-                _ => {}
-            }
-        } else {
-            // Whole-element overwrite (closure #149 / #150):
-            // `xs[i] = newval` for ANY heap-shaped element
-            // must free the OLD slot's heap before the store.
-            // Previously only the field_path != [] case was
-            // handled at the leaf level, so several
-            // whole-element shapes leaked.
-            match lty {
-                Type::OwnedStr => {
-                    // Closure #150: `Vec<OwnedStr>[i] = "x" + "y"`
-                    // — free the old i8* before storing the new.
-                    out.push_str(&format!("  free((void*){});\n", lv));
-                }
-                Type::Vec(elem) => {
-                    // Closure #150: `Vec<Vec<i64>>[i] = vec(…)`
-                    // — call the inner __free over the old
-                    // slot before storing the new struct.
-                    out.push_str(&format!(
-                        "  {}({});\n",
-                        vec_helper(elem, "free"),
-                        lv
-                    ));
-                }
-                Type::Struct(struct_name) => {
-                    let fields = STRUCT_FIELDS_REGISTRY
-                        .with(|r| r.borrow().get(struct_name).cloned())
-                        .unwrap_or_default();
-                    let has_owning = fields.iter().any(|(_, ty)| !ty.is_copy());
-                    if has_owning {
-                        let empty: std::collections::HashSet<&String> =
-                            std::collections::HashSet::new();
-                        emit_struct_field_drops(
-                            lv,
-                            struct_name,
-                            &fields,
-                            &empty,
-                            out,
-                        );
-                    }
-                }
-                Type::Enum(enum_name) => {
-                    let payload_ty = ENUM_PAYLOAD_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned());
-                    let free_expr: Option<String> = match &payload_ty {
-                        Some(Type::OwnedStr) => Some(format!(
-                            "free((void*){}.payload)",
-                            lv
-                        )),
-                        Some(Type::Vec(element)) => Some(format!(
-                            "{}({}.payload)",
-                            vec_helper(element, "free"),
-                            lv
-                        )),
-                        _ => None,
-                    };
-                    if let Some(free_call) = free_expr {
-                        let payload_tags: Vec<u32> =
-                            ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
-                                r.borrow()
-                                    .get(enum_name)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                        if !payload_tags.is_empty() {
-                            let cases: Vec<String> = payload_tags
-                                .iter()
-                                .map(|t| format!("case {}", t))
-                                .collect();
-                            out.push_str(&format!(
-                                "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
-                                lv,
-                                cases.join(": "),
-                                free_call
-                            ));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        // Mixed-place leaf drop (closure #126 / F2) when writing
+        // through a field path, or whole-element overwrite
+        // (closure #149 / #150) for plain `xs[i] = newval` --
+        // either way, ANY heap-shaped old slot value must be freed
+        // before the new value is stored. BUG-216 follow-up:
+        // unified both call sites through one helper (previously
+        // hand-duplicated, with the field_path branch missing
+        // Struct/Enum and BOTH branches missing Box and every
+        // Level-4 builtin type -- confirmed via a direct `valgrind`
+        // repro that `xs[0] = new_box;` on a `Vec<Box<Vec<i64>>>`
+        // leaked the old Box's inner Vec, a distinct bug from
+        // BUG-216 itself since this path never went through
+        // `c_element_drop_old` at all).
+        emit_index_assign_leaf_free_c(lv, lty, out);
     }
 
     out.push_str(&store_line);
+}
+
+/// Free the OLD value at an index-assign target's slot before the
+/// new value overwrites it -- shared by both the mixed-place
+/// (`field_path` non-empty) and whole-element (`field_path` empty)
+/// cases in `emit_index_assign` above. Same type coverage as
+/// `c_element_drop_old` (OwnedStr / Vec / Struct / Enum / Box /
+/// every Level-4 builtin type), duplicated here rather than reused
+/// directly because the call sites in `c_element_drop_old` all sit
+/// inside a Vec-bundle helper's own generated `for` loop with a
+/// fixed indentation/newline convention that doesn't match this
+/// function's plain statement-by-statement `out.push_str` style.
+fn emit_index_assign_leaf_free_c(lv: &str, lty: &Type, out: &mut String) {
+    match lty {
+        Type::OwnedStr => {
+            out.push_str(&format!("  free((void*){});\n", lv));
+        }
+        Type::Vec(elem) => {
+            out.push_str(&format!("  {}({});\n", vec_helper(elem, "free"), lv));
+        }
+        Type::Struct(struct_name) => {
+            let fields = STRUCT_FIELDS_REGISTRY
+                .with(|r| r.borrow().get(struct_name).cloned())
+                .unwrap_or_default();
+            let has_owning = fields.iter().any(|(_, ty)| !ty.is_copy());
+            if has_owning {
+                let empty: std::collections::HashSet<&String> =
+                    std::collections::HashSet::new();
+                emit_struct_field_drops(lv, struct_name, &fields, &empty, out);
+            }
+        }
+        Type::Enum(enum_name) => {
+            let payload_ty = ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().get(enum_name).cloned());
+            let free_expr: Option<String> = match &payload_ty {
+                Some(Type::OwnedStr) => Some(format!("free((void*){}.payload)", lv)),
+                Some(Type::Vec(element)) => Some(format!(
+                    "{}({}.payload)",
+                    vec_helper(element, "free"),
+                    lv
+                )),
+                _ => None,
+            };
+            if let Some(free_call) = free_expr {
+                let payload_tags: Vec<u32> = ENUM_PAYLOAD_TAGS_REGISTRY
+                    .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
+                if !payload_tags.is_empty() {
+                    let cases: Vec<String> =
+                        payload_tags.iter().map(|t| format!("case {}", t)).collect();
+                    out.push_str(&format!(
+                        "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
+                        lv,
+                        cases.join(": "),
+                        free_call
+                    ));
+                }
+            }
+        }
+        // BUG-216 follow-up: `Box<T>` and every Level-4 builtin
+        // type (see `c_element_drop_old`'s identical arms for the
+        // full rationale) never had leaf-overwrite coverage at all.
+        Type::Box(inner) => match &**inner {
+            Type::Object(_iface) => {
+                out.push_str(&format!("  free((void*){}.data);\n", lv));
+            }
+            Type::Vec(elem) => {
+                out.push_str(&format!(
+                    "  {}(*({}));\n  free({});\n",
+                    vec_helper(elem, "free"),
+                    lv,
+                    lv
+                ));
+            }
+            Type::OwnedStr => {
+                out.push_str(&format!("  free((void*)*({}));\n  free({});\n", lv, lv));
+            }
+            _ => {
+                out.push_str(&format!("  free({});\n", lv));
+            }
+        },
+        Type::UnionFind => {
+            out.push_str(&format!("  intent_union_find_drop(&{});\n", lv));
+        }
+        Type::Graph => {
+            out.push_str(&format!("  intent_graph_drop(&{});\n", lv));
+        }
+        Type::Bst(_) => {
+            out.push_str(&format!("  intent_bst_i64_drop(&{});\n", lv));
+        }
+        Type::Trie => {
+            out.push_str(&format!("  intent_trie_drop(&{});\n", lv));
+        }
+        Type::SkipList => {
+            out.push_str(&format!("  intent_skiplist_i64_drop(&{});\n", lv));
+        }
+        Type::BinaryHeap(_) => {
+            out.push_str(&format!("  intent_binary_heap_i64_drop(&{});\n", lv));
+        }
+        Type::BloomFilter => {
+            out.push_str(&format!("  intent_bloom_filter_drop(&{});\n", lv));
+        }
+        Type::BTreeSet(_) => {
+            out.push_str(&format!("  intent_btreeset_i64_drop(&{});\n", lv));
+        }
+        Type::BTreeMap(_, _) => {
+            out.push_str(&format!("  intent_btreemap_i64_i64_drop(&{});\n", lv));
+        }
+        Type::HashSet(_) => {
+            out.push_str(&format!("  intent_hashset_i64_drop(&{});\n", lv));
+        }
+        Type::HashMap(_, _) => {
+            out.push_str(&format!("  intent_hashmap_i64_i64_drop(&{});\n", lv));
+        }
+        Type::Deque(_) => {
+            out.push_str(&format!("  intent_deque_i64_drop(&{});\n", lv));
+        }
+        Type::Region => {
+            out.push_str(&format!("  intent_region_drop(&{});\n", lv));
+        }
+        _ => {}
+    }
 }
 
 /// Emit a `print item1, item2, …;` statement. Each item is printed

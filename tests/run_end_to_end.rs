@@ -5045,9 +5045,15 @@ fn emit_c_parallel_for_pragma_appears_in_output() {
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let pragma_count = stdout.matches("_Pragma(\"omp parallel for").count();
+    // BUG-214: an integer `+`/`*` reduction no longer gets an
+    // OpenMP `reduction()` pragma at all (libgomp's own cross-
+    // thread combine step has no overflow check, so those two
+    // loops -- `total`/`product`, both `i64` -- fall back to a
+    // plain sequential loop instead). 11 `parallel for` loops
+    // total, minus those 2, is 9.
     assert_eq!(
-        pragma_count, 11,
-        "expected 11 omp pragmas (one per parallel for in the example), got {pragma_count}:\n{stdout}"
+        pragma_count, 9,
+        "expected 9 omp pragmas (11 parallel-for loops in the example, minus the 2 integer +/* reductions that BUG-214 forces sequential), got {pragma_count}:\n{stdout}"
     );
     // Each reduction op contributes its `reduction(op: var)`
     // clause to the corresponding pragma. Tree-C names the
@@ -5060,8 +5066,16 @@ fn emit_c_parallel_for_pragma_appears_in_output() {
         stdout.contains(&format!("reduction({}:", op))
             || stdout.contains(&format!("reduction({}: ", op))
     }
-    assert!(has_reduction(&stdout, "+"), "expected `+` reduction clause:\n{stdout}");
-    assert!(has_reduction(&stdout, "*"), "expected `*` reduction clause:\n{stdout}");
+    // `+`/`*` deliberately have NO reduction clause on C (BUG-214,
+    // see above) -- assert their absence instead of their presence.
+    assert!(
+        !has_reduction(&stdout, "+"),
+        "expected NO `+` reduction clause (BUG-214 forces sequential for an integer + reduction):\n{stdout}"
+    );
+    assert!(
+        !has_reduction(&stdout, "*"),
+        "expected NO `*` reduction clause (BUG-214 forces sequential for an integer * reduction):\n{stdout}"
+    );
     assert!(has_reduction(&stdout, "||"), "expected `||` reduction clause:\n{stdout}");
     assert!(has_reduction(&stdout, "min"), "expected `min` reduction clause:\n{stdout}");
     assert!(has_reduction(&stdout, "max"), "expected `max` reduction clause:\n{stdout}");

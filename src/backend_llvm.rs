@@ -462,9 +462,23 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::UnionFind => 32, // {parent ptr, rank ptr, n, sets}
         Type::BinaryHeap(_) => 24, // {data ptr, len, capacity}
         Type::BloomFilter => 32, // {bits ptr, num_bits, num_hashes, insert_count}
-        Type::Bst(_) => 48, // {keys ptr, left ptr, right ptr, root, len, capacity, heights ptr}
+        // BUG-216: was 48 -- undercounted by one 8-byte field.
+        // `%intent_bst_i64 = type { i64*, i32*, i32*, i64, i64,
+        // i64, i8* }` is 7 fields (keys ptr, left ptr, right ptr,
+        // root, len, capacity, heights ptr, matching this arm's
+        // own comment) x 8 bytes = 56, not 48. Currently latent
+        // (Bst isn't Copy, so it can't reach `task_spawn_call_
+        // ctx_size`/`compute_ctx_size`; `box()` explicitly
+        // rejects it too) -- fixed anyway since it's a real,
+        // easy-to-verify miscount a future caller could hit.
+        Type::Bst(_) => 56, // {keys ptr, left ptr, right ptr, root, len, capacity, heights ptr}
         Type::Graph => 96, // closure #336 + #338: 12 fields, fwd CSR + rev CSR (rev_adj_start, rev_adj_csr_src, rev_adj_csr_weight)
-        Type::Trie => 56, // closure #344: +free_head, +free_count for arena compaction
+        // BUG-216: was 56 -- undercounted by 4 fields (32 bytes).
+        // `%intent_trie = type { i8**, i32**, i16*, i16*, i64*,
+        // i8*, i64, i64, i64, i64, i64 }` is 11 fields x 8 bytes =
+        // 88. Same latent-only status as the Bst fix above (Trie
+        // isn't Copy and `box()` rejects it).
+        Type::Trie => 88, // closure #344: 11 fields incl. free_head/free_count for arena compaction
         Type::SkipList => 64, // closure #341: 8 fields incl. tail_node for O(1) max
         Type::Object(_) => 16, // fat pointer: vtable + data
         Type::Vec(_) => 24, // {data, len, cap} on 64-bit
@@ -35610,18 +35624,20 @@ fn emit_intent_union_find_helpers_llvm(out: &mut String) {
          \x20 store i64 0, i64* %sp\n\
          \x20 ret void\n\
          }\n\
-         ; find with iterative path compression. Out-of-range x returns x.\n\
+         ; find with iterative path compression. Out-of-range x traps\n\
+         ; (BUG-215): x is used as a raw array index into parent[]/\n\
+         ; rank[] both here and, via ra/rb, inside union()/connected()\n\
+         ; -- silently returning x unchecked let union() perform a\n\
+         ; wild out-of-bounds GEP+store with an attacker/fuzzer-\n\
+         ; controlled offset (e.g. i64::MAX), corrupting the heap\n\
+         ; instead of trapping cleanly.\n\
          define i64 @intent_union_find_find(%intent_union_find* %uf, i64 %x) {\n\
          \x20 %pp = getelementptr %intent_union_find, %intent_union_find* %uf, i32 0, i32 0\n\
          \x20 %np = getelementptr %intent_union_find, %intent_union_find* %uf, i32 0, i32 2\n\
          \x20 %parent = load i64*, i64** %pp\n\
          \x20 %n = load i64, i64* %np\n\
-         \x20 %lo = icmp slt i64 %x, 0\n\
-         \x20 %hi = icmp sge i64 %x, %n\n\
-         \x20 %oob = or i1 %lo, %hi\n\
-         \x20 br i1 %oob, label %ff_ret_x, label %ff_walk\n\
-         ff_ret_x:\n\
-         \x20 ret i64 %x\n\
+         \x20 call void @__intent_bounds_check(i64 %x, i64 %n)\n\
+         \x20 br label %ff_walk\n\
          ff_walk:\n\
          \x20 ; Walk to root.\n\
          \x20 %r_p = alloca i64\n\
@@ -45714,6 +45730,69 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                     }
                 }
             }
+            // BUG-216 follow-up: same gap as `c_element_drop_old`
+            // in backend_c.rs -- every Level-4 builtin data-
+            // structure type owns its own heap buffers (freed by
+            // its `_drop` function, taking a `T*`), but none of
+            // them had an arm here, so `Vec<UnionFind>`/
+            // `Vec<Graph>`/etc. never called the element's own
+            // drop on scope exit (confirmed: the generated
+            // `__free` had no loop at all for these element
+            // types). `%elt_p` is already a pointer into the
+            // buffer -- the exact `T*` each `_drop` function
+            // expects, no load needed.
+            Type::UnionFind => {
+                needs_loop = true;
+                body.push_str("  call void @intent_union_find_drop(%intent_union_find* %elt_p)\n");
+            }
+            Type::Graph => {
+                needs_loop = true;
+                body.push_str("  call void @intent_graph_drop(%intent_graph* %elt_p)\n");
+            }
+            Type::Bst(_) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_bst_i64_drop(%intent_bst_i64* %elt_p)\n");
+            }
+            Type::Trie => {
+                needs_loop = true;
+                body.push_str("  call void @intent_trie_drop(%intent_trie* %elt_p)\n");
+            }
+            Type::SkipList => {
+                needs_loop = true;
+                body.push_str("  call void @intent_skiplist_i64_drop(%intent_skiplist_i64* %elt_p)\n");
+            }
+            Type::BinaryHeap(_) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_binary_heap_i64_drop(%intent_binary_heap_i64* %elt_p)\n");
+            }
+            Type::BloomFilter => {
+                needs_loop = true;
+                body.push_str("  call void @intent_bloom_filter_drop(%intent_bloom_filter* %elt_p)\n");
+            }
+            Type::BTreeSet(_) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_btreeset_i64_drop(%intent_btreeset_i64* %elt_p)\n");
+            }
+            Type::BTreeMap(_, _) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_btreemap_i64_i64_drop(%intent_btreemap_i64_i64* %elt_p)\n");
+            }
+            Type::HashSet(_) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_hashset_i64_drop(%intent_hashset_i64* %elt_p)\n");
+            }
+            Type::HashMap(_, _) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_hashmap_i64_i64_drop(%intent_hashmap_i64_i64* %elt_p)\n");
+            }
+            Type::Deque(_) => {
+                needs_loop = true;
+                body.push_str("  call void @intent_deque_i64_drop(%intent_deque_i64* %elt_p)\n");
+            }
+            Type::Region => {
+                needs_loop = true;
+                body.push_str("  call void @intent_region_drop(%intent_region* %elt_p)\n");
+            }
             _ => {}
         }
         if needs_loop {
@@ -45866,8 +45945,70 @@ pub(crate) fn vec_element_value_str(element: &Type) -> String {
 /// `sizeof(T)` at compile time. Used by emit_vec_helpers
 /// so `Vec<Point>` mallocs the right number of bytes.
 /// T1.2 + Vec<Struct> LLVM.
+/// BUG-216: the GEP-null sizeof idiom, factored out for the
+/// Level-4 data-structure arms below (`UnionFind`/`Graph`/`Bst`/
+/// `Trie`/`SkipList`/`BinaryHeap`/`BloomFilter`/`BTreeSet`/
+/// `BTreeMap`/`HashSet`/`HashMap`/`Deque`) -- all fixed, non-
+/// generic-over-T named LLVM struct types (v1 is i64-only for
+/// every one of them), so unlike Mutex/Guard/Channel above they
+/// need no per-element-type name computation, just the struct
+/// name itself.
+fn sizeof_idiom(struct_name: &str) -> String {
+    format!(
+        "ptrtoint ({}* getelementptr ({}, {}* null, i32 1) to i64)",
+        struct_name, struct_name, struct_name
+    )
+}
+
 pub(crate) fn vec_element_size_expr(element: &Type) -> String {
     match element {
+        // BUG-216: found sweeping `Vec<T>` for every Level-4
+        // builtin data-structure type (UnionFind/Graph/Bst/Trie/
+        // SkipList/BinaryHeap/BloomFilter/BTreeSet/BTreeMap/
+        // HashSet/HashMap/Deque) as a feature-combination audit --
+        // none of these had an arm here, so every one fell through
+        // to the final `_` fallback (`vec_element_byte_size`,
+        // which ALSO has no arm for them and falls through to
+        // `bits().unwrap_or(64) / 8 = 8` bytes) regardless of the
+        // real struct's size (32 bytes for UnionFind, 96 for
+        // Graph, ...). `Vec<Graph>`/`Vec<UnionFind>` malloc'd a
+        // buffer sized for 8-byte elements, then stored a full-
+        // size struct into it on the very first push -- a wild
+        // out-of-bounds write, confirmed via `vanic run` crashing
+        // with "corrupted size vs. prev_size" (Graph) and a
+        // similar heap corruption (UnionFind). Same failure class
+        // this file has already hit and fixed repeatedly for
+        // Vec128/256/512 (BUG-6x class), Box<dyn Iface>, Channel/
+        // Mutex/Guard/RwLock, and payloaded enums (closure #151) --
+        // this is the same gap in the same dispatch, just for a
+        // type family that was added later and never got the
+        // matching arm.
+        Type::UnionFind => sizeof_idiom("%intent_union_find"),
+        Type::Graph => sizeof_idiom("%intent_graph"),
+        Type::Bst(_) => sizeof_idiom("%intent_bst_i64"),
+        Type::Trie => sizeof_idiom("%intent_trie"),
+        Type::SkipList => sizeof_idiom("%intent_skiplist_i64"),
+        Type::BinaryHeap(_) => sizeof_idiom("%intent_binary_heap_i64"),
+        Type::BloomFilter => sizeof_idiom("%intent_bloom_filter"),
+        Type::BTreeSet(_) => sizeof_idiom("%intent_btreeset_i64"),
+        Type::BTreeMap(_, _) => sizeof_idiom("%intent_btreemap_i64_i64"),
+        Type::HashSet(_) => sizeof_idiom("%intent_hashset_i64"),
+        Type::HashMap(_, _) => sizeof_idiom("%intent_hashmap_i64_i64"),
+        Type::Deque(_) => sizeof_idiom("%intent_deque_i64"),
+        // BUG-216 follow-up: `Region` (Layer 5 v2 of `unsafe.md`)
+        // has the same missing-arm shape as the 12 types above --
+        // it's a `Type::Region` unit variant, just not one of the
+        // originally-audited "Level-4 data structure" types.
+        // `llvm_byte_size` (a DIFFERENT function, used for ctx/Box
+        // sizing) already has the correct `Region => 24` constant;
+        // this function (the one Vec push/literal/growth codegen
+        // actually calls) never got the matching arm, so it fell
+        // through to the 8-byte scalar-width fallback -- a real
+        // under-allocation this session's own `Vec<Region>` repro
+        // just happened not to visibly corrupt (malloc's real
+        // chunk-size rounding absorbed the 16-byte shortfall for a
+        // single-element buffer; not proof of correctness).
+        Type::Region => sizeof_idiom("%intent_region"),
         // `Vec<[T; N]>`: the array-element's real size is
         // `N * sizeof(T)`, which can differ wildly from
         // `vec_element_byte_size`'s recursive byte-count fallback
@@ -46011,6 +46152,25 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
         // ballpark rather than the 8-byte scalar default.
         Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_)
         | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) => 24,
+        // BUG-216: same "ballpark for any stray direct caller"
+        // reasoning as the Channel/Mutex/... arm above -- the real
+        // path is `vec_element_size_expr`'s GEP-null sizeof arms
+        // added alongside this one. Exact byte counts (matching
+        // each type's real LLVM struct definition), not just a
+        // ballpark, since they're trivial to get right here too.
+        Type::UnionFind => 32,
+        Type::Graph => 96,
+        Type::Bst(_) => 56,
+        Type::Trie => 88,
+        Type::SkipList => 64,
+        Type::BinaryHeap(_) => 24,
+        Type::BloomFilter => 32,
+        Type::BTreeSet(_) => 24,
+        Type::BTreeMap(_, _) => 32,
+        Type::HashSet(_) => 40,
+        Type::HashMap(_, _) => 48,
+        Type::Deque(_) => 32,
+        Type::Region => 24,
         Type::Atomic(inner) => vec_element_byte_size(inner),
         // Vtables Phase 4b: `dyn Iface` is a fat pointer
         // (vtable pointer + data pointer) — 16 bytes.
@@ -46342,6 +46502,102 @@ fn emit_leaf_overwrite_drop(
                 free_name, s_ty, old
             ));
         }
+        // BUG-216 follow-up: same gap as `__free`'s per-element
+        // match above -- every Level-4 builtin data-structure type
+        // needs its own drop called before `xs[i] = v` overwrites
+        // the old slot, or the old value's heap buffers leak. `p`
+        // already points at the slot (the exact `T*` each `_drop`
+        // expects), no load needed -- unlike OwnedStr/Vec above,
+        // whose `_drop`/`_free` take the VALUE, not a pointer.
+        Type::UnionFind => {
+            out.push_str(&format!("  call void @intent_union_find_drop(%intent_union_find* {})\n", p));
+        }
+        Type::Graph => {
+            out.push_str(&format!("  call void @intent_graph_drop(%intent_graph* {})\n", p));
+        }
+        Type::Bst(_) => {
+            out.push_str(&format!("  call void @intent_bst_i64_drop(%intent_bst_i64* {})\n", p));
+        }
+        Type::Trie => {
+            out.push_str(&format!("  call void @intent_trie_drop(%intent_trie* {})\n", p));
+        }
+        Type::SkipList => {
+            out.push_str(&format!("  call void @intent_skiplist_i64_drop(%intent_skiplist_i64* {})\n", p));
+        }
+        Type::BinaryHeap(_) => {
+            out.push_str(&format!("  call void @intent_binary_heap_i64_drop(%intent_binary_heap_i64* {})\n", p));
+        }
+        Type::BloomFilter => {
+            out.push_str(&format!("  call void @intent_bloom_filter_drop(%intent_bloom_filter* {})\n", p));
+        }
+        Type::BTreeSet(_) => {
+            out.push_str(&format!("  call void @intent_btreeset_i64_drop(%intent_btreeset_i64* {})\n", p));
+        }
+        Type::BTreeMap(_, _) => {
+            out.push_str(&format!("  call void @intent_btreemap_i64_i64_drop(%intent_btreemap_i64_i64* {})\n", p));
+        }
+        Type::HashSet(_) => {
+            out.push_str(&format!("  call void @intent_hashset_i64_drop(%intent_hashset_i64* {})\n", p));
+        }
+        Type::HashMap(_, _) => {
+            out.push_str(&format!("  call void @intent_hashmap_i64_i64_drop(%intent_hashmap_i64_i64* {})\n", p));
+        }
+        Type::Deque(_) => {
+            out.push_str(&format!("  call void @intent_deque_i64_drop(%intent_deque_i64* {})\n", p));
+        }
+        Type::Region => {
+            out.push_str(&format!("  call void @intent_region_drop(%intent_region* {})\n", p));
+        }
+        // BUG-216 follow-up: `Box<T>` had no arm here either --
+        // confirmed via a direct `valgrind` repro (`xs[0] =
+        // new_box;` on a `mut ref Vec<Box<Vec<i64>>>` leaked the
+        // old Box's inner Vec on both backends). Mirrors `__free`'s
+        // own `Type::Box` arm above exactly, adapted from `%elt_p`
+        // (that function's loop-local pointer name) to this
+        // function's `p` parameter.
+        Type::Box(inner) => match &**inner {
+            Type::Object(iface_name) => {
+                let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                let fat = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}, {}* {}\n", fat, dyn_ty, dyn_ty, p));
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = extractvalue {} {}, 1\n", data_ptr, dyn_ty, fat));
+                out.push_str(&format!("  call void @free(i8* {})\n", data_ptr));
+            }
+            Type::Vec(element) => {
+                let v_s = vec_struct_name(element);
+                let v_free = format!("@intent_vec_{}__free", vec_struct_tag(element));
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}*, {}** {}\n", box_ptr, v_s, v_s, p));
+                let vec_val = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}, {}* {}\n", vec_val, v_s, v_s, box_ptr));
+                out.push_str(&format!("  call void {}({} {})\n", v_free, v_s, vec_val));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to i8*\n", raw, v_s, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+            Type::OwnedStr => {
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8**, i8*** {}\n", box_ptr, p));
+                let str_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8*, i8** {}\n", str_ptr, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", str_ptr));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast i8** {} to i8*\n", raw, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+            _ => {
+                let inner_ty = llvm_type_string(inner);
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}*, {}** {}\n",
+                    box_ptr, inner_ty, inner_ty, p
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to i8*\n", raw, inner_ty, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+        },
         _ => {}
     }
 }

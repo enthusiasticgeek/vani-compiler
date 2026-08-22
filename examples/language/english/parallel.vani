@@ -66,8 +66,12 @@ fn main() -> i64 {
   // Reductions: `reduce total with +;` tells the checker that
   // `total = total + …` inside the body is the only update, and
   // tells the runtime to give each thread a private partial.
-  // OpenMP combines via `reduction(+:total)`; LLVM rewrites the
-  // in-body reassign to `atomicrmw add`.
+  // LLVM rewrites the in-body reassign to `atomicrmw add`. The C
+  // backend, as of BUG-214, does NOT use OpenMP's `reduction(+:…)`
+  // clause for an integer `+`/`*` reduction -- libgomp's own
+  // cross-thread combine step has no overflow check, so this loop
+  // runs sequentially on C instead (every accumulate still goes
+  // through the same checked-add guard as any other `+`).
   let total: i64 = 0;
   parallel for i from 0 to 4
   reduce total with +;
@@ -77,8 +81,10 @@ fn main() -> i64 {
   print total;
 
   // Multiplicative reduction. LLVM lowers `*` via a cmpxchg-retry
-  // loop (atomicrmw doesn't expose `mul`); C uses
-  // `reduction(*:product)`.
+  // loop (atomicrmw doesn't expose `mul`); C, per the same BUG-214
+  // note above, runs this sequentially rather than via
+  // `reduction(*:product)` (an integer `*` reduction has the same
+  // unchecked-combine gap as `+`).
   let product: i64 = 1;
   parallel for i from 0 to 4
   reduce product with *;

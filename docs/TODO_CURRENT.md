@@ -16220,4 +16220,423 @@ Both BUG-212 and BUG-213 verified via direct repro (`ok:` before ->
 `proof failed` SMT counterexample after) and full `cargo test --release
 --workspace` clean.
 
-Next free bug number is **BUG-214**.
+## BUG-214
+
+Found via a fresh `localfuzz` digest (2026-08-21), in the recurring
+"backend-divergence, both exit codes 0" bucket -- but unlike the other
+findings in that bucket (which turned out to be legitimate concurrent-
+print-ordering nondeterminism, not bugs), one repro had DIFFERENT exit
+codes (C: 0, LLVM: 3) once re-run against a freshly built binary.
+
+`parallel for ... reduce <var> with +/*;` on an INTEGER type has a
+checked-arithmetic soundness gap on the C backend (both tree-C in
+`backend_c.rs` and SSA-C in `ssa_backend_c.rs` -- confirmed as two
+independent copies of the same bug, since which one a given program
+hits depends on whether it uses a construct SSA-C's lowering still
+falls back to tree-C for, e.g. struct field access). The C backend
+lowers `reduce <var> with +;` to an OpenMP `#pragma omp parallel for
+reduction(+:<var>)` clause. OpenMP privatizes `<var>` per thread
+(seeded to the op's identity) and combines every thread's partial sum
+back together in a FINAL combine step that libgomp itself generates,
+invisible to this compiler's own SSA/tree instructions. Every
+PER-ITERATION accumulate inside the loop body still goes through the
+normal checked-add/checked-mul guard (`__builtin_add_overflow` +
+`exit(3)`) -- it's an ordinary assignment expression like any other --
+so an overflow that occurs WITHIN one thread's own running partial is
+still caught correctly. But an overflow that only occurs when libgomp
+sums the different threads' otherwise-individually-valid partials
+together at the very end has NO check at all, and silently wraps.
+
+**Confirmed via direct repro**:
+```vani
+struct Scale { factor: i64 }
+fn main() -> i64 {
+  let s: Scale = Scale { factor: -9223372036854775808 };  // i64::MIN
+  let total: i64 = 0;
+  parallel for i from 0 to 4
+  reduce total with +;
+  {
+    total = total + s.factor;
+  }
+  print total;
+  return 0;
+}
+```
+No single iteration's partial overflows (each is `0 + i64::MIN` in
+isolation), but two threads' partials summed together does. LLVM
+(which drives its own persistent pthread pool and combines partials
+through its own checked-add, not libgomp) correctly traps `exit(3)`
+with `integer overflow in i64 add`; the C backend silently returned
+`0` before this fix.
+
+**Fix**: `Add`/`Mul` are the only reduction ops where the cross-thread
+combine step can itself overflow (`Min`/`Max` just pick one of two
+already-valid values; `And`/`Or`/bitwise ops have no overflow
+concept). For those, on an integer type, both C backends now skip the
+`omp parallel for` pragma entirely and fall back to a plain sequential
+loop -- every accumulate, including what would have been the
+cross-thread combine, goes through one single checked chain. Every
+other reduction shape (including non-integer `+`/`*`, e.g. `f64`, and
+`Min`/`Max`/bitwise reductions of any type) keeps its existing OpenMP
+`reduction()` clause unchanged, so those loops stay parallelized.
+
+This trades away real parallelism specifically for checked integer
+sum/product reductions -- a correctness-over-performance call
+consistent with every other checked-arithmetic guard in this backend
+(exit(3) traps over silent wraparound everywhere else already).
+
+Updated `examples/language/english/parallel.vani`'s comments (which
+had documented the now-removed `reduction(+:total)`/`reduction(*:
+product)` C lowering) and the three existing tests that asserted the
+old pragma was present for an integer `+`/`*` reduction:
+- `src/ssa_backend_c.rs::parallel_for_emit_scaffolding_recognizes_canonical_shape`
+- `src/lib.rs::parallel_for_with_i64_min_start_bound_gets_an_overflow_guard_in_c`
+- `src/lib.rs::ssa_c_emits_multi_block_parallel_for_body`
+- `tests/run_end_to_end.rs::emit_c_parallel_for_pragma_appears_in_output`
+  (pragma count 11 -> 9; the example's own `+`/`*` reductions are both
+  `i64`)
+
+Verified: full `cargo test --release --workspace` clean (3008 tests),
+`tools/backend_crosscheck.py` full corpus sweep (1079 files, 1058
+clean, 0 flagged), and `parallel.vani` itself runs to identical output
+on both backends.
+
+## BUG-215
+
+Found via a full historical re-scan of the localfuzz digest (441
+findings, 62 signatures) as part of the next audit round. Most
+clusters were already-triaged noise (the documented C-exits-134-vs-
+LLVM-exits-3 trap convention; the recurring i64::MIN/MAX-boundary-
+literal fuzzer artifact inflating loop bounds/`sleep_ms` durations
+into huge-but-finite runs; concurrent-print ordering nondeterminism;
+etc.) or already fixed elsewhere on main, re-verified stale. One
+finding, still open and still reproducing on a fresh build, was a
+genuine heap-corruption bug: `20260818-235449-run-crash-31e17cc97c`
+(base: `examples/language/english/union_find.vani`, fuzzer mutated one
+`.union(...)` call's argument to `9223372036854775807`, i64::MAX).
+
+`UnionFind`'s `find(x)` (`intent_union_find_find` in both
+`backend_c.rs` and `backend_llvm.rs` -- UnionFind never routes through
+either SSA backend) checked whether `x` was in `[0, n)` but, on
+failure, silently returned `x` UNCHANGED instead of trapping (the tree-
+LLVM version's own comment said so explicitly: "Out-of-range x returns
+x"). Every other bounds-checked builtin in this compiler traps on an
+out-of-range index; this one instead handed the caller back an
+attacker/fuzzer-controlled out-of-range value disguised as a
+legitimate "root". `union(a, b)` calls `find(a)`/`find(b)` to get
+`ra`/`rb`, then uses them DIRECTLY as array indices into `parent[]`/
+`rank[]` with no further check (`uf->rank[ra]`, `uf->parent[rb] = ra;`
+on C; `getelementptr i64, i64* %rank, i64 %ra` on LLVM) -- so a single
+out-of-range `union()` call performed a wild out-of-bounds WRITE at an
+arbitrary offset, corrupting the heap. This surfaced downstream, not
+at the point of the actual bug: C crashed with `free(): invalid
+pointer` (rc=134) when the corrupted allocator metadata was later
+freed at scope-exit `Drop`, and LLVM's JIT segfaulted (rc=139) with an
+internal-crash stack dump -- neither backend produced a clean,
+attributable trap at the actual fault site.
+
+**Confirmed via direct repro** (`chain.union(9223372036854775807,
+5)` on a 6-element `UnionFind`): C backend `free(): invalid pointer`,
+LLVM backend SIGSEGV in the JIT, both non-deterministic-looking
+crashes far from the real defect.
+
+**Fix**: both backends' `find(x)` now call the same standard bounds-
+check helper every other indexed builtin already uses --
+`intent_check_bounds(x, uf->n)` on C (already unconditionally emitted
+whenever any bounds-checked construct is used, matched via the
+existing `body.contains("intent_check_bounds(")` gate), and
+`@__intent_bounds_check(i64 %x, i64 %n)` on LLVM (unconditionally
+defined in tree-LLVM's preamble already) -- instead of silently
+returning `x`. Both now trap cleanly with `index out of bounds:
+9223372036854775807, len 6` and `exit(3)` on both backends (matching
+every other bounds-checked builtin's convention), right at the actual
+out-of-range `find()` call, instead of a confusing downstream crash
+with no attributable message.
+
+Verified: the mutated repro now traps identically and cleanly on both
+backends; the unmutated `union_find.vani` example still produces
+identical, correct output on both backends (no regression); full
+`cargo test --release --workspace` clean (one unrelated, confirmed-
+flaky failure in `concurrent_pipeline_dashboard_example_produces_
+correct_output_on_both_backends` -- passed 3/3 direct runs and in
+isolation via `cargo test`, matching this exact example's known
+concurrent-print-ordering nondeterminism documented earlier in this
+file, not caused by this change); full `tools/backend_crosscheck.py`
+corpus sweep (1079 files, 1058 clean, 0 flagged).
+
+Next free bug number is **BUG-216**.
+
+## Audit round, 2026-08-21 (third pass) -- sibling-sweep of BUG-215, clean
+
+Per this session's established "sweep sibling functions after a
+bugfix" practice: BUG-215's shape was a builtin data-structure method
+that accepts a raw user-supplied `i64` index, validates it, but on
+failure returns the unchecked value itself instead of trapping --
+letting a caller reuse it as an array subscript with no further check.
+Localfuzz produced no new findings during this pass (checked twice,
+~10 minutes apart, harness actively running clean cycles both times),
+so this round was a manual sweep for the same pattern elsewhere
+instead.
+
+Checked every other builtin data structure exposing a user-facing
+index/id parameter, on both backends:
+- **`Graph`** (`add_edge`/`bfs_reach`/`dfs_reach`/`dijkstra`/
+  `mst_kruskal`/`mst_prim`) -- `add_edge` itself doesn't validate
+  `src`/`dst` before storing them (a lenient design gap, not a safety
+  bug), but every DOWNSTREAM consumer (`build_csr_if_needed` and
+  every traversal entry point) independently re-validates before using
+  an edge endpoint as an index, on both C and LLVM. Confirmed via a
+  direct repro (`graph_add_edge(g, i64::MAX, 2, 3)` on a 4-node graph,
+  then `bfs_reach`/`dijkstra`/`mst_kruskal`/`mst_prim`/`has_cycle`/
+  `topo_sort` all called afterward) -- clean under both `valgrind`
+  (C) and a normal LLVM run: the malformed edge is silently dropped
+  by the CSR builder, no corruption.
+- **`BoundedPtr` (`intent_bptr_i64_set`/`_get`)** -- different, safe
+  pattern: returns `false`/`None` on an out-of-range index and never
+  touches the buffer, rather than returning the bad index itself for a
+  caller to reuse.
+- **`Trie`/`Bst`/`SkipList`** -- no user-facing raw index/node
+  parameter at all; their public APIs take values/strings, and
+  internal node indices are always compiler-managed (arena-appended),
+  never attacker-controlled.
+- Capacity-growth doubling (`intent_trie__grow_node`,
+  `intent_skiplist_i64_ensure_cap`) -- bounded by the number of actual
+  insert calls (`node_count`/`num_nodes`, `uint16_t`-capped at 256 for
+  trie's per-node key slots), not a single arbitrary user-supplied
+  value the way `UnionFind`'s index parameter was -- not the same
+  vulnerability shape, no overflow risk in practice.
+
+No new bug found. `UnionFind` was confirmed to be the sole instance of
+this exact vulnerability shape in the codebase, not one of a broader
+family -- the fix in BUG-215 fully closes it.
+
+## BUG-216 (+ a follow-up leak fix)
+
+Audit round per the user's explicit request to "think of feature
+combinations not tested before". localfuzz had nothing new queued, so
+this round hand-constructed novel combinations of recently-touched
+features instead: `cancel`+`Task<R>`, `cancel`+`detach`, `downto`+
+`parallel for` (cleanly rejected, not a bug), and -- the one that
+found something real -- `Vec<T>` where `T` is one of the Level-4
+builtin data-structure types (`UnionFind`, `Graph`, `Bst<i64>`,
+`Trie`, `SkipList<i64>`, `BinaryHeap<i64>`, `BloomFilter`,
+`BTreeSet<i64>`, `BTreeMap<i64,i64>`, `HashSet<i64>`,
+`HashMap<i64,i64>`, `Deque<i64>`) -- a combination that, as far as
+could be determined, had genuinely never been exercised before: every
+one of these types' own example file only ever appears standalone,
+never nested inside a `Vec<...>`.
+
+**Crash / heap corruption (the headline finding).** `Vec<Graph>` and
+`Vec<UnionFind>` crashed on BOTH backends: `vanic run --backend=c`
+failed to compile ("unknown type name 'intent_graph'"/
+"'intent_union_find'"), and `vanic run` (LLVM) corrupted the heap
+("corrupted size vs. prev_size") or crashed with `free(): invalid
+pointer` depending on which type. Root-caused as two INDEPENDENT bugs
+that happened to share one trigger:
+
+1. **LLVM byte-size estimation.** `vec_element_size_expr`/
+   `vec_element_byte_size` in `backend_llvm.rs` -- the functions that
+   compute how many bytes a Vec's `malloc`/`realloc` needs per element
+   -- had no arm for any of these 12 types, so they all fell through to
+   the final `bits().unwrap_or(64) / 8 = 8`-bytes-per-element fallback,
+   regardless of the type's REAL size (96 bytes for `Graph`, 32 for
+   `UnionFind`, up to 88 for `Trie`). `Vec<Graph>`'s buffer was
+   allocated 12x too small; storing one full-size element into it was
+   a wild out-of-bounds write. Exact same failure class this file has
+   hit and fixed repeatedly before (Vec128/256/512, `Box<dyn Iface>`,
+   `Channel`/`Mutex`/`Guard`/`RwLock`, payloaded enums) -- these 12
+   types were just added later and never got the matching arm. Fixed
+   by adding all 12 arms, using the same GEP-null `sizeof` LLVM idiom
+   already used for Struct/Tuple/Channel/Mutex/etc. Also caught (and
+   fixed) two independent, pre-existing miscounts while cross-checking
+   every constant against its real struct definition: `llvm_byte_size`
+   had `Bst => 48` (real: 56) and `Trie => 56` (real: 88) -- both
+   currently latent (`Bst`/`Trie` aren't Copy, so they can't reach
+   `task_spawn_call_ctx_size`/`compute_ctx_size`'s malloc sizing, and
+   `box()` explicitly rejects them too), fixed anyway since they were
+   real, easy-to-verify miscounts a future caller could hit.
+
+2. **C typedef ordering.** All 12 types' full definitions (`typedef`
+   + every function) sat in one block, positioned AFTER the
+   `element_types` Vec-bundle loop -- so `Vec<Graph>`'s bundle
+   referenced `intent_graph` before that typedef existed anywhere in
+   the file ("unknown type name"). This is the exact same gap BUG-189
+   found and fixed for `Pool`/`Handle`, just never extended to these
+   12 types. The obvious fix (move each type's WHOLE block ahead of
+   the loop, mirroring BUG-189 exactly) was tried first and reverted:
+   several of these types' own FUNCTIONS (`graph_topo_sort`/
+   `graph_astar`, `btreeset_range`, `btreemap_range_keys`/`_values`)
+   depend on `intent_vec_int64_t` from that SAME loop, so moving the
+   whole block just swapped which direction broke -- confirmed via
+   `tools/backend_crosscheck.py` flagging 4 NEW divergences
+   (`graph_algo2.vani`, `btreeset.vani`, `btreemap.vani`,
+   `hashmap_veck.vani`) after the naive move. The real fix mirrors
+   BUG-31's typedef/functions split instead: hoist ONLY the 12 bare
+   `typedef struct {...}` lines ahead of the Vec-bundle loop (plus a
+   forward declaration of each type's `_drop` function, needed once
+   the leak fix below made the Vec bundle's own `clear`/`__free` call
+   into it), leaving every FUNCTION body at its original, later
+   position. Removed the now-redundant leading typedef line from each
+   of the 12 `emit_intent_*_helpers_c_body` functions -- C rejects a
+   literal duplicate typedef of an anonymous struct as "conflicting
+   types" even when the text is byte-identical, so it had to be
+   removed from the later site, not just harmlessly repeated.
+
+**Leak (follow-up, found immediately after via `valgrind` on the
+crash fix's own repro).** Once `Vec<UnionFind>` stopped crashing, a
+`valgrind --leak-check=full` run on the same repro showed the
+`UnionFind`'s own `parent`/`rank` arrays "definitely lost" -- the
+generated `__free`/`clear`/`set`/`set_mut` functions for a
+`Vec<UnionFind>` never called `intent_union_find_drop` on each
+element before freeing the outer buffer, so every Level-4 type's
+INNER heap allocations leaked whenever it sat inside a `Vec`,
+`Vec::clear()`d, or got overwritten via `set`. Root cause:
+`c_element_drop_old` (C backend, one shared function behind `__free`/
+`clear`/`set`/`set_mut`) and the LLVM backend's own `__free`
+per-element match plus `emit_leaf_overwrite_drop` (for `xs[i] = v`)
+all dispatch on element type to decide what to do before overwriting/
+freeing a slot -- `Struct`/`Enum`/`Vec`/`OwnedStr`/`Box` all have
+arms; none of the 12 Level-4 types did, so they fell through to a
+silent no-op. Fixed by adding all 12 arms in both places on both
+backends, each calling the type's own `_drop(&slot)`/`_drop(%elt_p)`
+(pointer-taking, matching every one of these types' existing `_drop`
+signature).
+
+Verified: the original crash repros (`Vec<Graph>`, `Vec<UnionFind>`,
+`Vec<Bst<i64>>`, `Vec<Trie>`, `Vec<BTreeSet<i64>>`) now run cleanly on
+both backends with matching output; the 4 regressions from the first
+(reverted) ordering attempt are confirmed gone; `valgrind
+--leak-check=full` reports zero leaks and zero errors on a
+`Vec<UnionFind>` push/drop repro on BOTH the C build and the LLVM AOT
+build; full `cargo test --release --workspace` clean; two full
+`tools/backend_crosscheck.py` corpus sweeps (one after the crash fix,
+one after the leak fix), each 1079 files / 1058 clean / 0 flagged,
+matching baseline exactly.
+
+Next free bug number is **BUG-217**.
+
+## BUG-217: systematic RAII sweep after BUG-216 (the user's follow-up
+## question, "will this issue arise with other RAII e.g. box")
+
+Per explicit instruction after BUG-216 landed: "every new bug find in
+1 RAII should be verified for all RAII. same with related features."
+Enumerated every RAII/affine type in the codebase (`is_copy() ==
+false` in `src/ast.rs`: Array, Vec, OwnedStr, Task, TaskR, Atomic,
+Channel, Mutex, Guard, Condvar, Barrier, FileHandle, RwLock,
+ReadGuard, WriteGuard, Deque, HashSet, HashMap, BTreeSet, BTreeMap,
+UnionFind, BinaryHeap, BloomFilter, Bst, Graph, Trie, SkipList, Pool,
+Region, Box) and, for every one still legal as a `Vec<T>` element,
+ran a real push/drop repro under `valgrind --leak-check=full` on both
+backends rather than trusting code-reading alone -- match-arm gaps
+don't warn, they silently fall to a `_ => {}`/`_ => String::new()`
+no-op. This found two more real, previously-unknown bugs beyond
+BUG-216's fix, in two entirely different mechanisms:
+
+**1. Leaf-overwrite leak (`xs[i] = v`), affecting `Box<T>` and
+confirmed-scoped to it alone.** `Box`'s basic push/scope-exit-drop
+into a `Vec<Box<T>>` was already correct (BUG-216's own fix didn't
+touch it, and it was clean before this sweep too). But direct index-
+assignment -- `xs[i] = new_value;` on a `mut ref Vec<Box<T>>`, as
+opposed to the `set()` builtin -- never dropped the OLD value at that
+slot on either backend, confirmed via a `Vec<Box<Vec<i64>>>` repro
+(`valgrind`: 24+24 bytes "definitely lost" on C; the LLVM IR showed a
+raw `store` with no preceding load-and-free either). Root cause: this
+is a THIRD, independently-maintained per-element-type dispatch table,
+distinct from both BUG-216's `__free`/`clear`/`set`/`set_mut`
+dispatch AND `vec_element_size_expr`'s byte-size dispatch --
+`emit_index_assign`'s two match blocks in `backend_c.rs` (mixed-place
+leaf write and whole-element write, previously hand-duplicated with
+DIFFERING arm sets -- the mixed-place one was missing Struct/Enum
+too) and `emit_leaf_overwrite_drop` in `backend_llvm.rs`. `Box` had
+no arm in any of the three. `OwnedStr`/`Vec`/`Struct`/`Enum` already
+did (confirmed clean via a parallel `Vec<OwnedStr>` repro -- this
+leak was Box-specific, not a "no dispatch exists at all" gap). Fixed
+by: (a) unifying the C backend's two duplicated match blocks into one
+shared `emit_index_assign_leaf_free_c` helper covering OwnedStr/Vec/
+Struct/Enum/Box/all 12 Level-4 types consistently for both branches;
+(b) adding the missing `Box` arm to `backend_llvm.rs`'s
+`emit_leaf_overwrite_drop`, mirroring `__free`'s own existing `Box`
+arm exactly (same four sub-cases: `Box<dyn Iface>`, `Box<Vec<U>>`,
+`Box<OwnedStr>`, `Box<T>` for Copy `T`).
+
+**2. `Region` has the exact same typedef-ordering AND byte-size gaps
+BUG-216 fixed for the 12 Level-4 types -- just wasn't in that sweep's
+scope.** `Region` (Layer 5 v2 of `unsafe.md`) is a `Type::Region` unit
+variant structurally identical in shape to `Type::Graph`/`Type::Trie`,
+but BUG-216's original sweep only covered the "Level-4 data
+structure" family, not the separate `unsafe.md` Layer types. Its
+sibling `Pool<i64>` (Layer 2) was already fixed by BUG-189 and is
+clean; `Region` never got the equivalent fix. Confirmed via a direct
+`Vec<Region>` repro: C failed with "unknown type name 'intent_region'"
+(same ordering gap); LLVM's byte-size estimator also had no arm for
+`Type::Region` in `vec_element_size_expr`/`vec_element_byte_size`
+(fell through to the 8-byte scalar default despite the REAL struct
+being 24 bytes) -- though this one didn't visibly corrupt in the
+single-element repro, most likely because malloc's real chunk-size
+rounding absorbed the 16-byte shortfall; not proof the gap was safe,
+just proof this particular test was too small to force a visible
+crash. Fixed identically to BUG-216's pattern: hoisted `Region`'s bare
+typedef + a `intent_region_drop` forward declaration ahead of the
+Vec-bundle loop in `backend_c.rs`, added the `sizeof_idiom`/constant
+arms to both LLVM byte-size functions, and added `Region` to all four
+drop-dispatch match sites (C's `c_element_drop_old` and
+`emit_index_assign_leaf_free_c`; LLVM's `__free` match and
+`emit_leaf_overwrite_drop`).
+
+**Also swept but found clean, no fix needed:** `Mutex<i64>`,
+`RwLock<i64>`, `Atomic<i64>`, `Channel<i64,4>`, `Pool<i64>` -- all
+push/drop cleanly into a `Vec<T>` on both backends today (Channel/
+Atomic/Pool don't independently own a separate heap buffer the way
+UnionFind/Graph/Box/Region do, so there's nothing for a missing
+per-element drop arm to leak in the first place, even though they
+correctly still get *checked* against every dispatch site above).
+
+**Found, NOT fixed -- filed as open, distinct from the RAII-drop
+pattern this bug is otherwise about:** investigating `Vec<Mutex<T>>`
+surfaced a genuinely different, deeper bug while chasing why it
+initially failed to link on LLVM ("base element of getelementptr must
+be sized" for `%intent_mutex_int64_t`). Root cause, as far as
+diagnosed: `Mutex`/`Guard`'s SSA-LLVM support (`ssa_backend_llvm.rs`)
+is a simpler, i64-only implementation that hardcodes the OLD name
+`%intent_mutex_i64` throughout its own codegen, entirely independent
+of BUG-19's later per-element-type `element_tag`-based naming
+(`%intent_mutex_int64_t`) added to tree-LLVM's `backend_llvm.rs` --
+the C backend has an explicit compatibility `typedef intent_mutex_
+int64_t intent_mutex_i64;` alias bridging the two naming schemes
+(`emit_intent_mutex_helpers_c`'s "Legacy aliases" block); no LLVM
+equivalent exists. A program using `Vec<Mutex<T>>` reuses tree-LLVM's
+generic Vec-bundle machinery (which references the NEW name) while
+SSA-LLVM's own Mutex codegen (which the same program's non-Vec
+`Mutex` operations still route through) uses the OLD name -- a cross-
+file, cross-representation mismatch. A same-direction LLVM type alias
+(`%intent_mutex_int64_t = type %intent_mutex_i64`) was attempted and
+DID NOT WORK -- `opt`/`llc` rejected the alias as an invalid base type
+for the GEP-null sizeof idiom specifically ("expected type" in
+isolation, "must be sized" in the full program), confirming LLVM's
+named-type aliasing doesn't transparently substitute inside constant
+expressions the way this fix needs. Also found, separately, while
+narrowing this down: a PLAIN (non-Vec) `Mutex<i32>` fails at LLVM IR
+verification with `'%v_0' defined with type 'i32' but expected
+'i64'` -- suggesting `Mutex<T>`'s SSA-LLVM support may only ever have
+been correct for `T = i64` specifically, with `Mutex<i32>`/other
+scalar widths silently accepted by the checker but never actually
+correctly lowered. This needs a real, separate investigation (likely
+requires either extending SSA-LLVM's Mutex/Guard codegen to be
+genuinely per-T generic, matching tree-LLVM, or reconciling the two
+naming schemes some other way) -- reverted the incomplete attempt
+rather than ship a fix that doesn't actually work. **`RwLock`/
+`ReadGuard`/`WriteGuard`/`Channel`/`Atomic` are NOT at risk of this
+SAME cross-file mismatch** -- confirmed none of them have ANY
+declaration in `ssa_backend_llvm.rs` at all, so a program using any of
+them always falls back to tree-LLVM entirely (matches the "swept and
+found clean" `RwLock`/`Atomic`/`Channel` results above).
+
+Verified: `Box`/`Region` fixes confirmed via `valgrind --leak-check=
+full` (0 errors, 0 leaks, both backends) on their own dedicated
+repros; full `cargo test --release --workspace` clean; full
+`tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
+0 flagged, matching baseline exactly.
+
+Next free bug number is **BUG-218** (reserved for the open Mutex/Guard
+SSA-LLVM naming-mismatch investigation above, if/when it's picked
+up).
