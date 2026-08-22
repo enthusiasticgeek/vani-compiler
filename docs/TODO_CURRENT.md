@@ -16409,3 +16409,108 @@ index/id parameter, on both backends:
 No new bug found. `UnionFind` was confirmed to be the sole instance of
 this exact vulnerability shape in the codebase, not one of a broader
 family -- the fix in BUG-215 fully closes it.
+
+## BUG-216 (+ a follow-up leak fix)
+
+Audit round per the user's explicit request to "think of feature
+combinations not tested before". localfuzz had nothing new queued, so
+this round hand-constructed novel combinations of recently-touched
+features instead: `cancel`+`Task<R>`, `cancel`+`detach`, `downto`+
+`parallel for` (cleanly rejected, not a bug), and -- the one that
+found something real -- `Vec<T>` where `T` is one of the Level-4
+builtin data-structure types (`UnionFind`, `Graph`, `Bst<i64>`,
+`Trie`, `SkipList<i64>`, `BinaryHeap<i64>`, `BloomFilter`,
+`BTreeSet<i64>`, `BTreeMap<i64,i64>`, `HashSet<i64>`,
+`HashMap<i64,i64>`, `Deque<i64>`) -- a combination that, as far as
+could be determined, had genuinely never been exercised before: every
+one of these types' own example file only ever appears standalone,
+never nested inside a `Vec<...>`.
+
+**Crash / heap corruption (the headline finding).** `Vec<Graph>` and
+`Vec<UnionFind>` crashed on BOTH backends: `vanic run --backend=c`
+failed to compile ("unknown type name 'intent_graph'"/
+"'intent_union_find'"), and `vanic run` (LLVM) corrupted the heap
+("corrupted size vs. prev_size") or crashed with `free(): invalid
+pointer` depending on which type. Root-caused as two INDEPENDENT bugs
+that happened to share one trigger:
+
+1. **LLVM byte-size estimation.** `vec_element_size_expr`/
+   `vec_element_byte_size` in `backend_llvm.rs` -- the functions that
+   compute how many bytes a Vec's `malloc`/`realloc` needs per element
+   -- had no arm for any of these 12 types, so they all fell through to
+   the final `bits().unwrap_or(64) / 8 = 8`-bytes-per-element fallback,
+   regardless of the type's REAL size (96 bytes for `Graph`, 32 for
+   `UnionFind`, up to 88 for `Trie`). `Vec<Graph>`'s buffer was
+   allocated 12x too small; storing one full-size element into it was
+   a wild out-of-bounds write. Exact same failure class this file has
+   hit and fixed repeatedly before (Vec128/256/512, `Box<dyn Iface>`,
+   `Channel`/`Mutex`/`Guard`/`RwLock`, payloaded enums) -- these 12
+   types were just added later and never got the matching arm. Fixed
+   by adding all 12 arms, using the same GEP-null `sizeof` LLVM idiom
+   already used for Struct/Tuple/Channel/Mutex/etc. Also caught (and
+   fixed) two independent, pre-existing miscounts while cross-checking
+   every constant against its real struct definition: `llvm_byte_size`
+   had `Bst => 48` (real: 56) and `Trie => 56` (real: 88) -- both
+   currently latent (`Bst`/`Trie` aren't Copy, so they can't reach
+   `task_spawn_call_ctx_size`/`compute_ctx_size`'s malloc sizing, and
+   `box()` explicitly rejects them too), fixed anyway since they were
+   real, easy-to-verify miscounts a future caller could hit.
+
+2. **C typedef ordering.** All 12 types' full definitions (`typedef`
+   + every function) sat in one block, positioned AFTER the
+   `element_types` Vec-bundle loop -- so `Vec<Graph>`'s bundle
+   referenced `intent_graph` before that typedef existed anywhere in
+   the file ("unknown type name"). This is the exact same gap BUG-189
+   found and fixed for `Pool`/`Handle`, just never extended to these
+   12 types. The obvious fix (move each type's WHOLE block ahead of
+   the loop, mirroring BUG-189 exactly) was tried first and reverted:
+   several of these types' own FUNCTIONS (`graph_topo_sort`/
+   `graph_astar`, `btreeset_range`, `btreemap_range_keys`/`_values`)
+   depend on `intent_vec_int64_t` from that SAME loop, so moving the
+   whole block just swapped which direction broke -- confirmed via
+   `tools/backend_crosscheck.py` flagging 4 NEW divergences
+   (`graph_algo2.vani`, `btreeset.vani`, `btreemap.vani`,
+   `hashmap_veck.vani`) after the naive move. The real fix mirrors
+   BUG-31's typedef/functions split instead: hoist ONLY the 12 bare
+   `typedef struct {...}` lines ahead of the Vec-bundle loop (plus a
+   forward declaration of each type's `_drop` function, needed once
+   the leak fix below made the Vec bundle's own `clear`/`__free` call
+   into it), leaving every FUNCTION body at its original, later
+   position. Removed the now-redundant leading typedef line from each
+   of the 12 `emit_intent_*_helpers_c_body` functions -- C rejects a
+   literal duplicate typedef of an anonymous struct as "conflicting
+   types" even when the text is byte-identical, so it had to be
+   removed from the later site, not just harmlessly repeated.
+
+**Leak (follow-up, found immediately after via `valgrind` on the
+crash fix's own repro).** Once `Vec<UnionFind>` stopped crashing, a
+`valgrind --leak-check=full` run on the same repro showed the
+`UnionFind`'s own `parent`/`rank` arrays "definitely lost" -- the
+generated `__free`/`clear`/`set`/`set_mut` functions for a
+`Vec<UnionFind>` never called `intent_union_find_drop` on each
+element before freeing the outer buffer, so every Level-4 type's
+INNER heap allocations leaked whenever it sat inside a `Vec`,
+`Vec::clear()`d, or got overwritten via `set`. Root cause:
+`c_element_drop_old` (C backend, one shared function behind `__free`/
+`clear`/`set`/`set_mut`) and the LLVM backend's own `__free`
+per-element match plus `emit_leaf_overwrite_drop` (for `xs[i] = v`)
+all dispatch on element type to decide what to do before overwriting/
+freeing a slot -- `Struct`/`Enum`/`Vec`/`OwnedStr`/`Box` all have
+arms; none of the 12 Level-4 types did, so they fell through to a
+silent no-op. Fixed by adding all 12 arms in both places on both
+backends, each calling the type's own `_drop(&slot)`/`_drop(%elt_p)`
+(pointer-taking, matching every one of these types' existing `_drop`
+signature).
+
+Verified: the original crash repros (`Vec<Graph>`, `Vec<UnionFind>`,
+`Vec<Bst<i64>>`, `Vec<Trie>`, `Vec<BTreeSet<i64>>`) now run cleanly on
+both backends with matching output; the 4 regressions from the first
+(reverted) ordering attempt are confirmed gone; `valgrind
+--leak-check=full` reports zero leaks and zero errors on a
+`Vec<UnionFind>` push/drop repro on BOTH the C build and the LLVM AOT
+build; full `cargo test --release --workspace` clean; two full
+`tools/backend_crosscheck.py` corpus sweeps (one after the crash fix,
+one after the leak fix), each 1079 files / 1058 clean / 0 flagged,
+matching baseline exactly.
+
+Next free bug number is **BUG-217**.
