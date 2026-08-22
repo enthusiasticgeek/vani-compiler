@@ -10549,3 +10549,31 @@ vani -m edge_cases mix_conc_parallel_struct_capture.vani --backend-divergence
 Observed symptom: Backend diverged with LLVM error. Specifically, a multiple definition of local value named 'loc_red_0' was detected in the generated LLVM IR.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260822-170655-backend-divergence-e4e94cd8c7
+
+Repro: `tools/localfuzz/findings/20260822-170655-backend-divergence-e4e94cd8c7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-170655-backend-divergence-e4e94cd8c7/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 0,
+    "stdout": "main computation result: 332833500\n[heartbeat] tick",
+    "stderr": "/tmp/localfuzz/candidate.vani:31:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat();\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "main computation result: 332833500\n[heartbeat] tick 1\n[heartbeat] tick 2\n[heartbeat] tick 3\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:31:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat();\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n",
+    "timed_out": false
+  }
+}
+```
+
