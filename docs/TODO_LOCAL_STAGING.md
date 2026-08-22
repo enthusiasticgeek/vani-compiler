@@ -10586,3 +10586,42 @@ Repro: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/r
 Fix attempt: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260822-193657-run-crash-35ffb022ba
+
+Repro: `tools/localfuzz/findings/20260822-193657-run-crash-35ffb022ba/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-193657-run-crash-35ffb022ba/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+---
+
+**Date:** [Insert Current Date]
+
+**Time:** [Insert Current Time]
+
+**System Information:**
+- Operating System: Linux (e.g., Ubuntu 20.04)
+- Compiler Version: [Specify the compiler version being used]
+- Hardware Specifications:
+  - CPU Model: [Enter the CPU model]
+  - Memory: [Specify the amount of RAM]
+  - Storage: [Specify the type and size of storage]
+
+**Description of the Bug Report:**
+A CANDIDATE bug report has been submitted for the vani-compiler project's local staging log. The bug involves a generated source file, specifically `examples/language/english/heap.vani`. This file contains a function `unwrap_or` that is used in multiple places within the program.
+
+**Mutant/generated source:**
+The provided code snippet shows a function `unwrap_or` defined within the `main` function of the `heap.vani` program. This function takes an optional value and returns its value if present, or defaults to a specified value if not.
+
+**Observed Symptom:**
+A run-crash occurred when attempting to execute the generated source code using the vanic compiler for both the LLVM and C backends. The compilation process did not complete successfully, resulting in a crash.
+
+**Backend Affected:**
+This bug affects both the LLVM backend and the C backend of the vani-compiler project.
+
+---
+
+**STATUS: needs human/frontier root-cause review.**
