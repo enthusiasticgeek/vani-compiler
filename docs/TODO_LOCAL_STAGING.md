@@ -10429,3 +10429,42 @@ danish/hungarian/french/gujarati instances of this same base file
 already closed out in prior rounds.
 
 Next free bug number on vani-compiler is BUG-217.
+
+---
+
+## Follow-up: BUG-217, systematic RAII sweep after BUG-216 (2026-08-22)
+
+Per explicit user instruction after BUG-216 landed ("every new bug find
+in 1 RAII should be verified for all RAII. same with related
+features."): enumerated every RAII/affine type in the codebase and
+valgrind-tested each one's `Vec<T>` push/drop/index-assign behavior on
+both backends, rather than trusting code-reading alone.
+
+**REAL BUGS, FIXED as BUG-217** (main repo commit `675edb30`):
+- `Box<T>` leaked on `xs[i] = v` direct index-assignment (distinct
+  from the `set()` builtin) on both backends -- a third, separately-
+  maintained per-element dispatch table that never had a Box arm.
+- `Region` (Layer 5 of unsafe.md) had the identical typedef-ordering
+  and byte-size gaps BUG-216 fixed for the 12 Level-4 types -- wasn't
+  in that sweep's original scope. Sibling `Pool<i64>` was already
+  fixed by BUG-189; Region wasn't.
+
+**Swept and confirmed clean**: Mutex, RwLock, Atomic, Channel, Pool
+all push/drop correctly.
+
+**FOUND, NOT FIXED -- filed as open (next free bug number BUG-218)**:
+`Vec<Mutex<T>>` fails to link on LLVM (cross-file naming mismatch
+between SSA-LLVM's simpler i64-only Mutex representation and tree-
+LLVM's per-element-type naming introduced by BUG-19). An attempted
+LLVM type-alias fix did not work (`opt`/`llc` reject it inside the
+GEP-null sizeof idiom specifically) and was reverted rather than
+shipped broken. Also found, separately: plain `Mutex<i32>` (no Vec)
+fails LLVM IR verification outright -- `Mutex<T>` may only ever have
+been correctly lowered for `T = i64` on this path. See
+`docs/TODO_CURRENT.md`'s BUG-217 entry on vani-compiler for the full
+root-cause writeup -- this needs its own dedicated investigation, not
+a quick follow-up.
+
+Verified: valgrind --leak-check=full clean (0 errors, both backends)
+on the Box/Region fixes; full cargo test clean; full
+backend_crosscheck.py corpus sweep (0 flagged).
