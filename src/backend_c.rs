@@ -1562,6 +1562,21 @@ pub fn emit_c(program: &TypedProgram) -> String {
             "#define INTENT_SKIPLIST_MAX_LEVEL 8\ntypedef struct { int64_t* keys; int32_t* forward; int32_t* node_levels; uint64_t rng_state; int64_t num_nodes; int64_t capacity; int64_t num_keys; int64_t tail_node; } intent_skiplist_i64;\nstatic void intent_skiplist_i64_drop(intent_skiplist_i64* p);\n",
         );
     }
+    // BUG-216 follow-up: `Region` (Layer 5 v2 of `unsafe.md`) has
+    // the exact same C typedef-ordering gap as the 12 types above,
+    // confirmed via a direct `Vec<Region>` repro ("unknown type
+    // name 'intent_region'") -- it's just a `Type::Region` unit
+    // variant like `Type::Graph`/`Type::Trie`, not one of the
+    // originally-audited "Level-4 data structure" types, so it
+    // wasn't in that first sweep. `Pool<i64>` (`Type::Pool`), the
+    // other Layer-2/5 `unsafe.md` sibling, was ALREADY fixed by
+    // BUG-189 -- confirmed clean via the same `Vec<Pool<i64>>`
+    // repro -- so it needs no change here.
+    if program_uses_region(program) {
+        body.push_str(
+            "typedef struct { int64_t* data; size_t len; size_t capacity; } intent_region;\nstatic void intent_region_drop(intent_region* p);\n",
+        );
+    }
     for element in &element_types {
         // Skip Vec bundles already emitted in the pre-struct
         // pass for fields like `struct Bag { contents: Vec<i64> }`.
@@ -3425,8 +3440,7 @@ fn emit_intent_bptr_helpers_c_body(out: &mut String, has_option_i64: bool) {
 /// a future `region_with_capacity` builtin.
 fn emit_intent_region_helpers_c_body(out: &mut String) {
     out.push_str(
-        "typedef struct { int64_t* data; size_t len; size_t capacity; } intent_region;\n\
-         static INTENT_UNUSED intent_region intent_region_new(void) {\n\
+        "static INTENT_UNUSED intent_region intent_region_new(void) {\n\
          \x20 intent_region r;\n\
          \x20 r.data = (int64_t*)0;\n\
          \x20 r.len = 0; r.capacity = 0;\n\
@@ -13397,6 +13411,11 @@ pub(crate) fn c_element_drop_old(slot: &str, ty: &Type) -> String {
         Type::HashSet(_) => format!("\n        intent_hashset_i64_drop(&{slot});", slot = slot),
         Type::HashMap(_, _) => format!("\n        intent_hashmap_i64_i64_drop(&{slot});", slot = slot),
         Type::Deque(_) => format!("\n        intent_deque_i64_drop(&{slot});", slot = slot),
+        // BUG-216 follow-up: `Region` needs the same per-element
+        // drop dispatch as the 12 Level-4 types above (see the
+        // typedef-ordering fix's comment for why it wasn't in the
+        // original sweep).
+        Type::Region => format!("\n        intent_region_drop(&{slot});", slot = slot),
         _ => String::new(),
     }
 }
@@ -16244,102 +16263,143 @@ fn emit_index_assign(
     };
 
     if let (Some(lv), Some(lty)) = (slot_lvalue.as_ref(), leaf_ty.as_ref()) {
-        // Mixed-place leaf drop (closure #126 / F2): when the
-        // assignment writes through a field path, free the OLD
-        // leaf field's heap before storing the new value.
-        if !field_path.is_empty() {
-            match lty {
-                Type::OwnedStr => {
-                    out.push_str(&format!("  free((void*){});\n", lv));
-                }
-                Type::Vec(elem) => {
-                    out.push_str(&format!("  {}({});\n", vec_helper(elem, "free"), lv));
-                }
-                _ => {}
-            }
-        } else {
-            // Whole-element overwrite (closure #149 / #150):
-            // `xs[i] = newval` for ANY heap-shaped element
-            // must free the OLD slot's heap before the store.
-            // Previously only the field_path != [] case was
-            // handled at the leaf level, so several
-            // whole-element shapes leaked.
-            match lty {
-                Type::OwnedStr => {
-                    // Closure #150: `Vec<OwnedStr>[i] = "x" + "y"`
-                    // — free the old i8* before storing the new.
-                    out.push_str(&format!("  free((void*){});\n", lv));
-                }
-                Type::Vec(elem) => {
-                    // Closure #150: `Vec<Vec<i64>>[i] = vec(…)`
-                    // — call the inner __free over the old
-                    // slot before storing the new struct.
-                    out.push_str(&format!(
-                        "  {}({});\n",
-                        vec_helper(elem, "free"),
-                        lv
-                    ));
-                }
-                Type::Struct(struct_name) => {
-                    let fields = STRUCT_FIELDS_REGISTRY
-                        .with(|r| r.borrow().get(struct_name).cloned())
-                        .unwrap_or_default();
-                    let has_owning = fields.iter().any(|(_, ty)| !ty.is_copy());
-                    if has_owning {
-                        let empty: std::collections::HashSet<&String> =
-                            std::collections::HashSet::new();
-                        emit_struct_field_drops(
-                            lv,
-                            struct_name,
-                            &fields,
-                            &empty,
-                            out,
-                        );
-                    }
-                }
-                Type::Enum(enum_name) => {
-                    let payload_ty = ENUM_PAYLOAD_REGISTRY
-                        .with(|r| r.borrow().get(enum_name).cloned());
-                    let free_expr: Option<String> = match &payload_ty {
-                        Some(Type::OwnedStr) => Some(format!(
-                            "free((void*){}.payload)",
-                            lv
-                        )),
-                        Some(Type::Vec(element)) => Some(format!(
-                            "{}({}.payload)",
-                            vec_helper(element, "free"),
-                            lv
-                        )),
-                        _ => None,
-                    };
-                    if let Some(free_call) = free_expr {
-                        let payload_tags: Vec<u32> =
-                            ENUM_PAYLOAD_TAGS_REGISTRY.with(|r| {
-                                r.borrow()
-                                    .get(enum_name)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                        if !payload_tags.is_empty() {
-                            let cases: Vec<String> = payload_tags
-                                .iter()
-                                .map(|t| format!("case {}", t))
-                                .collect();
-                            out.push_str(&format!(
-                                "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
-                                lv,
-                                cases.join(": "),
-                                free_call
-                            ));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        // Mixed-place leaf drop (closure #126 / F2) when writing
+        // through a field path, or whole-element overwrite
+        // (closure #149 / #150) for plain `xs[i] = newval` --
+        // either way, ANY heap-shaped old slot value must be freed
+        // before the new value is stored. BUG-216 follow-up:
+        // unified both call sites through one helper (previously
+        // hand-duplicated, with the field_path branch missing
+        // Struct/Enum and BOTH branches missing Box and every
+        // Level-4 builtin type -- confirmed via a direct `valgrind`
+        // repro that `xs[0] = new_box;` on a `Vec<Box<Vec<i64>>>`
+        // leaked the old Box's inner Vec, a distinct bug from
+        // BUG-216 itself since this path never went through
+        // `c_element_drop_old` at all).
+        emit_index_assign_leaf_free_c(lv, lty, out);
     }
 
     out.push_str(&store_line);
+}
+
+/// Free the OLD value at an index-assign target's slot before the
+/// new value overwrites it -- shared by both the mixed-place
+/// (`field_path` non-empty) and whole-element (`field_path` empty)
+/// cases in `emit_index_assign` above. Same type coverage as
+/// `c_element_drop_old` (OwnedStr / Vec / Struct / Enum / Box /
+/// every Level-4 builtin type), duplicated here rather than reused
+/// directly because the call sites in `c_element_drop_old` all sit
+/// inside a Vec-bundle helper's own generated `for` loop with a
+/// fixed indentation/newline convention that doesn't match this
+/// function's plain statement-by-statement `out.push_str` style.
+fn emit_index_assign_leaf_free_c(lv: &str, lty: &Type, out: &mut String) {
+    match lty {
+        Type::OwnedStr => {
+            out.push_str(&format!("  free((void*){});\n", lv));
+        }
+        Type::Vec(elem) => {
+            out.push_str(&format!("  {}({});\n", vec_helper(elem, "free"), lv));
+        }
+        Type::Struct(struct_name) => {
+            let fields = STRUCT_FIELDS_REGISTRY
+                .with(|r| r.borrow().get(struct_name).cloned())
+                .unwrap_or_default();
+            let has_owning = fields.iter().any(|(_, ty)| !ty.is_copy());
+            if has_owning {
+                let empty: std::collections::HashSet<&String> =
+                    std::collections::HashSet::new();
+                emit_struct_field_drops(lv, struct_name, &fields, &empty, out);
+            }
+        }
+        Type::Enum(enum_name) => {
+            let payload_ty = ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().get(enum_name).cloned());
+            let free_expr: Option<String> = match &payload_ty {
+                Some(Type::OwnedStr) => Some(format!("free((void*){}.payload)", lv)),
+                Some(Type::Vec(element)) => Some(format!(
+                    "{}({}.payload)",
+                    vec_helper(element, "free"),
+                    lv
+                )),
+                _ => None,
+            };
+            if let Some(free_call) = free_expr {
+                let payload_tags: Vec<u32> = ENUM_PAYLOAD_TAGS_REGISTRY
+                    .with(|r| r.borrow().get(enum_name).cloned().unwrap_or_default());
+                if !payload_tags.is_empty() {
+                    let cases: Vec<String> =
+                        payload_tags.iter().map(|t| format!("case {}", t)).collect();
+                    out.push_str(&format!(
+                        "  switch ({}.tag) {{ {}: {}; break; default: break; }}\n",
+                        lv,
+                        cases.join(": "),
+                        free_call
+                    ));
+                }
+            }
+        }
+        // BUG-216 follow-up: `Box<T>` and every Level-4 builtin
+        // type (see `c_element_drop_old`'s identical arms for the
+        // full rationale) never had leaf-overwrite coverage at all.
+        Type::Box(inner) => match &**inner {
+            Type::Object(_iface) => {
+                out.push_str(&format!("  free((void*){}.data);\n", lv));
+            }
+            Type::Vec(elem) => {
+                out.push_str(&format!(
+                    "  {}(*({}));\n  free({});\n",
+                    vec_helper(elem, "free"),
+                    lv,
+                    lv
+                ));
+            }
+            Type::OwnedStr => {
+                out.push_str(&format!("  free((void*)*({}));\n  free({});\n", lv, lv));
+            }
+            _ => {
+                out.push_str(&format!("  free({});\n", lv));
+            }
+        },
+        Type::UnionFind => {
+            out.push_str(&format!("  intent_union_find_drop(&{});\n", lv));
+        }
+        Type::Graph => {
+            out.push_str(&format!("  intent_graph_drop(&{});\n", lv));
+        }
+        Type::Bst(_) => {
+            out.push_str(&format!("  intent_bst_i64_drop(&{});\n", lv));
+        }
+        Type::Trie => {
+            out.push_str(&format!("  intent_trie_drop(&{});\n", lv));
+        }
+        Type::SkipList => {
+            out.push_str(&format!("  intent_skiplist_i64_drop(&{});\n", lv));
+        }
+        Type::BinaryHeap(_) => {
+            out.push_str(&format!("  intent_binary_heap_i64_drop(&{});\n", lv));
+        }
+        Type::BloomFilter => {
+            out.push_str(&format!("  intent_bloom_filter_drop(&{});\n", lv));
+        }
+        Type::BTreeSet(_) => {
+            out.push_str(&format!("  intent_btreeset_i64_drop(&{});\n", lv));
+        }
+        Type::BTreeMap(_, _) => {
+            out.push_str(&format!("  intent_btreemap_i64_i64_drop(&{});\n", lv));
+        }
+        Type::HashSet(_) => {
+            out.push_str(&format!("  intent_hashset_i64_drop(&{});\n", lv));
+        }
+        Type::HashMap(_, _) => {
+            out.push_str(&format!("  intent_hashmap_i64_i64_drop(&{});\n", lv));
+        }
+        Type::Deque(_) => {
+            out.push_str(&format!("  intent_deque_i64_drop(&{});\n", lv));
+        }
+        Type::Region => {
+            out.push_str(&format!("  intent_region_drop(&{});\n", lv));
+        }
+        _ => {}
+    }
 }
 
 /// Emit a `print item1, item2, …;` statement. Each item is printed

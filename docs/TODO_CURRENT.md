@@ -16514,3 +16514,129 @@ one after the leak fix), each 1079 files / 1058 clean / 0 flagged,
 matching baseline exactly.
 
 Next free bug number is **BUG-217**.
+
+## BUG-217: systematic RAII sweep after BUG-216 (the user's follow-up
+## question, "will this issue arise with other RAII e.g. box")
+
+Per explicit instruction after BUG-216 landed: "every new bug find in
+1 RAII should be verified for all RAII. same with related features."
+Enumerated every RAII/affine type in the codebase (`is_copy() ==
+false` in `src/ast.rs`: Array, Vec, OwnedStr, Task, TaskR, Atomic,
+Channel, Mutex, Guard, Condvar, Barrier, FileHandle, RwLock,
+ReadGuard, WriteGuard, Deque, HashSet, HashMap, BTreeSet, BTreeMap,
+UnionFind, BinaryHeap, BloomFilter, Bst, Graph, Trie, SkipList, Pool,
+Region, Box) and, for every one still legal as a `Vec<T>` element,
+ran a real push/drop repro under `valgrind --leak-check=full` on both
+backends rather than trusting code-reading alone -- match-arm gaps
+don't warn, they silently fall to a `_ => {}`/`_ => String::new()`
+no-op. This found two more real, previously-unknown bugs beyond
+BUG-216's fix, in two entirely different mechanisms:
+
+**1. Leaf-overwrite leak (`xs[i] = v`), affecting `Box<T>` and
+confirmed-scoped to it alone.** `Box`'s basic push/scope-exit-drop
+into a `Vec<Box<T>>` was already correct (BUG-216's own fix didn't
+touch it, and it was clean before this sweep too). But direct index-
+assignment -- `xs[i] = new_value;` on a `mut ref Vec<Box<T>>`, as
+opposed to the `set()` builtin -- never dropped the OLD value at that
+slot on either backend, confirmed via a `Vec<Box<Vec<i64>>>` repro
+(`valgrind`: 24+24 bytes "definitely lost" on C; the LLVM IR showed a
+raw `store` with no preceding load-and-free either). Root cause: this
+is a THIRD, independently-maintained per-element-type dispatch table,
+distinct from both BUG-216's `__free`/`clear`/`set`/`set_mut`
+dispatch AND `vec_element_size_expr`'s byte-size dispatch --
+`emit_index_assign`'s two match blocks in `backend_c.rs` (mixed-place
+leaf write and whole-element write, previously hand-duplicated with
+DIFFERING arm sets -- the mixed-place one was missing Struct/Enum
+too) and `emit_leaf_overwrite_drop` in `backend_llvm.rs`. `Box` had
+no arm in any of the three. `OwnedStr`/`Vec`/`Struct`/`Enum` already
+did (confirmed clean via a parallel `Vec<OwnedStr>` repro -- this
+leak was Box-specific, not a "no dispatch exists at all" gap). Fixed
+by: (a) unifying the C backend's two duplicated match blocks into one
+shared `emit_index_assign_leaf_free_c` helper covering OwnedStr/Vec/
+Struct/Enum/Box/all 12 Level-4 types consistently for both branches;
+(b) adding the missing `Box` arm to `backend_llvm.rs`'s
+`emit_leaf_overwrite_drop`, mirroring `__free`'s own existing `Box`
+arm exactly (same four sub-cases: `Box<dyn Iface>`, `Box<Vec<U>>`,
+`Box<OwnedStr>`, `Box<T>` for Copy `T`).
+
+**2. `Region` has the exact same typedef-ordering AND byte-size gaps
+BUG-216 fixed for the 12 Level-4 types -- just wasn't in that sweep's
+scope.** `Region` (Layer 5 v2 of `unsafe.md`) is a `Type::Region` unit
+variant structurally identical in shape to `Type::Graph`/`Type::Trie`,
+but BUG-216's original sweep only covered the "Level-4 data
+structure" family, not the separate `unsafe.md` Layer types. Its
+sibling `Pool<i64>` (Layer 2) was already fixed by BUG-189 and is
+clean; `Region` never got the equivalent fix. Confirmed via a direct
+`Vec<Region>` repro: C failed with "unknown type name 'intent_region'"
+(same ordering gap); LLVM's byte-size estimator also had no arm for
+`Type::Region` in `vec_element_size_expr`/`vec_element_byte_size`
+(fell through to the 8-byte scalar default despite the REAL struct
+being 24 bytes) -- though this one didn't visibly corrupt in the
+single-element repro, most likely because malloc's real chunk-size
+rounding absorbed the 16-byte shortfall; not proof the gap was safe,
+just proof this particular test was too small to force a visible
+crash. Fixed identically to BUG-216's pattern: hoisted `Region`'s bare
+typedef + a `intent_region_drop` forward declaration ahead of the
+Vec-bundle loop in `backend_c.rs`, added the `sizeof_idiom`/constant
+arms to both LLVM byte-size functions, and added `Region` to all four
+drop-dispatch match sites (C's `c_element_drop_old` and
+`emit_index_assign_leaf_free_c`; LLVM's `__free` match and
+`emit_leaf_overwrite_drop`).
+
+**Also swept but found clean, no fix needed:** `Mutex<i64>`,
+`RwLock<i64>`, `Atomic<i64>`, `Channel<i64,4>`, `Pool<i64>` -- all
+push/drop cleanly into a `Vec<T>` on both backends today (Channel/
+Atomic/Pool don't independently own a separate heap buffer the way
+UnionFind/Graph/Box/Region do, so there's nothing for a missing
+per-element drop arm to leak in the first place, even though they
+correctly still get *checked* against every dispatch site above).
+
+**Found, NOT fixed -- filed as open, distinct from the RAII-drop
+pattern this bug is otherwise about:** investigating `Vec<Mutex<T>>`
+surfaced a genuinely different, deeper bug while chasing why it
+initially failed to link on LLVM ("base element of getelementptr must
+be sized" for `%intent_mutex_int64_t`). Root cause, as far as
+diagnosed: `Mutex`/`Guard`'s SSA-LLVM support (`ssa_backend_llvm.rs`)
+is a simpler, i64-only implementation that hardcodes the OLD name
+`%intent_mutex_i64` throughout its own codegen, entirely independent
+of BUG-19's later per-element-type `element_tag`-based naming
+(`%intent_mutex_int64_t`) added to tree-LLVM's `backend_llvm.rs` --
+the C backend has an explicit compatibility `typedef intent_mutex_
+int64_t intent_mutex_i64;` alias bridging the two naming schemes
+(`emit_intent_mutex_helpers_c`'s "Legacy aliases" block); no LLVM
+equivalent exists. A program using `Vec<Mutex<T>>` reuses tree-LLVM's
+generic Vec-bundle machinery (which references the NEW name) while
+SSA-LLVM's own Mutex codegen (which the same program's non-Vec
+`Mutex` operations still route through) uses the OLD name -- a cross-
+file, cross-representation mismatch. A same-direction LLVM type alias
+(`%intent_mutex_int64_t = type %intent_mutex_i64`) was attempted and
+DID NOT WORK -- `opt`/`llc` rejected the alias as an invalid base type
+for the GEP-null sizeof idiom specifically ("expected type" in
+isolation, "must be sized" in the full program), confirming LLVM's
+named-type aliasing doesn't transparently substitute inside constant
+expressions the way this fix needs. Also found, separately, while
+narrowing this down: a PLAIN (non-Vec) `Mutex<i32>` fails at LLVM IR
+verification with `'%v_0' defined with type 'i32' but expected
+'i64'` -- suggesting `Mutex<T>`'s SSA-LLVM support may only ever have
+been correct for `T = i64` specifically, with `Mutex<i32>`/other
+scalar widths silently accepted by the checker but never actually
+correctly lowered. This needs a real, separate investigation (likely
+requires either extending SSA-LLVM's Mutex/Guard codegen to be
+genuinely per-T generic, matching tree-LLVM, or reconciling the two
+naming schemes some other way) -- reverted the incomplete attempt
+rather than ship a fix that doesn't actually work. **`RwLock`/
+`ReadGuard`/`WriteGuard`/`Channel`/`Atomic` are NOT at risk of this
+SAME cross-file mismatch** -- confirmed none of them have ANY
+declaration in `ssa_backend_llvm.rs` at all, so a program using any of
+them always falls back to tree-LLVM entirely (matches the "swept and
+found clean" `RwLock`/`Atomic`/`Channel` results above).
+
+Verified: `Box`/`Region` fixes confirmed via `valgrind --leak-check=
+full` (0 errors, 0 leaks, both backends) on their own dedicated
+repros; full `cargo test --release --workspace` clean; full
+`tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
+0 flagged, matching baseline exactly.
+
+Next free bug number is **BUG-218** (reserved for the open Mutex/Guard
+SSA-LLVM naming-mismatch investigation above, if/when it's picked
+up).

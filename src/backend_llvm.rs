@@ -45789,6 +45789,10 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                 needs_loop = true;
                 body.push_str("  call void @intent_deque_i64_drop(%intent_deque_i64* %elt_p)\n");
             }
+            Type::Region => {
+                needs_loop = true;
+                body.push_str("  call void @intent_region_drop(%intent_region* %elt_p)\n");
+            }
             _ => {}
         }
         if needs_loop {
@@ -45991,6 +45995,20 @@ pub(crate) fn vec_element_size_expr(element: &Type) -> String {
         Type::HashSet(_) => sizeof_idiom("%intent_hashset_i64"),
         Type::HashMap(_, _) => sizeof_idiom("%intent_hashmap_i64_i64"),
         Type::Deque(_) => sizeof_idiom("%intent_deque_i64"),
+        // BUG-216 follow-up: `Region` (Layer 5 v2 of `unsafe.md`)
+        // has the same missing-arm shape as the 12 types above --
+        // it's a `Type::Region` unit variant, just not one of the
+        // originally-audited "Level-4 data structure" types.
+        // `llvm_byte_size` (a DIFFERENT function, used for ctx/Box
+        // sizing) already has the correct `Region => 24` constant;
+        // this function (the one Vec push/literal/growth codegen
+        // actually calls) never got the matching arm, so it fell
+        // through to the 8-byte scalar-width fallback -- a real
+        // under-allocation this session's own `Vec<Region>` repro
+        // just happened not to visibly corrupt (malloc's real
+        // chunk-size rounding absorbed the 16-byte shortfall for a
+        // single-element buffer; not proof of correctness).
+        Type::Region => sizeof_idiom("%intent_region"),
         // `Vec<[T; N]>`: the array-element's real size is
         // `N * sizeof(T)`, which can differ wildly from
         // `vec_element_byte_size`'s recursive byte-count fallback
@@ -46152,6 +46170,7 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
         Type::HashSet(_) => 40,
         Type::HashMap(_, _) => 48,
         Type::Deque(_) => 32,
+        Type::Region => 24,
         Type::Atomic(inner) => vec_element_byte_size(inner),
         // Vtables Phase 4b: `dyn Iface` is a fat pointer
         // (vtable pointer + data pointer) — 16 bytes.
@@ -46526,6 +46545,59 @@ fn emit_leaf_overwrite_drop(
         Type::Deque(_) => {
             out.push_str(&format!("  call void @intent_deque_i64_drop(%intent_deque_i64* {})\n", p));
         }
+        Type::Region => {
+            out.push_str(&format!("  call void @intent_region_drop(%intent_region* {})\n", p));
+        }
+        // BUG-216 follow-up: `Box<T>` had no arm here either --
+        // confirmed via a direct `valgrind` repro (`xs[0] =
+        // new_box;` on a `mut ref Vec<Box<Vec<i64>>>` leaked the
+        // old Box's inner Vec on both backends). Mirrors `__free`'s
+        // own `Type::Box` arm above exactly, adapted from `%elt_p`
+        // (that function's loop-local pointer name) to this
+        // function's `p` parameter.
+        Type::Box(inner) => match &**inner {
+            Type::Object(iface_name) => {
+                let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                let fat = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}, {}* {}\n", fat, dyn_ty, dyn_ty, p));
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = extractvalue {} {}, 1\n", data_ptr, dyn_ty, fat));
+                out.push_str(&format!("  call void @free(i8* {})\n", data_ptr));
+            }
+            Type::Vec(element) => {
+                let v_s = vec_struct_name(element);
+                let v_free = format!("@intent_vec_{}__free", vec_struct_tag(element));
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}*, {}** {}\n", box_ptr, v_s, v_s, p));
+                let vec_val = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}, {}* {}\n", vec_val, v_s, v_s, box_ptr));
+                out.push_str(&format!("  call void {}({} {})\n", v_free, v_s, vec_val));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to i8*\n", raw, v_s, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+            Type::OwnedStr => {
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8**, i8*** {}\n", box_ptr, p));
+                let str_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8*, i8** {}\n", str_ptr, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", str_ptr));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast i8** {} to i8*\n", raw, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+            _ => {
+                let inner_ty = llvm_type_string(inner);
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}*, {}** {}\n",
+                    box_ptr, inner_ty, inner_ty, p
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to i8*\n", raw, inner_ty, box_ptr));
+                out.push_str(&format!("  call void @free(i8* {})\n", raw));
+            }
+        },
         _ => {}
     }
 }
