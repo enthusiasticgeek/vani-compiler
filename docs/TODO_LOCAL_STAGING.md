@@ -10577,3 +10577,12 @@ Fix attempt: `tools/localfuzz/findings/20260822-170655-backend-divergence-e4e94c
 }
 ```
 
+
+---
+
+### Candidate: 20260822-170822-backend-divergence-b8c7cbd33d
+
+Repro: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
