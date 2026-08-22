@@ -10673,3 +10673,12 @@ lli: lli: /tmp/vanic-candidate-1671059-1787439471161567739.ll:3522:3: error: mul
 ```
 
 **AFFECTED BACKENDS
+
+---
+
+### Candidate: 20260822-231804-run-crash-80935b3775
+
+Repro: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
