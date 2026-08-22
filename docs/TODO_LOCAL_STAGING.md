@@ -10479,3 +10479,14 @@ Fix attempt: `tools/localfuzz/findings/20260822-102420-run-crash-16f9bed6e7/fix_
 STATUS: needs human/frontier root-cause review.
 
 The compiler generated a crash during execution of the `early_exit.vani` program with the mutant/generated source above when run on LLVM. The observed symptom was a crash, and the backend that affected it was LLVM.
+
+---
+
+### Candidate: 20260822-132447-run-crash-33ef8e04de
+
+Repro: `tools/localfuzz/findings/20260822-132447-run-crash-33ef8e04de/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-132447-run-crash-33ef8e04de/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani compiler was run with the provided corpus file, and it resulted in a crash when attempting to execute the mutated code. The exact repro source is given above. The observed symptom is a crash, indicating that the program failed to terminate normally or produced unexpected output. The backend(s) affected by this bug are LLVM and C.
