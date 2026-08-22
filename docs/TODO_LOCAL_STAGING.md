@@ -10490,3 +10490,44 @@ Fix attempt: `tools/localfuzz/findings/20260822-132447-run-crash-33ef8e04de/fix_
 STATUS: needs human/frontier root-cause review.
 
 The vani compiler was run with the provided corpus file, and it resulted in a crash when attempting to execute the mutated code. The exact repro source is given above. The observed symptom is a crash, indicating that the program failed to terminate normally or produced unexpected output. The backend(s) affected by this bug are LLVM and C.
+
+---
+
+## Follow-up: BUG-218, Mutex/RwLock SSA naming mismatch + real soundness gap (2026-08-22)
+
+Picked up the open item BUG-217 filed. Root cause confirmed: both SSA
+backends (ssa_backend_llvm.rs, ssa_backend_c.rs) only ever correctly
+support Mutex/Guard/RwLock/ReadGuard/WriteGuard for T=i64 -- each
+unconditionally emits a hardcoded i64-only bundle, disconnected from
+tree's per-element-type naming (BUG-19). Fixed by gating non-i64
+Mutex-family elements (and Vec<Mutex<T>> for any T, LLVM-only) out of
+the SSA fast path in main.rs, mirroring the existing Vec<Atomic/
+Channel> precedent rather than duplicating tree's bundle emission
+into both SSA backends -- main repo commit `c7035b54`.
+
+Follow-up user questions ("does Mutex support bool", "will Box<Mutex>
+have similar issues", "other RAII nested in RAII") led to sweeping
+those combinations directly, which found TWO more real bugs:
+
+**REAL BUG, FIXED**: `RwLock<bool>` crashed LLVM IR verification even
+after correctly falling back to tree-LLVM -- `read_guard_get`/
+`write_guard_set` never got the i1-vs-i8 conversion `guard_get`/
+`guard_set` already have from a 2026-08-03 fix that should have
+covered this sibling pair but didn't.
+
+**REAL SOUNDNESS BUG, FIXED**: `Mutex<Box<T>>`/`Mutex<Vec<T>>`/
+`Mutex<OwnedStr>`/`Mutex<StructWithNonCopyField>` all compiled
+straight through the checker into an actual double-free (C) or an
+internal COMPILER panic (LLVM) -- `guard_get`/`mutex_lock` return T
+by value unconditionally, which is only sound for Copy T. An existing
+check only rejected the narrower `Mutex<Mutex<T>>` nesting case;
+generalized to reject any non-Copy T in both `mutex_new` and
+`rwlock_new`. `Box<Mutex<T>>` (the reverse nesting) was already
+safely rejected by `box()`'s existing restrictions. `Channel<T,N>`/
+`Atomic<T>` already had their own equivalent protection.
+
+See `docs/TODO_CURRENT.md`'s BUG-218 entry on vani-compiler for the
+full writeup. Verified via valgrind (0 errors/leaks, both backends),
+full cargo test, full backend_crosscheck.py sweep (0 flagged).
+
+Next free bug number on vani-compiler is BUG-219.
