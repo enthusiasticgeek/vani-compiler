@@ -10531,3 +10531,21 @@ full writeup. Verified via valgrind (0 errors/leaks, both backends),
 full cargo test, full backend_crosscheck.py sweep (0 flagged).
 
 Next free bug number on vani-compiler is BUG-219.
+
+---
+
+### Candidate: 20260822-155146-backend-divergence-fcbc4b2980
+
+Repro: `tools/localfuzz/findings/20260822-155146-backend-divergence-fcbc4b2980/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-155146-backend-divergence-fcbc4b2980/fix_attempt.md`
+
+STAGE: /home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_conc_parallel_struct_capture.vani
+
+Running:
+```sh
+vani -m edge_cases mix_conc_parallel_struct_capture.vani --backend-divergence
+```
+
+Observed symptom: Backend diverged with LLVM error. Specifically, a multiple definition of local value named 'loc_red_0' was detected in the generated LLVM IR.
+
+STATUS: needs human/frontier root-cause review.
