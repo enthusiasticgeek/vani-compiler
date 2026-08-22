@@ -10353,3 +10353,35 @@ the prior closeout above), no action taken**:
 
 No new signatures beyond BUG-215 and the artifacts above. Next free
 bug number on vani-compiler is BUG-216.
+
+---
+
+### Candidate: 20260822-030602-run-crash-c1adddc749
+
+Repro: `tools/localfuzz/findings/20260822-030602-run-crash-c1adddc749/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260822-030602-run-crash-c1adddc749/fix_attempt.md`
+
+STAGING ENTRY:
+```vani
+Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/italian/async_cancel_auto.vani
+
+Mutant/generated source:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  }
+}
+```
+
+STATUS: needs human/frontier root-cause review.
