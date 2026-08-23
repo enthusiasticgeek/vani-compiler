@@ -84,7 +84,7 @@ await cancellable(7, tok)  = -1
   actually reached. This shape lets you write code that *looks*
   asynchronous while the compiler treats it as straight-line.
 - **`CancelToken`** is a prelude-defined struct:
-  ```rust
+  ```vani
   struct CancelToken { cancelled: bool }
   ```
   Thread it through async functions and check `.cancelled` at

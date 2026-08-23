@@ -32,6 +32,7 @@
 - [Challenges](beginner/11_challenges.md)
 - [Devanagari surface -- optional intro](beginner/12_devanagari.md)
 - [Big-O notation -- intuition primer](beginner/13a_big_o_primer.md)
+- [Capstone: a class grade-report tool](beginner/14_gradebook_capstone.md)
 
 # Intermediate
 

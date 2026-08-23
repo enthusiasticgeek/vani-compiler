@@ -306,17 +306,9 @@ which bound it picks.
 
 ---
 
-**Congratulations -- you've completed the Intermediate track!**
-
-Next steps:
-
-- **[Advanced track](../advanced/01_async.md)** -- async / await,
-  parallel-for + race-freedom, embedded targets, vtable
-  internals, dialect contribution.
-- Build something. Pick a small CLI or library, ship it, file
-  issues for anything that pushed back. The compiler's most
-  honest design feedback is from real programs.
-
+That covers the SMT surface. Three chapters remain in the
+Intermediate track: packaging your code with Kosh, testing it, and
+a capstone that ties everything together into one real program.
 
 ---
 

@@ -283,5 +283,5 @@ work to expect.
 ---
 
 **Previous**: [Sec.12 -- Devanagari surface -- optional intro ->](12_devanagari.md)
-**Next**: [Intermediate track: Structs and methods ->](../intermediate/01_struct_methods.md)
+**Next**: [Sec.14 -- Capstone: a class grade-report tool ->](14_gradebook_capstone.md)
 

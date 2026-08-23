@@ -268,3 +268,8 @@ that thread the same way `watchdog` is cancelled, while the
 `Pollable`/`Executor` loop for the other three jobs runs alongside
 it. Write a `#[test]` asserting the mixed scheduler still reports the
 right total job count across both cancellation mechanisms.
+
+---
+
+**Previous**: [Sec.3d -- Capstone: a concurrent sensor-dashboard pipeline ->](03d_concurrent_pipeline_capstone.md)
+**Next**: [Sec.3b -- Condition variables: wait-until-predicate primer ->](03b_condvar_primer.md)

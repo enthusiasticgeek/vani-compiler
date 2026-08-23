@@ -21540,7 +21540,7 @@ fn check_expr(
                         decl_fields.len(),
                         fields.len()
                     ),
-                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(decl_fields.len(), fields.len())));
+                ).with_elaboration(crate::diagnostic_elaborations::struct_literal_wrong_arity(decl_fields.len(), fields.len())));
                 return CheckedExpr::fallback_integer(expr.span);
             }
             // Type-check each literal field; reorder into

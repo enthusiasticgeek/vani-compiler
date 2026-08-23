@@ -17098,3 +17098,92 @@ harness concurrently) got OOM-killed by the combined load from one
 manual probe call during testing; it self-healed via its existing
 auto-restart within seconds, but a second deliberate call was avoided
 given the harness would exercise the real path itself once refreshed.
+
+## BUG-220 -- struct-literal arity error reused function-call help text (2026-08-23)
+
+Found while auditing the tutorials for accuracy (verifying every
+"here's the real compiler output" block actually matches a current
+build): `Point { x: 3 }` against `struct Point { x: i64, y: i64 }`
+produced a correct top-line error (`struct 'Point' has 2 fields,
+literal provides 1`) but bolted-on help text that said "The function
+takes 2 arguments, but 1 was provided" and "update the function's
+signature" -- there is no function here. The struct-literal arity
+check in `checker.rs` was reusing `diagnostic_elaborations::wrong_arity`,
+the same elaboration a mismatched *function call* argument count uses,
+verbatim. Fixed by adding a dedicated `struct_literal_wrong_arity`
+elaboration (struct-literal-specific wording: "declares N fields,
+literal provides M", "no default field values in v1, no field name
+punning", "add the missing field(s) or remove the extra one(s)") and
+wiring the one call site in `checker.rs` to it instead. The bogus
+cascading second diagnostic (`let initializer must be assignable to
+Point, got i64`, itself using unrelated integer-cast help text) is a
+separate, lower-priority cascade from the same fallback-to-i64 path
+and was left alone -- the top-line error is accurate and points at
+the right place either way.
+
+Verified: rebuilt `vanic --release`; `struct Point { x: i64 } ` (one
+field short) now reports "The struct declares 2 fields, but the
+literal provides 1" / correct field-add-or-remove guidance instead of
+function-call wording. Full `cargo test --release --lib` (3008
+passed, 0 failed, 1 ignored) and `cargo test --release --test
+run_end_to_end` (278 passed, 0 failed, 8 ignored) both clean -- no
+existing test asserted the old wrong wording.
+
+Also this session: a full accuracy audit of all 90 tutorial files
+(beginner/intermediate/advanced, ~32K lines) against the current
+compiler -- every "real compiler output" code block, cross-file
+claim, and CLI/attribute name was spot-verified, not just proofread.
+Found and fixed, beyond BUG-220 above:
+- `Option<T>` documented as i64/f64-only in `13_option.md` -- false;
+  `Option<bool>`/`Option<OwnedStr>`/etc. all work today, only the
+  `option_*` combinator builtins are scalar-limited. Confirmed via a
+  direct `Option<bool>`/`Option<OwnedStr>` compile+run.
+- `11a_vani_idioms_primer.md` claimed "vāṇी has no `Box<T>`" as the
+  reason for the arena-Vec idiom -- false and contradicted by the
+  dedicated Box+RAII primer three chapters earlier; corrected to
+  frame the arena pattern as a *preferred alternative* for
+  cache-friendliness/drop-avoidance, not the only option.
+- Two nonexistent attribute spellings in `04a_embedded_primer.md`
+  (`#[recursion_bound(N)]`, bare `#[bounded_stack(64)]` with no
+  `bytes=` key) that the compiler actually rejects outright --
+  confirmed by testing both, corrected to the real `#[bounded(N)]` /
+  `#[bounded_stack(bytes = N)]` (already correct in the sibling
+  `04c_attributes_reference.md` and `04_embedded.md` pages, which
+  explicitly call out the same wrong name as a past error -- `04a`
+  alone hadn't been updated to match).
+- `16a_testing_primer.md`'s `assert_eq_bool` "deliberately wrong"
+  example wasn't actually wrong (`is_even(7)` really is `false`,
+  matching the asserted `false`), and the shown "mismatch" output
+  (`left: false / right: false`) can't represent a real mismatch --
+  confirmed the real `assert_eq_bool` mismatch output via a genuine
+  failing call and replaced both.
+- A misplaced "Congratulations, you've completed the Intermediate
+  track!" banner in `12_smt_deepdive.md`, three chapters before the
+  track's actual last chapter (`17_tic_tac_toe_capstone.md`, which
+  had no banner at all) -- moved to the real end.
+- A broken Previous/Next chain: `03d_concurrent_pipeline_capstone.md`
+  linked its Next straight to `03b_condvar_primer.md`, skipping
+  `03e_job_scheduler_capstone.md` entirely (which had no nav footer
+  of its own) -- confirmed against `SUMMARY.md`'s actual order and
+  re-linked all three.
+- Stale counts: "62 dialects" in `13_global_showcase.md` vs the
+  authoritative 63 (`tools/vani_translate.py`'s `SUPPORTED_LANGS`,
+  matching two other chapters that already said 63); a hardcoded
+  "194 English examples" in `11_llm_workflows.md` against a corpus
+  that's since grown to 221.
+- A `vAṇी` typo (`09a_ffi_primer.md`), an `INTENTC_NO_VERIFY` legacy
+  name used without noting `VANIC_NO_VERIFY` is primary
+  (`10b_runtime_errors_primer.md`), and a `` ```rust `` fence on a
+  real vāṇी `CancelToken` struct declaration (`01_async.md`).
+
+Also added: the beginner track was the only one of the three with no
+capstone (intermediate has the tic-tac-toe capstone, advanced has
+three). Added `beginner/14_gradebook_capstone.md` plus a real,
+runnable `examples/language/english/gradebook_capstone.vani` -- a
+class grade-report tool combining modules, tuples, `Option<T>`,
+labeled loops, and `requires`/`assert`/`prove` from Beginner
+Sec.1-13a into one program. Verified via `vanic check`/`run` on both
+backends and a clean `-fsanitize=address,leak,undefined` build (exit
+0, no findings).
+
+Next free bug number is **BUG-221**.

@@ -277,6 +277,25 @@ pub fn wrong_arity(expected: usize, got: usize) -> Vec<String> {
     ]
 }
 
+/// Wrong field count in a struct literal.
+pub fn struct_literal_wrong_arity(expected: usize, got: usize) -> Vec<String> {
+    vec![
+        format!(
+            "The struct declares {} field{}, but the literal provides {}.",
+            expected,
+            if expected == 1 { "" } else { "s" },
+            got,
+        ),
+        "Every field must be set in a struct literal — there are no \
+         default field values in v1, and field name punning \
+         (`Point { x, y }`) isn't supported either."
+            .to_string(),
+        "Add the missing field(s), or remove the extra one(s) if the \
+         struct's declared fields legitimately changed."
+            .to_string(),
+    ]
+}
+
 /// Captured-variable mutation in parallel for body.
 pub fn parallel_for_mutates_capture(name: &str) -> Vec<String> {
     vec![

@@ -561,5 +561,18 @@ that needs to care about it -- unchanged by the AI addition, since
 
 ---
 
+**Congratulations -- you've completed the Intermediate track!**
+
+Next steps:
+
+- **[Advanced track](../advanced/01_async.md)** -- async / await,
+  parallel-for + race-freedom, embedded targets, vtable
+  internals, dialect contribution.
+- Build something. Pick a small CLI or library, ship it, file
+  issues for anything that pushed back. The compiler's most
+  honest design feedback is from real programs.
+
+---
+
 **Previous**: [Sec.16a -- Testing your vāṇī code ->](16a_testing_primer.md)
 **Next**: [Advanced track: Async / await -- intuition primer ->](../advanced/01a_async_primer.md)

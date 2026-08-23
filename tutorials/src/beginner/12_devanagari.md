@@ -184,9 +184,15 @@ language is fully expressive there.
 
 ---
 
-**Congratulations -- you've completed the Beginner track!**
+You've now seen everything the Beginner track has to teach. Two
+things left before the Intermediate track:
 
-Next steps:
+- **[Sec.13a -- Big-O notation primer ->](13a_big_o_primer.md)** --
+  read Big-O annotations the way `vanic check --big-o` prints them.
+- **[Sec.14 -- Capstone: a class grade-report tool ->](14_gradebook_capstone.md)** --
+  one small real program combining everything from Sec.1-13a.
+
+Next steps after that:
 - **Intermediate** -- [Sec.1 -- Structs and methods ->](../intermediate/01_struct_methods.md)
   starts the next track. You'll add custom types, generics,
   dynamic dispatch, and a deep dive on the SMT verifier.

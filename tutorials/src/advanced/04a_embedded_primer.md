@@ -115,14 +115,14 @@ You get a guarantee, not a hope.
 A function can declare its maximum stack usage:
 
 ```vani
-#[bounded_stack(64)]
+#[bounded_stack(bytes = 64)]
 fn parse_packet(input: ref [u8; 1024]) -> Packet { ... }
 ```
 
 The compiler ensures the function (and everything it transitively
 calls) never uses more than 64 bytes of stack. Recursive
-functions need an explicit `#[recursion_bound(N)]` so the
-total bound is computable.
+functions need an explicit `#[bounded(N)]` (a recursion-depth
+bound) so the total bound is computable.
 
 On a chip with 8KB of RAM total, you might budget 2KB for the
 stack. Each top-level handler can declare its share. The
@@ -321,8 +321,8 @@ match.
   slow CPU, no OS, no heap, real-time deadlines.
 - **`#[no_heap]`** = "this function (transitively) never
   allocates from the heap." Compile-time verified.
-- **`#[bounded_stack(N)]`** + **`#[recursion_bound(N)]`** =
-  static guarantees on stack usage.
+- **`#[bounded_stack(bytes = N)]`** + **`#[bounded(N)]`** (a
+  recursion-depth bound) = static guarantees on stack usage.
 - **`#[deterministic_timing]`** = rejects constructs whose
   execution time isn't statically predictable.
 - **`unsafe(reason = "...")`** = small visible escape hatch
