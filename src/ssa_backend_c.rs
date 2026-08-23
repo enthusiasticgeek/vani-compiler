@@ -306,7 +306,24 @@ fn emit_function_prototype(f: &Function, out: &mut String) -> Result<(), EmitErr
     // Route through `c_declarator` with an empty name (the same
     // "type + name" spelling minus the name) instead, matching the
     // parameter loop below.
-    let ret_c = c_declarator(&f.return_type, "")?.trim_end().to_string();
+    //
+    // `extern "C" fn ... -> Str` is a special case: `c_declarator`
+    // spells `Str` as `const char*` (correct for a vāṇी-internal
+    // signature, and for a PARAMETER here too), but a real libc/
+    // POSIX function returning a string -- `getenv`, `strdup`,
+    // `strerror`, `getcwd`, `realpath`, `ctime`, `fgets`, ... --
+    // returns plain `char*`. An extern declaration is a
+    // REdeclaration of a symbol that may already be declared by a
+    // standard header this backend includes; `const char*` there
+    // conflicts with the real header's `char*` and `cc` rejects the
+    // whole file. Mirrors the same fix in `backend_c::
+    // extern_return_c_type` (tree-C hit the identical bug via its
+    // own `c_type_name`).
+    let ret_c = if f.is_extern && matches!(f.return_type, Type::Str) {
+        "char*".to_string()
+    } else {
+        c_declarator(&f.return_type, "")?.trim_end().to_string()
+    };
     // Closure #269: `extern "C"` declarations emit an `extern`
     // prototype with the bare C symbol (no `fn_` prefix). The
     // body emit also skips for extern (see `emit_function`).

@@ -17444,3 +17444,63 @@ run_end_to_end` (278 passed, 0 failed, 8 ignored), both unchanged from
 before the fix.
 
 Next free bug number is **BUG-224**.
+
+## BUG-224 -- `extern "C" fn ... -> Str` conflicts with real libc headers on the C backend (2026-08-23)
+
+Found while auditing whether the tutorials leave a new user equipped
+to build a real project -- specifically, checking whether reading an
+environment variable via FFI (`extern "C" fn getenv(name: Str) ->
+Str;`, the exact same pattern the FFI chapter's own `atoi`/`atoll`
+examples already teach) actually works. It compiled and ran correctly
+on the LLVM backend but failed to even compile on the C backend:
+
+```
+error: conflicting types for 'getenv'; have 'const char *(const char *)'
+extern const char* getenv(const char* v_0);
+                    ^~~~~~
+note: previous declaration of 'getenv' with type 'char *(const char *)'
+extern char *getenv (const char *__name) ...
+```
+
+Root cause: both C-emitting backends (tree-C's `c_type_name` in
+`backend_c.rs`, SSA-C's `c_declarator` in `ssa_backend_c.rs`) spell a
+`Str` return type as `const char*` unconditionally -- correct for an
+ordinary vāṇी-internal function signature (nothing else declares
+those), but wrong for an `extern "C"` declaration, which is a
+REdeclaration of a symbol that may already be declared by a standard
+header the backend unconditionally includes (`stdlib.h`, `string.h`).
+Virtually every real libc/POSIX function that returns a string
+returns plain `char*`, not `const char*` -- `getenv`, `strdup`,
+`strerror`, `getcwd`, `realpath`, `ctime`, `fgets`, and more -- so the
+`const` qualifier vāṇी added conflicts with the real header's
+declaration and `cc` rejects the whole file. Confirmed the SAME repro
+against `strdup` too (identical failure).
+
+Notably, this exact PROBLEM CLASS (a real-header redeclaration
+conflict) was already discovered and partially worked around: an
+`is_known_libc_symbol` allowlist in `backend_c.rs` (`atoll`,
+`strtoll`, `strtoull`, `llabs`, `lldiv`) skips emitting a competing
+declaration entirely for those five integer-returning functions. But
+an allowlist doesn't scale to the unbounded set of string-returning
+libc functions a real program might FFI to -- confirmed both
+`getenv` and `strdup` were simply never added.
+
+Fixed generally instead of extending the allowlist: for an `extern
+"C"` declaration specifically (not the general `Str`-typing path, and
+not `Str` used as a parameter, which stays `const char*` and doesn't
+conflict with anything), both backends now emit `char*` for a `Str`
+return type. `backend_c.rs` gets a new `extern_return_c_type` helper
+used at both of `emit_prototype`/`emit_function`'s extern-declaration
+sites; `ssa_backend_c.rs`'s `emit_function_prototype` special-cases
+`f.is_extern && matches!(f.return_type, Type::Str)` before falling
+through to the normal `c_declarator` path.
+
+Verification: `getenv`/`strdup` repros now compile and run correctly
+on both backends (LLVM was already fine; C backend now matches).
+`examples/language/english/ffi.vani` (the tutorial's own `atoi`/
+`atoll` example) re-checked unaffected on both backends. `cargo test
+--release --lib` (3008 passed, 0 failed, 1 ignored) and `cargo test
+--release --test run_end_to_end` (278 passed, 0 failed, 8 ignored),
+both unchanged.
+
+Next free bug number is **BUG-225**.
