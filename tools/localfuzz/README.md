@@ -89,21 +89,36 @@ turns these files into `systemd-run` arguments.
 Not an LLM guessing at bugs -- an LLM assisting a deterministic harness.
 Each cycle:
 
-1. **Pick a candidate.** Usually: a file from `examples/**/*.vani`
-   (1000+ files already in the repo, including the
-   `examples/edge_cases/` adversarial corpus), with 1-2 small
-   text-level mutations applied (numeric boundary values, statement
-   duplication/deletion/reordering, primitive-type swaps). Every
-   `HARNESS_GENERATE_EVERY`th cycle (default 10), instead: qwen writes
-   a fresh program combining two real language features. It's grounded
-   in two REAL example snippets pulled from `examples/language/english/`
-   by keyword match against the `FEATURES` list in `harness.py` (NOT
-   the full `tools/llm_context/bundle.py` dump -- that's tens of
-   thousands of tokens and reliably timed out regardless of model
-   size; a couple of concrete examples plus the keyword-alias table is
-   enough grounding and actually fits in the timeout budget). This is
-   qwen "learning" the feature set in the loosest sense: it never sees
-   the compiler source, only real usage examples, each cycle.
+1. **Pick a candidate**, in priority order:
+   - Every `HARNESS_GAP_EVERY`th cycle (default 7, 2026-08-23): `vanic
+     coverage-gaps` mines the compiler's own baked-in coverage
+     database for `{shape}#{operation}` fingerprints with NO
+     regression-test record anywhere in `examples/` at all (see
+     `docs/TODO_CURRENT.md`'s "vanic coverage-gaps" entry on `main`).
+     `generate_gap_targeted_program` picks one, finds a real English
+     example exercising the operation, finds a second real example
+     showing how the target element type gets constructed (if it's a
+     real type rather than a leaf category like "a Copy struct"), and
+     asks qwen to combine them into the exact untested shape. A
+     mechanical, corpus-independent way to bias the search toward the
+     kind of combination that produced BUG-216/217/218, rather than
+     hoping random mutation stumbles into one.
+   - Otherwise every `HARNESS_GENERATE_EVERY`th cycle (default 10):
+     qwen writes a fresh program combining two real language features.
+     It's grounded in two REAL example snippets pulled from
+     `examples/language/english/` by keyword match against the
+     `FEATURES` list in `harness.py` (NOT the full
+     `tools/llm_context/bundle.py` dump -- that's tens of thousands of
+     tokens and reliably timed out regardless of model size; a couple
+     of concrete examples plus the keyword-alias table is enough
+     grounding and actually fits in the timeout budget). This is qwen
+     "learning" the feature set in the loosest sense: it never sees
+     the compiler source, only real usage examples, each cycle.
+   - Otherwise: a file from `examples/**/*.vani` (1000+ files already
+     in the repo, including the `examples/edge_cases/` adversarial
+     corpus), with 1-2 small text-level mutations applied (numeric
+     boundary values, statement duplication/deletion/reordering,
+     primitive-type swaps).
 2. Runs the candidate through `vanic check`, then (only if `check`
    accepts it) `vanic run` on both backends (`--backend=c` and default
    LLVM), each under a timeout (with the whole process group killed on
@@ -123,13 +138,20 @@ Each cycle:
    `docs/TODO_LOCAL_STAGING.md`, and -- if `HARNESS_ATTEMPT_FIXES=1`,
    the default -- qwen gets one bounded shot at a fix; see "Fix
    attempts" below. All committed to `local-fuzz-findings`. Never
-   blocks waiting for anyone to look at it.
+   blocks waiting for anyone to look at it. Any candidate that got
+   past `check` also gets a `vanic check --coverage` score attached
+   (`finding.json`'s `coverage_score` key) regardless of which of the
+   three generation paths produced it -- cheap, offline, and lets a
+   later review see at a glance whether findings actually cluster
+   around low-coverage territory.
 5. **On a clean success that was qwen-generated** (not a mutation):
    saved under `tools/localfuzz/candidate_regressions/` -- a candidate
    for promotion into `examples/` or `tests/run_end_to_end.rs` as a
    permanent regression test, since it demonstrates a feature
    combination that compiled and ran consistently on both backends.
-   Also unreviewed until a human/frontier-model looks at it.
+   Its header comment records which generation path produced it (a
+   feature pair, or a targeted gap fingerprint) and its coverage
+   score. Also unreviewed until a human/frontier-model looks at it.
 6. **On a clean success from mutation**: discarded, just logged --
    it's a minor variation of an example that already exists in the
    corpus, not new coverage.
@@ -390,6 +412,9 @@ reasoning a frontier model gives, not a 7B local one.
   mutation (mutation is nearly free, ~20s/cycle; generation is a real
   model call, observed ~1-5 min/cycle depending on load -- see
   "Hardware-driven tuning notes" below). Default `10`.
+- `HARNESS_GAP_EVERY`: how often to use `vanic coverage-gaps`-targeted
+  generation instead (takes priority over `HARNESS_GENERATE_EVERY` on
+  a cycle where both would fire). Default `7`.
 - `HARNESS_ATTEMPT_FIXES=0`: disable the one-shot fix-attempt call on
   findings (still logs/stages the finding itself, just skips
   `fix_attempt.md`).

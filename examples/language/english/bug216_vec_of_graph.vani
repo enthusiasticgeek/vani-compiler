@@ -1,0 +1,25 @@
+// build & run:
+//   vanic run examples/language/english/bug216_vec_of_graph.vani              # LLVM
+//   vanic run examples/language/english/bug216_vec_of_graph.vani --backend=c  # C
+
+intent "BUG-216 regression: Vec<T> where T is one of the 12 'Level-4' builtin data-structure types (UnionFind/Graph/Bst/Trie/SkipList/BinaryHeap/BloomFilter/BTreeSet/BTreeMap/HashSet/HashMap/Deque) crashed on both backends -- a combination apparently never exercised before. LLVM's element byte-size estimator had no arm for these types (defaulted to 8 bytes regardless of real size, up to 96 bytes -- a wild out-of-bounds write on first push); C's typedef for each type was emitted after the code referencing it; and none of the 12 types' `_drop` was ever called for a Vec element on scope-exit (leak). Also stands in as this compiler's permanent regression coverage for the `Vec<Graph>#push` / `Vec<Graph>#drop` feature-combination fingerprints (see src/coverage.rs / `vanic check --coverage`), which the 2026-08-22 audit found had NO regression example anywhere in this corpus despite the underlying bug already being fixed.";
+
+fn main() -> i64 {
+  let g1: Graph = graph_new(3);
+  let _ = g1.add_edge(0, 1, 5);
+  let _ = g1.add_edge(1, 2, 7);
+
+  let vg: Vec<Graph> = vec();
+  let vg: Vec<Graph> = push(vg, g1);
+
+  let total_nodes: i64 = 0;
+  for g in ref vg {
+    total_nodes = total_nodes + g.num_nodes();
+  }
+  assert len(vg) == 1;
+  assert total_nodes == 3;
+
+  print "vg len:", len(vg) as i64;
+  print "total nodes across all graphs:", total_nodes;
+  return 0;
+}

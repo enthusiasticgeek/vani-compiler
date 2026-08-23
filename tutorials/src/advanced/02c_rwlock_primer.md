@@ -98,6 +98,12 @@ automatic release on scope exit), including when the type appears as
 a function parameter (`fn f(rw: mut ref RwLock<Config>) -> i64`).
 Each element type gets its own correctly-sized generated struct, the
 same way `Mutex<T>`, `Channel<T, N>`, and `Vec<T>` already do.
+(`RwLock<bool>` specifically was a fairly recent fix, BUG-218,
+2026-08-21 -- the read/write-guard round-trip crashed LLVM IR
+verification, a sibling gap to an earlier `Mutex<bool>` fix that
+didn't cover RwLock's separate guard types. See `examples/language/
+english/bug218_rwlock_bool_guard.vani` for a complete,
+`assert`-verified regression example.)
 
 ## When to use RwLock vs Mutex
 

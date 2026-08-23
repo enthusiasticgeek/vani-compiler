@@ -16637,6 +16637,464 @@ repros; full `cargo test --release --workspace` clean; full
 `tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
 0 flagged, matching baseline exactly.
 
-Next free bug number is **BUG-218** (reserved for the open Mutex/Guard
-SSA-LLVM naming-mismatch investigation above, if/when it's picked
-up).
+## BUG-218: Mutex/Guard/RwLock SSA-LLVM naming mismatch + a real
+## soundness gap found along the way
+
+Picked up the open item from BUG-217's writeup. Root cause was as
+diagnosed there: `ssa_backend_llvm.rs`'s Mutex/Guard support is a
+simpler, i64-only implementation (`%intent_mutex_i64`, hardcoded)
+entirely disconnected from tree-LLVM's BUG-19 fix (per-element-type
+`%intent_mutex_int64_t` naming, used by the generic Vec-bundle
+machinery a mixed program reuses) -- and `ssa_backend_c.rs` has the
+identical gap on the C side (`emit_intent_mutex_helpers_c`, literally
+named "Legacy: emit full i64 mutex helpers", called unconditionally
+regardless of what element types the program actually uses; tree-C's
+own `emit_c` never calls this legacy shim at all, relying purely on
+the correct generic per-T mechanism).
+
+**Decision: gate out of the SSA fast path rather than duplicate
+tree's generic per-T bundle emission into both SSA backends.**
+Neither `ssa_backend_llvm.rs` nor `ssa_backend_c.rs` currently has
+access to the original `TypedProgram` (SSA's `Module` is already
+lowered) needed to scan for actual element-type usage the way tree's
+`collect_mutex_specs`/`collect_rwlock_specs` do -- threading that
+through would be a substantially larger, riskier change than adding
+two focused type-level gates in `main.rs`, mirroring the EXISTING
+precedent already there for `Vec<Atomic<T>>`/`Vec<Channel<T,N>>`.
+
+Two new gates, both in `main.rs`:
+1. `ty_contains_non_i64_mutex_family` (new, feeds into the shared
+   `ssa_type_supported`, so it applies to BOTH SSA backends): rejects
+   the whole module from SSA whenever `Mutex<T>`/`Guard<T>`/
+   `RwLock<T>`/`ReadGuard<T>`/`WriteGuard<T>` appears ANYWHERE with a
+   non-`i64` `T` (recursing through Vec/Array/Ref/RefMut/Tuple/FnPtr/
+   Atomic/Box). This is the fix for the plain (no-Vec-involved) bug:
+   confirmed via direct repro, a bare `Mutex<i32>` failed LLVM IR
+   verification outright (`'%v_0' defined with type 'i32' but
+   expected 'i64'`) and failed to compile on C (`implicit declaration
+   of function 'intent_mutex_int32_t_new'`) -- `Mutex<T>` may only
+   ever have been correctly lowered for `T = i64` on the SSA fast
+   path, despite the checker accepting any T. `RwLock<i32>` (same
+   underlying gap) confirmed fixed by the same change.
+2. Extended `ty_contains_vec_of_atomic_or_channel` (LLVM-only,
+   mirrors why Atomic/Channel are LLVM-only exclusions there already
+   -- confirmed C doesn't have this problem via the same repro on
+   `--backend=c`): also flags `Vec<Mutex<T>>`/`Vec<Guard<T>>`/
+   `Vec<RwLock<T>>`/`Vec<ReadGuard<T>>`/`Vec<WriteGuard<T>>` for ANY
+   T, including `i64` -- this is the fix for the specific `Vec<
+   Mutex<i64>>` link failure BUG-217 originally surfaced (a mixed
+   program's Vec-bundle code referencing the new per-T name while
+   SSA-LLVM's own Mutex declaration in the SAME function uses the
+   old one).
+
+**A real, more serious soundness bug found while sweeping bool and
+nested-RAII cases per the user's follow-up questions.** `RwLock<bool>`
+crashed LLVM IR verification even AFTER falling back to tree-LLVM via
+gate 1 above (`'%t16' defined with type 'i8' but expected 'i1'`) --
+`read_guard_get`/`write_guard_set` in `backend_llvm.rs` never got the
+exact `i1`-vs-`i8` conversion `guard_get`/`guard_set` already have (a
+2026-08-03 "Gap-audit fix" comment explicitly documents why: bool's
+payload storage is `i8`, not byte-addressable `i1`, so returning/
+storing the raw SSA value without `icmp ne i8 _, 0` / `zext i1 _ to
+i8` is an LLVM type mismatch the instant the caller uses it as a
+bool). A sibling-function gap the 2026-08-03 fix should have covered
+but didn't. Fixed by mirroring `guard_get`/`guard_set`'s exact
+conversions into `read_guard_get`/`write_guard_set`.
+
+Then, checking whether `Box<Mutex<T>>` has the same issue (it
+doesn't -- `box()` already rejects `Mutex<T>` as an inner type in v1,
+same as it rejects the 12 Level-4 types) led to checking the REVERSE
+nesting, `Mutex<Box<T>>` -- which IS accepted by the checker, and
+turned out to be a genuine, more serious pre-existing soundness bug,
+unrelated to BUG-218's SSA-routing fix: `mutex_new`/`rwlock_new`'s
+checker code already had a narrow rejection for `Mutex<Mutex<T>>`/
+`Mutex<RwLock<T>>` (a 2026-08-03 "Gap-audit fix", on the reasoning
+that nested-lock codegen was never implemented) -- but a non-lock,
+non-Copy `T` like `Box<i64>`, `Vec<i64>`, `OwnedStr`, or a struct with
+a non-Copy field was NOT rejected, and compiled straight through to a
+REAL runtime bug: `guard_get`/`mutex_lock` (and RwLock's equivalents)
+unconditionally return `T` BY VALUE, which is only sound when `T`
+actually is Copy. For an affine `T`, that "copy" aliases the SAME
+heap allocation the lock itself still owns. Confirmed via direct
+repros: `Mutex<Box<i64>>` produced `free(): double free detected in
+tcache 2` on C, and panicked the COMPILER ITSELF on LLVM (`internal
+error: entered unreachable code: llvm_type: use llvm_type_string for
+aggregate / ref type Box(I64)` -- never even reached runtime).
+`Mutex<Vec<i64>>` failed to compile on C with undefined bundle
+symbols, a different symptom of the identical root cause. This is a
+genuine soundness gap, not a missing codegen arm -- there is no sound
+way to return an affine value out of a lock by copy, so the fix is a
+compile-time rejection, not an attempt to "fix" the codegen. Fixed by
+generalizing the existing `Mutex<Mutex<T>>`/`Mutex<RwLock<T>>`-only
+check in both `mutex_new` and `rwlock_new` to `!element.is_copy()`
+(which correctly subsumes the original nested-lock case, since
+Mutex/RwLock themselves aren't Copy, and correctly distinguishes a
+genuinely-Copy struct like the docs' own `Mutex<SharedCounter>`
+example from a struct with a non-Copy field via the existing
+`struct_has_non_copy_field` registry) -- with a new diagnostic
+message explaining the double-free risk directly, not just "not
+implemented". `Channel<T,N>`/`Atomic<T>` were separately confirmed to
+already have their own, pre-existing Copy/scalar-only restrictions
+(`Channel<Vec<i64>,4>`/`Atomic<Box<i64>>` were both already cleanly
+rejected before this session touched anything), so they were never at
+risk of this specific gap.
+
+Also swept, confirmed clean, no fix needed: `Mutex<bool>` standalone
+and nested in `Vec<Mutex<bool>>` (works correctly on both backends,
+both before and after every fix in this entry); `RwLock<i64>`/
+`Atomic<i64>` (already correct); the existing nested-lock rejection
+test (`nested_concurrency_handles_are_cleanly_rejected`) still
+correctly rejects all 4 nesting combinations, just via the new, more
+general diagnostic message (updated to match).
+
+Verified: `Mutex<i32>`/`RwLock<i32>`/`Vec<Mutex<i64>>`/`Vec<Mutex<
+i32>>`/`RwLock<bool>`/write_guard round-trip all confirmed correct
+via direct runs and `valgrind --leak-check=full` (0 errors, 0 leaks)
+on both backends; `Mutex<Box<i64>>`/`Mutex<Vec<i64>>`/`Mutex<Struct-
+WithVecField>`/`Mutex<OwnedStr>` all confirmed cleanly rejected at
+compile time with the new diagnostic, while the legitimate `Mutex<
+SharedCounter>`-style all-Copy-fields struct case still compiles and
+runs correctly on both backends; full `cargo test --release
+--workspace` clean (one pre-existing test's assertion string updated
+to match the new, more general rejection message -- not a behavior
+regression, still rejects the same 4 nesting combinations); full
+`tools/backend_crosscheck.py` corpus sweep, 1079 files / 1058 clean /
+0 flagged, matching baseline exactly.
+
+Next free bug number is **BUG-219**.
+
+## Feature: feature-combination coverage scoring (`vanic check --coverage`), 2026-08-22
+
+User request: score a program against the feature combinations the
+compiler's own regression/library corpus has already exercised and
+verified leak/bug-free, so a program touching an under-tested
+combination gets flagged before it ships, not after. Explicitly scoped
+by the user to a **user-gated** reporting model, not automatic
+issue-filing: "i also like report idea where user is alerted and they
+act as a gate and can decide if they want to file the issue on
+github." `vanic` itself must never phone home, file a GitHub issue, or
+send an email on its own -- every piece below only ever writes a local
+file and prints a command for the user to run themselves.
+
+**Design** (`src/coverage.rs`, full rationale in its module doc
+comment): a fingerprint is `{shape}#{operation}`, where `shape` is a
+canonical, depth-bounded (`MAX_SHAPE_DEPTH = 4`) collapse of a `Type`
+(scalars/Str/OwnedStr collapse to one alphabet each; structs/enums
+split only on `is_copy()`; named containers like `Vec<T>`/`Box<T>`/
+`Mutex<T>` recurse) and `operation` is either a structural tag
+(`bind`/`param`/`return`/`index_assign`/`field_assign`/... ) or a
+BUILTIN call's own name (`push`/`guard_get`/`mutex_new`/...) -- never
+a user-defined function's name, which would pollute the fingerprint
+set with names that can't recur across programs (found and fixed
+during implementation: an early version tagged calls to a test file's
+own `overwrite()` helper as if it were a builtin operation). This
+exact granularity was chosen because every real bug found in the
+2026-08-21/22 audit rounds (BUG-216/217/218) was precisely a missing
+arm in some per-(shape, operation) dispatch table.
+
+`extract_program_fingerprints(&TypedProgram) -> BTreeSet<Fingerprint>`
+walks the whole typed IR once. `vanic check --dump-fingerprints` prints
+a program's own set (one per line, sorted) -- both for manual
+inspection and as `tools/gen_coverage_db.py`'s raw input.
+
+**Database generation** (`tools/gen_coverage_db.py`): reuses
+`tools/leak_sweep.py`'s existing `sweep()` directly (imported as a
+module, not re-implemented) to determine which of the 1079 `examples/
+**/*.vani` corpus files are "known good" -- accepted by `vanic check`
+AND clean under the exact ASan+LeakSanitizer+UBSan sweep this repo
+already trusts for its leak-regression baseline. A file currently
+flagged is excluded even if the finding is itself baselined (tracked-
+but-not-fixed still means "known buggy", not "known good"). Extracts
+and unions fingerprints from every clean file into
+`coverage_fingerprints.json` (repo root), which `src/coverage.rs`
+bakes into the binary via `include_str!` and parses lazily
+(hand-parsed via `serde_json::Value` rather than a `#[derive(
+Deserialize)]` struct, since this crate depends on plain `serde`/
+`serde_json` without the `derive` feature) -- `vanic` never fetches or
+generates this file at check-time, so `--coverage` works fully
+offline. First generation: 1075/1079 example files verified clean
+(the same 4 files `leak_sweep_baseline.json` already tracks were
+excluded, as expected), yielding **529 fingerprints**.
+
+**Scoring** (`vani::coverage::score_program`, wired as `vanic check
+--coverage`): restricted to "interesting" fingerprints
+(`shape_is_interesting` -- excludes plain Scalar/Str/Copy-struct/
+Copy-enum shapes, since there's no per-element-type dispatch table for
+a plain `i64` for a missing arm to live in). Score = `100 *
+known_count / total_interesting` (vacuously 100 for a program with no
+interesting fingerprints at all). Prints the score plus every
+untested fingerprint.
+
+**Gated issue draft** (`vanic check --emit-coverage-issue`, implies
+`--coverage`): if the score is below 100, writes a local
+`<file>.coverage_issue.md` (never touches the network) containing the
+score, the untested fingerprint list, and the checked file's full
+source as the reproduction case -- reasonable to embed here
+specifically because the file never leaves the machine until the user
+themselves runs the exact `gh issue create --body-file ...` command
+`vanic` prints alongside it, or pastes the draft in by hand. `vanic`
+takes no action beyond writing that one local file and printing that
+one command.
+
+**Verified against the exact repro files from BUG-216/217/218**
+(the audit round that motivated this feature) using the real, baked-in
+529-fingerprint database:
+- `Vec<Box<Vec<i64>>>` index-assign (BUG-217's exact repro): 38/100 --
+  `Vec<Box<Vec<Scalar>>>#index_assign` etc. are NOT in the corpus.
+- `RwLock<bool>` read/write-guard round-trip (BUG-218's RwLock<bool>
+  sibling bug): 23/100 -- not covered either, despite the underlying
+  LLVM i1/i8 bug being fixed this month.
+- `Vec<Graph>` push (BUG-216's exact repro shape): 28/100 -- not
+  covered (though standalone `Graph#graph_new` is).
+- `Mutex<bool>` lock/guard_get: **100/100** -- correctly recognized as
+  already covered.
+
+This is a real, live finding, not just a smoke test: three of the
+exact shapes that produced real bugs this month were STILL not locked
+in as permanent regression coverage in `examples/`, even though the
+underlying compiler bugs are fixed -- a future regression in any of
+those three dispatch tables would not have been caught by the
+existing corpus.
+
+**Follow-up, same session**: closed all three gaps with new,
+`assert`-verified regression examples --
+`examples/language/english/bug217_vec_box_vec_index_assign.vani`,
+`bug218_rwlock_bool_guard.vani`, and `bug216_vec_of_graph.vani`
+(naming matches this repo's existing `bugNNN_*.vani` convention).
+Writing the RwLock one surfaced a genuine, separate gotcha worth
+documenting: holding a `ReadGuard` alive across a same-thread
+`rwlock_write()` call self-deadlocks (a non-reentrant `pthread_rwlock`)
+-- a real program bug, not a compiler one. Fixed by following
+`rwlock_struct_payload.vani`'s existing pattern of acquiring/using
+each guard inside its own function so it drops (releasing the lock)
+at function return, before the next lock operation runs; the first
+draft of the example hung indefinitely until restructured this way.
+Regenerated `coverage_fingerprints.json` after adding the three
+examples (1078/1082 verified-clean files, **554 fingerprints**, up
+from 529/1075) and confirmed all three original repro files now score
+**100/100** instead of 38/23/28. Also added short notes to the
+tutorials covering each shape (`tutorials/src/intermediate/
+03a_box_raii_primer.md`'s `Vec<Box<T>>` section, `tutorials/src/
+advanced/02c_rwlock_primer.md`, and a new "Storing these inside a
+`Vec<T>`" section in `tutorials/src/advanced/
+05b_advanced_collections.md`) plus the new `--coverage`/
+`--dump-fingerprints`/`--emit-coverage-issue` flags in `tutorials/src/
+beginner/00_cli_reference.md`.
+
+Full regression pass after landing: `cargo test --release --workspace`
+clean (278 + 31 + 1 + 1 + 1 + 2 + 11 passed, 0 failed); `tools/
+leak_sweep.py` matches `leak_sweep_baseline.json` exactly (4 flagged,
+all baselined, no new/stale findings) -- run twice, once as part of
+the DB-generation sweep itself and once standalone for the regression
+check.
+
+New CLI surface on `vanic check`: `--dump-fingerprints`, `--coverage`,
+`--emit-coverage-issue` (documented in `main.rs`'s `HELP` const, this
+repo's established place for CLI-flag documentation -- `--big-o` isn't
+separately documented in `docs/` either).
+
+## BUG-219 -- duplicate `reduce <var> with <op>;` clause for the SAME variable reached codegen instead of being rejected (2026-08-23, FIXED, found by localfuzz)
+
+`vani-compiler-localfuzz`'s harness independently found this exact bug
+shape twice within a few hours (`20260822-155146-backend-divergence-
+fcbc4b2980` -- a struct-capture variant, and `20260822-225752-
+backend-divergence-62b8e97c1f` -- a plain-int variant, both mutations
+of `examples/edge_cases/mix_parallel_vec_read_capture.vani`), both
+classified as "backend-divergence" by the harness's mechanical
+signature since the two backends failed differently rather than
+agreeing:
+
+```vani
+let total: i64 = 0;
+parallel for i from 0 to 5
+reduce total with +;
+reduce total with +;
+{
+  total = total + i;
+}
+```
+
+LLVM rejected the emitted IR outright: `lli: error: multiple
+definition of local value named 'loc_red_0'`. The C/OpenMP backend
+accepted it (exit code 30 rather than a clean 0, but no diagnostic) --
+undefined behavior, not a crash, since which clause's partial sum
+"wins" is unspecified.
+
+Root cause: `checker.rs`'s reduce-clause validation loop (around line
+16180) already built a `reduction_set: HashSet<String>` that is
+obviously intended for exactly this duplicate check -- but the check
+was never wired up. Every clause's `reduction_set.insert(r.var.clone())`
+call ran unconditionally, and its `bool` return value (true = newly
+inserted, false = already present) was simply discarded; a few lines
+later the whole set itself was discarded too (`let _ = reduction_set;`,
+presumably added at some point just to silence an unused-variable
+warning on an already write-only value). Both backends' parallel-for
+lowering allocates one local PER REDUCTION CLAUSE in `typed_reductions`
+(not per distinct reduced variable), so two clauses for the same `total`
+produced two `loc_red_0` allocas.
+
+Fix: `reduction_set.insert(r.var.clone())`'s return value is now
+actually checked -- `false` (variable already reduced by an earlier
+clause in the same loop) now pushes a proper checker diagnostic
+("'reduce total' is reduced more than once in this 'parallel for' --
+each variable may appear in at most one 'reduce' clause") and skips
+adding the duplicate `TypedReduction`, instead of silently accepting
+it. The now-redundant `let _ = reduction_set;` was removed. Verified:
+both original localfuzz repros now correctly rejected at `vanic check`
+time on both backends; a legitimate multi-variable case (`reduce total
+with +; reduce count with +;`, two DIFFERENT variables) still compiles
+and runs correctly on both backends; full `cargo test --release
+--workspace` clean (278 passed, 0 failed); `tools/leak_sweep.py`
+clean. New pinned regression:
+`examples/edge_cases/xfail_duplicate_reduce_clause.vani` (picked up
+automatically by `tests/edge_cases.rs`'s `xfail_*` convention -- must
+reject cleanly on both backends, no panic, no internal-error
+sentinel).
+
+**localfuzz sweep, same session**: reviewed all 9 findings in
+`tools/localfuzz/digests/20260823-014117.md` (6 distinct mechanical
+signatures). Besides the duplicate-reduce bug above (2 findings), the
+other 7 were triaged as NOT compiler bugs:
+- 4 findings (`20260822-132447`, `20260822-193657`, `20260822-231804`,
+  `20260823-012201`) are genuine infinite/astronomically-long loops
+  IN THE MUTATED CANDIDATE PROGRAM itself, not the compiler: two are
+  statement-deletion mutations of `early_exit.vani` (Hindi and
+  Kannada dialects, found independently) that deleted the loop-
+  variable increment on the `continue` path, guaranteeing
+  non-termination once a non-positive element is hit; one is a
+  statement-deletion mutation of `heap.vani` that deleted the ENTIRE
+  (and only) loop-body statement, which also happened to be the sole
+  thing shrinking the loop condition; one is a boundary-value
+  mutation of `bug207_for_vecfill_phi.vani` starting a `for` loop's
+  range at `i64::MIN`, an ~9.2*10^18-iteration trip count.
+- 1 finding (`20260822-102420`) is the same `i64::MIN`-boundary-value
+  mutation pattern applied to `early_exit.vani`'s `while` loop --
+  the C backend happened to finish near-instantly (GCC's optimizer
+  can prove a simple `while(n!=k) n++;` shape converges and fold it),
+  while LLVM's `lli` JIT interpreter has no such optimization and
+  genuinely tried to execute the full trip count, timing out. A real
+  PERFORMANCE divergence between backends on a degenerate input, not
+  a correctness bug -- both would produce the same answer given
+  enough time.
+- 2 findings (`20260822-170655`, `20260822-170822`) are
+  `detach_heartbeat.vani` mutations where the two backends' captured
+  stdout differs in exactly the tick count/line-truncation way
+  already documented in
+  `feedback_vani_concurrent_print_e2e_assertions` memory -- racy
+  timing of a detached background task's prints relative to when the
+  harness's timeout kills the process, not a compiler bug.
+
+Next free bug number is **BUG-220**.
+
+## Feature: `vanic coverage-gaps` -- mechanical audit-round hypothesis generator (2026-08-23)
+
+User question after the coverage-scoring feature landed: "would you use
+dump-fingerprint and coverage to find bugs in audit rounds? should we
+also update localfuzz to do this?" Answer: `--coverage` alone can only
+ever CONFIRM a gap once you've already written a candidate program for
+it -- useful for documenting a finding (as done for BUG-216/217/218's
+repros) but not for proactively generating new things to try. This
+feature is the inverse.
+
+**Design** (`src/coverage.rs`'s "Coverage GAP enumeration" section):
+mine every `(container-family, operation)` pair directly out of the
+baked-in database (seeing `Vec<Scalar>#push` in the DB tells us family
+`Vec` has operation `push`), then cross each family against every
+"filler" element shape ever recorded anywhere in the database -- the 7
+hardcoded leaf shapes `canonical_shape` can produce (`Scalar`, `Str`,
+`OwnedStr`, `Copy-Struct`, `NonCopy-Struct`, `Copy-Enum`, `NonCopy-
+Enum` -- these never appear as fingerprints themselves since
+`shape_is_interesting` filters the Copy-ish ones out at extraction
+time, so they have to be hardcoded rather than mined) plus every
+non-parameterized "atomic" shape also seen in the DB (`Graph`,
+`UnionFind`, `Barrier`, `Condvar`, `FileHandle`, ...). Deliberately
+scoped to depth-1, single-type-parameter families only (`Vec<Scalar>`,
+not `Vec<Box<Vec<Scalar>>>`; not `HashMap<K,V>`/`Array<T,N>`, which
+have more than one type/const parameter) -- every historical bug this
+mirrors (BUG-216/217/218) was exactly one level of nesting, and going
+deeper multiplies the candidate space for little real value. No
+external `regex` dependency added -- hand-rolled bracket/comma
+scanning is enough for this shape grammar.
+
+New CLI: `vanic coverage-gaps [--json]` -- no file argument, since it
+only ever reads the baked-in database. Sanity-checked: none of the
+already-covered fingerprints (`Vec<Graph>#push`, `RwLock<Scalar>
+#rwlock_write`, `Mutex<Scalar>#mutex_lock`, ...) appear in its output;
+real, plausible, never-tried combinations do (`Vec<Barrier>#push`,
+`Vec<Condvar>#push`, `Deque<Graph>#deque_push_back`, `Box<Graph>
+#__box_new`, ...) -- exactly the shape of hypothesis that would have
+led straight to BUG-216 if tried by hand. Current output: 2552
+candidates from the 554-fingerprint database. Explicitly documented
+(doc comment, `--help` text, and the tutorial) as a HEURISTIC
+generator, not a bug list -- it has no model of which builtins accept
+which element types, so a large fraction of candidates are expected to
+be rejected cleanly by the checker (e.g. an ordering-dependent Vec op
+crossed against a type with no ordering), which is a fine outcome, not
+a false claim.
+
+Full regression pass: `cargo test --release --workspace` clean (278
+passed, 0 failed) -- one transient failure
+(`concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends`,
+"pure virtual method called") on the FIRST full-suite run turned out to
+be pre-existing flakiness under parallel test-suite load (passed 3/3
+in isolation immediately after, and a full clean re-run of the whole
+suite passed 0 failures) -- unrelated to this change, which never
+touches concurrency/task codegen.
+
+New tutorial section: `tutorials/src/beginner/00_cli_reference.md`'s
+`vanic coverage-gaps` subsection.
+
+**Follow-up (same session): `localfuzz` wired to consume `coverage-gaps`.**
+`tools/localfuzz/harness.py` (tracked on `main`, mirrored onto the
+`local-fuzz-findings` worktree via `refresh.sh`'s merge -- the harness
+itself is common to both branches, only its findings/candidate output
+differs) gained a third candidate-generation path, prioritized over
+the existing two: every `HARNESS_GAP_EVERY`th cycle (default 7),
+`generate_gap_targeted_program` calls `vanic coverage-gaps --json`,
+picks one `Family<Filler>#op` gap fingerprint (preferring one not
+already tried this process's lifetime), finds a real English example
+exercising `op` via a new `find_example_by_content` (content search,
+not just filename -- a builtin op name is unlikely to appear in a
+filename but will appear in a file body) plus, if `Filler` is a real
+type rather than one of the 7 leaf categories, a second real example
+showing how that type gets constructed, and asks qwen to combine them
+into the exact untested combination. Falls through cleanly to the
+existing feature-combination generator, then to mutation, on any
+failure (no ollama response, no grounding example found, etc.) --
+same fallback shape the existing generator already had.
+
+Every candidate that gets past `vanic check` (from any of the three
+paths) now also gets a `vanic check --coverage` score attached to its
+`finding.json` / candidate-regression header via a new
+`get_coverage_score` helper -- cheap (one extra offline `vanic check`
+call) and gives visibility into whether findings actually cluster
+around low-coverage territory, validating (or not) the whole premise.
+
+Caught and fixed during implementation: `find_example_by_content`'s
+first draft defaulted to searching the ENTIRE multi-dialect corpus
+rather than `examples/language/english/` only -- a live probe (`vanic
+coverage-gaps` then a real `push` lookup) returned a Maithili example
+as the shortest match, which would have grounded qwen in a different
+dialect's native-script statement keywords (only builtin identifiers
+like `push` stay constant across dialects; `fn`/`let`/`while` etc. are
+localized) and likely produced garbage -- the exact reason the
+PRE-EXISTING `generate_novel_program` already restricts itself to
+`EXAMPLES_ENGLISH`. Fixed to match that existing convention before
+this shipped, not after.
+
+Verified: `python3 -m py_compile` clean; `fetch_coverage_gaps()`
+correctly parses all 2552 candidates; `find_example_by_content`
+correctly resolves real English groundings for `push`/`barrier_new`/
+`mutex_lock`/`Barrier`; `get_coverage_score` correctly returns `100`
+for the BUG-216 example and `None` for the (intentionally rejected)
+BUG-219 xfail example; one full `--once` cycle with
+`HARNESS_AUTOCOMMIT=0` and both gap/generate cadences disabled ran
+cleanly end-to-end through the (unchanged) mutation path, confirming
+the new per-cycle `coverage_score` computation doesn't break the
+existing paths. Did NOT force a live gap-targeted ollama call to
+validate the generation prompt itself beyond one already-attempted
+call -- the shared `ollama` service (also serving the LIVE running
+harness concurrently) got OOM-killed by the combined load from one
+manual probe call during testing; it self-healed via its existing
+auto-restart within seconds, but a second deliberate call was avoided
+given the harness would exercise the real path itself once refreshed.

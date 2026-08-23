@@ -403,7 +403,30 @@ fn ty_contains_vec_of_atomic_or_channel(ty: &Type) -> bool {
     match ty {
         Type::Vec(inner) => matches!(
             &**inner,
-            Type::Atomic(_) | Type::Channel(_, _)
+            // BUG-218: `Vec<Mutex<T>>`/`Vec<Guard<T>>`/
+            // `Vec<RwLock<T>>`/`Vec<ReadGuard<T>>`/
+            // `Vec<WriteGuard<T>>` fail to link on LLVM for ANY T,
+            // including `i64` (unlike the bare-type gate in
+            // `ty_contains_non_i64_mutex_family`, which only
+            // rejects non-i64 T) -- confirmed via a direct
+            // `Vec<Mutex<i64>>` repro: `opt`/`llc` reject
+            // "base element of getelementptr must be sized" for
+            // `%intent_mutex_int64_t`. Root cause: a program mixing
+            // `Vec<Mutex<T>>` with otherwise-SSA-eligible code
+            // reuses tree-LLVM's generic Vec-bundle machinery
+            // (`vec_element_size_expr`/`llvm_mutex_struct`, which
+            // references the per-element-type name from BUG-19),
+            // while `ssa_backend_llvm.rs`'s OWN Mutex/Guard
+            // declaration (used for any non-Vec Mutex ops in the
+            // SAME function) hardcodes the OLDER, disconnected name
+            // -- a cross-file/cross-representation type-name
+            // mismatch, same failure family as Atomic/Channel just
+            // below but triggered by naming rather than pointer-vs-
+            // value shape. C doesn't have this problem (confirmed
+            // clean via the same repro on `--backend=c`) so this
+            // stays LLVM-only, mirroring Atomic/Channel's own scope.
+            Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_)
+                | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_)
         ) || ty_contains_vec_of_atomic_or_channel(inner),
         Type::Array { element, .. } => ty_contains_vec_of_atomic_or_channel(element),
         Type::Ref(inner) | Type::RefMut(inner) => {
@@ -550,6 +573,52 @@ fn ssa_c_extra_reject(stmt: &TypedStmt) -> bool {
         || stmt_calls_vec_with_capacity(stmt)
 }
 
+/// BUG-218: `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/
+/// `WriteGuard<T>` for any T OTHER than `i64` are silently broken on
+/// both SSA backends -- confirmed via a direct repro, a plain (no
+/// Vec involved) `Mutex<i32>` fails LLVM IR verification
+/// (`'%v_0' defined with type 'i32' but expected 'i64'`) and fails
+/// to compile on the C side (`implicit declaration of function
+/// 'intent_mutex_int32_t_new'`). Root cause: `ssa_backend_llvm.rs`
+/// and `ssa_backend_c.rs` each unconditionally emit ONLY the
+/// hardcoded i64 Mutex/Guard bundle (`emit_intent_mutex_helpers_c`,
+/// literally named "Legacy: emit full i64 mutex helpers") --
+/// neither SSA backend was ever updated to the per-element-type
+/// generic bundle emission tree-C/tree-LLVM got in BUG-19
+/// (2026-07-27), which loops over every DISTINCT element type the
+/// program actually uses (`collect_mutex_specs`/
+/// `collect_rwlock_specs`). The checker happily accepts `Mutex<i32>`
+/// (nothing stops it type-checking), so this reaches codegen and
+/// breaks. Rather than duplicate tree's generic per-T bundle
+/// emission into both SSA backends (a substantially larger, riskier
+/// change touching `Module`-level codegen in two files that don't
+/// currently have access to the original `TypedProgram` to scan),
+/// gate the whole module out of the SSA fast path whenever a non-
+/// i64 element appears anywhere in this type -- the tree backends
+/// already handle arbitrary T correctly and unconditionally.
+fn ty_contains_non_i64_mutex_family(ty: &Type) -> bool {
+    match ty {
+        Type::Mutex(inner)
+        | Type::Guard(inner)
+        | Type::RwLock(inner)
+        | Type::ReadGuard(inner)
+        | Type::WriteGuard(inner) => {
+            !matches!(**inner, Type::I64) || ty_contains_non_i64_mutex_family(inner)
+        }
+        Type::Vec(inner) | Type::Atomic(inner) | Type::Box(inner) => {
+            ty_contains_non_i64_mutex_family(inner)
+        }
+        Type::Array { element, .. } => ty_contains_non_i64_mutex_family(element),
+        Type::Ref(inner) | Type::RefMut(inner) => ty_contains_non_i64_mutex_family(inner),
+        Type::Tuple(elements) => elements.iter().any(ty_contains_non_i64_mutex_family),
+        Type::FnPtr(params, ret) => {
+            params.iter().any(ty_contains_non_i64_mutex_family)
+                || ty_contains_non_i64_mutex_family(ret)
+        }
+        _ => false,
+    }
+}
+
 fn ssa_type_supported(ty: &Type) -> bool {
     // Every concurrency primitive now flows through SSA
     // (Atomic + Mutex/Guard + Channel) on both SSA-C and
@@ -566,6 +635,11 @@ fn ssa_type_supported(ty: &Type) -> bool {
     // gating away from SSA when an array return appears
     // anywhere in the program.
     if matches!(ty, Type::Array { .. }) {
+        return false;
+    }
+    // BUG-218: see `ty_contains_non_i64_mutex_family`'s own doc
+    // comment above.
+    if ty_contains_non_i64_mutex_family(ty) {
         return false;
     }
     true
@@ -1147,7 +1221,8 @@ USAGE:
 
 COMMANDS:
     check <path>... [--json] [--no-verify] [--smt-debug]
-        [--big-o[=<auto|force|off>]]
+        [--big-o[=<auto|force|off>]] [--dump-fingerprints]
+        [--coverage] [--emit-coverage-issue]
                                           Type-check one or more sources.
                                           Paths may be files or directories
                                           (the latter expand recursively to
@@ -1168,6 +1243,37 @@ COMMANDS:
                                           complexity annotation per fn:
                                           auto (default) skips O(1); force
                                           includes every fn; off is no-op.
+                                          With --dump-fingerprints, print
+                                          this program's feature-combination
+                                          coverage fingerprints (one per
+                                          line, sorted) instead of 'ok:' --
+                                          see src/coverage.rs's doc comment.
+                                          With --coverage, score this
+                                          program's feature combinations
+                                          against the baked-in corpus
+                                          database (0-100) and list any
+                                          untested ones. With
+                                          --emit-coverage-issue (implies
+                                          --coverage), if the score is
+                                          below 100, draft a GitHub issue
+                                          markdown file locally and print
+                                          the exact 'gh issue create'
+                                          command -- vanic never files
+                                          or sends anything on its own;
+                                          you decide whether to run it.
+    coverage-gaps [--json]           List candidate feature-combination
+                                          fingerprints the baked-in
+                                          coverage database has NO
+                                          record of -- no file needed,
+                                          purely mined from the
+                                          database itself (cross every
+                                          known container/operation
+                                          pair against every element
+                                          shape ever seen). A list of
+                                          hypotheses worth trying, not
+                                          confirmed bugs -- see
+                                          src/coverage.rs's doc
+                                          comment.
     emit <file.vani> [--backend=<c|llvm>] [-o out]
         [--big-o[=<auto|force|off>]]
                                           Emit lowered source for a program.
@@ -1527,6 +1633,41 @@ fn run() -> Result<ExitCode, String> {
             println!("{} {}", bin, env!("CARGO_PKG_VERSION"));
             Ok(ExitCode::SUCCESS)
         }
+        "coverage-gaps" => {
+            // No file argument -- this enumerates HYPOTHESIS
+            // fingerprints purely from the baked-in coverage
+            // database (tools/gen_coverage_db.py's output), by
+            // crossing every known (container-family, operation)
+            // pair against every element shape ever seen anywhere
+            // in the database. See src/coverage.rs's "Coverage GAP
+            // enumeration" section doc comment for the full design
+            // and its deliberate limitations (depth-1 only, many
+            // candidates will be legitimately rejected by the
+            // checker -- this is a list of things worth trying, not
+            // a list of confirmed bugs).
+            let mut json = false;
+            for arg in args.iter().skip(2) {
+                match arg.as_str() {
+                    "--json" => json = true,
+                    other => return Err(format!("unexpected argument '{}'", other)),
+                }
+            }
+            let gaps = vani::coverage::enumerate_coverage_gaps();
+            if json {
+                let items: Vec<String> = gaps.iter().map(|fp| format!("{}", fp)).collect();
+                println!(
+                    "{{\"gap_count\":{},\"gaps\":{}}}",
+                    items.len(),
+                    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string()),
+                );
+            } else {
+                for fp in &gaps {
+                    println!("{}", fp);
+                }
+                eprintln!("{} candidate gap(s)", gaps.len());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         "check" => {
             // Type-check one or more files. Paths may be files or
             // directories (the latter expand recursively to
@@ -1537,10 +1678,36 @@ fn run() -> Result<ExitCode, String> {
             // matches the single-file form.
             let mut json = false;
             let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
+            let mut dump_fingerprints = false;
+            let mut coverage = false;
+            let mut emit_coverage_issue = false;
             let mut path_args: Vec<String> = Vec::new();
             for arg in args.iter().skip(2) {
                 match arg.as_str() {
                     "--json" => json = true,
+                    // Coverage-fingerprinting groundwork: print this
+                    // program's `{shape}#{operation}` fingerprints
+                    // (one per line, sorted) instead of the normal
+                    // "ok: <file>" output. Feeds both manual
+                    // inspection and `tools/gen_coverage_db.py`'s
+                    // corpus walk. See `src/coverage.rs`'s module
+                    // doc comment for the full design.
+                    "--dump-fingerprints" => dump_fingerprints = true,
+                    // Score this program's feature-combination
+                    // coverage against the baked-in corpus database
+                    // (tools/gen_coverage_db.py). See
+                    // src/coverage.rs's module doc comment.
+                    "--coverage" => coverage = true,
+                    // Implies --coverage. If the score is below 100,
+                    // draft (never file) a GitHub issue markdown body
+                    // reporting the untested combinations, and print
+                    // the exact `gh issue create` command to run it
+                    // -- vanic never files anything on its own; the
+                    // user is the gate.
+                    "--emit-coverage-issue" => {
+                        coverage = true;
+                        emit_coverage_issue = true;
+                    }
                     // User-direction item (2026-06-08): static
                     // Big-O annotation per fn. `--big-o` with no
                     // value defaults to Auto (annotate fns that
@@ -1718,6 +1885,92 @@ fn run() -> Result<ExitCode, String> {
                                 }
                             }
                         }
+                        if dump_fingerprints {
+                            let fingerprints =
+                                vani::coverage::extract_program_fingerprints(&checked.ir);
+                            if files.len() > 1 {
+                                println!("fingerprints ({}):", file.display());
+                                for fp in &fingerprints {
+                                    println!("  {}", fp);
+                                }
+                            } else {
+                                for fp in &fingerprints {
+                                    println!("{}", fp);
+                                }
+                            }
+                        }
+                        if coverage {
+                            let report = vani::coverage::score_program(&checked.ir);
+                            let prefix = if files.len() > 1 {
+                                format!("coverage ({}): ", file.display())
+                            } else {
+                                "coverage: ".to_string()
+                            };
+                            println!(
+                                "{}{}/100 ({}/{} known feature combinations, db {})",
+                                prefix,
+                                report.score,
+                                report.known_count,
+                                report.total_interesting,
+                                if report.db_generated_utc.is_empty() {
+                                    "unavailable".to_string()
+                                } else {
+                                    format!(
+                                        "generated {} from {} file(s)",
+                                        report.db_generated_utc, report.db_verified_clean_files
+                                    )
+                                },
+                            );
+                            if !report.unknown.is_empty() {
+                                println!("  untested combinations:");
+                                for fp in &report.unknown {
+                                    println!("    {}", fp);
+                                }
+                            }
+                            if emit_coverage_issue {
+                                let source = std::fs::read_to_string(file)
+                                    .unwrap_or_default();
+                                let bin = std::path::Path::new(&args[0])
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "vanic".to_string());
+                                let version = format!(
+                                    "{} {}", bin, env!("CARGO_PKG_VERSION"),
+                                );
+                                match vani::coverage::draft_coverage_issue(
+                                    &report, file, &source, &version,
+                                ) {
+                                    Some(body) => {
+                                        let draft_path = file.with_extension(
+                                            "coverage_issue.md",
+                                        );
+                                        if let Err(e) =
+                                            std::fs::write(&draft_path, &body)
+                                        {
+                                            eprintln!(
+                                                "warning: could not write {}: {}",
+                                                draft_path.display(), e,
+                                            );
+                                        } else {
+                                            println!(
+                                                "  drafted: {} (nothing filed -- review it, then run:",
+                                                draft_path.display(),
+                                            );
+                                            println!(
+                                                "    gh issue create --repo <owner>/<repo> --title \"vanic coverage: {} untested combination(s) in {}\" --body-file {}",
+                                                report.unknown.len(),
+                                                file.display(),
+                                                draft_path.display(),
+                                            );
+                                            println!("  -- only if you want to share it)");
+                                        }
+                                    }
+                                    None => {
+                                        println!("  score is 100 -- nothing to draft");
+                                    }
+                                }
+                            }
+                        }
                     }
                     Err((map, diagnostics)) => {
                         failed += 1;
@@ -1775,7 +2028,7 @@ fn run() -> Result<ExitCode, String> {
                 // The single-file `{"diagnostics":[]}` success case
                 // also flows through here — combined_map is empty
                 // and the formatter emits the right empty object.
-            } else if failed == 0 {
+            } else if failed == 0 && !dump_fingerprints && !coverage {
                 if files.len() == 1 {
                     println!("ok: {}", files[0].display());
                 } else {

@@ -3,13 +3,30 @@
 
 Launched by start.sh under its own `systemd-run --user` transient service
 (hard MemoryMax/CPUQuota cap, no swap) so it can't starve an interactive
-build or Claude Code session on the same host. Each cycle it either
-mutates a corpus .vani file or (every HARNESS_GENERATE_EVERY cycles) asks
-the local Ollama model (qwen -- also running under its own capped user
-service) to write a fresh program combining two real vani-compiler
-features, grounded in real example snippets pulled from the corpus (not
-a huge context dump -- see generate_novel_program). The candidate is run
-through `vanic check` and both backends of `vanic run`.
+build or Claude Code session on the same host. Each cycle picks one of
+three ways to get a candidate, in priority order:
+  1. Every HARNESS_GAP_EVERY cycles: `vanic coverage-gaps` (2026-08-23)
+     mines the baked-in coverage database for {shape}#{operation}
+     fingerprints with NO regression-test record anywhere in examples/
+     -- generate_gap_targeted_program picks one and grounds qwen in a
+     real example of the operation (plus, if the element type is a
+     real type name rather than a leaf category, a second real example
+     showing how that type gets constructed), then asks it to combine
+     them into the exact untested shape. A mechanical, corpus-
+     independent way to bias the search toward the kind of combination
+     that produced BUG-216/217/218, instead of relying on chance.
+  2. Otherwise every HARNESS_GENERATE_EVERY cycles: the local Ollama
+     model (qwen -- also running under its own capped user service)
+     writes a fresh program combining two real vani-compiler features,
+     grounded in real example snippets pulled from the corpus (not a
+     huge context dump -- see generate_novel_program).
+  3. Otherwise: mutate a random corpus .vani file (see MUTATORS).
+The candidate is run through `vanic check` and both backends of `vanic
+run`; every candidate that passes `check` also gets a `vanic check
+--coverage` score attached to its finding/candidate-regression record,
+regardless of which of the three paths produced it -- a cheap, offline
+signal for whether findings cluster around already-low-coverage
+territory (validating or not the bias in path 1 above).
 
 Three outcomes:
   - Crashes/hangs/diverges -> saved under tools/localfuzz/findings/,
@@ -67,6 +84,32 @@ RUN_TIMEOUT = int(os.environ.get("RUN_TIMEOUT", "20"))
 AUTOCOMMIT = os.environ.get("HARNESS_AUTOCOMMIT", "1") == "1"
 GENERATE_EVERY = int(os.environ.get("HARNESS_GENERATE_EVERY", "10"))
 ATTEMPT_FIXES = os.environ.get("HARNESS_ATTEMPT_FIXES", "1") == "1"
+# 2026-08-23: `vanic coverage-gaps` mines the baked-in coverage
+# database and prints candidate {shape}#{operation} fingerprints it
+# has NO regression-tested record of at all -- see
+# docs/TODO_CURRENT.md's "vanic coverage-gaps" entry on main. Every
+# GAP_EVERY-th cycle, instead of a random mutation or a random
+# feature-pair combo, the harness targets one of these gap
+# fingerprints directly (generate_gap_targeted_program) -- a
+# mechanical, corpus-independent way to bias the search toward the
+# exact shape of combination that produced BUG-216/217/218, rather
+# than relying on chance to stumble into one via random mutation.
+GAP_EVERY = int(os.environ.get("HARNESS_GAP_EVERY", "7"))
+# The 7 leaf shapes `canonical_shape` produces that are category
+# names, not real vāṇी type identifiers (`Copy-Struct` isn't
+# something you can write as a type) -- these get a plain-English
+# instruction in the gap-targeted prompt instead of a second grounding
+# example, since qwen already sees how to write an `i64` or a struct
+# literal in the FIRST grounding example.
+LEAF_FILLER_HINTS = {
+    "Scalar": "a plain i64",
+    "Str": "a Str (borrowed string literal)",
+    "OwnedStr": "an OwnedStr (e.g. `s + \"\"` to copy a Str literal into one)",
+    "Copy-Struct": "a small struct where every field is Copy (e.g. all i64/bool fields)",
+    "NonCopy-Struct": "a struct with at least one non-Copy field (e.g. a Vec<i64> or OwnedStr field)",
+    "Copy-Enum": "an enum with no payload (or only Copy payloads)",
+    "NonCopy-Enum": "an enum with at least one non-Copy payload variant",
+}
 
 CRASH_MARKERS = (
     "panicked at",
@@ -434,6 +477,48 @@ def find_example(keyword):
     return matches[0] if matches else None
 
 
+def find_example_by_content(keyword, corpus_dirs=None):
+    """Like find_example, but searches file CONTENT rather than just
+    filenames -- needed for gap-targeted generation, where the keyword
+    is a builtin operation or type name (`push`, `barrier_new`,
+    `Barrier`) that's unlikely to appear in a filename but will appear
+    in a file body. Defaults to EXAMPLES_ENGLISH ONLY, same as
+    find_example/generate_novel_program -- a non-English dialect file
+    uses different native-script STATEMENT keywords (fn/let/while
+    etc. are localized per dialect; only builtin identifiers like
+    `push` stay constant), and qwen grounded in one would likely
+    produce garbage syntax, the same reason generate_novel_program
+    never draws from outside EXAMPLES_ENGLISH either. Returns the
+    SHORTEST matching file (cheapest possible grounding snippet), or
+    None.
+    """
+    dirs = corpus_dirs or [EXAMPLES_ENGLISH]
+    best = None
+    for d in dirs:
+        for p in d.rglob("*.vani"):
+            try:
+                text = p.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            if keyword in text and (best is None or len(text) < len(best[1])):
+                best = (p, text)
+    return best[0] if best else None
+
+
+def get_coverage_score(path):
+    """Runs `vanic check <path> --coverage` and parses the leading
+    "coverage: N/100" out of stdout. Returns None if the check itself
+    failed (not well-typed -- score is meaningless) or the output
+    couldn't be parsed. Cheap and offline (no network, no candidate
+    re-run) -- attached to every finding/candidate regression so a
+    human reviewing them later can see at a glance whether it clusters
+    around already-low-coverage territory.
+    """
+    result = run_vanic(["check", str(path), "--coverage"], CHECK_TIMEOUT)
+    m = re.search(r"coverage:\s*(\d+)/100", result["stdout"])
+    return int(m.group(1)) if m else None
+
+
 def generate_novel_program(rng):
     """Grounds qwen in two REAL example snippets (a few KB each) instead of
     the full tools/llm_context/bundle.py dump (tens of thousands of tokens,
@@ -471,17 +556,112 @@ def generate_novel_program(rng):
     return cleaned, pick
 
 
-def save_candidate_regression(src_text, feature_pick):
+GAP_FP_RE = re.compile(r"^([A-Za-z0-9_]+)<([A-Za-z0-9_-]+)>#(.+)$")
+
+
+def fetch_coverage_gaps():
+    """Runs `vanic coverage-gaps --json` and returns the (family,
+    filler, op, full_fingerprint) tuples for every gap fingerprint of
+    the `Family<Filler>#op` shape -- the only shape this two-grounding
+    generation scheme knows how to target (see coverage.rs's own doc
+    comment for why depth-1 single-type-param families are the
+    scoped-in case; atomic/multi-param shapes are skipped here too).
+    Returns [] on any failure (binary too old, no gaps, etc.) so
+    callers fall back cleanly.
+    """
+    out = run_vanic(["coverage-gaps", "--json"], 15)
+    if out["rc"] != 0 or not out["stdout"]:
+        return []
+    try:
+        gaps = json.loads(out["stdout"])["gaps"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return []
+    parsed = []
+    for g in gaps:
+        m = GAP_FP_RE.match(g)
+        if m:
+            parsed.append((m.group(1), m.group(2), m.group(3), g))
+    return parsed
+
+
+def generate_gap_targeted_program(rng, tried):
+    """Picks one `Family<Filler>#op` gap fingerprint (preferring one
+    this process hasn't already tried this run, per `tried`) and
+    grounds qwen in a REAL example exercising `op` plus, if `Filler`
+    is a real type name rather than a leaf category, a second real
+    example showing how a `Filler` value gets built -- the exact same
+    two-grounding-snippet shape as generate_novel_program, just with
+    the two snippets chosen from the gap fingerprint instead of the
+    static FEATURES table. Returns (source_or_None, fingerprint_or_None).
+    """
+    candidates = fetch_coverage_gaps()
+    if not candidates:
+        return None, None
+    untried = [c for c in candidates if c[3] not in tried]
+    family, filler, op, fp = rng.choice(untried or candidates)
+    tried.add(fp)
+
+    op_example = find_example_by_content(op)
+    if op_example is None:
+        return None, fp
+    op_text = op_example.read_text()
+    if len(op_text) > 2500:
+        op_text = op_text[:2500] + "\n// (truncated)\n"
+    snippets = [f"# Example showing the `{op}` operation:\n"
+                f"# Example file: {op_example.name}\n```vani\n{op_text}\n```"]
+
+    if filler in LEAF_FILLER_HINTS:
+        filler_desc = LEAF_FILLER_HINTS[filler]
+    else:
+        filler_desc = f"a `{filler}` value"
+        filler_example = find_example_by_content(filler)
+        if filler_example and filler_example != op_example:
+            ftext = filler_example.read_text()
+            if len(ftext) > 1500:
+                ftext = ftext[:1500] + "\n// (truncated)\n"
+            snippets.append(
+                f"# Example showing how `{filler}` values are built/used:\n"
+                f"# Example file: {filler_example.name}\n```vani\n{ftext}\n```"
+            )
+
+    prompt = (
+        "\n\n".join(snippets)
+        + f"\n\n---\n\nWrite ONE new, complete .vani program that creates a "
+        f"`{family}<{filler}>` (a {family} whose element type is {filler_desc}) "
+        f"and calls `{op}` on it, following the exact syntax shown above. This "
+        f"EXACT combination ({family}<{filler}>, {op}) has never been tried in "
+        f"this project before -- the goal is only to exercise it, not to do "
+        f"anything meaningful with the result."
+    )
+    out = ollama_generate(prompt, system=GEN_SYSTEM_PROMPT, timeout=300, num_predict=700)
+    if not out:
+        return None, fp
+    cleaned = re.sub(r"^```\w*\n|```$", "", out.strip(), flags=re.MULTILINE)
+    return cleaned, fp
+
+
+def save_candidate_regression(src_text, feature_pick=None, gap_target=None, coverage_score=None):
     h = hashlib.sha1(src_text.encode()).hexdigest()[:10]
     CANDIDATE_REGRESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     if list(CANDIDATE_REGRESSIONS_DIR.glob(f"*-{h}.vani")):
         return None  # identical content already staged
     ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    slug = re.sub(r"[^a-z0-9]+", "-", "-".join(f[1] for f in feature_pick).lower()).strip("-")[:60]
+    if gap_target:
+        slug = re.sub(r"[^a-z0-9]+", "-", gap_target.lower()).strip("-")[:60]
+        origin_line = (
+            f"// targeted a coverage-gap fingerprint (`vanic coverage-gaps`): {gap_target}\n"
+            f"// this exact (shape, operation) combination had no regression-test record\n"
+            f"// anywhere in examples/ before this candidate.\n"
+        )
+    else:
+        slug = re.sub(r"[^a-z0-9]+", "-", "-".join(f[1] for f in feature_pick).lower()).strip("-")[:60]
+        origin_line = f"// features: {', '.join(f[0] for f in feature_pick)}\n"
     outpath = CANDIDATE_REGRESSIONS_DIR / f"{ts}-{slug}-{h}.vani"
+    score_line = f"// coverage score: {coverage_score}/100\n" if coverage_score is not None else ""
     header = (
         f"// candidate regression, qwen-generated ({OLLAMA_MODEL}), UNREVIEWED\n"
-        f"// features: {', '.join(f[0] for f in feature_pick)}\n"
+        f"{origin_line}"
+        f"{score_line}"
         f"// compiled and ran cleanly on both backends -- candidate for examples/ or\n"
         f"// tests/run_end_to_end.rs after human/frontier-model review.\n\n"
     )
@@ -615,14 +795,28 @@ def main():
     rng = random.Random()
     SCRATCH.mkdir(parents=True, exist_ok=True)
     cycle = 0
+    # Gap fingerprints already targeted THIS process lifetime -- steers
+    # generate_gap_targeted_program away from immediate repeats without
+    # needing any persistent state across restarts (the gap list itself
+    # is deterministic per binary, so avoiding exact repeats within one
+    # run is what actually matters for search diversity).
+    tried_gaps = set()
 
     while True:
         cycle += 1
         base_path = None
         feature_pick = None
+        gap_target = None
         src = None
 
-        if GENERATE_EVERY and cycle % GENERATE_EVERY == 0:
+        if GAP_EVERY and cycle % GAP_EVERY == 0:
+            log("cycle: qwen-generated coverage-gap-targeted program")
+            src, gap_target = generate_gap_targeted_program(rng, tried_gaps)
+            if src is None:
+                log(f"gap-targeted generation failed/unavailable (target={gap_target}), "
+                    "falling back")
+
+        if src is None and GENERATE_EVERY and cycle % GENERATE_EVERY == 0:
             log("cycle: qwen-generated feature-combination program")
             src, feature_pick = generate_novel_program(rng)
             if src is None:
@@ -634,6 +828,7 @@ def main():
             base_path = rng.choice(corpus)
             src = mutate(base_path.read_text(), rng)
             feature_pick = None  # mutation output, not a qwen-authored candidate
+            gap_target = None
 
         tmp = SCRATCH / "candidate.vani"
         tmp.write_text(src)
@@ -641,11 +836,20 @@ def main():
         finding = test_candidate(tmp)
         kind = finding["kind"]
         feature_names = [f[0] for f in feature_pick] if feature_pick else None
+        # Skip re-checking a candidate whose `check` stage already
+        # crashed/hung once -- re-running it just to score coverage
+        # risks re-triggering the same crash/hang for no benefit.
+        coverage_score = get_coverage_score(tmp) if kind != "check-crash" else None
 
         if kind in ("check-crash", "run-crash", "backend-divergence"):
             if feature_pick:
                 finding["features"] = feature_names
-            log(f"FINDING: {kind} (base={base_path}, features={feature_names})")
+            if gap_target:
+                finding["gap_target"] = gap_target
+            if coverage_score is not None:
+                finding["coverage_score"] = coverage_score
+            log(f"FINDING: {kind} (base={base_path}, features={feature_names}, "
+                f"gap_target={gap_target}, coverage_score={coverage_score})")
             outdir = save_finding(src, finding, base_path)
             report = draft_report(src, finding, base_path)
             if ATTEMPT_FIXES:
@@ -653,14 +857,19 @@ def main():
             append_staging_doc(outdir, report, finding)
             git_commit([outdir, STAGING_DOC],
                        f"localfuzz: candidate {kind} ({outdir.name})")
-        elif kind == "clean-success" and feature_pick:
-            outpath = save_candidate_regression(src, feature_pick)
+        elif kind == "clean-success" and (feature_pick or gap_target):
+            outpath = save_candidate_regression(
+                src, feature_pick=feature_pick, gap_target=gap_target,
+                coverage_score=coverage_score,
+            )
             if outpath:
                 git_commit([outpath], f"localfuzz: candidate regression ({outpath.name})")
-            log(f"cycle {cycle}: clean-success, qwen-generated (features={feature_names})")
-        elif kind == "clean-reject" and feature_pick:
+            log(f"cycle {cycle}: clean-success, qwen-generated (features={feature_names}, "
+                f"gap_target={gap_target}, coverage_score={coverage_score})")
+        elif kind == "clean-reject" and (feature_pick or gap_target):
             log(f"cycle {cycle}: qwen-generated candidate rejected by checker "
-                f"(features={feature_names}) -- not staged, not a finding")
+                f"(features={feature_names}, gap_target={gap_target}) -- "
+                "not staged, not a finding")
         else:
             log(f"cycle {cycle}: clean (base={base_path})")
 

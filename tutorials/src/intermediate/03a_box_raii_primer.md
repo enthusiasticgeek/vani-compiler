@@ -231,6 +231,15 @@ You'd use both:
   element is its own heap allocation; the Vec stores pointers
   to them. Useful when individual elements are expensive to
   move OR when you need pointer-stability per element.
+  Overwriting a slot -- either `xs[i] = new_box` (direct
+  index-assignment) or `set(mut ref xs, i, new_box)` -- correctly
+  frees the OLD Box (both heap levels: the pointee, then the Box
+  itself) before the new one moves in, on both backends. This is a
+  fairly recent fix (BUG-217, 2026-08-21) -- earlier compiler
+  versions leaked the old Box specifically via direct
+  index-assignment (`set`/`set_mut` were already correct). See
+  `examples/language/english/bug217_vec_box_vec_index_assign.vani`
+  for a complete, `assert`-verified regression example.
 
 ## Variations -- what Box wraps in real programs
 
