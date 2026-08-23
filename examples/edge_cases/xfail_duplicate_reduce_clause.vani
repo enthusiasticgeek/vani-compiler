@@ -1,0 +1,33 @@
+// Regression for BUG-219 (found by localfuzz, 2026-08-22/23): a
+// `parallel for` with TWO `reduce total with +;` clauses for the
+// SAME variable used to reach codegen instead of being rejected.
+// checker.rs's reduce-clause loop already built a
+// `reduction_set: HashSet<String>` clearly intended for exactly
+// this duplicate check, but the check itself was never wired up --
+// the set was only ever inserted into, then explicitly discarded a
+// few lines later (`let _ = reduction_set;`). Both TypedReduction
+// entries flowed through to codegen, and both backends' parallel-for
+// lowering allocates one local PER REDUCTION CLAUSE (not per reduced
+// variable) -- LLVM rejected the resulting IR outright ("multiple
+// definition of local value named `loc_red_0`"), while the C/OpenMP
+// backend accepted it but the behavior was undefined (which clause's
+// partial sum wins is unspecified).
+//
+// Found independently twice by the localfuzz harness within a few
+// hours (a struct-capture variant and a plain-int variant of the
+// same duplicate-clause shape), both misclassified by its mechanical
+// signature as "backend-divergence" since the two backends failed
+// differently rather than agreeing.
+//
+// Must reject — `xfail_*` prefix asserts the compiler errors out.
+fn main() -> i64 {
+  let total: i64 = 0;
+  parallel for i from 0 to 5
+  reduce total with +;
+  reduce total with +;
+  {
+    total = total + i;
+  }
+  print total;
+  return 0;
+}

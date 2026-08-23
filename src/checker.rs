@@ -16232,7 +16232,32 @@ fn check_one_stmt(
                     ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     continue;
                 }
-                reduction_set.insert(r.var.clone());
+                // localfuzz finding 20260822-225752 / 20260822-155146:
+                // a duplicate `reduce total with +;` clause for the
+                // SAME variable produced two TypedReduction entries,
+                // which both backends' parallel-for lowering turns
+                // into one per-reduction-variable local -- LLVM
+                // rejected the resulting IR outright ("multiple
+                // definition of local value named 'loc_red_0'"); the
+                // C/OpenMP backend accepted it but the behavior is
+                // still nonsensical (which clause's partial wins?).
+                // `reduction_set` was already being populated for
+                // exactly this check but the check itself was never
+                // wired up (only silenced via `let _ = reduction_set`
+                // below) -- reject here instead of letting a
+                // duplicate reach codegen.
+                if !reduction_set.insert(r.var.clone()) {
+                    diagnostics.push(Diagnostic::new(
+                        r.span,
+                        format!(
+                            "'reduce {}' is reduced more than once in this \
+                             'parallel for' -- each variable may appear in \
+                             at most one 'reduce' clause",
+                            r.var
+                        ),
+                    ));
+                    continue;
+                }
                 typed_reductions.push(crate::ir::TypedReduction {
                     var: r.var.clone(),
                     op: r.op,
@@ -16268,7 +16293,6 @@ fn check_one_stmt(
                 reductions: typed_reductions,
                 descending: *descending,
             });
-            let _ = reduction_set;
             false
         }
         Stmt::ForIter {

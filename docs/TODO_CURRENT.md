@@ -16892,3 +16892,96 @@ New CLI surface on `vanic check`: `--dump-fingerprints`, `--coverage`,
 `--emit-coverage-issue` (documented in `main.rs`'s `HELP` const, this
 repo's established place for CLI-flag documentation -- `--big-o` isn't
 separately documented in `docs/` either).
+
+## BUG-219 -- duplicate `reduce <var> with <op>;` clause for the SAME variable reached codegen instead of being rejected (2026-08-23, FIXED, found by localfuzz)
+
+`vani-compiler-localfuzz`'s harness independently found this exact bug
+shape twice within a few hours (`20260822-155146-backend-divergence-
+fcbc4b2980` -- a struct-capture variant, and `20260822-225752-
+backend-divergence-62b8e97c1f` -- a plain-int variant, both mutations
+of `examples/edge_cases/mix_parallel_vec_read_capture.vani`), both
+classified as "backend-divergence" by the harness's mechanical
+signature since the two backends failed differently rather than
+agreeing:
+
+```vani
+let total: i64 = 0;
+parallel for i from 0 to 5
+reduce total with +;
+reduce total with +;
+{
+  total = total + i;
+}
+```
+
+LLVM rejected the emitted IR outright: `lli: error: multiple
+definition of local value named 'loc_red_0'`. The C/OpenMP backend
+accepted it (exit code 30 rather than a clean 0, but no diagnostic) --
+undefined behavior, not a crash, since which clause's partial sum
+"wins" is unspecified.
+
+Root cause: `checker.rs`'s reduce-clause validation loop (around line
+16180) already built a `reduction_set: HashSet<String>` that is
+obviously intended for exactly this duplicate check -- but the check
+was never wired up. Every clause's `reduction_set.insert(r.var.clone())`
+call ran unconditionally, and its `bool` return value (true = newly
+inserted, false = already present) was simply discarded; a few lines
+later the whole set itself was discarded too (`let _ = reduction_set;`,
+presumably added at some point just to silence an unused-variable
+warning on an already write-only value). Both backends' parallel-for
+lowering allocates one local PER REDUCTION CLAUSE in `typed_reductions`
+(not per distinct reduced variable), so two clauses for the same `total`
+produced two `loc_red_0` allocas.
+
+Fix: `reduction_set.insert(r.var.clone())`'s return value is now
+actually checked -- `false` (variable already reduced by an earlier
+clause in the same loop) now pushes a proper checker diagnostic
+("'reduce total' is reduced more than once in this 'parallel for' --
+each variable may appear in at most one 'reduce' clause") and skips
+adding the duplicate `TypedReduction`, instead of silently accepting
+it. The now-redundant `let _ = reduction_set;` was removed. Verified:
+both original localfuzz repros now correctly rejected at `vanic check`
+time on both backends; a legitimate multi-variable case (`reduce total
+with +; reduce count with +;`, two DIFFERENT variables) still compiles
+and runs correctly on both backends; full `cargo test --release
+--workspace` clean (278 passed, 0 failed); `tools/leak_sweep.py`
+clean. New pinned regression:
+`examples/edge_cases/xfail_duplicate_reduce_clause.vani` (picked up
+automatically by `tests/edge_cases.rs`'s `xfail_*` convention -- must
+reject cleanly on both backends, no panic, no internal-error
+sentinel).
+
+**localfuzz sweep, same session**: reviewed all 9 findings in
+`tools/localfuzz/digests/20260823-014117.md` (6 distinct mechanical
+signatures). Besides the duplicate-reduce bug above (2 findings), the
+other 7 were triaged as NOT compiler bugs:
+- 4 findings (`20260822-132447`, `20260822-193657`, `20260822-231804`,
+  `20260823-012201`) are genuine infinite/astronomically-long loops
+  IN THE MUTATED CANDIDATE PROGRAM itself, not the compiler: two are
+  statement-deletion mutations of `early_exit.vani` (Hindi and
+  Kannada dialects, found independently) that deleted the loop-
+  variable increment on the `continue` path, guaranteeing
+  non-termination once a non-positive element is hit; one is a
+  statement-deletion mutation of `heap.vani` that deleted the ENTIRE
+  (and only) loop-body statement, which also happened to be the sole
+  thing shrinking the loop condition; one is a boundary-value
+  mutation of `bug207_for_vecfill_phi.vani` starting a `for` loop's
+  range at `i64::MIN`, an ~9.2*10^18-iteration trip count.
+- 1 finding (`20260822-102420`) is the same `i64::MIN`-boundary-value
+  mutation pattern applied to `early_exit.vani`'s `while` loop --
+  the C backend happened to finish near-instantly (GCC's optimizer
+  can prove a simple `while(n!=k) n++;` shape converges and fold it),
+  while LLVM's `lli` JIT interpreter has no such optimization and
+  genuinely tried to execute the full trip count, timing out. A real
+  PERFORMANCE divergence between backends on a degenerate input, not
+  a correctness bug -- both would produce the same answer given
+  enough time.
+- 2 findings (`20260822-170655`, `20260822-170822`) are
+  `detach_heartbeat.vani` mutations where the two backends' captured
+  stdout differs in exactly the tick count/line-truncation way
+  already documented in
+  `feedback_vani_concurrent_print_e2e_assertions` memory -- racy
+  timing of a detached background task's prints relative to when the
+  harness's timeout kills the process, not a compiler bug.
+
+Next free bug number is **BUG-220**.
