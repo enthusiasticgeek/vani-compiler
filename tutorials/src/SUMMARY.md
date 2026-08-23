@@ -80,6 +80,7 @@
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Packages with Kosh](intermediate/16_packages.md)
 - [Testing your vāṇī code: #[test], vanic test, and assert_eq_*](intermediate/16a_testing_primer.md)
+- [Setting up a real project, step by step](intermediate/16b_project_setup.md)
 - [Capstone: a terminal tic-tac-toe game](intermediate/17_tic_tac_toe_capstone.md)
 
 # Advanced

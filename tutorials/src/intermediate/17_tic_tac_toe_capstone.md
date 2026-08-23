@@ -574,5 +574,5 @@ Next steps:
 
 ---
 
-**Previous**: [Sec.16a -- Testing your vāṇī code ->](16a_testing_primer.md)
+**Previous**: [Sec.16b -- Setting up a real project, step by step ->](16b_project_setup.md)
 **Next**: [Advanced track: Async / await -- intuition primer ->](../advanced/01a_async_primer.md)
