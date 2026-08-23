@@ -10480,6 +10480,8 @@ STATUS: needs human/frontier root-cause review.
 
 The compiler generated a crash during execution of the `early_exit.vani` program with the mutant/generated source above when run on LLVM. The observed symptom was a crash, and the backend that affected it was LLVM.
 
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** The mutation set the loop's counter to `i64::MIN` (`let n: i64 = -9223372036854775808;`) in a `while n < 100 { if n == 5 { break; } n = n + 1; }` loop -- a ~9.2e18-iteration trip count to reach 5 by +1 steps. C exited 0 quickly because GCC's optimizer can prove this simple induction pattern converges and folds it; LLVM's `lli` JIT interpreter has no equivalent optimization and genuinely tried to execute the full trip count, hence the timeout ("run-crash" was a timeout classification, not an actual crash). A real backend PERFORMANCE divergence on a degenerate boundary-value input, not a correctness bug -- both backends would produce the identical answer given enough time. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup (this finding is one of several triaged in that pass).
+
 ---
 
 ### Candidate: 20260822-132447-run-crash-33ef8e04de
@@ -10490,6 +10492,8 @@ Fix attempt: `tools/localfuzz/findings/20260822-132447-run-crash-33ef8e04de/fix_
 STATUS: needs human/frontier root-cause review.
 
 The vani compiler was run with the provided corpus file, and it resulted in a crash when attempting to execute the mutated code. The exact repro source is given above. The observed symptom is a crash, indicating that the program failed to terminate normally or produced unexpected output. The backend(s) affected by this bug are LLVM and C.
+
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** Diffing the repro against `examples/language/hindi/early_exit.vani` shows the mutation deleted TWO lines from `धनात्मक_गणना`/`count_positive`'s `continue`-path: the loop-counter increment (`क = क + 1;`) right before `आगे;`/`continue`, and the count increment after it. With the increment gone, hitting any non-positive element makes the loop spin on the same index forever -- a real, correctly-detected infinite loop in the MUTATED test program, not the compiler. `20260822-231804-run-crash-80935b3775` (Kannada) is the identical mutation shape found independently on a different dialect of the same base file. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup.
 
 ---
 
@@ -10548,7 +10552,7 @@ vani -m edge_cases mix_conc_parallel_struct_capture.vani --backend-divergence
 
 Observed symptom: Backend diverged with LLVM error. Specifically, a multiple definition of local value named 'loc_red_0' was detected in the generated LLVM IR.
 
-STATUS: needs human/frontier root-cause review.
+**FIXED as BUG-219 (2026-08-23, main vani-compiler commit -- see docs/TODO_CURRENT.md).** Root cause: the repro has TWO `reduce total with +;` clauses for the same variable `total`, which `checker.rs` accepted (a `reduction_set: HashSet<String>` meant for exactly this duplicate check was built but never actually consulted) and passed through to codegen as two separate `TypedReduction` entries. Both backends' parallel-for lowering allocates one local per reduction CLAUSE (not per distinct variable), so LLVM emitted two `loc_red_0` allocas and `lli`'s verifier correctly rejected the malformed IR; C accepted it silently with undefined behavior (which clause's partial wins is unspecified). Fixed by wiring up the existing `reduction_set` check as a proper checker diagnostic. `20260822-225752-backend-divergence-62b8e97c1f` below is the same bug, found independently a couple hours later on a plain-int variant. New pinned regression: `examples/edge_cases/xfail_duplicate_reduce_clause.vani` on the main repo.
 
 ---
 
@@ -10577,6 +10581,7 @@ Fix attempt: `tools/localfuzz/findings/20260822-170655-backend-divergence-e4e94c
 }
 ```
 
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** Both runs are mutations of `detach_heartbeat.vani`, which spawns a `detach()`'d background task printing "[heartbeat] tick N" on a timer while `main` does other work. The stdout difference (C's output truncated mid-line with no trailing newline/number, LLVM completing 3 full ticks) is exactly the documented racy-print gotcha in `feedback_vani_concurrent_print_e2e_assertions` memory: unsynchronized concurrent `print()` output depends on exactly when the harness's timeout kills the process relative to the detached task's own timer, which is inherently nondeterministic and backend-speed-dependent, not a correctness bug. `20260822-170822-backend-divergence-b8c7cbd33d` below is the same root cause with a different truncation point. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup.
 
 ---
 
@@ -10585,7 +10590,7 @@ Fix attempt: `tools/localfuzz/findings/20260822-170655-backend-divergence-e4e94c
 Repro: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260822-170822-backend-divergence-b8c7cbd33d/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** Same root cause as `20260822-170655-backend-divergence-e4e94cd8c7` above -- a `detach_heartbeat.vani` mutation whose stdout divergence is racy timing of a detached background task's prints relative to the harness's process-kill timeout, not a correctness bug. See that entry and docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo.
 
 ---
 
@@ -10624,7 +10629,7 @@ This bug affects both the LLVM backend and the C backend of the vani-compiler pr
 
 ---
 
-**STATUS: needs human/frontier root-cause review.**
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** Diffing the repro against `examples/language/english/heap.vani` shows the mutation deleted exactly one line -- `print unwrap_or(heap_pop(mut ref h), 0 - 1);` -- which was the ONLY statement inside `while (len(ref h) as i64) > 0 { ... }`, and also the only thing shrinking `h` (via its `heap_pop` side effect). With that line gone the loop body is empty and `h`'s length never changes: a real, correctly-detected infinite loop in the MUTATED test program, not the compiler. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup.
 
 ---
 
@@ -10674,6 +10679,8 @@ lli: lli: /tmp/vanic-candidate-1671059-1787439471161567739.ll:3522:3: error: mul
 
 **AFFECTED BACKENDS
 
+**FIXED as BUG-219 (2026-08-23, main vani-compiler commit -- see docs/TODO_CURRENT.md).** Same root cause as `20260822-155146-backend-divergence-fcbc4b2980` above -- this repro's TWO `reduce total with +;` clauses for the same variable reached codegen because `checker.rs` built a `reduction_set` meant to catch exactly this but never actually checked it. Fixed by wiring up the existing check. (The comment header in this repro, referencing a self-bitcast bug/"bug #13", is stale boilerplate copied from the ORIGINAL `mix_parallel_vec_read_capture.vani` base file the mutation started from -- unrelated to this finding's actual symptom, which is the duplicate `reduce` clause below it.) New pinned regression: `examples/edge_cases/xfail_duplicate_reduce_clause.vani` on the main repo.
+
 ---
 
 ### Candidate: 20260822-231804-run-crash-80935b3775
@@ -10681,7 +10688,7 @@ lli: lli: /tmp/vanic-candidate-1671059-1787439471161567739.ll:3522:3: error: mul
 Repro: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): NOT a compiler bug.** Same root cause as `20260822-132447-run-crash-33ef8e04de` above -- a Kannada dialect of the identical `early_exit.vani` mutation (deleted the loop-counter increment on the `continue` path in `count_positive`), found independently. See that entry and docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo.
 
 ---
 
@@ -10700,3 +10707,5 @@ The mutant/generated source provided is a regression example for Bug-207 (LLVM b
 Expected behavior: Proper execution of the program without crashing.
 
 Actual behavior: The compiler crashed due to an LLVM verifier error related to PHI node entries not matching predecessors. The bug was resolved by updating `ctx.current_block` in the `TypedStmt::For` codegen, which ensured that the loop's control flow and data dependencies were properly managed.
+
+**CLOSED (2026-08-23, reviewed by Claude on main checkout): the write-up above is INCORRECT/hallucinated -- ignore it.** The entire "PHI node entries do not match predecessors" / `ctx.current_block` / "the bug was resolved by..." narrative is copied from `bug207_for_vecfill_phi.vani`'s own header COMMENT (the already-fixed BUG-207 this repro mutated FROM), not a description of what actually happened to THIS repro -- qwen appears to have echoed the base file's docstring rather than describing the observed symptom. Diffing the repro against the real base file shows the only actual mutation is `for i from 0 to n` -> `for i from -9223372036854775808 to n`, the same i64::MIN-boundary-value pattern as `20260822-102420-run-crash-16f9bed6e7` and the two `early_exit.vani` findings above -- an ~9.2e18-iteration trip count that both backends correctly time out on. Real symptom: both backends timeout (not a PHI/verifier crash at all). NOT a compiler bug -- a degenerate mutated input, and a caution that this harness's auto-generated staging text can confidently restate stale context instead of the actual finding; always check `finding.json`/the repro diff directly rather than trusting the prose. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup.
