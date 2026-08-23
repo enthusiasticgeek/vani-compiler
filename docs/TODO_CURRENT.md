@@ -17557,4 +17557,81 @@ both re-verified working correctly against the new Skip case (no
 `cargo test --release --test run_end_to_end` (278 passed, 0 failed, 8
 ignored), both unchanged.
 
-Next free bug number is **BUG-227**.
+## BUG-227: full SMT verification hung indefinitely on `vani-symbolic`/`vani-ml` (two independent root causes, both fixed)
+
+**Symptom**: `vanic check`/`vanic test` without `VANIC_NO_VERIFY=1` never
+completed for `vani-symbolic` or `vani-ml` (timed out past 400s in
+earlier sessions; the previous writeup above worked around it with
+`VANIC_NO_VERIFY=1` rather than root-causing it). Bisected by
+truncating `vani-matrix/src/lib.vani` (a shared transitive dependency
+of both packages via `vani-algebra`) at function boundaries: a single
+function, `mat_inv_3x3` (3x3 matrix inverse, one `f64` division
+followed by nine `Vec` element writes), took ~30s to verify in
+isolation -- z3's `fp.div` bit-blasting is inherently expensive
+(multi-second per query), confirmed by extracting the raw SMT-LIB
+queries and timing each against `z3` directly.
+
+**Root cause 1 -- irrelevant facts re-paid the expensive query's cost
+on every later proof in the same function.** `prove_with_calls_extra`
+(checker.rs) forwards *every* accumulated fact in a function --
+every prior `let`-derived equality, struct-field binding, etc. -- to
+*every* subsequent proof, with no relevance filtering. `mat_inv_3x3`'s
+one division fact (`inv = 1.0 / d`) was included in all nine
+subsequent per-element bounds-check queries, so its ~5-6s cost was
+paid nine times instead of once (~30s per call instead of ~1s).
+
+Fixed with `filter_relevant_facts` (checker.rs): before each proof,
+prune the fact list to the transitive closure of facts sharing a
+variable with the goal. Sound because BitVec/FP/Bool SMT theories
+have no hidden coupling between disjoint variable sets -- a fact that
+shares no variable (even transitively) with the goal cannot affect
+its provability. Array/Vec-typed variables are always seeded as
+relevant regardless of the goal (see root cause 2 below for why).
+
+**Root cause 2 -- the SMT query cache was silently defeated by
+non-deterministic query text.** The process-wide `SMT_CACHE`
+(smt.rs) is keyed on exact query string, but `build_query`'s
+per-query index-bounds-axiom collector used a `HashSet<String>` --
+iteration order depends on each thread's randomly-seeded hasher, so
+`vanic test`'s worker-thread pool produced *different* query text for
+byte-identical logical queries depending on which thread ran them,
+defeating cross-thread/cross-file cache hits for any query with more
+than one axiom. Every shared-library function ended up re-solved by
+z3 once per file that `use`s it (both packages' package-level `vanic
+test` recurses `vendor/`, so ~17 files each independently re-verify
+the *entire* transitive closure of `lib.vani` + vendored deps).
+Fixed by switching `index_axioms` to `BTreeSet<String>` (deterministic
+sorted order).
+
+**A regression found and fixed during validation**: the first cut of
+`filter_relevant_facts` broke 5 existing tests
+(`smt_preserves_{bool,f64}_slots_across_constant_index_assign`,
+`smt_preserves_clone_relation_across_index_assign_via_versioning`,
+`smt_preserves_unrelated_slot_facts_across_index_assign`,
+`smt_two_step_index_assign_chains_through_versions`). Root cause:
+`IndexAssign`'s array-versioning bridge fact (`__smt_store_eq`, added
+for BUG-198/BUG-212's array-versioning work) references *only*
+version-suffixed synthetic names (`Var("xs#1")`, `Var("xs#2")`),
+never the bare binding name (`"xs"`) that appears in `vars` -- so
+name-based relevance matching could never see it as relevant and
+dropped it unconditionally, regardless of the Vec/Array seeding.
+Fixed with `expr_mentions_versioned`, a variant of the existing
+`expr_mentions` (scoped only to `filter_relevant_facts`, not touching
+the shared `expr_mentions` used elsewhere for different-purpose fact
+dropping) that strips a `#<version>` suffix before comparing.
+
+**Verification**: `mat_inv_3x3` in isolation: 30s -> ~1s.
+`vani-matrix`'s own full `vanic test`: 37s -> 8.3s (its previously
+35s-long `linear_system.vani` example: 35s -> ~4.9s). `vani-symbolic`
+full package `vanic test` (197 tests, recurses `vendor/algebra` +
+`vendor/calculus`): previously hung indefinitely (>400s) -- now
+completes in ~1m49s (default parallel threads) / ~2m22s (serial),
+197 passed, 0 failed, **no `VANIC_NO_VERIFY=1`**. `vani-ml`'s
+`tests/` (31 tests, previously required `VANIC_NO_VERIFY=1` to
+complete in reasonable time): now 31 passed, 0 failed in ~3m, full
+verification on. `cargo test --release --lib`: 3008 passed, 0 failed,
+1 ignored (this run surfaced and then confirmed-fixed the 5-test
+regression above). `cargo test --release --test run_end_to_end`: 278
+passed, 0 failed, 8 ignored.
+
+Next free bug number is **BUG-228**.
