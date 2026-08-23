@@ -170,5 +170,5 @@ from the second map -- using only `option_and_then`.
 
 ---
 
-**Previous**: [Sec.10c -- Error patterns primer ->](10c_error_patterns_primer.md)
+**Previous**: [Sec.10d -- Debugging with gdb/lldb primer ->](10d_debugging_primer.md)
 **Next**: [Sec.14 -- `HashMap<K,V>` and `HashSet<T>` ->](14_collections.md)

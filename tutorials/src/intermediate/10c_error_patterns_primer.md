@@ -301,4 +301,4 @@ incomplete -- a programmer bug, not a recoverable condition.
 ---
 
 **Previous**: [Sec.10 -- Error handling: `Result<T, E>` + `try` ->](10_result_try.md)
-**Next**: [Sec.13 -- `Option<T>` and the option builtins ->](13_option.md)
+**Next**: [Sec.10d -- Debugging with gdb/lldb primer ->](10d_debugging_primer.md)

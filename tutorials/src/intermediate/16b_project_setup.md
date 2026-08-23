@@ -46,6 +46,29 @@ walks up to find `vani.toml` and uses `entry` -- the same manifest
 one piece of infrastructure everything else in this chapter builds on
 top of.
 
+## Before you commit: two things v1 genuinely can't do yet
+
+Worth knowing before you invest real project time, not after:
+
+- **No command-line arguments.** `fn main() -> i64` is the only legal
+  signature -- there's no `argv`, and no builtin that reads the
+  process's own command-line arguments either. If the project you're
+  planning is a CLI tool that needs to read flags/positional args,
+  that's not a documentation gap to work around, it's a real v1 gap
+  (see [`docs/v1_limitations.md`
+  L33](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)).
+- **No JSON (or other structured-data) support.** No builtin parser
+  or encoder, no bundled Kosh package for it as of this writing. A
+  project that needs to read/write JSON has to hand-roll parsing over
+  `Str`/`OwnedStr` builtins or FFI out to a real C JSON library (L34,
+  same doc).
+
+Neither is a dealbreaker for what vāṇी is actually built for --
+safety-critical, embedded, verified, CPU-bound native code, none of
+which typically needs either -- but a config-file-reading web service
+or a flag-driven CLI tool should know about both before Step 2, not
+after Step 6.
+
 ## Step 2: when to split, not just how
 
 Sec.8 shows *how* `use "path.vani";` and `module { ... }` work; the
