@@ -6169,7 +6169,7 @@ fn resolve_type_aliases(
             Ok(()) => {}
             Err((span, msg)) => {
                 diagnostics.push(Diagnostic::new(span, msg)
-                    .with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("type alias", "")));
+                    .with_elaboration(crate::diagnostic_elaborations::recursive_type_alias(name)));
                 return None;
             }
         }

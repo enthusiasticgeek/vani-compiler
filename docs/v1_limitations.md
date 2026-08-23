@@ -1929,3 +1929,52 @@ test pass to get the lookahead right without breaking `नियोग
 <fn_call>()` spawn parsing. Matches this file's `async_cancel_auto.vani`
 precedent: known Devanagari async-surface gaps get documented and
 queued rather than rushed.
+
+## Standard-library / process-interface limitations
+
+### L33 -- No way to read command-line arguments
+
+Found auditing whether the tutorials leave a new user equipped to
+build a real CLI program (2026-08-23). `fn main() -> i64` is the only
+legal `main` signature -- no `fn main(argc: i64, argv: Vec<Str>) ->
+i64` alternate form exists, and there's no builtin (`args()`,
+`env_args()`, or similar) that hands back the process's own argv
+either. Unlike most other FFI gaps, this one has no clean workaround:
+there's no single, portable libc call that returns "the argv this
+process was invoked with" the way `getenv(name)` returns one named
+environment variable (BUG-224 fixed `extern "C" fn` FFI declarations
+returning `Str` on the C backend, which makes `getenv`-style env-var
+reads work correctly now -- but that's environment variables, not
+positional command-line arguments). A determined workaround exists on
+Linux only (reading `/proc/self/cmdline` via the file-I/O builtins,
+splitting on NUL bytes) but it's platform-specific, undocumented, and
+not something this catalog is recommending.
+
+**Not fixed**: a real fix needs either a `main(argc, argv)` signature
+variant or a dedicated `process_args() -> Vec<Str>` builtin backed by
+each platform's real argv-capture mechanism (saved from C's real
+`main(int argc, char** argv)` before control reaches `fn_main`) --
+a language-surface decision, not a small patch. Filed here so it's
+discoverable rather than a silent surprise partway through a CLI-tool
+project; see [Intermediate 16b -- Setting up a real
+project](../tutorials/src/intermediate/16b_project_setup.md) for the
+tutorial-facing pointer to this entry.
+
+### L34 -- No JSON (or other structured-data) parsing/encoding
+
+Also found during the same 2026-08-23 audit. No `json_parse`/
+`json_encode`-style builtin exists, and there's no vendored/Kosh
+"standard" JSON package either as of this writing. A program that
+needs to read or write JSON (config files, a simple HTTP API,
+interop with an external tool) has to either hand-roll a parser over
+`Str`/`OwnedStr` builtins (`str_split`, `str_trim`, `parse_int`,
+`parse_float`, ...) or FFI out to a real C JSON library via `extern
+"C" fn` declarations against its API. Neither is documented as a
+recommended pattern anywhere in the tutorials.
+
+**Not fixed**: no builtin JSON support is planned for v1 specifically
+(structured-data serialization is a reasonable Kosh-package-ecosystem
+candidate rather than a compiler-builtin one, matching how vāṇी's
+`Vec`/`HashMap`/etc. are compiler builtins but higher-level facilities
+tend to live in the package registry) -- filed here as a known gap,
+not a promise of a specific fix.

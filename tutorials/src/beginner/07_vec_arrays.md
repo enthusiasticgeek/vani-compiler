@@ -173,4 +173,4 @@ fn max_in_vec(xs: ref Vec<i64>) -> i64 {
 ---
 
 **Previous**: [Sec.7a -- Tuples and destructuring primer ->](07a_tuples_primer.md)
-**Next**: [Sec.8a -- Pattern matching primer ->](08a_pattern_match_primer.md)
+**Next**: [Sec.7b -- Type aliases primer ->](07b_type_aliases_primer.md)

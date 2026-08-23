@@ -99,6 +99,46 @@ lifetime syntax, while keeping every guarantee Rust gives you.
 vāṇī is an independent project with no affiliation with the Rust
 project or Rust Foundation.
 
+## Is vāṇī object-oriented?
+
+Short answer: no, not in the class-and-inheritance sense -- and this
+trips up people coming from Java, C#, C++, or Python, so it's worth
+stating plainly before you hit `struct` and `methods on` and start
+reaching for instincts that don't quite apply.
+
+There is no `class` keyword, no inheritance, and no constructors that
+run implicit setup logic. What vāṇī has instead:
+
+| If you're looking for... | vāṇī has |
+|---|---|
+| A class | `struct` (plain data) + a separate `methods on TypeName { ... }` block that attaches functions to it |
+| A constructor | An ordinary function that returns the struct by value (`fn new() -> Point { return Point { x: 0, y: 0 }; }`) -- no hidden initialization, nothing runs that isn't written on the page |
+| Inheritance / subclassing | Nothing -- there is no "extends," no base class, no virtual dispatch table for a struct hierarchy |
+| Polymorphism | `interface` + `dyn Iface` (trait-object-style dynamic dispatch, one vtable, no diamond problem) or `where T is Iface` (compile-time generic dispatch, monomorphized -- zero runtime cost) |
+| Encapsulation | Module-level visibility (`pub`/private, see [Beginner 9a -- Modules primer](beginner/09a_modules_primer.md)), not per-object access control |
+| Data with multiple shapes | `enum` with payloads + `match` -- a sum type, not a class hierarchy |
+
+`methods on Point { fn area(self: ref Point) -> i64 { ... } }` looks
+like a class from a distance -- you call it `p.area()` -- but it's
+sugar over a free function that happens to take `Point` (or `ref
+Point` / `mut ref Point`) as its first argument. There's no dynamic
+dispatch involved unless you explicitly reach for `dyn Iface`; a
+`struct`'s methods are resolved at compile time, same cost as calling
+any other function.
+
+If a label helps: vāṇī is closer to **Rust's paradigm** than to
+Java's or Python's -- data and behavior are related but not fused,
+polymorphism is opt-in and explicit (interfaces, not implicit
+subclassing), and the thing actually enforcing correctness across all
+of it is the ownership system, not the object model. [Intermediate 1
+-- Structs and methods](intermediate/01_struct_methods.md) is where
+this becomes concrete with real code; [Intermediate 11a -- vāṇī
+idioms primer](intermediate/11a_vani_idioms_primer.md) and
+[Intermediate 11b -- SOLID primer](intermediate/11b_solid_primer.md)
+walk through the specific idiom to reach for when an OOP instinct
+(a base class, a Strategy object, a Decorator) doesn't have a direct
+vāṇī equivalent.
+
 ## What this doesn't mean
 
 vāṇī is not claiming to be strictly better than any of these

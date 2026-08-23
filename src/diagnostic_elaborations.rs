@@ -907,6 +907,31 @@ pub fn duplicate_declaration(kind: &str, name: &str) -> Vec<String> {
     ]
 }
 
+/// A `type` alias chain cycles back on itself (`type A = B; type B
+/// = A;`). Was incorrectly reusing `duplicate_declaration`'s text
+/// (wrong elaboration, and called with an empty name) before this
+/// was split out -- fixed alongside the beginner-track type-alias
+/// primer once the gap was noticed.
+pub fn recursive_type_alias(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Resolving `{}` requires resolving `{}` itself, directly \
+             or through another alias in between -- there's no base \
+             case to bottom out on.",
+            name, name,
+        ),
+        "A type alias must eventually resolve to a real, concrete \
+         type (a primitive, a struct, an enum, a tuple, ...). A \
+         cycle of aliases pointing at each other never does, so \
+         there's no size or layout the compiler could give it."
+            .to_string(),
+        "Break the cycle: pick the alias that should name the real \
+         underlying type and point it at that concrete type instead \
+         of another alias."
+            .to_string(),
+    ]
+}
+
 /// No `fn main()` entry point found in the program.
 pub fn missing_main_function() -> Vec<String> {
     vec![

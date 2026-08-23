@@ -13521,11 +13521,36 @@ pub(crate) fn is_known_libc_symbol(name: &str) -> bool {
     matches!(name, "atoll" | "strtoll" | "strtoull" | "llabs" | "lldiv")
 }
 
+/// Return-type spelling for an `extern "C" fn` declaration.
+/// Ordinary vāṇी-internal signatures spell a `Str` return as
+/// `const char*` (c_type_name) -- correct there, since nothing else
+/// declares those functions. An `extern "C"` declaration is
+/// different: it's a redeclaration of a symbol that may ALREADY be
+/// declared by a standard header the C backend includes (`stdlib.h`,
+/// `string.h`, ...), and virtually every real libc/POSIX function
+/// that returns a string returns plain `char*`, not `const char*`
+/// (`getenv`, `strdup`, `strerror`, `getcwd`, `realpath`, `ctime`,
+/// `fgets`, ...). Emitting `const char*` there redeclares the symbol
+/// with a conflicting type and gcc rejects the whole file --
+/// confirmed live with `extern "C" fn getenv(name: Str) -> Str;`.
+/// The existing `is_known_libc_symbol` allowlist already worked
+/// around the same *symptom* (a real-header redeclaration conflict)
+/// for a handful of integer-returning functions; this is the
+/// general fix for the Str-return-type instance of that same
+/// problem class, so it doesn't need per-symbol enumeration.
+fn extern_return_c_type(ty: &Type) -> String {
+    if matches!(ty, Type::Str) {
+        "char*".to_string()
+    } else {
+        c_type_name(ty)
+    }
+}
+
 fn emit_prototype(function: &TypedFunction, out: &mut String) {
     if function.is_extern {
         if !is_known_libc_symbol(&function.name) {
             out.push_str("extern ");
-            out.push_str(&c_type_name(&function.return_type));
+            out.push_str(&extern_return_c_type(&function.return_type));
             out.push(' ');
             out.push_str(&function.name);
             out.push('(');
@@ -13571,7 +13596,7 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
     if function.is_extern {
         if !is_known_libc_symbol(&function.name) {
             out.push_str("extern ");
-            out.push_str(&c_type_name(&function.return_type));
+            out.push_str(&extern_return_c_type(&function.return_type));
             out.push(' ');
             out.push_str(&function.name);
             out.push('(');

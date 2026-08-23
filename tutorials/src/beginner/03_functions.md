@@ -123,5 +123,5 @@ fn main() -> i64 {
 
 ---
 
-**Previous**: [Sec.2 -- Variables, types, operators ->](02_variables.md)
+**Previous**: [Sec.2a -- Writing numbers: bases and separators ->](02a_numeric_literals_primer.md)
 **Next**: [Sec.4 -- `if` / `else` ->](04_if_else.md)

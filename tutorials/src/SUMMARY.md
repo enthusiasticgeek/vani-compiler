@@ -10,6 +10,7 @@
 - [Hello, World](beginner/01_hello_world.md)
 - [Block comments `/* ... */` -- primer](beginner/01b_block_comments_primer.md)
 - [Variables, types, operators](beginner/02_variables.md)
+- [Writing numbers: bases and separators -- primer](beginner/02a_numeric_literals_primer.md)
 - [Functions and the four return aliases](beginner/03_functions.md)
 - [`if` / `else`](beginner/04_if_else.md)
 - [`while` and `for` loops](beginner/05_loops.md)
@@ -23,6 +24,7 @@
 - [Program memory layout: `.text`/`.rodata`/`.data`/`.bss` -- intuition primer](beginner/06d_memory_sections_primer.md)
 - [Tuples and destructuring -- intuition primer](beginner/07a_tuples_primer.md)
 - [Arrays and `Vec<T>` basics](beginner/07_vec_arrays.md)
+- [Type aliases: `type X = Y;` -- primer](beginner/07b_type_aliases_primer.md)
 - [Pattern matching -- intuition primer](beginner/08a_pattern_match_primer.md)
 - [Pattern match on integers + booleans](beginner/08_match.md)
 - [Errors as values -- intuition primer](beginner/08b_errors_primer.md)
@@ -66,6 +68,7 @@
 - [Runtime errors, panic-free design, the segfault-free guarantee -- intuition primer](intermediate/10b_runtime_errors_primer.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
 - [Error patterns: nested errors, context, and FFI translation](intermediate/10c_error_patterns_primer.md)
+- [Debugging with gdb/lldb -- primer](intermediate/10d_debugging_primer.md)
 - [`Option<T>` and the option builtins](intermediate/13_option.md)
 - [`HashMap<K,V>` and `HashSet<T>`](intermediate/14_collections.md)
 - [Math, random numbers, and clone](intermediate/15_math_rng.md)
@@ -80,6 +83,7 @@
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Packages with Kosh](intermediate/16_packages.md)
 - [Testing your vāṇī code: #[test], vanic test, and assert_eq_*](intermediate/16a_testing_primer.md)
+- [Setting up a real project, step by step](intermediate/16b_project_setup.md)
 - [Capstone: a terminal tic-tac-toe game](intermediate/17_tic_tac_toe_capstone.md)
 
 # Advanced

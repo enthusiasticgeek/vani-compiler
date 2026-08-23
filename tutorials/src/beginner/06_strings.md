@@ -97,6 +97,51 @@ diff = true
   `"apple" < "banana"` is `true`.
 - **`len(s)` returns `u64`** (non-negative by definition).
 
+### Escape sequences
+
+The example above already used one: `"len of \"hello\" ="`. A
+backslash inside a string literal doesn't mean a literal backslash --
+it's a signal that says "the next character means something special,
+not itself." Think of it like a footnote marker: `\"` doesn't print
+a backslash then a quote, it prints one quote mark *without* ending
+the string there, the same way a footnote number in a sentence isn't
+read aloud as a word -- it's an instruction to the reader (here, the
+compiler) about how to interpret what follows.
+
+vāṇी supports five escapes inside a string literal:
+
+| Escape | Means | Why you need it |
+|---|---|---|
+| `\"` | a literal `"` | A `"` normally *ends* the string -- this is how you put one inside without ending it early. |
+| `\\` | a literal `\` | A lone `\` normally *starts* an escape -- this is how you get an actual backslash character (a Windows path, a regex). |
+| `\n` | newline | You can't type an actual line break inside a `"..."` literal (vāṇी strings can't span multiple source lines) -- `\n` is how you put one in the text anyway. |
+| `\t` | tab | Lines up columns in printed output without hand-counting spaces. |
+| `\xNN` | the raw byte `NN` (two hex digits) | An escape hatch to any byte value at all, printable or not -- used for things like ANSI terminal color codes (`\x1b` is the "escape" control byte that starts a color sequence). |
+
+```vani
+fn main() -> i64 {
+  print "line one\nline two";      // two lines of output
+  print "name\tscore";             // a tab between the two words
+  print "a backslash: \\";         // prints: a backslash: \
+  print "she said \"hi\"";         // prints: she said "hi"
+  print "\x41\x42\x43";            // prints: ABC (65, 66, 67 in ASCII)
+  return 0;
+}
+```
+
+Anything else after a backslash (`\q`, `\5`, ...) is a compile-time
+error -- `unknown escape sequence`, not a silent pass-through of the
+literal characters. There's no way to accidentally get a stray
+backslash into your string by forgetting an escape you needed
+elsewhere; the compiler catches it at the exact character.
+
+**No raw/multi-line string literals in v1.** A `"..."` literal must
+start and end on the same source line -- if you need a genuinely
+long block of text, build it with repeated `+` concatenation across
+several `let` statements (Part 2, just below, covers exactly that),
+or read it from a file with `file_read_line()` ([Intermediate 9c --
+Native file I/O](../intermediate/09c_file_io.md)).
+
 ---
 
 ## Part 2 — `OwnedStr`: heap-allocated strings you build at runtime

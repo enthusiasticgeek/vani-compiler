@@ -303,4 +303,4 @@ capstone](../advanced/03e_job_scheduler_capstone.md).
 ---
 
 **Previous**: [Sec.16 -- Packages with Kosh](16_packages.md)
-**Next**: [Sec.17 -- Capstone: a terminal tic-tac-toe game ->](17_tic_tac_toe_capstone.md)
+**Next**: [Sec.16b -- Setting up a real project, step by step ->](16b_project_setup.md)
