@@ -44,6 +44,32 @@ pub fn move_after_use(name: &str) -> Vec<String> {
     ]
 }
 
+/// BUG-223: moving a heap-owning field out of a struct reached
+/// through a `ref`/`mut ref` binding. `object` is the borrowed
+/// binding's name, `field` the field being moved.
+pub fn move_field_out_of_borrow(object: &str, field: &str) -> Vec<String> {
+    vec![
+        format!(
+            "`{object}.{field}` is a field of `{object}`, which is only \
+             borrowed here (`ref {object}` / `mut ref {object}`) — moving \
+             its field out would leave the caller's real value missing a \
+             field it still owns."
+        ),
+        "vāṇी's affine ownership rule applies through field access the \
+         same way it applies to a whole binding: you can never move \
+         something you don't own, and a `ref`/`mut ref` parameter never \
+         owns what it points to."
+            .to_string(),
+        format!(
+            "Use the in-place form instead: pass `mut ref {object}.{field}` \
+             to a builtin that has one (e.g. `set(mut ref {object}.{field}, \
+             i, v)`, `push(mut ref {object}.{field}, v)`), or read the field \
+             with `ref {object}.{field}` if you only need to look at it, or \
+             `.clone()` it explicitly if you genuinely need an owned copy."
+        ),
+    ]
+}
+
 /// Aliasing mut + shared (or two mut borrows). The XOR rule.
 pub fn alias_mut_with_shared(name: &str) -> Vec<String> {
     vec![

@@ -1,0 +1,119 @@
+// build & run:
+//   vanic run examples/language/english/dma_ring_buffer.vani                          # LLVM backend
+//   vanic run examples/language/english/dma_ring_buffer.vani --backend=c              # C backend
+//   vanic build examples/language/english/dma_ring_buffer.vani -o /tmp/dma_ring_buffer && /tmp/dma_ring_buffer
+
+intent "simulated DMA descriptor ring buffer -- a fixed-capacity circular queue of {src, dst, len} transfer requests, drained one at a time by a simulated 'controller' that performs the copy. Every array access (descriptor slots AND the copy loop itself) is bounds-checked, so the two classic real-DMA bugs -- submitting past a full ring, and a descriptor whose src/dst/len overruns the backing buffer -- become caught assertions instead of the hardware silently scribbling over unrelated memory.";
+
+const RING_CAPACITY: i64 = 3;
+
+struct DmaDescriptor { src: i64, dst: i64, n: i64 }
+
+struct DmaRing {
+  descs: Vec<DmaDescriptor>,
+  head: i64,   // next slot the controller will drain
+  tail: i64,   // next slot a submit() will fill
+  count: i64,  // how many descriptors are currently queued
+}
+
+fn dma_ring_new() -> DmaRing {
+  let placeholder: DmaDescriptor = DmaDescriptor { src: 0, dst: 0, n: 0 };
+  return DmaRing {
+    descs: vec_fill(RING_CAPACITY, placeholder),
+    head: 0,
+    tail: 0,
+    count: 0,
+  };
+}
+
+// Enqueue a transfer request. Returns false (and queues nothing) if
+// the ring is full -- the real-hardware equivalent of the CPU
+// polling a "ring full" status bit before writing the next
+// descriptor.
+fn dma_submit(ring: mut ref DmaRing, src: i64, dst: i64, n: i64) -> bool {
+  if ring.count == RING_CAPACITY {
+    return false;
+  }
+  let d: DmaDescriptor = DmaDescriptor { src: src, dst: dst, n: n };
+  let _ = set(mut ref ring.descs, ring.tail, d);
+  ring.tail = (ring.tail + 1) % RING_CAPACITY;
+  ring.count = ring.count + 1;
+  return true;
+}
+
+// Drain and execute exactly one queued descriptor -- the simulated
+// "controller tick." Returns false if the ring is empty. The copy
+// loop itself is where a bad descriptor (src/dst/len that overruns
+// `mem`) gets caught, exactly like real DMA hardware would fault or
+// (worse, on hardware with no MPU) silently corrupt adjacent memory.
+fn dma_controller_step(ring: mut ref DmaRing, mem: mut ref Vec<i64>) -> bool {
+  if ring.count == 0 {
+    return false;
+  }
+  let d: DmaDescriptor = ring.descs[ring.head];
+  let i: i64 = 0;
+  while i < d.n {
+    let v: i64 = mem[d.src + i];
+    let _ = set(mem, d.dst + i, v);
+    i = i + 1;
+  }
+  ring.head = (ring.head + 1) % RING_CAPACITY;
+  ring.count = ring.count - 1;
+  return true;
+}
+
+fn main() -> i64 {
+  // "device memory": [0..8) is the source region, [8..16) the
+  // destination region. Source is seeded with a recognizable
+  // pattern; destination starts zeroed.
+  let mem: Vec<i64> = vec_fill(16, 0);
+  let i: i64 = 0;
+  while i < 8 {
+    let _ = set(mut ref mem, i, (i + 1) * 10); // 10, 20, 30, ..., 80
+    i = i + 1;
+  }
+
+  let ring: DmaRing = dma_ring_new();
+
+  // Submit 2 transfers (ring capacity is 3 -- still room for one more).
+  assert dma_submit(mut ref ring, 0, 8, 4);  // copy mem[0..4] -> mem[8..12]
+  assert dma_submit(mut ref ring, 4, 12, 2); // copy mem[4..6] -> mem[12..14]
+
+  // Drain one -- this is what makes room to submit past the ring's
+  // raw capacity without ever exceeding 3 *queued* entries at once,
+  // the same "drain while producing" pattern a real interrupt-driven
+  // DMA controller and CPU run concurrently.
+  assert dma_controller_step(mut ref ring, mut ref mem);
+
+  // Ring now has 1 queued ({4,12,2}); submit 2 more -- `tail` wraps
+  // past the end of the 3-slot backing array here.
+  assert dma_submit(mut ref ring, 6, 14, 1); // copy mem[6..7] -> mem[14..15]
+  assert dma_submit(mut ref ring, 7, 15, 1); // copy mem[7..8] -> mem[15..16]
+
+  // A 4th submit here would fail (`false`) -- exactly 3 queued now.
+  assert !dma_submit(mut ref ring, 0, 8, 1);
+
+  // Drain everything else.
+  assert dma_controller_step(mut ref ring, mut ref mem);
+  assert dma_controller_step(mut ref ring, mut ref mem);
+  assert dma_controller_step(mut ref ring, mut ref mem);
+  assert !dma_controller_step(mut ref ring, mut ref mem); // ring is empty now
+
+  // Verify every transfer landed correctly.
+  print "dst[8..16]:";
+  let j: i64 = 8;
+  while j < 16 {
+    print mem[j];
+    j = j + 1;
+  }
+  assert mem[8] == 10;
+  assert mem[9] == 20;
+  assert mem[10] == 30;
+  assert mem[11] == 40;
+  assert mem[12] == 50;
+  assert mem[13] == 60;
+  assert mem[14] == 70;
+  assert mem[15] == 80;
+
+  return 0;
+}

@@ -17368,3 +17368,79 @@ BUG-222 is now fully closed -- both LLVM parallel-for-reduction
 lowerers overflow-check identically to the C backend.
 
 Next free bug number is **BUG-223**.
+
+## BUG-223 -- move a heap-owning field out of a `ref`/`mut ref` struct: silent double-free (2026-08-23)
+
+Found while writing new tutorial examples for a DMA descriptor ring
+buffer (a `struct DmaRing { descs: Vec<DmaDescriptor>, head: i64,
+tail: i64, count: i64 }`, mutated through `fn dma_submit(ring: mut ref
+DmaRing, ...)`). `set(ring.descs, ring.tail, d)` inside that function
+compiled cleanly on both backends but crashed identically at runtime:
+`free(): double free detected in tcache 2` (C backend) / an `lli`
+JIT SIGABRT with the same libc message (LLVM backend).
+
+Root cause: `set(xs, i, v)` has two overloads --
+`set(xs: Vec<T>, i, v) -> Vec<T>` (consuming: takes ownership, returns
+a fresh Vec) and `set(xs: mut ref Vec<T>, i, v) -> i64` (in-place:
+mutates through the reference, no ownership change) -- dispatched in
+`check_set_builtin` purely on `args[0]`'s static type. `ring.descs`'s
+static type, however, comes back as plain `Vec<DmaDescriptor>` even
+though `ring` itself is only `mut ref DmaRing` -- `FieldAccess`
+type-checking (checker.rs, the `ExprKind::FieldAccess` arm) resolves a
+field's type straight from the struct declaration with no wrapping
+for whether the *object* being projected through was itself a
+`Ref`/`RefMut`. So `set(ring.descs, ...)` silently picked the
+CONSUMING overload. In the generated code this meant: call
+`intent_vec_int64_t__set(...)` (a value-in, value-out helper that just
+mutates `.data[idx]` and returns the SAME struct, sharing the SAME
+`.data` pointer -- no copy), discard the "new" Vec by freeing it
+(since the checker believed a value had been produced and abandoned)
+-- which frees `ring`'s REAL backing buffer -- and then whatever scope
+eventually drops the real `ring.descs` frees the identical pointer a
+second time.
+
+The deeper gap: moving a value out of something you only borrow is
+supposed to be categorically illegal in vāṇी's affine-ownership model
+-- and it IS correctly rejected for a whole `ref`/`mut ref` *variable*
+(`fn f(r: mut ref Vec<i64>) { let x = r; }` is a type error, references
+aren't the pointee type). It's also correctly rejected for a field of
+an OWNED local moved a second time (`let ring: Ring = ...; let _ =
+set(ring.vals, 0, 9); print ring.vals[0];` correctly errors "field
+'ring.vals' was moved; cannot use after move" on the *second* use).
+The one gap was a field move reached through a borrowed *object*: the
+partial-move bookkeeping function (`consume_if_moved_var`'s
+`ExprKind::FieldAccess` arm) recorded the field as moved (so a LATER
+re-read of `ring.descs` was still correctly rejected) but never
+checked whether `ring` itself was only a borrow -- so the move itself,
+on first use, sailed through silently instead of being flagged as
+illegal *at the move site*.
+
+Fixed by adding exactly that check: `consume_if_moved_var` now takes
+`diagnostics` (threaded through all 27 call sites -- every context
+that can consume a value: builtin args, function-call args, if/match
+arm merges, let-initializers, etc.) and, in the `FieldAccess` arm,
+looks up the object variable's declared type; if it's `Type::Ref(_)`
+or `Type::RefMut(_)`, emits `cannot move '<obj>.<field>' -- '<obj>' is
+only borrowed here, it doesn't own what it points to` instead of
+silently accepting the move. New elaboration
+`diagnostic_elaborations::move_field_out_of_borrow`. The correct,
+now-required spelling is what the sibling in-place builtins already
+documented but nothing enforced: `set(mut ref ring.descs, i, v)` /
+`push(mut ref ring.descs, v)` -- writing `mut ref` on the field access
+itself, which correctly gives `check_set_builtin` a `RefMut(Vec<T>)`
+argument type and dispatches to the safe in-place overload.
+
+Verification: the original DMA-ring-buffer repro now double-free-free
+end to end (identical, correct output on both backends, clean
+ASan/LeakSanitizer/UBSan). The two "should still work" cases (`mut ref
+t.field` explicit form; a field move out of a genuinely OWNED local)
+remain unaffected. Swept the entire example corpus (`vanic check
+examples/` across all ~1084 files): **zero** new rejections outside
+the one file I was actively writing when this surfaced -- the existing
+corpus never relied on the buggy silent-move behavior, so this is a
+pure soundness tightening with no fallout. `cargo test --release --lib`
+(3008 passed, 0 failed, 1 ignored) and `cargo test --release --test
+run_end_to_end` (278 passed, 0 failed, 8 ignored), both unchanged from
+before the fix.
+
+Next free bug number is **BUG-224**.
