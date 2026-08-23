@@ -1,9 +1,9 @@
 {
   "format_version": 1,
-  "generated_utc": "2026-08-23T00:33:05Z",
+  "generated_utc": "2026-08-23T02:14:12Z",
   "source_corpus": "examples/**/*.vani",
-  "total_example_files": 1082,
-  "verified_clean_files": 1078,
+  "total_example_files": 1083,
+  "verified_clean_files": 1079,
   "fingerprint_count": 554,
   "fingerprints": [
     "&Array<Scalar,5>#for_iter_borrow",
