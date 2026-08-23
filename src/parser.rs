@@ -2363,6 +2363,29 @@ impl Parser {
             });
         }
 
+        // L32: `नियोग<T>` (Task<R>'s Devanagari spelling) can't fall
+        // through to a plain `Ident` the way ASCII `Task` does --
+        // Devanagari has no case distinction, so नियोग always lexes
+        // to the reserved `TokenKind::Task` (same token the
+        // statement-form spawn `नियोग <fn_call>()` uses), regardless
+        // of position. `parse_type` is only ever called from a type
+        // position (after `:`, inside `<...>`, etc.), never from
+        // statement position -- the spawn-statement dispatch that
+        // also checks for `TokenKind::Task` lives in a separate
+        // function and runs first, so there's no ambiguity between
+        // the two call sites. Mirrors the `Ident("Task")` branch
+        // below exactly (same `<`-lookahead to distinguish bare
+        // `Task` from `Task<R>`).
+        if matches!(self.current().kind, TokenKind::Task) {
+            self.bump();
+            if self.check(|kind| matches!(kind, TokenKind::Less)) {
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let inner = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::TaskR(Box::new(inner)));
+            }
+            return Ok(Type::Task);
+        }
         // `Str` is recognized as a type via the ident token. It's
         // not a lexer keyword because the identifier `Str` may also
         // come up elsewhere; the type position is the only place we

@@ -6003,6 +6003,45 @@ mod tests {
     }
 
     #[test]
+    fn devanagari_task_generic_type_annotation_parses() {
+        // L32 (docs/v1_limitations.md), fixed 2026-08-23: नियोग
+        // (Task<R>'s Devanagari spelling) always lexes to the
+        // reserved TokenKind::Task -- Devanagari has no upper/
+        // lowercase distinction to fall through to a plain Ident
+        // the way ASCII `Task` does -- so an explicit `नियोग<T>`
+        // type annotation used to fail to parse ("expected type
+        // like 'i32', 'u64', --¦"), even though the spawn syntax
+        // itself (`नियोग <fn_call>()`) and detach/join both already
+        // worked fine without the annotation.
+        let source = r#"
+            कार्य विलम्ब() -> i64 { पुनरागम 7; }
+            कार्य मुख्य() -> i64 {
+              माना ता: नियोग<i64> = नियोग विलम्ब();
+              वियोजन ता;
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("नियोग<T> should parse as an explicit type annotation");
+    }
+
+    #[test]
+    fn devanagari_task_bare_type_annotation_parses() {
+        // Companion to the generic case above: bare नियोग (no `<T>`)
+        // must still resolve to the payload-free Task type, not
+        // just नियोग<T>.
+        let source = r#"
+            कार्य विलम्ब() -> i64 { पुनरागम 7; }
+            कार्य लो(ह: नियोग) -> i64 { पुनरागम 0; }
+            कार्य मुख्य() -> i64 {
+              माना ता: नियोग<i64> = नियोग विलम्ब();
+              वियोजन ता;
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("bare नियोग should parse as a type annotation");
+    }
+
+    #[test]
     fn detach_then_join_same_task_rejected() {
         // A task can be consumed by join OR detach, never both.
         let source = r#"

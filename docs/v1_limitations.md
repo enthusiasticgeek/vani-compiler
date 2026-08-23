@@ -1892,7 +1892,7 @@ outside the JIT'd program (`vanic`'s own subprocess wrapper around
 `lli`), not from generated IR -- worth a dedicated design pass if this
 turns out to bite real (non-fuzzer-manufactured) programs.
 
-### L32 -- `नियोग<T>` (Task<R>'s Devanagari spelling) can't be used as a type annotation
+### L32 -- `नियोग<T>` (Task<R>'s Devanagari spelling) can't be used as a type annotation ✅ Fixed 2026-08-23
 
 Found auditing Sanskrit primitive/concurrency keyword coverage
 (2026-08-17): `Task<R>`'s type-annotation position relies on ASCII
@@ -1920,15 +1920,19 @@ inference fill in the `Task<R>` type from the spawn expression's
 return type, same as `examples/language/sanskrit/
 concurrency_primitives.vani` does.
 
-**Not fixed this pass**: a real fix means teaching `parse_type` to
-also recognize a bare `TokenKind::Task` token (not just
-`Ident("Task")`) with `<`-lookahead disambiguation against the
-statement-form spawn, mirroring the existing Ident-based logic --
-same shape, different token-kind check, but needs its own design/
-test pass to get the lookahead right without breaking `नियोग
-<fn_call>()` spawn parsing. Matches this file's `async_cancel_auto.vani`
-precedent: known Devanagari async-surface gaps get documented and
-queued rather than rushed.
+**Fixed 2026-08-23**: `parse_type` now recognizes a bare
+`TokenKind::Task` directly (in addition to the existing
+`Ident("Task")` branch), with the exact same `<`-lookahead
+disambiguation (`Task<R>` vs bare `Task`) the ASCII path already
+used. No conflict with the statement-form spawn (`नियोग
+<fn_call>()`): `parse_type` is only ever invoked from a type
+position (after `:`, inside `<...>`, etc.), never from statement
+position, so the two `TokenKind::Task` checks live in structurally
+disjoint call sites. `examples/language/sanskrit/
+concurrency_primitives.vani` now uses the explicit `नियोग<i64>`
+annotation directly instead of documenting the inference workaround.
+Regression tests: `devanagari_task_generic_type_annotation_parses`,
+`devanagari_task_bare_type_annotation_parses` (src/lib.rs).
 
 ## Standard-library / process-interface limitations
 

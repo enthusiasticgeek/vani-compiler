@@ -17634,4 +17634,42 @@ verification on. `cargo test --release --lib`: 3008 passed, 0 failed,
 regression above). `cargo test --release --test run_end_to_end`: 278
 passed, 0 failed, 8 ignored.
 
+## `docs/v1_limitations.md` L32 fixed: `नियोग<T>` as a type annotation
+
+Devanagari has no case distinction, so `नियोग` (`Task<R>`'s Sanskrit
+spelling) always lexed to the reserved `TokenKind::Task` -- unlike
+ASCII `Task` (falls through to `Ident("Task")`, which `parse_type`'s
+string-matched type-name block already recognized), `नियोग` could
+never reach that branch, so an explicit `नियोग<i64>` annotation
+failed to parse even though the spawn syntax and detach/join both
+already worked fine on the inferred type.
+
+Fixed by adding a direct `TokenKind::Task` branch in `parse_type`
+(src/parser.rs), mirroring the existing `Ident("Task")` logic's
+`<`-lookahead (`Task<R>` vs bare `Task`). No conflict with the
+statement-form spawn dispatch -- `parse_type` only runs from type
+position, never statement position, so the two `TokenKind::Task`
+checks are structurally disjoint call sites.
+
+`examples/language/sanskrit/concurrency_primitives.vani` updated to
+use the explicit annotation directly rather than documenting the
+inference workaround. Two new regression tests in src/lib.rs
+(`devanagari_task_generic_type_annotation_parses`,
+`devanagari_task_bare_type_annotation_parses`) -- both initially
+failed the script-purity gate (mixed English `fn`/`main` with
+Devanagari body) until rewritten in pure Sanskrit matching the
+example's own style.
+
+Verification: `cargo test --release --lib` 3010 passed, 0 failed, 1
+ignored (up from 3008 -- the 2 new tests). Full `examples/` corpus
+`vanic check` sweep: all failures pre-existing (`xfail_*` by design,
+`mix_*`/embedded need special invocation, harness-test files lacking
+`main`), none related to this change. `cargo test --release --test
+run_end_to_end`: one flaky failure on first run
+(`concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends`,
+the documented **L31** upstream-`lli` detached-task-teardown race,
+unrelated to this change -- reproduced clean 3/3 in isolation, and a
+full clean re-run of the suite passed 278/0/8-ignored with zero
+failures).
+
 Next free bug number is **BUG-228**.
