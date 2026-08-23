@@ -10818,3 +10818,32 @@ Fix attempt: `tools/localfuzz/findings/20260823-083536-backend-divergence-7d9090
 }
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260823-113746-run-crash-7f27808337
+
+Repro: `tools/localfuzz/findings/20260823-113746-run-crash-7f27808337/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-113746-run-crash-7f27808337/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
