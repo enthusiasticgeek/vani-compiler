@@ -17504,3 +17504,57 @@ on both backends (LLVM was already fine; C backend now matches).
 both unchanged.
 
 Next free bug number is **BUG-225**.
+
+## BUG-226 -- bare `vanic test` reports every library file as a spurious failure (2026-08-23)
+
+Found auditing the Kosh package ecosystem for gaps needing fixes.
+`cd vani-bignum && vanic test` (Test-fw Phase E's no-args default,
+which recurses the whole package root) reported "8 passed; 1 failed"
+-- the one failure was `src/lib.vani`, `FAILED (compile)`, `error:
+program must define fn main() -> i64`. Confirmed this affects every
+package with the same shape: `vani-matrix` (would have failed the
+same way), `vani-calculus`, `vani-symbolic`, `vani-ml` -- essentially
+the entire Kosh ecosystem, since a library package's `src/lib.vani`
+(or any `use`d module file with no entry point of its own) is exactly
+this shape, and it's the overwhelmingly common one.
+
+Root cause: the per-file test-plan decision (in the `test` subcommand
+handler) only had three real outcomes -- `#[test]` fns found -> run in
+harness mode; `--filter` excluded everything -> skip; otherwise ->
+"Legacy" mode, which compiles+runs the file and requires `fn main`.
+A file with *neither* `#[test]` fns *nor* `fn main` -- an ordinary
+library/module file -- fell into that last bucket purely by
+elimination, and Legacy mode's `fn main` requirement made it fail
+unconditionally. The Test-fw Phase E doc comment reasoned
+`detect_harness_test_fns` "only ever picks up genuine `#[test]`-
+containing, main-less files, so this is safe even if a dependency
+happens to ship one" -- true for what that function detects, but it
+never accounted for the fall-through case of a file that's neither.
+
+Fixed by having `detect_harness_test_fns` (renamed
+`detect_harness_test_fns_and_main`) also report whether the file
+declares a top-level `fn main() -> i64` (same `f.name == "main" &&
+f.params.is_empty()` check `run_test_function` already used
+elsewhere), and adding a fourth outcome to the per-file plan: no
+`#[test]` fns AND no `fn main` -> `Skip` (not a test file in either
+sense), distinct from "no `#[test]` fns but has `fn main`" (still
+Legacy mode exactly as before -- a standalone runnable program, where
+"does it exit 0" remains the right smoke test).
+
+Verification: `vani-bignum` now reports "8 passed; 0 failed" (the
+`src/lib.vani` false positive gone, every real test unaffected).
+Re-ran `vani-matrix` (11 passed, 0 failed), `vani-calculus` (69
+passed, 0 failed), `vani-symbolic` and `vani-ml` (197 and 31 passed
+respectively, both under `VANIC_NO_VERIFY=1` -- both packages hang
+under full SMT verification independent of this fix, the same known
+`vani-pde`/`vani-probability`-class slow-SMT issue, not a regression;
+`vani-ml`'s `examples/xor_mlp_demo.vani` specifically is legitimately
+slow on its own, 3000 real training epochs, confirmed by isolating
+`tests/` alone which completes in seconds). `--json` and `--filter`
+both re-verified working correctly against the new Skip case (no
+`src/lib.vani` entry in JSON output; filter still narrows correctly).
+`cargo test --release --lib` (3008 passed, 0 failed, 1 ignored) and
+`cargo test --release --test run_end_to_end` (278 passed, 0 failed, 8
+ignored), both unchanged.
+
+Next free bug number is **BUG-227**.
