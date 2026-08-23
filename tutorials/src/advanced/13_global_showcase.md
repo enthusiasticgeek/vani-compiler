@@ -143,8 +143,11 @@ That's 13 translations plus the English original -- 14 working
 programs, one program's worth of logic, spanning 8 different scripts
 (Han, Japanese kana/kanji, Hangul, Thai, Cyrillic, Latin, Ge'ez, and
 the Cherokee syllabary). These 13 are a sample, not the full catalog:
-vāṇी ships **62 dialects across 26 scripts** in total (see
-`README.md`'s Tier-I/II tables) -- everything from this chapter's
+vāṇी ships **63 dialects** in total (confirmed directly against
+`tools/vani_translate.py`'s `SUPPORTED_LANGS` -- see
+[Sec.8](08_translator.md#supported-languages) for the full list; an
+earlier version of this page said 62, matching a now-stale count in
+`README.md`) -- everything from this chapter's
 picks to Hindi, Arabic, Hebrew, Vietnamese, Yoruba, and dozens more.
 
 ## Try it yourself

@@ -32,6 +32,7 @@
 - [Challenges](beginner/11_challenges.md)
 - [Devanagari surface -- optional intro](beginner/12_devanagari.md)
 - [Big-O notation -- intuition primer](beginner/13a_big_o_primer.md)
+- [Capstone: a class grade-report tool](beginner/14_gradebook_capstone.md)
 
 # Intermediate
 
@@ -98,6 +99,8 @@
 - [Cross-compilation and bare-metal targets -- intuition primer](advanced/04b_cross_compile_primer.md)
 - [Embedded targets + `unsafe` + region typing](advanced/04_embedded.md)
 - [Attributes reference](advanced/04c_attributes_reference.md)
+- [Data movement: scatter/gather and simulated DMA](advanced/04d_dma_scatter_gather.md)
+- [Cache coherency: the MESI protocol -- primer](advanced/04e_cache_coherency_primer.md)
 - [SIMD and NEON vectorization](advanced/05_simd.md)
 - [The `dyn` vtable layout + safety boundary](advanced/05_vtables.md)
 - [Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque](advanced/05b_advanced_collections.md)

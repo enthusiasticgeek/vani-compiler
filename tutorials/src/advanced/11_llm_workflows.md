@@ -240,7 +240,7 @@ JSON shape -- point `command` at `python3` and `args[0]` at
 | `vani://aliases` | TokenKind <-> dialect spelling table |
 | `vani://sov` | SOV verb-at-end shape table |
 | `vani://patterns` | 22-pattern GoF catalog |
-| `vani://examples` | Signatures of all 194 English examples |
+| `vani://examples` | Signatures of every English example (221 as of 2026-08-23 -- the same growing corpus the table above tracks; re-derive with `find examples/language/english -name '*.vani' \| wc -l` if this drifts) |
 | `vani://errors` | Dialect-aware error prefix table |
 | `vani://limits` | v1 limitations catalog |
 | `vani://full-bundle` | All of the above concatenated |

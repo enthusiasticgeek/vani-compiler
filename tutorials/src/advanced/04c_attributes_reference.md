@@ -420,4 +420,4 @@ named in the diagnostic.
 ---
 
 **Previous**: [Sec.4 -- Embedded targets + unsafe + region typing ->](04_embedded.md)
-**Next**: [Sec.5 -- SIMD and NEON vectorization ->](05_simd.md)
+**Next**: [Sec.4d -- Data movement: scatter/gather and simulated DMA ->](04d_dma_scatter_gather.md)

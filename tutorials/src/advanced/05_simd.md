@@ -7,7 +7,7 @@
 > and how they compose on x86-64 and AArch64/NEON.
 >
 > Reading order:
-> [Advanced 4b -- Cross-compilation](04b_cross_compile_primer.md)
+> [Advanced 4e -- Cache coherency primer](04e_cache_coherency_primer.md)
 > -> here.
 
 ---
@@ -653,6 +653,6 @@ Is the loop already fast enough?
 
 ---
 
-**Previous**: [Sec.4c -- Attributes reference ->](04c_attributes_reference.md)
+**Previous**: [Sec.4e -- Cache coherency primer ->](04e_cache_coherency_primer.md)
 **Next**: [Sec.5 -- The dyn vtable layout + safety boundary ->](05_vtables.md)
 

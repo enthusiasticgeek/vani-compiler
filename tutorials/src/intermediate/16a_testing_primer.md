@@ -151,18 +151,25 @@ fn is_even(n: i64) -> bool { return n % 2 == 0; }
 #[test]
 fn is_even_classifies_correctly() -> i64 {
   let _ = assert_eq_bool(is_even(4), true);
-  let _ = assert_eq_bool(is_even(7), false);   // deliberately wrong, for illustration
+  let _ = assert_eq_bool(is_even(7), false);
   return 0;
 }
 ```
 
-A mismatch prints both sides before exiting (same `exit(3)` convention
-every other runtime trap already uses):
+Both calls above pass -- `is_even(4)` is `true` and `is_even(7)` is
+`false`, matching what each call expects. Flip the second expectation
+to `true` (deliberately wrong, to see a failure) and `assert_eq_bool`
+prints both sides before exiting (same `exit(3)` convention every
+other runtime trap already uses):
+
+```vani
+let _ = assert_eq_bool(is_even(7), true);   // wrong: 7 is odd
+```
 
 ```
 assertion failed: left != right
   left: false
- right: false
+ right: true
 ```
 
 Four variants, one per type -- **`assert_eq_str` compares by

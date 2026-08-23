@@ -99,9 +99,9 @@ fn main() -> i64 {
 error: struct 'Point' has 2 fields, literal provides 1
   let p: Point = Point { x: 3 };
                  ^^^^^^^^^^^^^^
-  help: Either pass the missing arguments, or update the function's
-  signature if its arity legitimately changed. If you want to pass
-  extra context, add a struct parameter that bundles them.
+  help: 1. The struct declares 2 fields, but the literal provides 1.
+  help: 2. Every field must be set in a struct literal — there are no default field values in v1, and field name punning (`Point { x, y }`) isn't supported either.
+  help: 3. Add the missing field(s), or remove the extra one(s) if the struct's declared fields legitimately changed.
 ```
 
 **Fix**: supply every declared field:
@@ -147,5 +147,5 @@ fn main() -> i64 {
 
 ---
 
-**Previous**: [Sec.13a -- Big-O notation primer ->](../beginner/13a_big_o_primer.md)
+**Previous**: [Sec.14 -- Capstone: a class grade-report tool ->](../beginner/14_gradebook_capstone.md)
 **Next**: [Sec.2 -- Enums with payloads + match arms ->](02_enums_payloads.md)

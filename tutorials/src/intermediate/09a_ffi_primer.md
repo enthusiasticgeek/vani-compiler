@@ -70,7 +70,7 @@ Each of these is *already* solved by some C library (openssl,
 sqlite3, libjpeg, BlueZ). Writing your own is months of work
 PLUS risks bugs the libraries have already squashed.
 
-The vAṇी solution: don't rewrite -- call the C library
+The vāṇī solution: don't rewrite -- call the C library
 directly. The mechanism is **FFI** -- Foreign Function
 Interface. Your vāṇī program calls into pre-compiled C code as
 if it were a vāṇī function.

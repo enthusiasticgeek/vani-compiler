@@ -4983,22 +4983,36 @@ fn emit_llvm_parallel_for_lowers_to_gomp_call() {
             "expected at least 11 CreateThread call sites, got {call_sites}"
         );
     }
-    // The `+` reduction lowers to `atomicrmw add`; the `*`
-    // reduction lowers to a `cmpxchg` retry loop (atomicrmw
-    // doesn't expose `mul`). For signed integers, `min`/`max`
+    // BUG-222 follow-up (2026-08-23): the `+` reduction used to
+    // lower to a plain `atomicrmw add`, but that can't overflow-
+    // check (unlike every other `+` in the language), so it
+    // silently wrapped instead of trapping -- confirmed live via a
+    // repro that forces this exact tree-LLVM path. Fixed to share
+    // the same checked `cmpxchg` retry loop the `*` reduction
+    // already needed (atomicrmw doesn't expose `mul` either), so
+    // both now assert the checked shape and that plain
+    // `atomicrmw add` is gone. For signed integers, `min`/`max`
     // lower to the dedicated `atomicrmw min`/`atomicrmw max`
-    // instructions (the unsigned variants are `umin`/`umax`).
-    // Bool `||` lowers to `atomicrmw or i8*` via the shadow.
-    // Bitwise `&` / `|` / `^` lower to native-width
-    // `atomicrmw and` / `or` / `xor` (no shadow needed because
-    // the integer width is already byte-aligned).
+    // instructions (the unsigned variants are `umin`/`umax`) --
+    // untouched, since Min/Max can't overflow. Bool `||` lowers to
+    // `atomicrmw or i8*` via the shadow. Bitwise `&` / `|` / `^`
+    // lower to native-width `atomicrmw and` / `or` / `xor` (no
+    // shadow needed because the integer width is already byte-
+    // aligned) -- also untouched, since the bitwise ops don't trap
+    // on overflow anywhere else in the language either.
     assert!(
-        stdout.contains("atomicrmw add"),
-        "expected atomicrmw add lowering:\n{stdout}"
+        !stdout.contains("atomicrmw add i64*"),
+        "the `+` reduction's cross-thread combine must no longer use a \
+         plain (unchecked) `atomicrmw add` -- BUG-222:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("call {i64, i1} @llvm.sadd.with.overflow.i64"),
+        "expected the `+` reduction's combine to route through the \
+         checked-add intrinsic:\n{stdout}"
     );
     assert!(
         stdout.contains("cmpxchg"),
-        "expected cmpxchg lowering for `*` reduction:\n{stdout}"
+        "expected cmpxchg lowering for `+`/`*` reductions:\n{stdout}"
     );
     assert!(
         stdout.contains("atomicrmw min"),

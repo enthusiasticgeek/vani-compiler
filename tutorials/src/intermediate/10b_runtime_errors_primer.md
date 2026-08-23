@@ -494,7 +494,8 @@ in a language that ALWAYS does the check (most languages).
 The guard's behavior on failure is `abort` -- not silent UB,
 not corrupted state.
 
-You can ALWAYS keep the guards on with `INTENTC_NO_VERIFY=1`
+You can ALWAYS keep the guards on with `VANIC_NO_VERIFY=1`
+(`--no-verify` / the legacy `INTENTC_NO_VERIFY=1` alias also work)
 during development; profile-guided you can ALSO ship with
 elision aggressive in release builds. The trade is yours
 per build.

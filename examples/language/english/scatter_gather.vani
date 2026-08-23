@@ -1,0 +1,118 @@
+// build & run:
+//   vanic run examples/language/english/scatter_gather.vani                          # LLVM backend
+//   vanic run examples/language/english/scatter_gather.vani --backend=c              # C backend
+//   vanic build examples/language/english/scatter_gather.vani -o /tmp/scatter_gather && /tmp/scatter_gather
+
+intent "gather/scatter -- indexed, non-contiguous Vec access. No unsafe code needed: every index is bounds-checked at the point of use, so a hardware gather/scatter instruction's non-contiguous-memory hazard becomes an ordinary, catchable runtime assertion instead of a wild memory access.";
+
+fn print_vec(xs: ref Vec<i64>) -> i64 {
+  let i: u64 = 0;
+  let n: u64 = len(xs);
+  while i < n {
+    print xs[i];
+    i = i + 1;
+  }
+  return 0;
+}
+
+// A gather reads xs[idx[0]], xs[idx[1]], ... into a fresh, DENSE
+// output Vec -- the classic "SIMD gather" access pattern (SoA
+// re-layout, sparse-vector densify, permutation, table lookup).
+fn gather(xs: ref Vec<i64>, idx: ref Vec<i64>) -> Vec<i64> {
+  let out: Vec<i64> = vec();
+  let i: u64 = 0;
+  let n: u64 = len(idx);
+  while i < n {
+    let src: u64 = idx[i] as u64;
+    out = push(out, xs[src]);
+    i = i + 1;
+  }
+  return out;
+}
+
+// A scatter writes vals[0], vals[1], ... to xs[idx[0]], xs[idx[1]],
+// ... -- the mirror-image "SIMD scatter" pattern (sparse update,
+// histogram bump, permutation in place). `xs: mut ref Vec<i64>` +
+// the in-place form of `set()` mutates the caller's Vec directly --
+// no reassignment, no reallocation.
+fn scatter(xs: mut ref Vec<i64>, idx: ref Vec<i64>, vals: ref Vec<i64>) -> i64 {
+  let i: u64 = 0;
+  let n: u64 = len(idx);
+  while i < n {
+    let dst: u64 = idx[i] as u64;
+    let _ = set(xs, dst, vals[i]);
+    i = i + 1;
+  }
+  return 0;
+}
+
+// Scatter's real hazard: if `idx` has a repeated destination, the
+// LAST write to that slot wins and every earlier one is silently
+// discarded. That's exactly why `parallel for` refuses to let you
+// scatter into a plain Vec by data-dependent index (Sec.2 --
+// "parallel for + reductions + race-freedom") -- across threads,
+// "last write wins" becomes "whichever thread happens to finish
+// last wins," a real data race the checker won't let you write.
+// Sequentially it's still legal, just worth knowing: this function
+// demonstrates the safe fallback -- accumulate duplicates with `+`
+// instead of overwriting, the same idea `reduce ... with +;` uses
+// for the parallel case.
+fn scatter_accumulate(xs: mut ref Vec<i64>, idx: ref Vec<i64>, vals: ref Vec<i64>) -> i64 {
+  let i: u64 = 0;
+  let n: u64 = len(idx);
+  while i < n {
+    let dst: u64 = idx[i] as u64;
+    let _ = set(xs, dst, xs[dst] + vals[i]);
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  // -- gather: densify every third element out of a sparse table --
+  let table: Vec<i64> = vec(10, 11, 12, 13, 14, 15, 16, 17, 18);
+  let pick: Vec<i64> = vec(0, 3, 6, 8);
+  let picked: Vec<i64> = gather(ref table, ref pick);
+  print "gathered:";
+  let _ = print_vec(ref picked);
+  assert picked[0] == 10;
+  assert picked[1] == 13;
+  assert picked[2] == 16;
+  assert picked[3] == 18;
+
+  // -- scatter: reverse a Vec in place via a permutation index --
+  let src: Vec<i64> = vec(1, 2, 3, 4, 5);
+  let n: u64 = len(src);
+  let rev_idx: Vec<i64> = vec();
+  let j: i64 = (n as i64) - 1;
+  while j >= 0 {
+    rev_idx = push(rev_idx, j);
+    j = j - 1;
+  }
+  let dest: Vec<i64> = vec_fill(n as i64, 0);
+  let _ = scatter(mut ref dest, ref rev_idx, ref src);
+  print "scattered (reversed):";
+  let _ = print_vec(ref dest);
+  assert dest[0] == 5;
+  assert dest[4] == 1;
+
+  // -- scatter with a duplicate destination: last-write-wins --
+  let overwrite_idx: Vec<i64> = vec(0, 0, 1);
+  let overwrite_vals: Vec<i64> = vec(100, 200, 300);
+  let lww: Vec<i64> = vec_fill(2, 0);
+  let _ = scatter(mut ref lww, ref overwrite_idx, ref overwrite_vals);
+  print "last-write-wins scatter:";
+  let _ = print_vec(ref lww);
+  assert lww[0] == 200; // 100 was overwritten by 200, not summed
+  assert lww[1] == 300;
+
+  // -- the safe alternative: accumulate instead of overwrite --
+  let hist: Vec<i64> = vec_fill(2, 0);
+  let _ = scatter_accumulate(mut ref hist, ref overwrite_idx, ref overwrite_vals);
+  print "accumulating scatter (histogram):";
+  let _ = print_vec(ref hist);
+  assert hist[0] == 300; // 100 + 200, both contributions kept
+  assert hist[1] == 300;
+
+  return 0;
+}

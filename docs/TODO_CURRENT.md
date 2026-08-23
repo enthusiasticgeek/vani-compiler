@@ -17098,3 +17098,349 @@ harness concurrently) got OOM-killed by the combined load from one
 manual probe call during testing; it self-healed via its existing
 auto-restart within seconds, but a second deliberate call was avoided
 given the harness would exercise the real path itself once refreshed.
+
+## BUG-220 -- struct-literal arity error reused function-call help text (2026-08-23)
+
+Found while auditing the tutorials for accuracy (verifying every
+"here's the real compiler output" block actually matches a current
+build): `Point { x: 3 }` against `struct Point { x: i64, y: i64 }`
+produced a correct top-line error (`struct 'Point' has 2 fields,
+literal provides 1`) but bolted-on help text that said "The function
+takes 2 arguments, but 1 was provided" and "update the function's
+signature" -- there is no function here. The struct-literal arity
+check in `checker.rs` was reusing `diagnostic_elaborations::wrong_arity`,
+the same elaboration a mismatched *function call* argument count uses,
+verbatim. Fixed by adding a dedicated `struct_literal_wrong_arity`
+elaboration (struct-literal-specific wording: "declares N fields,
+literal provides M", "no default field values in v1, no field name
+punning", "add the missing field(s) or remove the extra one(s)") and
+wiring the one call site in `checker.rs` to it instead. The bogus
+cascading second diagnostic (`let initializer must be assignable to
+Point, got i64`, itself using unrelated integer-cast help text) is a
+separate, lower-priority cascade from the same fallback-to-i64 path
+and was left alone -- the top-line error is accurate and points at
+the right place either way.
+
+Verified: rebuilt `vanic --release`; `struct Point { x: i64 } ` (one
+field short) now reports "The struct declares 2 fields, but the
+literal provides 1" / correct field-add-or-remove guidance instead of
+function-call wording. Full `cargo test --release --lib` (3008
+passed, 0 failed, 1 ignored) and `cargo test --release --test
+run_end_to_end` (278 passed, 0 failed, 8 ignored) both clean -- no
+existing test asserted the old wrong wording.
+
+Also this session: a full accuracy audit of all 90 tutorial files
+(beginner/intermediate/advanced, ~32K lines) against the current
+compiler -- every "real compiler output" code block, cross-file
+claim, and CLI/attribute name was spot-verified, not just proofread.
+Found and fixed, beyond BUG-220 above:
+- `Option<T>` documented as i64/f64-only in `13_option.md` -- false;
+  `Option<bool>`/`Option<OwnedStr>`/etc. all work today, only the
+  `option_*` combinator builtins are scalar-limited. Confirmed via a
+  direct `Option<bool>`/`Option<OwnedStr>` compile+run.
+- `11a_vani_idioms_primer.md` claimed "vāṇी has no `Box<T>`" as the
+  reason for the arena-Vec idiom -- false and contradicted by the
+  dedicated Box+RAII primer three chapters earlier; corrected to
+  frame the arena pattern as a *preferred alternative* for
+  cache-friendliness/drop-avoidance, not the only option.
+- Two nonexistent attribute spellings in `04a_embedded_primer.md`
+  (`#[recursion_bound(N)]`, bare `#[bounded_stack(64)]` with no
+  `bytes=` key) that the compiler actually rejects outright --
+  confirmed by testing both, corrected to the real `#[bounded(N)]` /
+  `#[bounded_stack(bytes = N)]` (already correct in the sibling
+  `04c_attributes_reference.md` and `04_embedded.md` pages, which
+  explicitly call out the same wrong name as a past error -- `04a`
+  alone hadn't been updated to match).
+- `16a_testing_primer.md`'s `assert_eq_bool` "deliberately wrong"
+  example wasn't actually wrong (`is_even(7)` really is `false`,
+  matching the asserted `false`), and the shown "mismatch" output
+  (`left: false / right: false`) can't represent a real mismatch --
+  confirmed the real `assert_eq_bool` mismatch output via a genuine
+  failing call and replaced both.
+- A misplaced "Congratulations, you've completed the Intermediate
+  track!" banner in `12_smt_deepdive.md`, three chapters before the
+  track's actual last chapter (`17_tic_tac_toe_capstone.md`, which
+  had no banner at all) -- moved to the real end.
+- A broken Previous/Next chain: `03d_concurrent_pipeline_capstone.md`
+  linked its Next straight to `03b_condvar_primer.md`, skipping
+  `03e_job_scheduler_capstone.md` entirely (which had no nav footer
+  of its own) -- confirmed against `SUMMARY.md`'s actual order and
+  re-linked all three.
+- Stale counts: "62 dialects" in `13_global_showcase.md` vs the
+  authoritative 63 (`tools/vani_translate.py`'s `SUPPORTED_LANGS`,
+  matching two other chapters that already said 63); a hardcoded
+  "194 English examples" in `11_llm_workflows.md` against a corpus
+  that's since grown to 221.
+- A `vAṇी` typo (`09a_ffi_primer.md`), an `INTENTC_NO_VERIFY` legacy
+  name used without noting `VANIC_NO_VERIFY` is primary
+  (`10b_runtime_errors_primer.md`), and a `` ```rust `` fence on a
+  real vāṇी `CancelToken` struct declaration (`01_async.md`).
+
+Also added: the beginner track was the only one of the three with no
+capstone (intermediate has the tic-tac-toe capstone, advanced has
+three). Added `beginner/14_gradebook_capstone.md` plus a real,
+runnable `examples/language/english/gradebook_capstone.vani` -- a
+class grade-report tool combining modules, tuples, `Option<T>`,
+labeled loops, and `requires`/`assert`/`prove` from Beginner
+Sec.1-13a into one program. Verified via `vanic check`/`run` on both
+backends and a clean `-fsanitize=address,leak,undefined` build (exit
+0, no findings).
+
+Next free bug number is **BUG-221**.
+
+## BUG-222 -- `parallel for ... reduce ... with +/*;` silently wrapped on overflow (LLVM backend only) (2026-08-23)
+
+Found while triaging localfuzz's daily digest for unmatched clusters.
+One cluster (`findings/20260823-083536-backend-divergence-7d9090c7b3`,
+built from `examples/edge_cases/mix_parallel_vec_read_capture.vani`)
+showed `c.rc=3` (the C backend's correct
+`integer overflow in int64_t add` trap) against `llvm.rc=29` with
+empty stderr on LLVM -- the digest's coarse keyword-match auto-flagged
+it as "possible match: BUG-177", but BUG-177's own write-up explicitly
+documents `abort()`-vs-`exit(3)` (C=134, LLVM=3, same message) as the
+accepted divergence; `c.rc=3`/`llvm.rc=29` doesn't match that shape at
+all, so it needed real triage, not a rubber-stamp.
+
+Root cause, confirmed via `strace -f`: `llvm.rc=29` wasn't a crash --
+`exit_group(29)` was a deliberate `exit()` call. The repro's `main()`
+does `return total;` where `total` had silently wrapped to a huge
+negative i64 during the `parallel for ... reduce total with +;`
+combine; `return <i64>` from `main` truncates to the process's 8-bit
+exit status, so the "crash" was just that garbage value's low byte.
+Isolated with a minimal repro (`total: i64 = i64::MAX; parallel for
+... reduce total with +; { total = total + xs[i]; } print total;`):
+LLVM printed a silently-wrapped negative number and exited 0; the C
+backend correctly trapped with `integer overflow in int64_t add` /
+`exit(3)` on the same input, every time.
+
+Two independent LLVM parallel-for-reduction lowerers exist --
+`backend_llvm.rs`'s `emit_parallel_for_via_gomp` (tree backend, used
+when the enclosing function falls outside the SSA-LLVM subset) and
+`ssa_backend_llvm.rs`'s region-based reduction codegen (used when it
+qualifies, which was the case for every repro here) -- and BOTH
+independently have the identical gap: the "thread-local accumulator"
+fast path (one alloca per thread, zero atomic ops in the hot loop,
+combined once at loop exit) lowers `total = total + <inc>` as a raw
+`add i64` and combines the per-thread partials into the shared
+reduction slot with a raw `atomicrmw add i64*` -- neither of which can
+overflow-check (`atomicrmw` has no checked-add variant), unlike every
+other `+`/`*` in the language, which routes through
+`@__intent_checked_add_i64`/`@__intent_checked_mul_i64` (an
+`alwaysinline` helper: computes via `llvm.sadd/smul.with.overflow`,
+traps through `@__intent_trap` + `exit(3)` on overflow, otherwise
+returns the sum/product transparently). `*` (Mul) reductions have the
+exact same gap in their existing `cmpxchg` CAS-retry combine loop (no
+`atomicrmw mul` exists, so Mul already needed a CAS loop -- it just
+never checked the multiply inside it either). Confirmed live with a
+second, independent repro
+(`total: i64 = 1; ...; total = total * xs[i];` with factors chosen so
+the product exceeds i64::MAX): LLVM silently produced a wrapped
+product with `rc=0`, C correctly trapped `integer overflow in int64_t
+mul` / `exit(3)`.
+
+Fixed in `ssa_backend_llvm.rs` (the only lowerer actually reachable by
+every repro that surfaced the bug; `backend_llvm.rs`'s
+`emit_parallel_for_via_gomp` has the identical unchecked-`add`/
+`atomicrmw add` shape and is very likely affected the same way for
+functions that fall back to the tree backend, but no live repro
+reaches it -- flagged as a probable sibling instance, not yet fixed,
+see below):
+
+- The local-accumulator update site (`total = total + <inc>` /
+  `total = total * <inc>`, previously a raw `add`/`mul`) now calls
+  `@__intent_checked_add_i64`/`@__intent_checked_mul_i64` for `Add`/
+  `Mul` reductions, same as the normal (non-reduction) expression
+  path. `Min`/`Max`/bitwise reductions are untouched -- Min/Max can
+  never overflow and the bitwise ops don't trap on overflow anywhere
+  else in the language either, so there was never a gap there.
+- The final cross-thread combine for `Add` moved out of the plain-
+  `atomicrmw` bucket and into the same `cmpxchg` CAS-retry-loop
+  machinery `Mul` already used (generalized from "Mul-only" to "Mul
+  or Add"), with the loop body's `mul`/`add` replaced by a call to
+  the same checked helper -- a spurious CAS retry failure (another
+  thread updated the slot between load and compare-exchange) still
+  just retries; a genuine overflow traps via `exit(3)`, matching the
+  C backend exactly.
+- The SSA-LLVM module-level scan that decides which
+  `@__intent_checked_*` helpers to emit (`InstrKind::Binary { checked:
+  true, .. }` on regular expressions) never saw the reduction
+  accumulation site at all -- it lives in a `HintKind::
+  ParallelForBegin` hint, not a regular checked binary instruction.
+  Added a second scan pass over `ParallelForBegin` hints that
+  registers `(tyname, "add")`/`(tyname, "mul")` for every integer
+  `Add`/`Mul` reduction unconditionally (there's no cheap way to
+  thread a per-reduction "checker already proved this safe" bit
+  through this metadata, and calling the checked helper on a
+  provably-safe reduction is just a harmless redundant runtime check,
+  not a correctness issue) -- this guarantees the helper the two
+  fixed emission sites now call always exists in the module.
+  (Confirmed `reduce ... with +`/`with *` is rejected by the checker
+  for any non-integer type -- "requires an integer-typed variable" --
+  so the new scan's `int_type_name(red_ty)` can never actually need
+  its `.unwrap_or("i64")` fallback; kept only for defensive symmetry
+  with the file's existing scan-pass style.)
+
+Verification: both minimal repros (Add and Mul) now trap identically
+on both backends (`integer overflow in int64_t add`/`mul`, `exit(3)`).
+Re-ran every existing example using `reduce ... with +/*`
+(`parallel.vani`, `parallel_for_mul_reduction.vani`,
+`parallel_for_jit_run.vani`, `memory_safety.vani`,
+`mix_parallel_vec_read_capture.vani`,
+`mix_conc_parallel_struct_capture.vani`,
+`mix_simd_parallel_capture.vani`) on both backends -- stdout and exit
+code identical to pre-fix in every case (none of them were anywhere
+near overflowing, so the fix is a pure no-op for all of them; the
+`atomicrmw add`/`mul` they used to hit is simply gone from the
+generated IR, replaced by the checked-CAS-loop shape). Updated
+`ssa_llvm_multi_block_parallel_for_lowers_to_atomicrmw` (renamed
+intent unchanged, body updated) since it had literally asserted the
+buggy `atomicrmw add i64*` shape as the *expected* output pre-fix --
+now asserts the checked-CAS-loop shape and explicitly asserts
+`atomicrmw add i64*` is ABSENT. `cargo test --release --lib` (3008
+passed, 0 failed, 1 ignored -- the previously-failing test above is
+now green), `cargo test --release --test run_end_to_end` (278 passed,
+0 failed, 8 ignored, unchanged).
+
+**Follow-up left open**: `backend_llvm.rs`'s `emit_parallel_for_via_gomp`
+(the tree-backend parallel-for lowerer, used for functions outside the
+SSA-LLVM subset) has the structurally identical unchecked local-accumulator
+`add`/`mul` and unchecked `atomicrmw add`/CAS-`mul` combine -- read
+directly during this triage, not yet fixed or test-covered, since no
+localfuzz finding actually reached it (every repro's enclosing function
+happened to qualify for SSA-LLVM). Next bug-pattern-audit round should
+write a repro that forces the tree-backend fallback (e.g. a
+parallel-for body capturing a type SSA-LLVM's subset rejects) and
+confirm/fix the same way.
+
+## Update 2026-08-23: BUG-222's tree-LLVM follow-up FIXED
+
+The follow-up flagged above (`backend_llvm.rs`'s `emit_parallel_for_via_gomp`,
+the tree-backend parallel-for lowerer, had the structurally identical
+unchecked-combine gap but no live repro reached it) is now fixed and
+verified, closing the loop on BUG-222.
+
+Forced the tree-backend fallback path with a minimal repro (an
+unrelated struct field-access in the same function is enough to push
+the whole function outside the SSA-LLVM subset): confirmed via the
+emitted IR that the tree backend's LOCAL per-thread accumulation was
+**never** buggy -- `total = total + xs[i]` inside the outlined body
+goes through the same general statement-lowering `emit_stmt` uses for
+any assignment, which already inlines
+`llvm.sadd.with.overflow.i64`/`llvm.smul.with.overflow.i64` + a trap
+branch for every checked add/mul, reduction or not. Only the FINAL
+cross-thread combine (the `atomicrmw add`/CAS-`mul` at loop exit,
+hand-emitted separately from normal statement lowering) had the gap --
+confirmed live: `total: i64` seeded near `i64::MAX`, small per-thread
+partial sums, `atomicrmw add` wrapped silently on LLVM (`return total`
+truncated to a garbage exit code, same "looks like a crash but isn't"
+shape as the original BUG-222 finding), `exit(3)` correctly on C for
+the identical program. Confirmed the identical gap for `*` via a
+second repro (factors chosen so the product exceeds `i64::MAX`).
+
+Fix: moved `Add` out of the plain-`atomicrmw` bucket into the same
+`cmpxchg` CAS-retry-loop `Mul` already used (atomicrmw has no checked-
+add either), with the loop body computing the new value via
+`llvm.sadd.with.overflow.i64`/`llvm.smul.with.overflow.i64` inline
+(mirroring the exact pattern the local-accumulation site --and BUG-192's
+prior fix in this same function -- already used) and trapping through
+`@__intent_trap` on overflow before ever attempting the `cmpxchg`. Both
+message globals (`.msg.ovf.i64.add`/`.msg.ovf.i64.mul`) were already
+unconditionally emitted by this file's preamble (unlike SSA-LLVM's
+gated scan, tree-LLVM emits all 8-types-x-5-ops messages regardless of
+use), so no scan-pass change was needed here.
+
+Two tests asserted the old buggy shape as *expected* output and needed
+updating: `emit_llvm_parallel_for_lowers_to_gomp_call`
+(`tests/run_end_to_end.rs`) used to assert a bare `stdout.contains(
+"atomicrmw add")`; now asserts `atomicrmw add i64*` is ABSENT and that
+the checked-add intrinsic call is present. Verification: both repros
+now trap identically on both backends; re-ran every existing example
+using `reduce ... with +/*` on both backends (byte-identical stdout
+and exit code to pre-fix, since none of them were anywhere near
+overflowing). `cargo test --release --lib` (3008 passed, 0 failed, 1
+ignored) and `cargo test --release --test run_end_to_end` (278 passed,
+0 failed, 8 ignored, run twice to rule out one interleaved-run flake
+in an unrelated Mutex/Barrier/task test that doesn't touch
+`parallel for`/`reduce` at all and passed cleanly both in isolation
+and on the clean rerun).
+
+BUG-222 is now fully closed -- both LLVM parallel-for-reduction
+lowerers overflow-check identically to the C backend.
+
+Next free bug number is **BUG-223**.
+
+## BUG-223 -- move a heap-owning field out of a `ref`/`mut ref` struct: silent double-free (2026-08-23)
+
+Found while writing new tutorial examples for a DMA descriptor ring
+buffer (a `struct DmaRing { descs: Vec<DmaDescriptor>, head: i64,
+tail: i64, count: i64 }`, mutated through `fn dma_submit(ring: mut ref
+DmaRing, ...)`). `set(ring.descs, ring.tail, d)` inside that function
+compiled cleanly on both backends but crashed identically at runtime:
+`free(): double free detected in tcache 2` (C backend) / an `lli`
+JIT SIGABRT with the same libc message (LLVM backend).
+
+Root cause: `set(xs, i, v)` has two overloads --
+`set(xs: Vec<T>, i, v) -> Vec<T>` (consuming: takes ownership, returns
+a fresh Vec) and `set(xs: mut ref Vec<T>, i, v) -> i64` (in-place:
+mutates through the reference, no ownership change) -- dispatched in
+`check_set_builtin` purely on `args[0]`'s static type. `ring.descs`'s
+static type, however, comes back as plain `Vec<DmaDescriptor>` even
+though `ring` itself is only `mut ref DmaRing` -- `FieldAccess`
+type-checking (checker.rs, the `ExprKind::FieldAccess` arm) resolves a
+field's type straight from the struct declaration with no wrapping
+for whether the *object* being projected through was itself a
+`Ref`/`RefMut`. So `set(ring.descs, ...)` silently picked the
+CONSUMING overload. In the generated code this meant: call
+`intent_vec_int64_t__set(...)` (a value-in, value-out helper that just
+mutates `.data[idx]` and returns the SAME struct, sharing the SAME
+`.data` pointer -- no copy), discard the "new" Vec by freeing it
+(since the checker believed a value had been produced and abandoned)
+-- which frees `ring`'s REAL backing buffer -- and then whatever scope
+eventually drops the real `ring.descs` frees the identical pointer a
+second time.
+
+The deeper gap: moving a value out of something you only borrow is
+supposed to be categorically illegal in vāṇी's affine-ownership model
+-- and it IS correctly rejected for a whole `ref`/`mut ref` *variable*
+(`fn f(r: mut ref Vec<i64>) { let x = r; }` is a type error, references
+aren't the pointee type). It's also correctly rejected for a field of
+an OWNED local moved a second time (`let ring: Ring = ...; let _ =
+set(ring.vals, 0, 9); print ring.vals[0];` correctly errors "field
+'ring.vals' was moved; cannot use after move" on the *second* use).
+The one gap was a field move reached through a borrowed *object*: the
+partial-move bookkeeping function (`consume_if_moved_var`'s
+`ExprKind::FieldAccess` arm) recorded the field as moved (so a LATER
+re-read of `ring.descs` was still correctly rejected) but never
+checked whether `ring` itself was only a borrow -- so the move itself,
+on first use, sailed through silently instead of being flagged as
+illegal *at the move site*.
+
+Fixed by adding exactly that check: `consume_if_moved_var` now takes
+`diagnostics` (threaded through all 27 call sites -- every context
+that can consume a value: builtin args, function-call args, if/match
+arm merges, let-initializers, etc.) and, in the `FieldAccess` arm,
+looks up the object variable's declared type; if it's `Type::Ref(_)`
+or `Type::RefMut(_)`, emits `cannot move '<obj>.<field>' -- '<obj>' is
+only borrowed here, it doesn't own what it points to` instead of
+silently accepting the move. New elaboration
+`diagnostic_elaborations::move_field_out_of_borrow`. The correct,
+now-required spelling is what the sibling in-place builtins already
+documented but nothing enforced: `set(mut ref ring.descs, i, v)` /
+`push(mut ref ring.descs, v)` -- writing `mut ref` on the field access
+itself, which correctly gives `check_set_builtin` a `RefMut(Vec<T>)`
+argument type and dispatches to the safe in-place overload.
+
+Verification: the original DMA-ring-buffer repro now double-free-free
+end to end (identical, correct output on both backends, clean
+ASan/LeakSanitizer/UBSan). The two "should still work" cases (`mut ref
+t.field` explicit form; a field move out of a genuinely OWNED local)
+remain unaffected. Swept the entire example corpus (`vanic check
+examples/` across all ~1084 files): **zero** new rejections outside
+the one file I was actively writing when this surfaced -- the existing
+corpus never relied on the buggy silent-move behavior, so this is a
+pure soundness tightening with no fallout. `cargo test --release --lib`
+(3008 passed, 0 failed, 1 ignored) and `cargo test --release --test
+run_end_to_end` (278 passed, 0 failed, 8 ignored), both unchanged from
+before the fix.
+
+Next free bug number is **BUG-224**.

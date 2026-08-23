@@ -43570,9 +43570,24 @@ função main() -> i64 {
         assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
         let ll = crate::ssa_backend_llvm::emit(&module)
             .expect("SSA-LLVM emits multi-block directly (no fallback)");
-        // The outlined fn must contain BOTH:
+        // The outlined fn must contain:
         //   - `body_bb<N>:` labels for the region blocks
-        //   - an `atomicrmw add i64*` for the reduction
+        //   - the in-branch update routed through the checked-add
+        //     helper (not a raw `add`)
+        //   - the cross-thread combine as a checked cmpxchg retry
+        //     loop (not a raw `atomicrmw add`)
+        //
+        // BUG-222 (2026-08-23): this test used to assert
+        // `atomicrmw add i64*` for BOTH sites -- a plain atomicrmw
+        // add can't overflow-check, so a `parallel for ... reduce
+        // total with +;` silently wrapped on overflow instead of
+        // trapping like every other `+` in the language (confirmed
+        // live via `total: i64 = i64::MAX; ...; total = total +
+        // n;` inside a reduce body: wrapped silently on LLVM,
+        // trapped correctly on the C backend). Fixed by routing
+        // both the local-accumulator update and the final combine
+        // through `@__intent_checked_add_i64`; this test now
+        // asserts the fixed shape instead of the buggy one.
         assert!(
             ll.contains("body_bb"),
             "expected `body_bb<N>:` labels for multi-block region;\
@@ -43580,10 +43595,23 @@ função main() -> i64 {
             ll.lines().take(120).collect::<Vec<_>>().join("\n")
         );
         assert!(
-            ll.contains("atomicrmw add i64*"),
-            "expected `atomicrmw add i64*` for the in-branch update;\
+            ll.contains("call i64 @__intent_checked_add_i64"),
+            "expected the in-branch update AND the final combine to route \
+             through the checked-add helper instead of a raw `add`/\
+             `atomicrmw add`;\ngot:\n{}",
+            ll.lines().take(160).collect::<Vec<_>>().join("\n")
+        );
+        assert!(
+            !ll.contains("atomicrmw add i64*"),
+            "the Add reduction's cross-thread combine must no longer use a \
+             plain (unchecked) `atomicrmw add` -- BUG-222;\ngot:\n{}",
+            ll.lines().take(160).collect::<Vec<_>>().join("\n")
+        );
+        assert!(
+            ll.contains("cmpxchg i64*"),
+            "expected the final combine to be a checked cmpxchg retry loop;\
              got:\n{}",
-            ll.lines().take(120).collect::<Vec<_>>().join("\n")
+            ll.lines().take(160).collect::<Vec<_>>().join("\n")
         );
     }
 

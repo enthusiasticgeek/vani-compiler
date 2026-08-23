@@ -203,6 +203,6 @@ Use `Condvar` when: the predicate is complex (multiple fields), the waiting thre
 
 ---
 
-**Previous**: [Sec.3d -- Capstone: a concurrent sensor-dashboard pipeline ->](03d_concurrent_pipeline_capstone.md)
+**Previous**: [Sec.3e -- Capstone: a job scheduler ->](03e_job_scheduler_capstone.md)
 **Next**: [Sec.4a -- Embedded, unsafe, and regions primer ->](04a_embedded_primer.md)
 

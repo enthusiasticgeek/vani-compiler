@@ -284,6 +284,55 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         }
     }
 
+    // BUG-222: `parallel for ... reduce <var> with +/*;` never
+    // routed its accumulation (neither the per-thread local
+    // accumulator update nor the final cross-thread combine) through
+    // the checked-arithmetic helpers above -- both used a raw `add`/
+    // `mul` instruction, silently wrapping on overflow instead of
+    // trapping like every other `+`/`*` in the language. The
+    // reduction's own accumulation site lives in a `HintKind::
+    // ParallelForBegin` (an `InstrKind::Hint`, not a regular
+    // `InstrKind::Binary { checked: true, .. }`), so the scan above
+    // never saw it and never registered the (tyname, "add"/"mul")
+    // pair needed to get `@__intent_checked_add_i64`/
+    // `@__intent_checked_mul_i64` emitted. Registering it here
+    // unconditionally (Add/Mul reductions over an integer type
+    // always need the checked helper, whether or not the checker
+    // proved the specific instance safe -- there's no cheap way to
+    // thread a per-reduction "checked" bit through this metadata,
+    // and calling the checked helper on a provably-safe reduction is
+    // just a harmless redundant check, not a correctness issue)
+    // guarantees the helper the fixed emission sites below now call
+    // is always present, mirroring the "only emit what's used"
+    // gating this whole scan already follows.
+    for f in &module.functions {
+        for block in &f.blocks {
+            for instr in &block.instructions {
+                let InstrKind::Hint(HintKind::ParallelForBegin { reductions, .. }) = &instr.kind
+                else {
+                    continue;
+                };
+                for (_, op, red_ty) in reductions {
+                    if !matches!(op, crate::ast::ReductionOp::Add | crate::ast::ReductionOp::Mul) {
+                        continue;
+                    }
+                    if !red_ty.is_integer() {
+                        continue;
+                    }
+                    let Some(tyname) = int_type_name(red_ty) else {
+                        continue;
+                    };
+                    let op_word = if matches!(op, crate::ast::ReductionOp::Add) {
+                        "add"
+                    } else {
+                        "mul"
+                    };
+                    checked_overflow_ops.insert((tyname, op_word));
+                }
+            }
+        }
+    }
+
     // L28 fix (2026-08-16): scan for `InstrKind::Cast { checked:
     // true, .. }` -- a float->int narrowing cast needing a runtime
     // range check (see `InstrKind::Cast`'s own doc comment in
@@ -2999,10 +3048,22 @@ fn emit_outlined_parallel_for(
                                 n, cmp, storage_ty, cur, storage_ty, inc
                             ));
                         }
+                        crate::ast::ReductionOp::Add | crate::ast::ReductionOp::Mul => {
+                            // BUG-222: route through the same checked
+                            // helper regular `+`/`*` uses instead of a
+                            // raw `add`/`mul` -- see the scan-pass fix
+                            // above for why the helper is guaranteed to
+                            // exist here.
+                            let op_word =
+                                if matches!(op, crate::ast::ReductionOp::Add) { "add" } else { "mul" };
+                            let tyname = int_type_name(red_ty).unwrap_or("i64");
+                            out.push_str(&format!(
+                                "  %v_{} = call {} @__intent_checked_{}_{}({} {}, {} {})\n",
+                                n, storage_ty, op_word, tyname, storage_ty, cur, storage_ty, inc
+                            ));
+                        }
                         other => {
                             let binop = match other {
-                                crate::ast::ReductionOp::Add => "add",
-                                crate::ast::ReductionOp::Mul => "mul",
                                 crate::ast::ReductionOp::And
                                 | crate::ast::ReductionOp::BitAnd => "and",
                                 crate::ast::ReductionOp::Or
@@ -3079,15 +3140,21 @@ fn emit_outlined_parallel_for(
     out.push_str("  br label %check\n");
     out.push_str("done:\n");
     // Combine each thread's local accumulator into the shared
-    // global via one atomic op (non-Mul) or CAS loop (Mul).
-    // Non-Mul atomicrmw ops are plain instructions and stay in
-    // the done: block. Mul uses cmpxchg so it needs its own
-    // basic blocks; those are emitted last.
+    // global via one atomic op (non-Mul/Add) or CAS loop
+    // (Mul/Add). Everything else's atomicrmw op has no overflow
+    // notion (Min/Max can't overflow; the bitwise ops don't trap
+    // on overflow anywhere else in the language either) and stays
+    // a plain instruction in the done: block. Mul/Add need cmpxchg
+    // (atomicrmw has no checked-mul, and BUG-222 found the same gap
+    // for its atomicrmw-add: a plain `atomicrmw add` can't call the
+    // checked-arithmetic helper, so it silently wrapped on overflow
+    // instead of trapping like the local-accumulator fix above) --
+    // both get their own basic blocks, emitted last.
     for (i, (local_opt, (_, op, red_ty))) in
         local_acc_names.iter().zip(region.reductions.iter()).enumerate()
     {
         let Some(local_name) = local_opt else { continue };
-        if matches!(op, crate::ast::ReductionOp::Mul) {
+        if matches!(op, crate::ast::ReductionOp::Mul | crate::ast::ReductionOp::Add) {
             continue; // emitted below
         }
         let storage_ty = red_storage_llvm(red_ty)?;
@@ -3098,7 +3165,6 @@ fn emit_outlined_parallel_for(
             final_val, storage_ty, storage_ty, local_name
         ));
         let opcode = match op {
-            crate::ast::ReductionOp::Add => "add",
             crate::ast::ReductionOp::BitAnd => "and",
             crate::ast::ReductionOp::BitOr => "or",
             crate::ast::ReductionOp::BitXor => "xor",
@@ -3115,13 +3181,15 @@ fn emit_outlined_parallel_for(
             opcode, storage_ty, global_ptr, storage_ty, final_val
         ));
     }
-    // Collect Mul-reduction indices (need CAS loops → new blocks).
+    // Collect Mul/Add-reduction indices (need CAS loops → new blocks).
     let mul_reds: Vec<usize> = local_acc_names
         .iter()
         .zip(region.reductions.iter())
         .enumerate()
         .filter_map(|(i, (local_opt, (_, op, _)))| {
-            if local_opt.is_some() && matches!(op, crate::ast::ReductionOp::Mul) {
+            if local_opt.is_some()
+                && matches!(op, crate::ast::ReductionOp::Mul | crate::ast::ReductionOp::Add)
+            {
                 Some(i)
             } else {
                 None
@@ -3131,13 +3199,13 @@ fn emit_outlined_parallel_for(
     if mul_reds.is_empty() {
         out.push_str("  ret void\n");
     } else {
-        // Bridge done: → first Mul CAS block.
+        // Bridge done: → first CAS block.
         out.push_str(&format!(
             "  br label %mul_combine_{}\n",
             mul_reds[0]
         ));
         for (k, &i) in mul_reds.iter().enumerate() {
-            let (_, _, red_ty) = &region.reductions[i];
+            let (_, op, red_ty) = &region.reductions[i];
             let storage_ty = red_storage_llvm(red_ty)?;
             let global_ptr = &reduction_ptr_names[i];
             let local_name = local_acc_names[i].as_ref().unwrap();
@@ -3153,9 +3221,14 @@ fn emit_outlined_parallel_for(
                 "  %mul_cur_{} = load {}, {}* {}\n",
                 i, storage_ty, storage_ty, global_ptr
             ));
+            // BUG-222: was a raw `mul`/`add` here -- route through
+            // the checked helper so a wrapping combine traps instead
+            // of silently corrupting the reduction result.
+            let op_word = if matches!(op, crate::ast::ReductionOp::Add) { "add" } else { "mul" };
+            let tyname = int_type_name(red_ty).unwrap_or("i64");
             out.push_str(&format!(
-                "  %mul_new_{} = mul {} %mul_cur_{}, {}\n",
-                i, storage_ty, i, final_val
+                "  %mul_new_{} = call {} @__intent_checked_{}_{}({} %mul_cur_{}, {} {})\n",
+                i, storage_ty, op_word, tyname, storage_ty, i, storage_ty, final_val
             ));
             out.push_str(&format!(
                 "  %mul_xchg_{} = cmpxchg {}* {}, {} %mul_cur_{}, {} %mul_new_{} seq_cst seq_cst\n",

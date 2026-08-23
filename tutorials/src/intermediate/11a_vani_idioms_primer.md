@@ -159,10 +159,16 @@ tutorial.
 
 ## Idiom 6: arena Vec instead of recursive object graph
 
-Composite, Decorator, and any tree-shaped structure face a
-problem: vāṇī has no `Box<T>` (no recursively-typed fields). The
-canonical answer is an **arena**: a flat `Vec<Node>` where each
-node holds *indices* into the same Vec, not pointers:
+Composite, Decorator, and any tree-shaped structure can reach for
+`Box<T>` for a genuinely recursive field -- see the
+[Box + RAII primer](03a_box_raii_primer.md); `struct Node { value:
+i64, next: Box<Node> }` compiles fine. A *different* idiom is often
+preferred for trees you'll walk and mutate a lot, though: an
+**arena** -- a flat `Vec<Node>` where each node holds *indices*
+into the same Vec instead of pointers. This avoids the deep
+recursive chain of `Box` drops when the tree goes out of scope,
+and keeps sibling nodes cache-friendly (adjacent in one Vec instead
+of scattered across separate heap allocations):
 
 ```
 struct Node {

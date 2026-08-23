@@ -252,4 +252,4 @@ correctness guarantee, not a coincidence of scheduling.)
 ---
 
 **Previous**: [Sec.3c -- Capstone: timed tic-tac-toe ->](03c_timed_tic_tac_toe_capstone.md)
-**Next**: [Sec.3b -- Condition variables: wait-until-predicate primer ->](03b_condvar_primer.md)
+**Next**: [Sec.3e -- Capstone: a job scheduler ->](03e_job_scheduler_capstone.md)

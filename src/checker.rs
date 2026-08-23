@@ -13619,7 +13619,7 @@ fn check_one_stmt(
                 ).with_elaboration(crate::diagnostic_elaborations::move_nested_field()));
             }
 
-            consume_if_moved_var(expr, &checked, env);
+            consume_if_moved_var(expr, &checked, env, diagnostics);
 
             // BUG-155: `let x = some_fn(...);` where `some_fn` returns
             // an affine closure (a closure literal with non-Copy
@@ -14065,7 +14065,7 @@ fn check_one_stmt(
             // a bounds check on `zs[2]`, producing a silent OOB read
             // on the C backend).
             drop_facts_for_mut_ref_call_args(expr, smt_facts, env);
-            consume_if_moved_var(expr, &coerced, env);
+            consume_if_moved_var(expr, &coerced, env, diagnostics);
             // BUG-36 fix (2026-08-02): `x = ...;` writes directly to
             // `x`'s own storage -- if `x` is NOT itself a ref binding
             // (i.e. this is a write to the true owner, not a write
@@ -14231,7 +14231,7 @@ fn check_one_stmt(
             // a bounds check on `zs[2]`, producing a silent OOB read
             // on the C backend).
             drop_facts_for_mut_ref_call_args(expr, smt_facts, env);
-            consume_if_moved_var(expr, &checked, env);
+            consume_if_moved_var(expr, &checked, env, diagnostics);
 
             // Materialize the return expression into a fresh temp
             // *before* emitting drops. Otherwise a return like
@@ -15334,7 +15334,7 @@ fn check_one_stmt(
                 diagnostics,
             );
             diagnose_partial_then_whole_move(value, &value_coerced, env, diagnostics);
-            consume_if_moved_var(value, &value_coerced, env);
+            consume_if_moved_var(value, &value_coerced, env, diagnostics);
 
             // Compile-time bounds-check elision for owned-array case only.
             let checked = match (length_opt, index_checked.constant()) {
@@ -15637,7 +15637,7 @@ fn check_one_stmt(
             // and double-free the heap now owned by the
             // struct's field. Closure #166.
             reject_affine_closure_into_struct_field(value, field_ty, field, diagnostics);
-            consume_if_moved_var(value, &value_coerced, env);
+            consume_if_moved_var(value, &value_coerced, env, diagnostics);
             // L4 (B) Phase 2 (2026-06-08) â€” scope-escape check
             // for FieldAssign. When the RHS contains a `ref X`
             // (or `mut ref X`), X must outlive the binding being
@@ -18990,6 +18990,7 @@ fn consume_if_moved_var(
     source: &Expr,
     checked: &CheckedExpr,
     env: &mut Env,
+    diagnostics: &mut Vec<Diagnostic>,
 ) {
     if checked.ty().is_copy() {
         return;
@@ -19009,8 +19010,51 @@ fn consume_if_moved_var(
         // reads of `t.contents` will surface a "field was
         // moved" diagnostic. T1.2 phase 2b partial-move
         // follow-up.
+        //
+        // BUG-223: `t` itself might be a `ref`/`mut ref`
+        // parameter (or any other borrow), not an owned local --
+        // in which case this isn't a partial move to track for
+        // LATER, it's an illegal move happening RIGHT NOW. A
+        // `ref`/`mut ref` binding never owns what it points to,
+        // so moving one of its fields out (e.g. `set(t.contents,
+        // i, v)`'s consuming overload, reached because field
+        // access strips the outer ref-ness from the field's own
+        // static type) would leave the CALLER's real struct
+        // missing a field it still owns -- a double-free waiting
+        // to happen the moment both the moved-out copy and the
+        // original struct eventually get dropped. Previously
+        // this was silently accepted: `moved_fields` got recorded
+        // (so a LATER re-read of `t.contents` was still correctly
+        // rejected), but the move itself never surfaced a
+        // diagnostic, so a single use (the overwhelmingly common
+        // case) sailed through and corrupted memory at runtime.
+        // Confirmed live via a minimal repro: a struct field
+        // Vec<i64> passed bare (no `mut ref`) to `set()`'s
+        // consuming overload from inside a `fn f(t: mut ref T)`
+        // -- `intent_vec_int64_t__free`'d twice, "double free
+        // detected in tcache 2", identical on both backends.
         ExprKind::FieldAccess { object, field, .. } => {
             if let ExprKind::Var(obj_name) = &object.kind {
+                if let Some(info) = env.lookup(obj_name) {
+                    if matches!(info.ty, Type::Ref(_) | Type::RefMut(_)) {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                source.span,
+                                format!(
+                                    "cannot move '{}.{}' -- '{}' is only \
+                                     borrowed here, it doesn't own what it \
+                                     points to",
+                                    obj_name, field, obj_name
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::move_field_out_of_borrow(
+                                    obj_name, field,
+                                ),
+                            ),
+                        );
+                    }
+                }
                 if let Some(info) = env.lookup_mut(obj_name) {
                     if !info.moved_fields.contains_key(field) {
                         info.moved_fields.insert(field.clone(), source.span);
@@ -19030,8 +19074,8 @@ fn consume_if_moved_var(
         // alternative needs a structural rewrite in the
         // codegen layer.
         ExprKind::IfExpr { then_value, else_value, .. } => {
-            consume_if_moved_var(then_value, checked, env);
-            consume_if_moved_var(else_value, checked, env);
+            consume_if_moved_var(then_value, checked, env, diagnostics);
+            consume_if_moved_var(else_value, checked, env, diagnostics);
         }
         // Same shape for match arms: `let chosen = match n
         // { 1 then a, 2 then b, _ then c };` would double-
@@ -19042,7 +19086,7 @@ fn consume_if_moved_var(
         // arm above). Closure #173.
         ExprKind::Match { arms, .. } => {
             for arm in arms {
-                consume_if_moved_var(&arm.body, checked, env);
+                consume_if_moved_var(&arm.body, checked, env, diagnostics);
             }
         }
         // Block expression tail: `let y = { let _ = â€¦; a };`
@@ -19072,7 +19116,7 @@ fn consume_if_moved_var(
                     return;
                 }
             }
-            consume_if_moved_var(tail, checked, env);
+            consume_if_moved_var(tail, checked, env, diagnostics);
         }
         _ => {}
     }
@@ -20422,7 +20466,7 @@ fn check_expr(
                             // heap the enum now owns. Same family
                             // as vec / push / set (closures
                             // #171, #177). Closure #178.
-                            consume_if_moved_var(&args[0], &arg_checked, env);
+                            consume_if_moved_var(&args[0], &arg_checked, env, diagnostics);
                             let mut payload_expr = arg_checked.expr;
                             inject_branch_drops(&mut payload_expr);
                             return CheckedExpr::new(
@@ -21079,7 +21123,7 @@ fn check_expr(
                                 diagnostics,
                             );
                             diagnose_partial_then_whole_move(arg, &coerced, env, diagnostics);
-                            consume_if_moved_var(arg, &coerced, env);
+                            consume_if_moved_var(arg, &coerced, env, diagnostics);
                             let mut arg_expr = coerced.expr;
                             inject_branch_drops(&mut arg_expr);
                             typed_args.push(arg_expr);
@@ -21194,7 +21238,7 @@ fn check_expr(
                         diagnostics,
                     );
                     diagnose_partial_then_whole_move(arg, &coerced, env, diagnostics);
-                    consume_if_moved_var(arg, &coerced, env);
+                    consume_if_moved_var(arg, &coerced, env, diagnostics);
                     let mut arg_expr = coerced.expr;
                     inject_branch_drops(&mut arg_expr);
                     typed_args.push(arg_expr);
@@ -21540,7 +21584,7 @@ fn check_expr(
                         decl_fields.len(),
                         fields.len()
                     ),
-                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(decl_fields.len(), fields.len())));
+                ).with_elaboration(crate::diagnostic_elaborations::struct_literal_wrong_arity(decl_fields.len(), fields.len())));
                 return CheckedExpr::fallback_integer(expr.span);
             }
             // Type-check each literal field; reorder into
@@ -21590,7 +21634,7 @@ fn check_expr(
                 // T1.2 phase 2b.
                 diagnose_partial_then_whole_move(&found.1, &coerced, env, diagnostics);
                 reject_affine_closure_into_struct_field(&found.1, fty, fname, diagnostics);
-                consume_if_moved_var(&found.1, &coerced, env);
+                consume_if_moved_var(&found.1, &coerced, env, diagnostics);
                 let mut field_expr = coerced.expr;
                 inject_branch_drops(&mut field_expr);
                 typed_fields.push((fname.clone(), field_expr));
@@ -22558,7 +22602,7 @@ fn check_expr(
                         // rewrites if-expr / match Var-branches
                         // (closure #179) so the unchosen branch
                         // doesn't leak.
-                        consume_if_moved_var(rhs, &rhs_checked, env);
+                        consume_if_moved_var(rhs, &rhs_checked, env, diagnostics);
                         inject_branch_drops(&mut rhs_checked.expr);
                         // `let _ = expr;` is a discard. Don't
                         // insert a binding (the name `_` would
@@ -22740,7 +22784,7 @@ fn check_expr(
                             "block-expr reassignment",
                             diagnostics,
                         );
-                        consume_if_moved_var(rhs, &coerced, env);
+                        consume_if_moved_var(rhs, &coerced, env, diagnostics);
                         let mut rhs_expr = coerced.expr;
                         inject_branch_drops(&mut rhs_expr);
                         typed_stmts.push(TypedStmt::Reassign {
@@ -22891,7 +22935,7 @@ fn check_expr(
             // moved during check_expr of the tail (closure #178
             // for vec-elements, str_concat for binary, named-
             // call args). Closure #194.
-            consume_if_moved_var(tail, &tail_checked, env);
+            consume_if_moved_var(tail, &tail_checked, env, diagnostics);
             // Collect scope-exit drops for non-moved non-Copy
             // bindings in the inner Block-expr scope. Without
             // this, a sibling `let b = "x"+""` declared next to
@@ -25002,7 +25046,7 @@ fn check_indirect_call(
         // OwnedStr arg was freed by the callee AND by the
         // caller's scope-exit Drop).
         diagnose_partial_then_whole_move(arg, &coerced, env, diagnostics);
-        consume_if_moved_var(arg, &coerced, env);
+        consume_if_moved_var(arg, &coerced, env, diagnostics);
         let mut arg_expr = coerced.expr;
         inject_branch_drops(&mut arg_expr);
         typed_args.push(arg_expr);
@@ -25803,7 +25847,7 @@ fn check_call(
             for (i, arg) in args.iter().enumerate() {
                 let _expected = capture_types.get(i);
                 let checked = check_expr(arg, env, signatures, diagnostics);
-                consume_if_moved_var(arg, &checked, env);
+                consume_if_moved_var(arg, &checked, env, diagnostics);
                 typed_args.push(checked.expr);
             }
             let closure_ty = Type::Closure(closure_args, Box::new(closure_ret));
@@ -26067,7 +26111,7 @@ fn check_call(
                 checked
             };
             diagnose_partial_then_whole_move(arg, &coerced, env, diagnostics);
-            consume_if_moved_var(arg, &coerced, env);
+            consume_if_moved_var(arg, &coerced, env, diagnostics);
             let mut arg_expr = coerced.expr;
             inject_branch_drops(&mut arg_expr);  // closure #180
             arg_expr
@@ -28303,7 +28347,7 @@ fn try_elaborate_box_to_dyn(
     }
     // Mark the source binding as moved (the box now owns the heap
     // allocation containing the concrete value).
-    consume_if_moved_var(&args[0], &checked_inner, env);
+    consume_if_moved_var(&args[0], &checked_inner, env, diagnostics);
     let target_obj = Type::Object(iface_name.clone());
     let coerce = make_dyn_coerce(
         checked_inner.expr,
@@ -28485,7 +28529,7 @@ fn check_box_builtin(
     // source Var is moved into the box â€” mark it so the
     // scope-exit pass doesn't emit a Drop for it (which would
     // double-free the inner buffer the box now owns).
-    consume_if_moved_var(&args[0], &inner, env);
+    consume_if_moved_var(&args[0], &inner, env, diagnostics);
     let result_ty = Type::Box(Box::new(inner_ty));
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -28780,7 +28824,7 @@ fn check_vec_builtin(
         // the source binding's scope-exit drop would double-
         // free the heap now in the buffer. Mirrors push()
         // and set() from closure #171. Closure #177.
-        consume_if_moved_var(&args[index], &coerced, env);
+        consume_if_moved_var(&args[index], &coerced, env, diagnostics);
         let mut elem_expr = coerced.expr;
         inject_branch_drops(&mut elem_expr);
         coerced_args.push(elem_expr);
@@ -28999,7 +29043,7 @@ fn check_push_builtin(
     // checks already validated the borrow shape).
     if !in_place {
         diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
-        consume_if_moved_var(&args[0], &xs, env);
+        consume_if_moved_var(&args[0], &xs, env, diagnostics);
     }
     // The pushed value is taken by value â€” for non-Copy
     // element types (OwnedStr / Vec / struct with heap),
@@ -29007,7 +29051,7 @@ fn check_push_builtin(
     // Otherwise its scope-exit drop fires after push
     // already transferred ownership into the new Vec's
     // slot, double-freeing the heap. Closure #171.
-    consume_if_moved_var(&args[1], &value, env);
+    consume_if_moved_var(&args[1], &value, env, diagnostics);
     let mut xs_expr = xs.expr;
     inject_branch_drops(&mut xs_expr);  // closure #182
     let mut value_expr = value.expr;
@@ -36766,7 +36810,7 @@ fn check_mutator_builtin(
         );
         // For non-Copy element types, the value moves into the
         // slot. Mark the source binding as moved.
-        consume_if_moved_var(&args[2], &v_checked, env);
+        consume_if_moved_var(&args[2], &v_checked, env, diagnostics);
         typed_args.push(v_checked.expr);
     }
     CheckedExpr::new(
@@ -36842,12 +36886,12 @@ fn check_set_builtin(
     // (the RefMut borrow already validated by the checker).
     if !in_place {
         diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
-        consume_if_moved_var(&args[0], &xs, env);
+        consume_if_moved_var(&args[0], &xs, env, diagnostics);
     }
     // The stored value is taken by value â€” for non-Copy element
     // types the source binding must be marked moved to avoid a
     // double-free at scope exit. Mirrors push (closure #171).
-    consume_if_moved_var(&args[2], &value, env);
+    consume_if_moved_var(&args[2], &value, env, diagnostics);
     let mut xs_expr = xs.expr;
     inject_branch_drops(&mut xs_expr);  // closure #182
     let mut value_expr = value.expr;

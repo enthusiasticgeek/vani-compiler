@@ -23,7 +23,17 @@ inspect the box.
 // enum Option<T> { Some(T), None }
 ```
 
-For v1, `T` must be `i64` or `f64`. Construct a value directly:
+`Option<T>` itself works for any `T` -- scalars, `OwnedStr`, `bool`,
+structs, enums, `Box<T>`, tuples, and more (see e.g.
+`parse_bool(s) -> Option<bool>` in [Beginner 6](../beginner/06_strings.md),
+`Option<Box<Node>>` in [Intermediate 3a](03a_box_raii_primer.md), and
+`hashmap_get`'s `Option<V>` for an arbitrary value type `V` in
+[Sec.14](14_collections.md)). What's scoped to `i64`/`f64` is
+narrower: the **`option_*` combinator builtins** below (`option_map`,
+`option_unwrap_or`, ...) only ship `i64` and `f64`-suffixed forms in
+v1 -- for any other `T`, extract with `match` instead, the same way
+every non-`i64`/`f64` example in this tutorial set already does.
+Construct an `Option<i64>` value directly:
 
 ```vani
 let present: Option<i64> = Option.Some(42);

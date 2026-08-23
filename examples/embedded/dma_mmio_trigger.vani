@@ -1,0 +1,79 @@
+// A real-hardware DMA trigger sketch -- MMIO register programming,
+// not a simulation. Unlike scatter_gather.vani / dma_ring_buffer.vani
+// / dma_streaming.vani / cache_coherency_mesi.vani (all 100% safe
+// vāṇी, no unsafe code, portable, runnable on this machine), this
+// file pokes literal hardware register ADDRESSES that only exist on
+// a real (or emulated) Cortex-M part with a DMA controller at this
+// base address -- e.g. STM32F4's DMA2 Stream0.
+//
+// `vanic check examples/embedded/dma_mmio_trigger.vani` type-checks
+// fine on any host (it's just `mmio_read_u32`/`mmio_write_u32` calls,
+// which the checker doesn't gate to an embedded target the way
+// `unsafe(reason = "...")` / `volatile_read` do -- see the
+// cross-reference in the tutorial chapter for why that's a real,
+// worth-knowing asymmetry, not a guarantee this file is safe to run).
+//
+// DO NOT `vanic run` this hosted -- these addresses don't back real
+// memory on an x86-64/AArch64 dev machine, so dereferencing them
+// segfaults immediately. That's expected, not a compiler bug (the
+// exact same thing happens running examples/language/english/
+// bare_metal.vani hosted). The intended flow is:
+//
+//   vanic build examples/embedded/dma_mmio_trigger.vani \
+//     --target=thumbv7em-none-eabihf --no-std -o dma_demo.elf
+//   qemu-system-arm -M netduinoplus2 -kernel dma_demo.elf -nographic
+//
+// (or flash `dma_demo.elf` to real hardware with the matching DMA
+// controller layout).
+
+intent "trigger a real DMA transfer via MMIO register writes -- configure source/destination/length, set the enable bit, poll the status register until the hardware reports completion. The register offsets below match a generic AHB DMA controller's stream-0 configuration block (source address / destination address / transfer count / control-and-status), not a literal part number -- adjust the base address for your real target's datasheet before flashing this anywhere.";
+
+const DMA_BASE: i64 = 0x40026010; // example base: STM32F4 DMA2 Stream0
+const DMA_SRC_OFFSET: i64 = 0x00;
+const DMA_DST_OFFSET: i64 = 0x04;
+const DMA_LEN_OFFSET: i64 = 0x08;
+const DMA_CTRL_OFFSET: i64 = 0x0C;
+
+const DMA_CTRL_ENABLE_BIT: u32 = 0x1;
+const DMA_CTRL_DONE_BIT: u32 = 0x2;
+
+// Configure and start one DMA transfer. Returns immediately --
+// the hardware runs the copy asynchronously; the caller (or an
+// interrupt handler wired to the controller's completion IRQ, not
+// modeled here) is responsible for noticing completion.
+fn dma_start(src_addr: i64, dst_addr: i64, len_words: i64) -> i64 {
+  let _ = mmio_write_u32(DMA_BASE + DMA_SRC_OFFSET, src_addr as u32);
+  let _ = mmio_write_u32(DMA_BASE + DMA_DST_OFFSET, dst_addr as u32);
+  let _ = mmio_write_u32(DMA_BASE + DMA_LEN_OFFSET, len_words as u32);
+  let _ = mmio_write_u32(DMA_BASE + DMA_CTRL_OFFSET, DMA_CTRL_ENABLE_BIT);
+  return 0;
+}
+
+// Busy-poll the status register until the controller's "done" bit
+// is set. A real interrupt-driven design would instead sleep the
+// core (or run other work) and let the DMA-complete IRQ wake it --
+// polling like this is the simplest correct thing, at the cost of
+// burning CPU cycles the whole transfer.
+fn dma_wait_done() -> i64 {
+  let done: bool = false;
+  while !done {
+    let status: u32 = mmio_read_u32(DMA_BASE + DMA_CTRL_OFFSET);
+    done = ((status as i64) & (DMA_CTRL_DONE_BIT as i64)) != 0;
+  }
+  return 0;
+}
+
+#[no_mangle]
+fn Reset_Handler() -> i64 {
+  // Move 16 words from a source buffer at 0x2000_0000 to a
+  // destination at 0x2000_1000 (two plausible SRAM offsets on a
+  // typical Cortex-M memory map).
+  let _ = dma_start(0x20000000, 0x20001000, 16);
+  let _ = dma_wait_done();
+  return 0;
+}
+
+fn main() -> i64 {
+  let _ = Reset_Handler();
+  return 0;
+}

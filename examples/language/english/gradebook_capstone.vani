@@ -1,0 +1,170 @@
+intent "Beginner capstone -- a class grade-report tool that combines functions, if/else, loops + labels, tuples, Vec, match, Option, modules, and requires/assert/prove contracts (Beginner Sec.1-13a) into one small, real program.";
+
+module gradebook {
+  // Private helper -- not `pub`, so only code inside this module can
+  // call it. class_average() below calls it bare (no `gradebook::`
+  // prefix needed for an intra-module call).
+  fn sum_scores(scores: ref Vec<i64>) -> i64 {
+    let total: i64 = 0;
+    let i: u64 = 0;
+    while i < len(scores) {
+      total = total + scores[i];
+      i = i + 1;
+    }
+    return total;
+  }
+
+  pub fn class_average(scores: ref Vec<i64>) -> Option<i64> {
+    if len(scores) == 0 {
+      return Option.None;
+    }
+    return Option.Some(sum_scores(scores) / (len(scores) as i64));
+  }
+
+  pub fn min_max(scores: ref Vec<i64>) -> (i64, i64)
+  requires len(scores) > 0;
+  {
+    let lo: i64 = scores[0];
+    let hi: i64 = scores[0];
+    let i: u64 = 1;
+    while i < len(scores) {
+      if scores[i] < lo { lo = scores[i]; }
+      if scores[i] > hi { hi = scores[i]; }
+      i = i + 1;
+    }
+    assert lo <= hi;
+    return (lo, hi);
+  }
+
+  pub fn letter_grade(score: i64) -> Str {
+    return match score {
+      _ if score >= 90 then "A",
+      _ if score >= 80 then "B",
+      _ if score >= 70 then "C",
+      _ if score >= 60 then "D",
+      _ then "F",
+    };
+  }
+
+  pub fn passing_count(scores: ref Vec<i64>, threshold: i64) -> i64 {
+    let count: i64 = 0;
+    let i: u64 = 0;
+    while i < len(scores) {
+      if scores[i] >= threshold {
+        count = count + 1;
+      }
+      i = i + 1;
+    }
+    return count;
+  }
+
+  // Everyone-against-everyone: O(n^2), the fourth Big-O shape from
+  // Sec.13a. Returns the (0-based) index of the first student found
+  // sharing an exact score with an earlier student, or None.
+  pub fn find_duplicate_score(scores: ref Vec<i64>) -> Option<i64> {
+    let n: u64 = len(scores);
+    let i: u64 = 0;
+    while i < n {
+      let j: u64 = i + 1;
+      while j < n {
+        if scores[i] == scores[j] {
+          return Option.Some(i as i64);
+        }
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    return Option.None;
+  }
+
+  // Search for the first pair of two different students whose scores
+  // sum to exactly 100 (a "perfect pair"). Same nested-loop shape as
+  // find_duplicate_score, but demonstrates a LABELED break escaping
+  // both loops at once, the way Sec.5c's own challenge does.
+  pub fn find_perfect_pair(scores: ref Vec<i64>) -> Option<i64> {
+    let n: u64 = len(scores);
+    let found_i: i64 = 0 - 1;
+    let i: u64 = 0;
+    search: while i < n {
+      let j: u64 = i + 1;
+      while j < n {
+        if scores[i] + scores[j] == 100 {
+          found_i = i as i64;
+          break search;
+        }
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    if found_i < 0 {
+      return Option.None;
+    }
+    return Option.Some(found_i);
+  }
+}
+
+fn print_report(scores: ref Vec<i64>) -> i64 {
+  let i: u64 = 0;
+  while i < len(scores) {
+    let rank: i64 = (i as i64) + 1;
+    let s: i64 = scores[i];
+    let g: Str = gradebook::letter_grade(s);
+    print {
+      "student", rank, ": score =", s, " grade =", g;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let roster: Vec<i64> = vec(92, 67, 74, 55, 88, 91, 40, 73, 85, 60);
+
+  print "=== Class Grade Report ===";
+  let _ = print_report(ref roster);
+  print "";
+
+  let avg_msg: OwnedStr = match gradebook::class_average(ref roster) {
+    Option.Some(avg) then "class average: " + i64_to_str(avg),
+    Option.None then "no scores recorded" + "",
+  };
+  print avg_msg;
+
+  let (lo, hi) = gradebook::min_max(ref roster);
+  print "min score:", lo;
+  print "max score:", hi;
+
+  let passing: i64 = gradebook::passing_count(ref roster, 60);
+  print "passing (>= 60):", passing;
+
+  let dup_msg: OwnedStr = match gradebook::find_duplicate_score(ref roster) {
+    Option.Some(idx) then "duplicate score found starting at student " + i64_to_str(idx + 1),
+    Option.None then "no duplicate scores" + "",
+  };
+  print dup_msg;
+
+  let pair_msg: OwnedStr = match gradebook::find_perfect_pair(ref roster) {
+    Option.Some(idx) then "perfect pair found starting at student " + i64_to_str(idx + 1),
+    Option.None then "no perfect pair found" + "",
+  };
+  print pair_msg;
+
+  print "";
+
+  // Edge case: an empty roster. class_average() returns None rather
+  // than dividing by zero -- the whole reason it returns Option<i64>
+  // instead of a bare i64 (Sec.8b -- errors as values).
+  let empty: Vec<i64> = vec();
+  let empty_msg: OwnedStr = match gradebook::class_average(ref empty) {
+    Option.Some(avg) then "empty roster average: " + i64_to_str(avg),
+    Option.None then "empty roster -- no average to report" + "",
+  };
+  print empty_msg;
+
+  // A trivial compile-time-proved fact, just to show `prove` alongside
+  // the `requires`/`assert` already used inside the module above --
+  // same flavor as Sec.9's own `prove 2 + 2 == 4;`.
+  prove 100 == 100;
+
+  return 0;
+}
