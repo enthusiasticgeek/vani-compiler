@@ -10709,3 +10709,52 @@ Expected behavior: Proper execution of the program without crashing.
 Actual behavior: The compiler crashed due to an LLVM verifier error related to PHI node entries not matching predecessors. The bug was resolved by updating `ctx.current_block` in the `TypedStmt::For` codegen, which ensured that the loop's control flow and data dependencies were properly managed.
 
 **CLOSED (2026-08-23, reviewed by Claude on main checkout): the write-up above is INCORRECT/hallucinated -- ignore it.** The entire "PHI node entries do not match predecessors" / `ctx.current_block` / "the bug was resolved by..." narrative is copied from `bug207_for_vecfill_phi.vani`'s own header COMMENT (the already-fixed BUG-207 this repro mutated FROM), not a description of what actually happened to THIS repro -- qwen appears to have echoed the base file's docstring rather than describing the observed symptom. Diffing the repro against the real base file shows the only actual mutation is `for i from 0 to n` -> `for i from -9223372036854775808 to n`, the same i64::MIN-boundary-value pattern as `20260822-102420-run-crash-16f9bed6e7` and the two `early_exit.vani` findings above -- an ~9.2e18-iteration trip count that both backends correctly time out on. Real symptom: both backends timeout (not a PHI/verifier crash at all). NOT a compiler bug -- a degenerate mutated input, and a caution that this harness's auto-generated staging text can confidently restate stale context instead of the actual finding; always check `finding.json`/the repro diff directly rather than trusting the prose. See docs/TODO_CURRENT.md's BUG-219 entry on the main vani-compiler repo for the full localfuzz-sweep writeup.
+
+---
+
+### Candidate: 20260823-020122-run-crash-853b54ac2a
+
+Repro: `tools/localfuzz/findings/20260823-020122-run-crash-853b54ac2a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-020122-run-crash-853b54ac2a/fix_attempt.md`
+
+```plaintext
+STATUS: needs human/frontier root-cause review.
+The CANDIDATE bug report for the vani-compiler project's local staging log has been drafted as follows:
+
+Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani
+
+Mutant/generated source:
+```vani
+// build & run:
+//   vanic run examples/language/english/detach_heartbeat.vani                          # LLVM backend
+//   vanic run examples/language/english/detach_heartbeat.vani --backend=c              # C backend
+//   vanic build examples/language/english/detach_heartbeat.vani -o /tmp/detach_heartbeat && /tmp/detach_heartbeat
+
+intent "detach: a background heartbeat that logs progress independently while the main computation runs -- the real reason detach exists: main doesn't know (and shouldn't have to wait to find out) when the heartbeat is done, because it isn't ever 'done' in any sense main cares about.";
+
+fn heartbeat() -> i64 {
+  let i: i64 = 0;
+  while i < 3 {
+    i = i + 1;
+    print "[heartbeat] tick", i;
+  }
+  return 0;
+}
+
+fn compute_result(n: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while i < n {
+    total = total + i * i;
+    i = i + 0;
+  }
+  return total;
+}
+
+fn main() -> i64 {
+  // A background task with no result main will ever consume --
+  // exactly the shape `join` can't express well (join always
+  // implies "I'll wait for this and use what it hands back").
+  let hb: Task<i64> = task heartbeat();
+
+  //
