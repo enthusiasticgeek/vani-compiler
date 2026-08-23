@@ -48444,10 +48444,27 @@ fn emit_parallel_for_via_gomp(
         ));
         let global_ptr = format!("%cap_{}", la.cap_idx);
         match la.op {
-            ReductionOp::Mul => {
-                // atomicrmw mul doesn't exist; use CAS loop.
+            // BUG-222 follow-up (2026-08-23): `Add`/`Mul` both need a
+            // `cmpxchg` retry loop, not a plain `atomicrmw` -- neither
+            // `atomicrmw mul` (doesn't exist) nor a raw `atomicrmw add`
+            // (exists, but can't overflow-check) can express "trap if
+            // this wraps" the way every other `+`/`*` in the language
+            // does via `llvm.sadd/smul.with.overflow.i64`. The tree
+            // backend's LOCAL per-thread accumulation (the `body:`
+            // block above) already went through the normal checked-
+            // arithmetic statement lowering and was never buggy; only
+            // this final cross-thread combine used the unchecked
+            // shortcut -- confirmed live via a repro that forces tree-
+            // LLVM fallback (an unrelated struct use in the same
+            // function): `total: i64` seeded near `i64::MAX`,
+            // `reduce total with +;` summed small per-thread partials,
+            // wrapped silently on `atomicrmw add`, `exit(3)` on the C
+            // backend for the identical program. Same class of bug,
+            // same fix shape, as BUG-222's SSA-LLVM instance.
+            ReductionOp::Mul | ReductionOp::Add => {
                 let cas_loop = outlined_ctx.fresh_tmp();
                 let cas_done = outlined_ctx.fresh_tmp();
+                let cas_fail = outlined_ctx.fresh_tmp();
                 deferred.push_str(&format!("  br label {}\n", cas_loop));
                 deferred.push_str(&format!("{}:\n", &cas_loop[1..]));
                 let old_v = outlined_ctx.fresh_tmp();
@@ -48455,11 +48472,48 @@ fn emit_parallel_for_via_gomp(
                     "  {} = load atomic i64, i64* {} monotonic, align 8\n",
                     old_v, global_ptr
                 ));
+                let (intrinsic, msg_name, msg_text) = if matches!(la.op, ReductionOp::Mul) {
+                    (
+                        "@llvm.smul.with.overflow.i64",
+                        ".msg.ovf.i64.mul",
+                        "integer overflow in i64 mul\n",
+                    )
+                } else {
+                    (
+                        "@llvm.sadd.with.overflow.i64",
+                        ".msg.ovf.i64.add",
+                        "integer overflow in i64 add\n",
+                    )
+                };
+                let pair = outlined_ctx.fresh_tmp();
+                deferred.push_str(&format!(
+                    "  {} = call {{i64, i1}} {}(i64 {}, i64 {})\n",
+                    pair, intrinsic, old_v, local_val
+                ));
                 let new_v = outlined_ctx.fresh_tmp();
                 deferred.push_str(&format!(
-                    "  {} = mul i64 {}, {}\n",
-                    new_v, old_v, local_val
+                    "  {} = extractvalue {{i64, i1}} {}, 0\n",
+                    new_v, pair
                 ));
+                let of = outlined_ctx.fresh_tmp();
+                deferred.push_str(&format!(
+                    "  {} = extractvalue {{i64, i1}} {}, 1\n",
+                    of, pair
+                ));
+                let no_of = outlined_ctx.fresh_tmp();
+                deferred.push_str(&format!("  {} = xor i1 {}, true\n", no_of, of));
+                let cas_ok = outlined_ctx.fresh_tmp();
+                deferred.push_str(&format!(
+                    "  br i1 {}, label {}, label {}\n",
+                    no_of, cas_ok, cas_fail
+                ));
+                deferred.push_str(&format!("{}:\n", &cas_fail[1..]));
+                deferred.push_str(&format!(
+                    "  call void @__intent_trap(i8* {})\n",
+                    crate::ssa_backend_llvm::trap_msg_ref(msg_name, msg_text)
+                ));
+                deferred.push_str("  unreachable\n");
+                deferred.push_str(&format!("{}:\n", &cas_ok[1..]));
                 let xchg = outlined_ctx.fresh_tmp();
                 deferred.push_str(&format!(
                     "  {} = cmpxchg i64* {}, i64 {}, i64 {} seq_cst seq_cst\n",
@@ -48478,13 +48532,12 @@ fn emit_parallel_for_via_gomp(
             }
             op => {
                 let atomic_op = match op {
-                    ReductionOp::Add => "add",
                     ReductionOp::And | ReductionOp::BitAnd => "and",
                     ReductionOp::Or | ReductionOp::BitOr => "or",
                     ReductionOp::BitXor => "xor",
                     ReductionOp::Min => "min",
                     ReductionOp::Max => "max",
-                    ReductionOp::Mul => unreachable!(),
+                    ReductionOp::Add | ReductionOp::Mul => unreachable!(),
                 };
                 let _old = outlined_ctx.fresh_tmp();
                 deferred.push_str(&format!(

@@ -17312,4 +17312,59 @@ write a repro that forces the tree-backend fallback (e.g. a
 parallel-for body capturing a type SSA-LLVM's subset rejects) and
 confirm/fix the same way.
 
+## Update 2026-08-23: BUG-222's tree-LLVM follow-up FIXED
+
+The follow-up flagged above (`backend_llvm.rs`'s `emit_parallel_for_via_gomp`,
+the tree-backend parallel-for lowerer, had the structurally identical
+unchecked-combine gap but no live repro reached it) is now fixed and
+verified, closing the loop on BUG-222.
+
+Forced the tree-backend fallback path with a minimal repro (an
+unrelated struct field-access in the same function is enough to push
+the whole function outside the SSA-LLVM subset): confirmed via the
+emitted IR that the tree backend's LOCAL per-thread accumulation was
+**never** buggy -- `total = total + xs[i]` inside the outlined body
+goes through the same general statement-lowering `emit_stmt` uses for
+any assignment, which already inlines
+`llvm.sadd.with.overflow.i64`/`llvm.smul.with.overflow.i64` + a trap
+branch for every checked add/mul, reduction or not. Only the FINAL
+cross-thread combine (the `atomicrmw add`/CAS-`mul` at loop exit,
+hand-emitted separately from normal statement lowering) had the gap --
+confirmed live: `total: i64` seeded near `i64::MAX`, small per-thread
+partial sums, `atomicrmw add` wrapped silently on LLVM (`return total`
+truncated to a garbage exit code, same "looks like a crash but isn't"
+shape as the original BUG-222 finding), `exit(3)` correctly on C for
+the identical program. Confirmed the identical gap for `*` via a
+second repro (factors chosen so the product exceeds `i64::MAX`).
+
+Fix: moved `Add` out of the plain-`atomicrmw` bucket into the same
+`cmpxchg` CAS-retry-loop `Mul` already used (atomicrmw has no checked-
+add either), with the loop body computing the new value via
+`llvm.sadd.with.overflow.i64`/`llvm.smul.with.overflow.i64` inline
+(mirroring the exact pattern the local-accumulation site --and BUG-192's
+prior fix in this same function -- already used) and trapping through
+`@__intent_trap` on overflow before ever attempting the `cmpxchg`. Both
+message globals (`.msg.ovf.i64.add`/`.msg.ovf.i64.mul`) were already
+unconditionally emitted by this file's preamble (unlike SSA-LLVM's
+gated scan, tree-LLVM emits all 8-types-x-5-ops messages regardless of
+use), so no scan-pass change was needed here.
+
+Two tests asserted the old buggy shape as *expected* output and needed
+updating: `emit_llvm_parallel_for_lowers_to_gomp_call`
+(`tests/run_end_to_end.rs`) used to assert a bare `stdout.contains(
+"atomicrmw add")`; now asserts `atomicrmw add i64*` is ABSENT and that
+the checked-add intrinsic call is present. Verification: both repros
+now trap identically on both backends; re-ran every existing example
+using `reduce ... with +/*` on both backends (byte-identical stdout
+and exit code to pre-fix, since none of them were anywhere near
+overflowing). `cargo test --release --lib` (3008 passed, 0 failed, 1
+ignored) and `cargo test --release --test run_end_to_end` (278 passed,
+0 failed, 8 ignored, run twice to rule out one interleaved-run flake
+in an unrelated Mutex/Barrier/task test that doesn't touch
+`parallel for`/`reduce` at all and passed cleanly both in isolation
+and on the clean rerun).
+
+BUG-222 is now fully closed -- both LLVM parallel-for-reduction
+lowerers overflow-check identically to the C backend.
+
 Next free bug number is **BUG-223**.
