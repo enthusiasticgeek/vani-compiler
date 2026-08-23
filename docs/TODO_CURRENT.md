@@ -17044,6 +17044,57 @@ touches concurrency/task codegen.
 New tutorial section: `tutorials/src/beginner/00_cli_reference.md`'s
 `vanic coverage-gaps` subsection.
 
-Follow-up (same session): wiring `localfuzz`'s harness to consume this
-output for biased candidate generation -- see that repo's own
-docs/TODO_LOCAL_STAGING.md / README.md for the harness-side writeup.
+**Follow-up (same session): `localfuzz` wired to consume `coverage-gaps`.**
+`tools/localfuzz/harness.py` (tracked on `main`, mirrored onto the
+`local-fuzz-findings` worktree via `refresh.sh`'s merge -- the harness
+itself is common to both branches, only its findings/candidate output
+differs) gained a third candidate-generation path, prioritized over
+the existing two: every `HARNESS_GAP_EVERY`th cycle (default 7),
+`generate_gap_targeted_program` calls `vanic coverage-gaps --json`,
+picks one `Family<Filler>#op` gap fingerprint (preferring one not
+already tried this process's lifetime), finds a real English example
+exercising `op` via a new `find_example_by_content` (content search,
+not just filename -- a builtin op name is unlikely to appear in a
+filename but will appear in a file body) plus, if `Filler` is a real
+type rather than one of the 7 leaf categories, a second real example
+showing how that type gets constructed, and asks qwen to combine them
+into the exact untested combination. Falls through cleanly to the
+existing feature-combination generator, then to mutation, on any
+failure (no ollama response, no grounding example found, etc.) --
+same fallback shape the existing generator already had.
+
+Every candidate that gets past `vanic check` (from any of the three
+paths) now also gets a `vanic check --coverage` score attached to its
+`finding.json` / candidate-regression header via a new
+`get_coverage_score` helper -- cheap (one extra offline `vanic check`
+call) and gives visibility into whether findings actually cluster
+around low-coverage territory, validating (or not) the whole premise.
+
+Caught and fixed during implementation: `find_example_by_content`'s
+first draft defaulted to searching the ENTIRE multi-dialect corpus
+rather than `examples/language/english/` only -- a live probe (`vanic
+coverage-gaps` then a real `push` lookup) returned a Maithili example
+as the shortest match, which would have grounded qwen in a different
+dialect's native-script statement keywords (only builtin identifiers
+like `push` stay constant across dialects; `fn`/`let`/`while` etc. are
+localized) and likely produced garbage -- the exact reason the
+PRE-EXISTING `generate_novel_program` already restricts itself to
+`EXAMPLES_ENGLISH`. Fixed to match that existing convention before
+this shipped, not after.
+
+Verified: `python3 -m py_compile` clean; `fetch_coverage_gaps()`
+correctly parses all 2552 candidates; `find_example_by_content`
+correctly resolves real English groundings for `push`/`barrier_new`/
+`mutex_lock`/`Barrier`; `get_coverage_score` correctly returns `100`
+for the BUG-216 example and `None` for the (intentionally rejected)
+BUG-219 xfail example; one full `--once` cycle with
+`HARNESS_AUTOCOMMIT=0` and both gap/generate cadences disabled ran
+cleanly end-to-end through the (unchanged) mutation path, confirming
+the new per-cycle `coverage_score` computation doesn't break the
+existing paths. Did NOT force a live gap-targeted ollama call to
+validate the generation prompt itself beyond one already-attempted
+call -- the shared `ollama` service (also serving the LIVE running
+harness concurrently) got OOM-killed by the combined load from one
+manual probe call during testing; it self-healed via its existing
+auto-restart within seconds, but a second deliberate call was avoided
+given the harness would exercise the real path itself once refreshed.
