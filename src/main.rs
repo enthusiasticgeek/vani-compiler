@@ -1261,6 +1261,19 @@ COMMANDS:
                                           command -- vanic never files
                                           or sends anything on its own;
                                           you decide whether to run it.
+    coverage-gaps [--json]           List candidate feature-combination
+                                          fingerprints the baked-in
+                                          coverage database has NO
+                                          record of -- no file needed,
+                                          purely mined from the
+                                          database itself (cross every
+                                          known container/operation
+                                          pair against every element
+                                          shape ever seen). A list of
+                                          hypotheses worth trying, not
+                                          confirmed bugs -- see
+                                          src/coverage.rs's doc
+                                          comment.
     emit <file.vani> [--backend=<c|llvm>] [-o out]
         [--big-o[=<auto|force|off>]]
                                           Emit lowered source for a program.
@@ -1618,6 +1631,41 @@ fn run() -> Result<ExitCode, String> {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "vanic".to_string());
             println!("{} {}", bin, env!("CARGO_PKG_VERSION"));
+            Ok(ExitCode::SUCCESS)
+        }
+        "coverage-gaps" => {
+            // No file argument -- this enumerates HYPOTHESIS
+            // fingerprints purely from the baked-in coverage
+            // database (tools/gen_coverage_db.py's output), by
+            // crossing every known (container-family, operation)
+            // pair against every element shape ever seen anywhere
+            // in the database. See src/coverage.rs's "Coverage GAP
+            // enumeration" section doc comment for the full design
+            // and its deliberate limitations (depth-1 only, many
+            // candidates will be legitimately rejected by the
+            // checker -- this is a list of things worth trying, not
+            // a list of confirmed bugs).
+            let mut json = false;
+            for arg in args.iter().skip(2) {
+                match arg.as_str() {
+                    "--json" => json = true,
+                    other => return Err(format!("unexpected argument '{}'", other)),
+                }
+            }
+            let gaps = vani::coverage::enumerate_coverage_gaps();
+            if json {
+                let items: Vec<String> = gaps.iter().map(|fp| format!("{}", fp)).collect();
+                println!(
+                    "{{\"gap_count\":{},\"gaps\":{}}}",
+                    items.len(),
+                    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string()),
+                );
+            } else {
+                for fp in &gaps {
+                    println!("{}", fp);
+                }
+                eprintln!("{} candidate gap(s)", gaps.len());
+            }
             Ok(ExitCode::SUCCESS)
         }
         "check" => {

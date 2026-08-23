@@ -16985,3 +16985,65 @@ other 7 were triaged as NOT compiler bugs:
   harness's timeout kills the process, not a compiler bug.
 
 Next free bug number is **BUG-220**.
+
+## Feature: `vanic coverage-gaps` -- mechanical audit-round hypothesis generator (2026-08-23)
+
+User question after the coverage-scoring feature landed: "would you use
+dump-fingerprint and coverage to find bugs in audit rounds? should we
+also update localfuzz to do this?" Answer: `--coverage` alone can only
+ever CONFIRM a gap once you've already written a candidate program for
+it -- useful for documenting a finding (as done for BUG-216/217/218's
+repros) but not for proactively generating new things to try. This
+feature is the inverse.
+
+**Design** (`src/coverage.rs`'s "Coverage GAP enumeration" section):
+mine every `(container-family, operation)` pair directly out of the
+baked-in database (seeing `Vec<Scalar>#push` in the DB tells us family
+`Vec` has operation `push`), then cross each family against every
+"filler" element shape ever recorded anywhere in the database -- the 7
+hardcoded leaf shapes `canonical_shape` can produce (`Scalar`, `Str`,
+`OwnedStr`, `Copy-Struct`, `NonCopy-Struct`, `Copy-Enum`, `NonCopy-
+Enum` -- these never appear as fingerprints themselves since
+`shape_is_interesting` filters the Copy-ish ones out at extraction
+time, so they have to be hardcoded rather than mined) plus every
+non-parameterized "atomic" shape also seen in the DB (`Graph`,
+`UnionFind`, `Barrier`, `Condvar`, `FileHandle`, ...). Deliberately
+scoped to depth-1, single-type-parameter families only (`Vec<Scalar>`,
+not `Vec<Box<Vec<Scalar>>>`; not `HashMap<K,V>`/`Array<T,N>`, which
+have more than one type/const parameter) -- every historical bug this
+mirrors (BUG-216/217/218) was exactly one level of nesting, and going
+deeper multiplies the candidate space for little real value. No
+external `regex` dependency added -- hand-rolled bracket/comma
+scanning is enough for this shape grammar.
+
+New CLI: `vanic coverage-gaps [--json]` -- no file argument, since it
+only ever reads the baked-in database. Sanity-checked: none of the
+already-covered fingerprints (`Vec<Graph>#push`, `RwLock<Scalar>
+#rwlock_write`, `Mutex<Scalar>#mutex_lock`, ...) appear in its output;
+real, plausible, never-tried combinations do (`Vec<Barrier>#push`,
+`Vec<Condvar>#push`, `Deque<Graph>#deque_push_back`, `Box<Graph>
+#__box_new`, ...) -- exactly the shape of hypothesis that would have
+led straight to BUG-216 if tried by hand. Current output: 2552
+candidates from the 554-fingerprint database. Explicitly documented
+(doc comment, `--help` text, and the tutorial) as a HEURISTIC
+generator, not a bug list -- it has no model of which builtins accept
+which element types, so a large fraction of candidates are expected to
+be rejected cleanly by the checker (e.g. an ordering-dependent Vec op
+crossed against a type with no ordering), which is a fine outcome, not
+a false claim.
+
+Full regression pass: `cargo test --release --workspace` clean (278
+passed, 0 failed) -- one transient failure
+(`concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends`,
+"pure virtual method called") on the FIRST full-suite run turned out to
+be pre-existing flakiness under parallel test-suite load (passed 3/3
+in isolation immediately after, and a full clean re-run of the whole
+suite passed 0 failures) -- unrelated to this change, which never
+touches concurrency/task codegen.
+
+New tutorial section: `tutorials/src/beginner/00_cli_reference.md`'s
+`vanic coverage-gaps` subsection.
+
+Follow-up (same session): wiring `localfuzz`'s harness to consume this
+output for biased candidate generation -- see that repo's own
+docs/TODO_LOCAL_STAGING.md / README.md for the harness-side writeup.

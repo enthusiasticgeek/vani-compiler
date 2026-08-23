@@ -154,6 +154,46 @@ added, so it always reflects the CURRENT corpus, not a stale snapshot.
 
 ---
 
+### `vanic coverage-gaps [--json]`
+
+`--coverage` can only ever confirm a gap you've already written a
+repro for -- it needs a candidate program to score. `coverage-gaps`
+is the inverse: no file needed, purely mined from the baked-in
+database itself, it prints candidate fingerprints the corpus has NO
+record of at all, so you don't have to guess what to try next.
+
+```bash
+vanic coverage-gaps
+# Vec<Barrier>#push
+# Vec<Condvar>#push
+# Deque<Graph>#deque_push_back
+# ...
+# 2552 candidate gap(s)
+```
+
+Mechanically: it mines every `(container-family, operation)` pair
+straight out of the database (e.g. seeing `Vec<Scalar>#push` tells it
+the family `Vec` has an operation `push`), then crosses each family
+against every element shape the database has ever recorded anywhere
+(`Scalar`, `Copy-Struct`, `Graph`, `Barrier`, ...) to build hypothesis
+fingerprints, and reports the ones missing entirely. This is a
+mechanical version of the exact manual sweep that found BUG-216/217/
+218 -- "this operation is proven safe for element type A, has it ever
+been exercised for element type B?"
+
+**It's a list of hypotheses, not confirmed bugs.** Scoped to depth-1,
+single-type-parameter families only (`Vec<Scalar>`, not `Vec<Box<Vec
+<Scalar>>>`; not `HashMap<K,V>` or `Array<T,N>`, which have more than
+one type/const parameter), and it has no idea which builtins actually
+accept which element types -- many candidates (e.g. an ordering-
+dependent op crossed against a type with no ordering) will be
+rejected cleanly by the checker, which is a fine, expected outcome,
+not a bug. Treat the list as "worth a few minutes trying," the same
+way trying `Vec<Graph>` by hand was worth trying before it turned out
+to be BUG-216.
+
+---
+
 ### `vanic emit <file.vani>`
 
 Emit lowered source (LLVM IR or C) to stdout or a file.

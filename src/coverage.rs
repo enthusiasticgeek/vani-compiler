@@ -631,3 +631,123 @@ pub fn draft_coverage_issue(
     );
     Some(body)
 }
+
+// ---------------------------------------------------------------------
+// Coverage GAP enumeration (`vanic coverage-gaps`)
+// ---------------------------------------------------------------------
+//
+// `--coverage` needs a candidate program to score -- it can only ever
+// confirm a gap you've already written a repro for. This is the
+// inverse: mine the (container family, operation) vocabulary directly
+// out of the baked-in database itself (e.g. seeing `Vec<Scalar>#push`
+// tells us the family "Vec" has an operation "push"), then cross each
+// family against every "filler" element shape ever seen anywhere in
+// the database (the 7 hardcoded leaf shapes `canonical_shape` can
+// produce, plus every non-parameterized "atomic" shape like `Graph`/
+// `UnionFind`/`Barrier`/...) to build hypothesis fingerprints, and
+// report the ones the database has NO record of. This is a mechanical
+// version of the exact manual sweep that found BUG-216/217/218 --
+// "this operation is proven safe for element type A, has it ever been
+// exercised for element type B?"
+//
+// Deliberately scoped to depth-1, single-type-param families only
+// (`Vec<Scalar>`, not `Vec<Box<Vec<Scalar>>>`; not `HashMap<K,V>` or
+// `Array<T,N>`, which have more than one type/const parameter) --
+// going deeper multiplies the candidate space combinatorially for
+// diminishing real-bug-finding value, since every historical bug this
+// approach was modeled on (BUG-216/217/218) was exactly one level of
+// nesting.
+//
+// This is a HEURISTIC generator, not a proof of anything: many
+// candidate fingerprints will be rejected by the checker outright
+// (e.g. a builtin that only ever accepts a Copy element type), and
+// that's expected -- the list is a set of hypotheses worth a human
+// (or an automated fuzzer) spending a few minutes writing a real
+// repro for, exactly like trying `Vec<Graph>` was worth trying.
+
+/// The leaf shapes `canonical_shape` can produce that are NEVER
+/// themselves recorded as a fingerprint in the database (filtered out
+/// by `shape_is_interesting` at extraction time, since a plain scalar
+/// touching `bind`/`return` was never where a dispatch-table bug
+/// lived) -- so unlike the "atomic" shapes below, these have to be
+/// hardcoded rather than mined.
+const BASE_FILLERS: &[&str] = &[
+    "Scalar",
+    "Str",
+    "OwnedStr",
+    "Copy-Struct",
+    "NonCopy-Struct",
+    "Copy-Enum",
+    "NonCopy-Enum",
+];
+
+/// If `shape` is exactly `Family<Inner>` for a single, simple
+/// (non-nested, comma-free) `Inner`, return `(Family, Inner)`.
+/// Deliberately excludes ref-wrapped (`&...`), depth-truncated (`…`),
+/// and multi-parameter (`Array<T,N>`, `HashMap<K,V>`, `Channel<T,N>`)
+/// shapes -- see this section's doc comment for why.
+fn parse_family_leaf(shape: &str) -> Option<(&str, &str)> {
+    if shape.starts_with('&') || shape.contains('…') {
+        return None;
+    }
+    let open = shape.find('<')?;
+    if !shape.ends_with('>') {
+        return None;
+    }
+    let family = &shape[..open];
+    let inner = &shape[open + 1..shape.len() - 1];
+    if family.is_empty() || !family.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    if inner.is_empty() || inner.contains(['<', '>', ',']) {
+        return None;
+    }
+    Some((family, inner))
+}
+
+/// A "filler"-eligible atomic shape: a bare identifier (optionally
+/// hyphenated, e.g. `Copy-Struct`) with no generic parameters --
+/// either one of the 7 `BASE_FILLERS`, or a first-class type like
+/// `Graph`/`UnionFind`/`Barrier` that showed up as its own fingerprint
+/// shape in the database.
+fn is_atomic_filler_shape(shape: &str) -> bool {
+    !shape.is_empty()
+        && !shape.starts_with('&')
+        && !shape.contains('…')
+        && shape.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+pub fn enumerate_coverage_gaps() -> Vec<Fingerprint> {
+    let db = coverage_db();
+    let mut ops_by_family: std::collections::BTreeMap<String, BTreeSet<String>> =
+        std::collections::BTreeMap::new();
+    let mut fillers: BTreeSet<String> = BASE_FILLERS.iter().map(|s| s.to_string()).collect();
+
+    for fp in &db.known {
+        let Some((shape, op)) = fp.rsplit_once('#') else {
+            continue;
+        };
+        if let Some((family, _inner)) = parse_family_leaf(shape) {
+            ops_by_family
+                .entry(family.to_string())
+                .or_default()
+                .insert(op.to_string());
+        } else if is_atomic_filler_shape(shape) {
+            fillers.insert(shape.to_string());
+        }
+    }
+
+    let mut gaps: BTreeSet<Fingerprint> = BTreeSet::new();
+    for (family, ops) in &ops_by_family {
+        for op in ops {
+            for filler in &fillers {
+                let candidate_shape = format!("{family}<{filler}>");
+                let candidate = format!("{candidate_shape}#{op}");
+                if !db.known.contains(&candidate) {
+                    gaps.insert(Fingerprint::new(candidate_shape, op.clone()));
+                }
+            }
+        }
+    }
+    gaps.into_iter().collect()
+}
