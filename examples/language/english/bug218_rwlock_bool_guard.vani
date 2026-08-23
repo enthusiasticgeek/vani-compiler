@@ -1,0 +1,36 @@
+// build & run:
+//   vanic run examples/language/english/bug218_rwlock_bool_guard.vani              # LLVM
+//   vanic run examples/language/english/bug218_rwlock_bool_guard.vani --backend=c  # C
+
+intent "BUG-218 regression: RwLock<bool>'s read/write-guard round-trip crashed LLVM IR verification even after correctly falling back to tree-LLVM ('%tN' defined with type 'i8' but expected 'i1') -- read_guard_get/write_guard_set never got the i1-vs-i8 conversion guard_get/guard_set (Mutex's equivalents) already had from an earlier fix that explicitly should have covered this sibling pair but didn't. Mutex<bool> itself was always fine; this was RwLock-specific. Also stands in as this compiler's permanent regression coverage for the `RwLock<Scalar>#rwlock_write` / `WriteGuard<Scalar>#write_guard_set` feature-combination fingerprints (see src/coverage.rs / `vanic check --coverage`), which the 2026-08-22 audit found had NO regression example anywhere in this corpus despite the underlying bug already being fixed. Each guard is acquired and used inside its OWN function (matching examples/language/english/rwlock_struct_payload.vani's established pattern) so it's dropped -- releasing the underlying pthread_rwlock -- at function return, before the next lock operation runs; holding a ReadGuard live across a same-thread rwlock_write() call would self-deadlock (a non-reentrant rwlock), a real program bug rather than a compiler one, worth calling out explicitly since it's an easy mistake to reintroduce here.";
+
+fn read_it(rw: mut ref RwLock<bool>) -> bool {
+  let r: ReadGuard<bool> = rwlock_read(rw);
+  return read_guard_get(ref r);
+}
+
+fn write_it(rw: mut ref RwLock<bool>, v: bool) -> i64 {
+  let w: WriteGuard<bool> = rwlock_write(rw);
+  let _set_result: bool = write_guard_set(mut ref w, v);
+  return 0;
+}
+
+fn main() -> i64 {
+  let rw: RwLock<bool> = rwlock_new(true);
+
+  let before: bool = read_it(mut ref rw);
+  assert before == true;
+
+  let _ = write_it(mut ref rw, false);
+
+  // Re-read through a fresh guard (a fresh call, so the previous
+  // WriteGuard has already dropped) to confirm the write actually
+  // landed -- this is what BUG-218 broke on LLVM: the write path
+  // itself, not just construction.
+  let after: bool = read_it(mut ref rw);
+  assert after == false;
+
+  print "before:", before;
+  print "after:", after;
+  return 0;
+}

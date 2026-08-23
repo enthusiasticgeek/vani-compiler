@@ -1221,7 +1221,8 @@ USAGE:
 
 COMMANDS:
     check <path>... [--json] [--no-verify] [--smt-debug]
-        [--big-o[=<auto|force|off>]]
+        [--big-o[=<auto|force|off>]] [--dump-fingerprints]
+        [--coverage] [--emit-coverage-issue]
                                           Type-check one or more sources.
                                           Paths may be files or directories
                                           (the latter expand recursively to
@@ -1242,6 +1243,24 @@ COMMANDS:
                                           complexity annotation per fn:
                                           auto (default) skips O(1); force
                                           includes every fn; off is no-op.
+                                          With --dump-fingerprints, print
+                                          this program's feature-combination
+                                          coverage fingerprints (one per
+                                          line, sorted) instead of 'ok:' --
+                                          see src/coverage.rs's doc comment.
+                                          With --coverage, score this
+                                          program's feature combinations
+                                          against the baked-in corpus
+                                          database (0-100) and list any
+                                          untested ones. With
+                                          --emit-coverage-issue (implies
+                                          --coverage), if the score is
+                                          below 100, draft a GitHub issue
+                                          markdown file locally and print
+                                          the exact 'gh issue create'
+                                          command -- vanic never files
+                                          or sends anything on its own;
+                                          you decide whether to run it.
     emit <file.vani> [--backend=<c|llvm>] [-o out]
         [--big-o[=<auto|force|off>]]
                                           Emit lowered source for a program.
@@ -1611,10 +1630,36 @@ fn run() -> Result<ExitCode, String> {
             // matches the single-file form.
             let mut json = false;
             let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
+            let mut dump_fingerprints = false;
+            let mut coverage = false;
+            let mut emit_coverage_issue = false;
             let mut path_args: Vec<String> = Vec::new();
             for arg in args.iter().skip(2) {
                 match arg.as_str() {
                     "--json" => json = true,
+                    // Coverage-fingerprinting groundwork: print this
+                    // program's `{shape}#{operation}` fingerprints
+                    // (one per line, sorted) instead of the normal
+                    // "ok: <file>" output. Feeds both manual
+                    // inspection and `tools/gen_coverage_db.py`'s
+                    // corpus walk. See `src/coverage.rs`'s module
+                    // doc comment for the full design.
+                    "--dump-fingerprints" => dump_fingerprints = true,
+                    // Score this program's feature-combination
+                    // coverage against the baked-in corpus database
+                    // (tools/gen_coverage_db.py). See
+                    // src/coverage.rs's module doc comment.
+                    "--coverage" => coverage = true,
+                    // Implies --coverage. If the score is below 100,
+                    // draft (never file) a GitHub issue markdown body
+                    // reporting the untested combinations, and print
+                    // the exact `gh issue create` command to run it
+                    // -- vanic never files anything on its own; the
+                    // user is the gate.
+                    "--emit-coverage-issue" => {
+                        coverage = true;
+                        emit_coverage_issue = true;
+                    }
                     // User-direction item (2026-06-08): static
                     // Big-O annotation per fn. `--big-o` with no
                     // value defaults to Auto (annotate fns that
@@ -1792,6 +1837,92 @@ fn run() -> Result<ExitCode, String> {
                                 }
                             }
                         }
+                        if dump_fingerprints {
+                            let fingerprints =
+                                vani::coverage::extract_program_fingerprints(&checked.ir);
+                            if files.len() > 1 {
+                                println!("fingerprints ({}):", file.display());
+                                for fp in &fingerprints {
+                                    println!("  {}", fp);
+                                }
+                            } else {
+                                for fp in &fingerprints {
+                                    println!("{}", fp);
+                                }
+                            }
+                        }
+                        if coverage {
+                            let report = vani::coverage::score_program(&checked.ir);
+                            let prefix = if files.len() > 1 {
+                                format!("coverage ({}): ", file.display())
+                            } else {
+                                "coverage: ".to_string()
+                            };
+                            println!(
+                                "{}{}/100 ({}/{} known feature combinations, db {})",
+                                prefix,
+                                report.score,
+                                report.known_count,
+                                report.total_interesting,
+                                if report.db_generated_utc.is_empty() {
+                                    "unavailable".to_string()
+                                } else {
+                                    format!(
+                                        "generated {} from {} file(s)",
+                                        report.db_generated_utc, report.db_verified_clean_files
+                                    )
+                                },
+                            );
+                            if !report.unknown.is_empty() {
+                                println!("  untested combinations:");
+                                for fp in &report.unknown {
+                                    println!("    {}", fp);
+                                }
+                            }
+                            if emit_coverage_issue {
+                                let source = std::fs::read_to_string(file)
+                                    .unwrap_or_default();
+                                let bin = std::path::Path::new(&args[0])
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "vanic".to_string());
+                                let version = format!(
+                                    "{} {}", bin, env!("CARGO_PKG_VERSION"),
+                                );
+                                match vani::coverage::draft_coverage_issue(
+                                    &report, file, &source, &version,
+                                ) {
+                                    Some(body) => {
+                                        let draft_path = file.with_extension(
+                                            "coverage_issue.md",
+                                        );
+                                        if let Err(e) =
+                                            std::fs::write(&draft_path, &body)
+                                        {
+                                            eprintln!(
+                                                "warning: could not write {}: {}",
+                                                draft_path.display(), e,
+                                            );
+                                        } else {
+                                            println!(
+                                                "  drafted: {} (nothing filed -- review it, then run:",
+                                                draft_path.display(),
+                                            );
+                                            println!(
+                                                "    gh issue create --repo <owner>/<repo> --title \"vanic coverage: {} untested combination(s) in {}\" --body-file {}",
+                                                report.unknown.len(),
+                                                file.display(),
+                                                draft_path.display(),
+                                            );
+                                            println!("  -- only if you want to share it)");
+                                        }
+                                    }
+                                    None => {
+                                        println!("  score is 100 -- nothing to draft");
+                                    }
+                                }
+                            }
+                        }
                     }
                     Err((map, diagnostics)) => {
                         failed += 1;
@@ -1849,7 +1980,7 @@ fn run() -> Result<ExitCode, String> {
                 // The single-file `{"diagnostics":[]}` success case
                 // also flows through here — combined_map is empty
                 // and the formatter emits the right empty object.
-            } else if failed == 0 {
+            } else if failed == 0 && !dump_fingerprints && !coverage {
                 if files.len() == 1 {
                     println!("ok: {}", files[0].display());
                 } else {

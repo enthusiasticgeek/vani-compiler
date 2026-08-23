@@ -544,6 +544,39 @@ pass, which `BinaryHeap<i64>` can't do (it only supports one-at-a-time
 
 ---
 
+## Storing these inside a `Vec<T>`
+
+All ten structures on this page are affine, heap-owning handles just
+like `Vec<i64>` or `Box<T>` -- and they can themselves be the element
+type of a `Vec<T>`: `Vec<Graph>`, `Vec<UnionFind>`, `Vec<Bst<i64>>`,
+and so on all work correctly, on both backends, including `push`,
+scope-exit drop, and (via `set`) overwrite of an existing slot. Each
+element gets its own correctly-sized generated free/clear/set bundle,
+the same way a `struct` or `enum` element does.
+
+```vani
+let g1: Graph = graph_new(3);
+let _ = g1.add_edge(0, 1, 5);
+let graphs: Vec<Graph> = vec();
+let graphs: Vec<Graph> = push(graphs, g1);
+for g in ref graphs {
+  print g.num_nodes();
+}
+// scope exit: each Graph's edge arrays are freed, then the Vec's own
+// backing buffer.
+```
+
+This is a fairly recent fix (BUG-216, 2026-08-21) -- earlier compiler
+versions crashed or leaked on this exact combination, since these ten
+types are large, variable-sized handles and the Vec byte-size
+estimator + per-element drop dispatch hadn't been extended to cover
+them. See `examples/language/english/bug216_vec_of_graph.vani` for a
+complete, `assert`-verified regression example, and run `vanic check
+<file> --coverage` (see the [CLI reference](../beginner/00_cli_reference.md#vanic-check-filevani))
+if you want to check whether a specific type/operation combination in
+*your* program is one this compiler's own regression corpus actually
+exercises.
+
 ## Which collection to use?
 
 | Need | Collection |

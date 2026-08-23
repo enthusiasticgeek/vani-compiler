@@ -3,6 +3,7 @@ pub mod backend;
 pub mod backend_c;
 pub mod backend_llvm;
 pub mod checker;
+pub mod coverage;
 pub mod acyclicity;
 pub mod deviations;
 pub mod hashmap_bundle;

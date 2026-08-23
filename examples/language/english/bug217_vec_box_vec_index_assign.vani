@@ -1,0 +1,28 @@
+// build & run:
+//   vanic run examples/language/english/bug217_vec_box_vec_index_assign.vani              # LLVM
+//   vanic run examples/language/english/bug217_vec_box_vec_index_assign.vani --backend=c  # C
+
+intent "BUG-217 regression: Box<T> leaked on DIRECT index-assignment (xs[i] = v, distinct from the set() builtin) inside a Vec<Box<Vec<i64>>>, on both backends. A third, separately-maintained per-element dispatch table (emit_index_assign in backend_c.rs, emit_leaf_overwrite_drop in backend_llvm.rs) never had a Box arm, so overwriting a Vec<Box<T>> slot silently dropped the old Box without freeing the heap-allocated Vec struct AND its data buffer underneath it -- a two-level leak per overwrite. Also stands in as this compiler's permanent regression coverage for the `Vec<Box<Vec<Scalar>>>#index_assign` feature-combination fingerprint (see src/coverage.rs / `vanic check --coverage`), which the 2026-08-22 audit found had NO regression example anywhere in this corpus despite the underlying bug already being fixed.";
+
+fn overwrite(vb: mut ref Vec<Box<Vec<i64>>>, b: Box<Vec<i64>>) -> i64 {
+  vb[0] = b;
+  return len(vb) as i64;
+}
+
+fn main() -> i64 {
+  let v1: Vec<i64> = vec(1, 2, 3);
+  let b1: Box<Vec<i64>> = box(v1);
+  let vb: Vec<Box<Vec<i64>>> = vec();
+  let vb: Vec<Box<Vec<i64>>> = push(vb, b1);
+
+  // Overwriting vb[0] via direct index-assignment must free the OLD
+  // Box<Vec<i64>> (both heap levels) before the new one moves in --
+  // under valgrind/ASan this is exactly where BUG-217 leaked.
+  let v2: Vec<i64> = vec(9, 9, 9, 9, 9);
+  let b2: Box<Vec<i64>> = box(v2);
+  let n: i64 = overwrite(mut ref vb, b2);
+  assert n == 1;
+
+  print "vb len after index-assign overwrite:", n;
+  return 0;
+}

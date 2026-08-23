@@ -16762,3 +16762,133 @@ regression, still rejects the same 4 nesting combinations); full
 0 flagged, matching baseline exactly.
 
 Next free bug number is **BUG-219**.
+
+## Feature: feature-combination coverage scoring (`vanic check --coverage`), 2026-08-22
+
+User request: score a program against the feature combinations the
+compiler's own regression/library corpus has already exercised and
+verified leak/bug-free, so a program touching an under-tested
+combination gets flagged before it ships, not after. Explicitly scoped
+by the user to a **user-gated** reporting model, not automatic
+issue-filing: "i also like report idea where user is alerted and they
+act as a gate and can decide if they want to file the issue on
+github." `vanic` itself must never phone home, file a GitHub issue, or
+send an email on its own -- every piece below only ever writes a local
+file and prints a command for the user to run themselves.
+
+**Design** (`src/coverage.rs`, full rationale in its module doc
+comment): a fingerprint is `{shape}#{operation}`, where `shape` is a
+canonical, depth-bounded (`MAX_SHAPE_DEPTH = 4`) collapse of a `Type`
+(scalars/Str/OwnedStr collapse to one alphabet each; structs/enums
+split only on `is_copy()`; named containers like `Vec<T>`/`Box<T>`/
+`Mutex<T>` recurse) and `operation` is either a structural tag
+(`bind`/`param`/`return`/`index_assign`/`field_assign`/... ) or a
+BUILTIN call's own name (`push`/`guard_get`/`mutex_new`/...) -- never
+a user-defined function's name, which would pollute the fingerprint
+set with names that can't recur across programs (found and fixed
+during implementation: an early version tagged calls to a test file's
+own `overwrite()` helper as if it were a builtin operation). This
+exact granularity was chosen because every real bug found in the
+2026-08-21/22 audit rounds (BUG-216/217/218) was precisely a missing
+arm in some per-(shape, operation) dispatch table.
+
+`extract_program_fingerprints(&TypedProgram) -> BTreeSet<Fingerprint>`
+walks the whole typed IR once. `vanic check --dump-fingerprints` prints
+a program's own set (one per line, sorted) -- both for manual
+inspection and as `tools/gen_coverage_db.py`'s raw input.
+
+**Database generation** (`tools/gen_coverage_db.py`): reuses
+`tools/leak_sweep.py`'s existing `sweep()` directly (imported as a
+module, not re-implemented) to determine which of the 1079 `examples/
+**/*.vani` corpus files are "known good" -- accepted by `vanic check`
+AND clean under the exact ASan+LeakSanitizer+UBSan sweep this repo
+already trusts for its leak-regression baseline. A file currently
+flagged is excluded even if the finding is itself baselined (tracked-
+but-not-fixed still means "known buggy", not "known good"). Extracts
+and unions fingerprints from every clean file into
+`coverage_fingerprints.json` (repo root), which `src/coverage.rs`
+bakes into the binary via `include_str!` and parses lazily
+(hand-parsed via `serde_json::Value` rather than a `#[derive(
+Deserialize)]` struct, since this crate depends on plain `serde`/
+`serde_json` without the `derive` feature) -- `vanic` never fetches or
+generates this file at check-time, so `--coverage` works fully
+offline. First generation: 1075/1079 example files verified clean
+(the same 4 files `leak_sweep_baseline.json` already tracks were
+excluded, as expected), yielding **529 fingerprints**.
+
+**Scoring** (`vani::coverage::score_program`, wired as `vanic check
+--coverage`): restricted to "interesting" fingerprints
+(`shape_is_interesting` -- excludes plain Scalar/Str/Copy-struct/
+Copy-enum shapes, since there's no per-element-type dispatch table for
+a plain `i64` for a missing arm to live in). Score = `100 *
+known_count / total_interesting` (vacuously 100 for a program with no
+interesting fingerprints at all). Prints the score plus every
+untested fingerprint.
+
+**Gated issue draft** (`vanic check --emit-coverage-issue`, implies
+`--coverage`): if the score is below 100, writes a local
+`<file>.coverage_issue.md` (never touches the network) containing the
+score, the untested fingerprint list, and the checked file's full
+source as the reproduction case -- reasonable to embed here
+specifically because the file never leaves the machine until the user
+themselves runs the exact `gh issue create --body-file ...` command
+`vanic` prints alongside it, or pastes the draft in by hand. `vanic`
+takes no action beyond writing that one local file and printing that
+one command.
+
+**Verified against the exact repro files from BUG-216/217/218**
+(the audit round that motivated this feature) using the real, baked-in
+529-fingerprint database:
+- `Vec<Box<Vec<i64>>>` index-assign (BUG-217's exact repro): 38/100 --
+  `Vec<Box<Vec<Scalar>>>#index_assign` etc. are NOT in the corpus.
+- `RwLock<bool>` read/write-guard round-trip (BUG-218's RwLock<bool>
+  sibling bug): 23/100 -- not covered either, despite the underlying
+  LLVM i1/i8 bug being fixed this month.
+- `Vec<Graph>` push (BUG-216's exact repro shape): 28/100 -- not
+  covered (though standalone `Graph#graph_new` is).
+- `Mutex<bool>` lock/guard_get: **100/100** -- correctly recognized as
+  already covered.
+
+This is a real, live finding, not just a smoke test: three of the
+exact shapes that produced real bugs this month were STILL not locked
+in as permanent regression coverage in `examples/`, even though the
+underlying compiler bugs are fixed -- a future regression in any of
+those three dispatch tables would not have been caught by the
+existing corpus.
+
+**Follow-up, same session**: closed all three gaps with new,
+`assert`-verified regression examples --
+`examples/language/english/bug217_vec_box_vec_index_assign.vani`,
+`bug218_rwlock_bool_guard.vani`, and `bug216_vec_of_graph.vani`
+(naming matches this repo's existing `bugNNN_*.vani` convention).
+Writing the RwLock one surfaced a genuine, separate gotcha worth
+documenting: holding a `ReadGuard` alive across a same-thread
+`rwlock_write()` call self-deadlocks (a non-reentrant `pthread_rwlock`)
+-- a real program bug, not a compiler one. Fixed by following
+`rwlock_struct_payload.vani`'s existing pattern of acquiring/using
+each guard inside its own function so it drops (releasing the lock)
+at function return, before the next lock operation runs; the first
+draft of the example hung indefinitely until restructured this way.
+Regenerated `coverage_fingerprints.json` after adding the three
+examples (1078/1082 verified-clean files, **554 fingerprints**, up
+from 529/1075) and confirmed all three original repro files now score
+**100/100** instead of 38/23/28. Also added short notes to the
+tutorials covering each shape (`tutorials/src/intermediate/
+03a_box_raii_primer.md`'s `Vec<Box<T>>` section, `tutorials/src/
+advanced/02c_rwlock_primer.md`, and a new "Storing these inside a
+`Vec<T>`" section in `tutorials/src/advanced/
+05b_advanced_collections.md`) plus the new `--coverage`/
+`--dump-fingerprints`/`--emit-coverage-issue` flags in `tutorials/src/
+beginner/00_cli_reference.md`.
+
+Full regression pass after landing: `cargo test --release --workspace`
+clean (278 + 31 + 1 + 1 + 1 + 2 + 11 passed, 0 failed); `tools/
+leak_sweep.py` matches `leak_sweep_baseline.json` exactly (4 flagged,
+all baselined, no new/stale findings) -- run twice, once as part of
+the DB-generation sweep itself and once standalone for the regression
+check.
+
+New CLI surface on `vanic check`: `--dump-fingerprints`, `--coverage`,
+`--emit-coverage-issue` (documented in `main.rs`'s `HELP` const, this
+repo's established place for CLI-flag documentation -- `--big-o` isn't
+separately documented in `docs/` either).
