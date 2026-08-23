@@ -374,5 +374,5 @@ covers enum-with-payload destructuring in depth.
 
 ---
 
-**Previous**: [Sec.7 -- Arrays and Vec<T> basics ->](07_vec_arrays.md)
+**Previous**: [Sec.7b -- Type aliases primer ->](07b_type_aliases_primer.md)
 **Next**: [Sec.8 -- Pattern match on integers + booleans ->](08_match.md)
