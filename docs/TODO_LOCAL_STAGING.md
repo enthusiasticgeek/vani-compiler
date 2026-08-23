@@ -10766,7 +10766,10 @@ fn main() -> i64 {
 Repro: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-23) -- same signature/cluster as
+`20260823-044832-run-crash-5c6a3fe3f3` below; see that entry for the
+diff-confirmed root cause (fuzzer-stripped loop increment, not a
+compiler bug).
 
 ---
 
@@ -10775,9 +10778,18 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260823-044832-run-crash-5c6a3fe3f3/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260823-044832-run-crash-5c6a3fe3f3/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-23) -- the ollama-generated
+"Details" block below is wrong (it claims LLVM-only, unspecified
+crash/hang in `hashset_insert`/`hashset_remove`); the raw
+`finding.json` above it already contradicts that, showing BOTH `c`
+and `llvm` timed out identically. `diff examples/language/english/
+hashset.vani tools/localfuzz/findings/.../repro.vani` shows the only
+change is a deleted `j = j + 1;` inside `while j < 30 { if
+!hashset_insert(mut ref s, j) { dup_count = dup_count + 1; } }` --
+a genuine, fuzzer-introduced infinite loop, correctly hanging
+identically on both backends. Not a compiler bug.
 
-Details:
+Details (ollama-generated, kept for record; superseded by the above):
 - **Input File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/hashset.vani`
 - **Mutant/Generated Source**:
   ```vani
@@ -10816,8 +10828,24 @@ Fix attempt: `tools/localfuzz/findings/20260823-083536-backend-divergence-7d9090
   },
   "coverage_score": 100
 }
-STATUS: needs human/frontier root-cause review.
 ```
+STATUS: FIXED as **BUG-222** on vani-compiler main (2026-08-23) -- see
+`docs/TODO_CURRENT.md`'s BUG-222 write-up for the full root-cause.
+Short version: `c.rc=3`/`llvm.rc=29` didn't match BUG-177's documented
+`abort()`-vs-`exit(3)` divergence shape (the digest's keyword-match
+auto-flag was a false positive), so this got a real triage. `llvm.
+rc=29` wasn't a crash -- `main() -> i64` returned a silently-wrapped
+i64 total, truncated to an 8-bit exit status. Root cause: `parallel
+for ... reduce total with +/*;`'s thread-local-accumulator fast path
+(both the per-thread update AND the final cross-thread combine) used
+a raw, unchecked `add`/`atomicrmw add`/`mul` instead of routing
+through `@__intent_checked_add_i64`/`@__intent_checked_mul_i64` like
+every other `+`/`*` in the language -- silently wrapped instead of
+trapping, LLVM-backend-only (C backend was always correct). Fixed in
+`ssa_backend_llvm.rs`. `backend_llvm.rs`'s tree-backend parallel-for
+lowerer has the structurally identical gap but wasn't reachable by any
+live repro this session -- flagged as a probable sibling instance for
+a future audit round, not yet fixed.
 
 ---
 
@@ -10825,6 +10853,13 @@ STATUS: needs human/frontier root-cause review.
 
 Repro: `tools/localfuzz/findings/20260823-113746-run-crash-7f27808337/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260823-113746-run-crash-7f27808337/fix_attempt.md`
+
+STATUS: RE-VERIFIED CLEAN (2026-08-23) -- `diff examples/language/
+telugu/control_flow.vani tools/localfuzz/findings/.../repro.vani`
+shows the only change is a deleted `i = i + 1;` inside `sum`'s `వరకు
+i < n { total = total + xs[i]; }` loop -- a genuine, fuzzer-introduced
+infinite loop, correctly hanging identically on both backends (both
+`c`/`llvm` timed out in the raw finding below). Not a compiler bug.
 
 (ollama unavailable -- raw finding only)
 
