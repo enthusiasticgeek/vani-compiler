@@ -1,0 +1,160 @@
+// build & run:
+//   vanic run examples/language/english/cache_coherency_mesi.vani                          # LLVM backend
+//   vanic run examples/language/english/cache_coherency_mesi.vani --backend=c              # C backend
+//   vanic build examples/language/english/cache_coherency_mesi.vani -o /tmp/cache_coherency_mesi && /tmp/cache_coherency_mesi
+
+intent "simulated MESI cache-coherency protocol -- the state machine every multi-core CPU runs in hardware to keep each core's private cache honest about one shared memory location, reproduced here as a deterministic trace over a Vec<i64> of per-core state tags instead of real snooped bus transactions. The point isn't the concurrency mechanics (Sec.3's task/Mutex/Atomic primitives already cover those) -- it's the four-state protocol itself: Modified / Exclusive / Shared / Invalid, and exactly which transitions a read-miss vs. a write forces on every OTHER core.";
+
+const NUM_CORES: i64 = 3;
+
+const INVALID: i64 = 0;   // no valid copy cached
+const SHARED: i64 = 1;    // valid copy, matches memory, other cores may also hold it
+const EXCLUSIVE: i64 = 2; // valid copy, matches memory, NO other core holds it
+const MODIFIED: i64 = 3;  // valid copy, dirty -- the ONLY correct copy anywhere
+
+fn state_name(s: i64) -> Str {
+  if s == INVALID { return "Invalid"; }
+  if s == SHARED { return "Shared"; }
+  if s == EXCLUSIVE { return "Exclusive"; }
+  return "Modified";
+}
+
+struct Bus {
+  cache: Vec<i64>, // cache[core] = that core's MESI state for the one line being modeled
+  mem: i64,        // shared memory's current value for that line
+}
+
+fn bus_new() -> Bus {
+  return Bus { cache: vec_fill(NUM_CORES, INVALID), mem: 0 };
+}
+
+fn any_other_in_state(bus: mut ref Bus, core: i64, want: i64) -> bool {
+  let i: i64 = 0;
+  while i < NUM_CORES {
+    if i != core && bus.cache[i] == want {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+// Downgrade every OTHER core currently holding the line to Shared.
+// Used when a read miss needs to snoop a sibling's copy instead of
+// going all the way to memory.
+fn downgrade_others_to_shared(bus: mut ref Bus, core: i64) -> i64 {
+  let i: i64 = 0;
+  while i < NUM_CORES {
+    if i != core && bus.cache[i] != INVALID {
+      let _ = set(mut ref bus.cache, i, SHARED);
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// Invalidate every OTHER core's copy. Used on a write: this core is
+// about to become the sole owner, so nobody else may keep reading
+// their now-stale cached value.
+fn invalidate_others(bus: mut ref Bus, core: i64) -> i64 {
+  let i: i64 = 0;
+  while i < NUM_CORES {
+    if i != core && bus.cache[i] != INVALID {
+      let _ = set(mut ref bus.cache, i, INVALID);
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn handle_read(bus: mut ref Bus, core: i64) -> i64 {
+  if bus.cache[core] != INVALID {
+    print "  (cache hit, no bus transaction)";
+    return bus.mem;
+  }
+  // Read miss. If some other core has it Modified, that core's
+  // value IS memory's true value -- snoop it (in real hardware this
+  // is the write-back-on-snoop step; here `bus.mem` is kept current
+  // eagerly by handle_write, so the snoop is just a state change).
+  if any_other_in_state(bus, core, MODIFIED) {
+    let _ = downgrade_others_to_shared(bus, core);
+    let _ = set(mut ref bus.cache, core, SHARED);
+    print "  (read miss, snooped a Modified sibling -> both Shared)";
+    return bus.mem;
+  }
+  if any_other_in_state(bus, core, EXCLUSIVE) || any_other_in_state(bus, core, SHARED) {
+    let _ = downgrade_others_to_shared(bus, core);
+    let _ = set(mut ref bus.cache, core, SHARED);
+    print "  (read miss, sibling(s) already cached it -> all Shared)";
+    return bus.mem;
+  }
+  // Nobody else has it cached at all -- this core gets sole
+  // ownership, no invalidation needed.
+  let _ = set(mut ref bus.cache, core, EXCLUSIVE);
+  print "  (read miss, no sibling has it -> Exclusive)";
+  return bus.mem;
+}
+
+fn handle_write(bus: mut ref Bus, core: i64, value: i64) -> i64 {
+  let _ = invalidate_others(bus, core);
+  bus.mem = value;
+  let _ = set(mut ref bus.cache, core, MODIFIED);
+  print "  (write -> siblings invalidated, this core Modified)";
+  return 0;
+}
+
+fn print_states(bus: ref Bus) -> i64 {
+  let i: i64 = 0;
+  while i < NUM_CORES {
+    print "    core";
+    print i;
+    print state_name(bus.cache[i]);
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let bus: Bus = bus_new();
+
+  print "core 0 reads (cold: nobody has it yet)";
+  let v0: i64 = handle_read(mut ref bus, 0);
+  print v0;
+  let _ = print_states(ref bus);
+  assert bus.cache[0] == EXCLUSIVE;
+
+  print "core 1 reads (core 0 has it Exclusive -> both Shared)";
+  let v1: i64 = handle_read(mut ref bus, 1);
+  print v1;
+  let _ = print_states(ref bus);
+  assert bus.cache[0] == SHARED;
+  assert bus.cache[1] == SHARED;
+
+  print "core 2 writes 42 (invalidates cores 0 and 1)";
+  let _ = handle_write(mut ref bus, 2, 42);
+  let _ = print_states(ref bus);
+  assert bus.cache[0] == INVALID;
+  assert bus.cache[1] == INVALID;
+  assert bus.cache[2] == MODIFIED;
+  assert bus.mem == 42;
+
+  print "core 0 reads (must snoop core 2's Modified copy, not stale memory)";
+  let v0b: i64 = handle_read(mut ref bus, 0);
+  print v0b;
+  let _ = print_states(ref bus);
+  assert v0b == 42; // the coherency invariant: every reader sees the LATEST write
+  assert bus.cache[0] == SHARED;
+  assert bus.cache[2] == SHARED;
+
+  print "core 1 writes 99 (invalidates cores 0 and 2 again)";
+  let _ = handle_write(mut ref bus, 1, 99);
+  assert bus.cache[0] == INVALID;
+  assert bus.cache[2] == INVALID;
+  assert bus.cache[1] == MODIFIED;
+  assert bus.mem == 99;
+
+  print "final memory value:";
+  print bus.mem;
+
+  return 0;
+}

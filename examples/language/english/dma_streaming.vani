@@ -1,0 +1,110 @@
+// build & run:
+//   vanic run examples/language/english/dma_streaming.vani                          # LLVM backend
+//   vanic run examples/language/english/dma_streaming.vani --backend=c              # C backend
+//   vanic build examples/language/english/dma_streaming.vani -o /tmp/dma_streaming && /tmp/dma_streaming
+
+intent "simulated streaming (double-buffered / ping-pong) DMA -- the pattern real ADC/audio/sensor pipelines use: while the DMA controller fills buffer A from the peripheral, the CPU consumes buffer B (already full from the previous round); when both finish, the roles swap. Neither side ever touches the buffer the other side owns at that moment, so there's no torn read of a half-filled buffer -- the classic streaming-DMA correctness property, reproduced here with two safe Vec<i64> buffers and a role flag instead of two real hardware FIFOs.";
+
+const CHUNK_SIZE: i64 = 4;
+const NUM_CHUNKS: i64 = 6;
+
+struct StreamState {
+  buf_a: Vec<i64>,
+  buf_b: Vec<i64>,
+  a_is_filling: bool, // true: DMA fills A while CPU drains B. false: swapped.
+  running_sum: i64,   // CPU-side accumulated checksum of every sample drained
+  next_sample: i64,   // the simulated peripheral's next value to produce
+}
+
+fn stream_new() -> StreamState {
+  return StreamState {
+    buf_a: vec_fill(CHUNK_SIZE, 0),
+    buf_b: vec_fill(CHUNK_SIZE, 0),
+    a_is_filling: true,
+    running_sum: 0,
+    next_sample: 1,
+  };
+}
+
+// The simulated DMA controller: fill the currently-filling buffer
+// with CHUNK_SIZE fresh samples from the peripheral. In real
+// hardware this runs via interrupt/transfer-complete callback while
+// the CPU is off doing something else -- here it's just the next
+// step of the same sequential simulation, since the *ordering*
+// property (never touch the buffer the other side owns) is the
+// thing being demonstrated, not literal thread concurrency (Sec.3 --
+// "task / join / detach / atomics / mutexes" covers the real-
+// concurrency version of this same double-buffer idea).
+fn dma_fill_active(s: mut ref StreamState) -> i64 {
+  let i: i64 = 0;
+  while i < CHUNK_SIZE {
+    if s.a_is_filling {
+      let _ = set(mut ref s.buf_a, i, s.next_sample);
+    } else {
+      let _ = set(mut ref s.buf_b, i, s.next_sample);
+    }
+    s.next_sample = s.next_sample + 1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+// The CPU consumer: drain whichever buffer is NOT currently being
+// filled (i.e. the one the previous round finished) into the
+// running checksum.
+fn cpu_drain_inactive(s: mut ref StreamState) -> i64 {
+  let i: i64 = 0;
+  while i < CHUNK_SIZE {
+    if s.a_is_filling {
+      s.running_sum = s.running_sum + s.buf_b[i];
+    } else {
+      s.running_sum = s.running_sum + s.buf_a[i];
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn stream_swap(s: mut ref StreamState) -> i64 {
+  s.a_is_filling = !s.a_is_filling;
+  return 0;
+}
+
+fn main() -> i64 {
+  let s: StreamState = stream_new();
+
+  // Round 0 is special: only fill (buffer B has no real data yet,
+  // draining it now would read stale zeros). From round 1 on, every
+  // round fills the active buffer AND drains the buffer that was
+  // filled last round, in either order -- they touch disjoint
+  // memory by construction, so the order between them never matters.
+  let _ = dma_fill_active(mut ref s);
+  let _ = stream_swap(mut ref s);
+
+  let round: i64 = 1;
+  while round < NUM_CHUNKS {
+    let _ = dma_fill_active(mut ref s);
+    let _ = cpu_drain_inactive(mut ref s);
+    let _ = stream_swap(mut ref s);
+    round = round + 1;
+  }
+  // Final round: drain whatever the last fill produced (no more
+  // rounds to swap into).
+  let _ = cpu_drain_inactive(mut ref s);
+
+  print "samples streamed:";
+  print (NUM_CHUNKS * CHUNK_SIZE);
+  print "running checksum:";
+  print s.running_sum;
+
+  // Every sample 1..(NUM_CHUNKS*CHUNK_SIZE) was produced exactly
+  // once and drained exactly once -- verify against the closed-form
+  // sum, the same invariant a real streaming pipeline's end-to-end
+  // test would assert (total samples in == total samples processed,
+  // no drops, no double-counts).
+  let total_samples: i64 = NUM_CHUNKS * CHUNK_SIZE;
+  let expected: i64 = total_samples * (total_samples + 1) / 2;
+  assert s.running_sum == expected;
+
+  return 0;
+}
