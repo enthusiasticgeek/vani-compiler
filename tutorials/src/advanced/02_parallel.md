@@ -165,6 +165,19 @@ and behave exactly as shown above.
 | Calls to pure fns | Calls to impure fns (FFI, IO) without `unsafe` |
 | `reduce var with +`/`*`/`max`/`min` | Multiple `reduce` clauses on the same variable |
 
+The "multiple `reduce` clauses on the same variable" rejection above
+was the documented contract from the start, but wasn't actually
+enforced by the checker until BUG-219 (2026-08-23, found by the
+project's localfuzz harness): `parallel for i from 0 to n reduce
+total with +; reduce total with +; { ... }` used to compile straight
+through and reach codegen, where both backends' lowering allocates
+one local PER `reduce` CLAUSE rather than per distinct variable --
+LLVM's verifier correctly rejected the resulting IR (`multiple
+definition of local value`), while the C backend accepted it silently
+with unspecified behavior (which clause's partial sum wins was never
+defined). It's now a proper checker diagnostic instead of reaching
+either backend.
+
 ## Mapping a Vec without a reduce
 
 If you want a transform-each-element pattern (no reduction),

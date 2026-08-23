@@ -122,9 +122,9 @@ worked fine.
 
 ```bash
 vanic check my_program.vani --coverage
-# coverage: 62/100 (5/8 known feature combinations, db generated ... from 1082 file(s))
+# coverage: 62/100 (5/8 known feature combinations, db generated ... from <N> file(s))
 #   untested combinations:
-#     Vec<Graph>#push
+#     <Shape>#<operation>
 #     ...
 ```
 
@@ -139,6 +139,18 @@ by a permanent regression test yet, which is worth knowing either way.
 If you want to report the gap, `--emit-coverage-issue` drafts the
 issue locally; nothing is ever sent without you running the printed
 command yourself.
+
+**This isn't hypothetical -- it already found real gaps once.** The
+day `--coverage` shipped, scoring the exact BUG-216/217/218 repro
+shapes against the freshly-generated database found all three still
+scored well below 100 (`Vec<Graph>#push` 28/100, `Vec<Box<T>>
+#index_assign` 38/100, `RwLock<bool>#rwlock_write` 23/100) --
+`examples/` had never actually pinned a permanent regression test for
+any of them, even though the underlying compiler bugs were already
+fixed. Three new `examples/language/english/bug21{6,7,8}_*.vani`
+files closed the gaps; all three now score 100/100. The database gets
+regenerated (and the binary rebuilt) each time a new example is
+added, so it always reflects the CURRENT corpus, not a stale snapshot.
 
 ---
 
