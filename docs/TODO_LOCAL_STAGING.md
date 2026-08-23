@@ -10882,3 +10882,12 @@ infinite loop, correctly hanging identically on both backends (both
 }
 ```
 
+
+---
+
+### Candidate: 20260823-195338-run-crash-d5fb8add20
+
+Repro: `tools/localfuzz/findings/20260823-195338-run-crash-d5fb8add20/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-195338-run-crash-d5fb8add20/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
