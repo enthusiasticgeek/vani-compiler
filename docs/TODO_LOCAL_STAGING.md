@@ -10767,3 +10767,26 @@ Repro: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260823-044832-run-crash-5c6a3fe3f3
+
+Repro: `tools/localfuzz/findings/20260823-044832-run-crash-5c6a3fe3f3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-044832-run-crash-5c6a3fe3f3/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Details:
+- **Input File**: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/hashset.vani`
+- **Mutant/Generated Source**:
+  ```vani
+  // build & run:
+  //   vanic run examples/language/english/hashset.vani                          # LLVM backend
+  //   vanic run examples/language/english/hashset.vani --backend=c              # C backend
+  //   vanic build examples/language/english/hashset.vani -o /tmp/hashset && /tmp/hashset
+  ```
+- **Observed Symptom**: Crash or hang during the execution of `hashset_new`, `hashset_insert`, or `hashset_remove`.
+- **Affects Backends**: LLVM backend. The C backend does not exhibit this issue.
+
+To resolve this, additional investigation is required to identify and fix the root cause of the crash or hang in the LLVM backend. Once identified, a potential fix can be implemented and verified through testing and retesting the affected code paths.
