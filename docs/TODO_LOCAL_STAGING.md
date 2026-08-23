@@ -10790,3 +10790,31 @@ Details:
 - **Affects Backends**: LLVM backend. The C backend does not exhibit this issue.
 
 To resolve this, additional investigation is required to identify and fix the root cause of the crash or hang in the LLVM backend. Once identified, a potential fix can be implemented and verified through testing and retesting the affected code paths.
+
+---
+
+### Candidate: 20260823-083536-backend-divergence-7d9090c7b3
+
+Repro: `tools/localfuzz/findings/20260823-083536-backend-divergence-7d9090c7b3/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-083536-backend-divergence-7d9090c7b3/fix_attempt.md`
+
+```json
+{
+  "path": "/home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_parallel_vec_read_capture.vani",
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "integer overflow in int64_t add\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 29,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": false
+  },
+  "coverage_score": 100
+}
+STATUS: needs human/frontier root-cause review.
+```
