@@ -10890,7 +10890,23 @@ infinite loop, correctly hanging identically on both backends (both
 Repro: `tools/localfuzz/findings/20260823-195338-run-crash-d5fb8add20/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260823-195338-run-crash-d5fb8add20/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-23) -- same signature/cluster as
+`20260823-044427-run-crash-08beef2b8e`/`20260823-044832-run-crash-5c6a3fe3f3`
+above (fuzzer-stripped loop increment). Confirmed via `ps`/`pstree`
+during a live `timeout … vanic run` that the process hangs inside
+`lli` (LLVM JIT execution), not compile-time SMT proving -- so this is
+NOT the BUG-227 SMT-verifier issue fixed earlier today, despite the
+superficial "timed_out" resemblance. `diff
+examples/language/assamese/early_exit.vani tools/localfuzz/findings/
+20260823-195338-run-crash-d5fb8add20/repro.vani` shows two changes:
+(1) the mutation deletes `i = i + 1;` from `find_first_negative`'s
+`while i < len(xs) { if xs[i] < 0 { … বিরাম; } }` body, so for input
+`[1, 2, -3, 4, -5]` (`xs[0] = 1`, not negative) `i` never advances --
+a genuine, fuzzer-introduced infinite loop; (2) the `নিশ্চিত
+positives == 3` assertion was also mutated to the nonsensical
+`নিশ্চিত positives == -9223372036854775808`, irrelevant since the
+program never reaches it. Not a compiler bug -- re-verified against
+the current (BUG-227-fixed) `vanic` binary.
 
 ---
 
@@ -10899,4 +10915,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260823-214334-run-crash-fc72173080/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260823-214334-run-crash-fc72173080/fix_attempt.md`
 
-Status: needs human/frontier root-cause review.
+STATUS: RE-VERIFIED CLEAN (2026-08-23) -- same fuzzer-stripped-
+loop-increment class as the entry above. Confirmed hanging inside
+`lli` (runtime execution), not compile-time SMT -- not the BUG-227
+issue. `diff examples/language/english/scopes.vani tools/localfuzz/
+findings/20260823-214334-run-crash-fc72173080/repro.vani` shows the
+only functional change is a deleted `i = i + 1;` inside `while i < 4 {
+… }`, making `i` never advance past 0 -- a genuine infinite loop in
+the mutated source (plus a harmless duplicated `print counter;`, moot
+since the loop never exits). Not a compiler bug.
