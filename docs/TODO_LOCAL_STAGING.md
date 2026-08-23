@@ -10682,3 +10682,21 @@ Repro: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260822-231804-run-crash-80935b3775/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260823-012201-run-crash-0c3c9b1389
+
+Repro: `tools/localfuzz/findings/20260823-012201-run-crash-0c3c9b1389/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-012201-run-crash-0c3c9b1389/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+Description:
+The vani-compiler project, during its local staging log, encountered a run-crash due to an LLVM backend issue related to `TypedStmt::For` and PHI-based constructs in the loop body. Specifically, the compiler did not properly update `ctx.current_block` within `TypedStmt::For`, leading to a "PHI node entries do not match predecessors!" LLVM verifier crash. The bug was triggered by the standing instruction following BUG-206 and confirmed by auditing the `ctx.current_block` family after this session's Vec-bounds-check family sweep.
+
+The mutant/generated source provided is a regression example for Bug-207 (LLVM backend, `TypedStmt::For`), which involves range-based loops with PHI-based constructs. The mutation introduced was to deliberately audit the context after running the Vec-bounds-check family sweep, ensuring that `ctx.current_block` was updated correctly within the loop body.
+
+Expected behavior: Proper execution of the program without crashing.
+
+Actual behavior: The compiler crashed due to an LLVM verifier error related to PHI node entries not matching predecessors. The bug was resolved by updating `ctx.current_block` in the `TypedStmt::For` codegen, which ensured that the loop's control flow and data dependencies were properly managed.
