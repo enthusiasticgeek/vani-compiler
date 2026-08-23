@@ -10758,3 +10758,12 @@ fn main() -> i64 {
   let hb: Task<i64> = task heartbeat();
 
   //
+
+---
+
+### Candidate: 20260823-044427-run-crash-08beef2b8e
+
+Repro: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260823-044427-run-crash-08beef2b8e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
