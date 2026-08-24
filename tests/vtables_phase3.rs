@@ -455,14 +455,14 @@ fn dyn_dispatch_emits_per_iface_typedefs_and_static_vtable() {
         struct Point { x: i64 }
 
         interface Movable {
-          fn step(self: Point) -> i64;
+          fn advance(self: Point) -> i64;
         }
 
         implement Movable for Point {
-          fn step(self: Point) -> i64 { return self.x + 1; }
+          fn advance(self: Point) -> i64 { return self.x + 1; }
         }
 
-        fn first(d: dyn Movable) -> i64 { return d.step(); }
+        fn first(d: dyn Movable) -> i64 { return d.advance(); }
 
         fn main() -> i64 {
           let p: Point = Point { x: 41 };
@@ -483,7 +483,7 @@ fn dyn_dispatch_emits_per_iface_typedefs_and_static_vtable() {
         "expected per-(T, Iface) static vtable name in:\n{c}"
     );
     assert!(
-        c.contains("intent_trampoline_Point_Movable_0_step"),
+        c.contains("intent_trampoline_Point_Movable_0_advance"),
         "expected trampoline name in:\n{c}"
     );
 }

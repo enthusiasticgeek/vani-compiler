@@ -10,6 +10,11 @@
     "reason": "Round-8 audit (2026-08-09), triaged as a methodology false positive: reads a hardcoded STM32 Cortex-M GPIO peripheral address (mmio_read_u32(0x40020014)) in a Reset_Handler meant for real embedded hardware or QEMU, not native userspace execution. Correctly crashes when run the 'wrong' way; not a compiler bug."
   },
   {
+    "file": "examples/embedded/dma_mmio_trigger.vani",
+    "klass": "SEGV",
+    "reason": "Added 2026-08-19/20 alongside the DMA/scatter-gather tutorial content (commit 05fc880a), baseline entry added 2026-08-24 after CI flagged it as new. Same methodology false positive as the pre-existing bare_metal.vani entry above: writes to a hardcoded STM32F4 DMA2 Stream0 peripheral base address (0x40026010, matching the crash address exactly) meant for real embedded hardware or QEMU, not native userspace execution. Correctly SEGVs when run the 'wrong' way; not a compiler bug."
+  },
+  {
     "file": "examples/language/english/loop_carried_overflow_not_elided.vani",
     "klass": "UBSAN_MAYBE",
     "reason": "Round-8 audit (2026-08-09), triaged low severity, not fixed: the C backend emits vani's i64::MIN literal as `-(int64_t)9223372036854775808LL`, technically UB by the strict C standard (huge-unsigned-to-int64_t conversion + negating an unrepresentable value), but universally implemented as the intended two's-complement value via constant folding on every real compiler/CPU. The program's actual overflow-check logic (__builtin_add_overflow + abort()) is present and correct; this is purely about how the literal itself is spelled in the generated C, not a missing runtime check. No observed wrong output."
