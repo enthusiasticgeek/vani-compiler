@@ -234,13 +234,48 @@ def _stmt_lines(lines):
     return [i for i, l in enumerate(lines) if l.strip().endswith(";")]
 
 
+def _is_slow_prone_position(line):
+    """True when `line` looks like a `sleep_ms(...)` call or a loop-bound
+    (`for ... from/to/downto`, `while ...`) header -- the two shapes that
+    made an i64::MIN/MAX boundary literal produce a "correctly asking for
+    ~9.2 quintillion iterations / a multi-million-year sleep" program
+    instead of a real overflow/bounds-trap repro (BUG_PATTERN_AUDIT_TODO_13.md
+    Priority 4, 2026-08-14 -- 83/341 findings in that round, ~24%, were
+    this exact shape). Text-level heuristic, not a real parse (this
+    mutator has never needed one) -- false positives just mean a few
+    extra lines get the smaller-magnitude pool below, which is harmless;
+    false negatives just mean the occasional slow-timeout finding still
+    gets through, no worse than before this fix.
+    """
+    return (
+        "sleep_ms(" in line
+        or ("for " in line and (" from " in line) and (" to " in line or " downto " in line))
+        or "while " in line
+    )
+
+
 def mut_numeric_boundary(lines, rng):
     lines = lines[:]
     idxs = [i for i, l in enumerate(lines) if re.search(r"(?<![\w.])\d+(?![\w.])", l)]
     if not idxs:
         return lines
     i = rng.choice(idxs)
-    repl = rng.choice(["0", "-1", "1", "9223372036854775807", "-9223372036854775808"])
+    # BUG_PATTERN_AUDIT_TODO_13.md Priority 4: an i64::MIN/MAX literal
+    # landing in a sleep_ms(...) argument or a loop bound doesn't stress
+    # an overflow/bounds trap the way it does everywhere else -- it just
+    # asks for a correctly-specified, deterministically enormous amount
+    # of real wall-clock work, which RUN_TIMEOUT can't distinguish from
+    # a genuine hang. Keep the extreme literals for every OTHER position
+    # (arithmetic/comparison, where they're exactly the interesting case)
+    # and fall back to a smaller-magnitude pool only for these two
+    # shapes -- still varied, still exercises 0/negative/off-by-one
+    # edges, just not ones that turn the whole program into a multi-
+    # million-year sleep or a 2^63-iteration loop.
+    if _is_slow_prone_position(lines[i]):
+        pool = ["0", "-1", "1", "2", "-2", "100", "-100"]
+    else:
+        pool = ["0", "-1", "1", "9223372036854775807", "-9223372036854775808"]
+    repl = rng.choice(pool)
     lines[i] = re.sub(r"(?<![\w.])\d+(?![\w.])", repl, lines[i], count=1)
     return lines
 

@@ -109,9 +109,40 @@ def load_main_docs() -> str:
     return git_show("main:docs/TODO_CURRENT.md") + "\n" + git_show("main:CHANGELOG.md")
 
 
-def check_already_fixed(keywords, main_docs: str) -> str:
+# Signature clusters explicitly triaged in the past and accepted as
+# intentional / non-bug -- NOT "matched, might be fixed, please
+# re-check" (that's the default `check_already_fixed` behavior below),
+# but "matched, and a human already decided on purpose to leave this
+# as-is." Without this table, both cases render identically ("possible
+# match: BUG-N -- rebuild and re-verify"), so an accepted, permanent,
+# by-design divergence gets re-flagged as if-new on every single digest
+# run forever (BUG_PATTERN_AUDIT_TODO_13.md Priority 3, 2026-08-14: 103
+# of 341 findings in that one round, ~30%, were this exact already-
+# triaged pattern). Add an entry here whenever a future round reaches
+# the same "yes it's real, no we're not fixing it" conclusion.
+KNOWN_ACCEPTED = {
+    "BUG-177": (
+        "both C backends (tree-C and SSA-C) abort() with SIGABRT on "
+        "overflow/division/bounds-check traps, while the LLVM backend "
+        "exit(3)s cleanly for the identical case -- deliberately left "
+        "as-is. BUG-115's abort()-to-exit(3) conversion was LLVM-only "
+        "by design and was never extended to either C backend, because "
+        "both C backends already agree WITH EACH OTHER even though "
+        "they disagree with LLVM. See docs/TODO_CURRENT.md's BUG-177 "
+        "writeup (2026-08-11)."
+    ),
+}
+
+
+def check_already_fixed(keywords, main_docs: str) -> tuple:
+    """Returns (kind, text): kind is "" (no match at all), "accepted"
+    (matched a KNOWN_ACCEPTED entry -- collapse to one calm line, this
+    is expected and permanent, not a re-verification lead), or
+    "unverified" (matched a BUG-N mention in main's docs that hasn't
+    been triaged into KNOWN_ACCEPTED -- still a real re-verification
+    lead, same as this function's original/only behavior)."""
     if not keywords or not main_docs:
-        return ""
+        return ("", "")
     for kw in keywords:
         if len(kw) < 8:
             continue
@@ -121,8 +152,10 @@ def check_already_fixed(keywords, main_docs: str) -> str:
             window = main_docs[max(0, idx - 800):idx]
             m = re.findall(r"BUG-(\d+)", window)
             bug_ref = f"BUG-{m[-1]}" if m else "(unknown BUG-N)"
-            return f"possible match: {bug_ref} -- verbatim keyword {kw!r} found in main's docs"
-    return ""
+            if bug_ref in KNOWN_ACCEPTED:
+                return ("accepted", f"{bug_ref} -- {KNOWN_ACCEPTED[bug_ref]}")
+            return ("unverified", f"possible match: {bug_ref} -- verbatim keyword {kw!r} found in main's docs")
+    return ("", "")
 
 
 def load_state() -> dict:
@@ -186,15 +219,24 @@ def main():
     for sig, members in ranked:
         kind, crc, cto, lrc, lto, cerr, lerr = sig
         kws = sig_keywords(sig)
-        fixed_hint = check_already_fixed(kws, main_docs)
+        fixed_kind, fixed_text = check_already_fixed(kws, main_docs)
         lines.append(f"## [{len(members)}x] {kind} -- c.rc={crc} c.timeout={cto} "
                       f"llvm.rc={lrc} llvm.timeout={lto}")
         if cerr:
             lines.append(f"- C stderr class: `{cerr}`")
         if lerr:
             lines.append(f"- LLVM stderr class: `{lerr}`")
-        if fixed_hint:
-            lines.append(f"- **⚠ {fixed_hint} -- rebuild against latest main and re-verify "
+        if fixed_kind == "accepted":
+            # Collapsed, calm line -- explicitly triaged already, not a
+            # re-verification lead. Skip the "all: <every finding dir>"
+            # list too (that's exactly the noise this table exists to
+            # cut -- see KNOWN_ACCEPTED's docstring above).
+            lines.append(f"- ✓ accepted, see {fixed_text}")
+            lines.append(f"- example: `findings/{members[0]}/`")
+            lines.append("")
+            continue
+        if fixed_kind == "unverified":
+            lines.append(f"- **⚠ {fixed_text} -- rebuild against latest main and re-verify "
                           f"before treating this as new**")
         lines.append(f"- example: `findings/{members[0]}/`")
         if len(members) > 1:
