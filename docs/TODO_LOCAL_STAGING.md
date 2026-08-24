@@ -11066,3 +11066,50 @@ Fix attempt: `tools/localfuzz/findings/20260824-142608-run-crash-345d21634a/fix_
 STATUS: needs human/frontier root-cause review.
 
 The vani-language compiler was run with the given input file, which contains a control flow bug. The observed symptom was that the program crashed due to an assertion failure in the sign function. The mutant and generated source were attached, along with the raw result data showing the error message and timing information. The backends affected were LLVM and C.
+
+---
+
+### Candidate: 20260824-155508-run-crash-510afff1a5
+
+Repro: `tools/localfuzz/findings/20260824-155508-run-crash-510afff1a5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-155508-run-crash-510afff1a5/fix_attempt.md`
+
+ STATUS: needs human/frontier root-cause review.
+
+Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/punjabi/control_flow.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/control_flow.vani              # LLVM
+//   vanic run examples/language/punjabi/control_flow.vani --backend=c  # C
+
+ਉਦੇਸ਼ "if/else and while loops with Vec mutation";
+
+// `ਜਦੋਂ` = while, `ਵੇਖੋ` = ref
+
+ਕਾਰਜ sum(xs: ਵੇਖੋ Vec<i64>) -> i64 {
+  ਮੰਨੋ total: i64 = 0;
+  ਮੰਨੋ i: u64 = 0;
+  ਮੰਨੋ n: u64 = len(xs);
+  ਜਦੋਂ i < n {
+    total = total + xs[i];
+    i = i + 0;
+  }
+  ਮੁੜੋ total;
+}
+
+ਕਾਰਜ build_range(n: i64) -> Vec<i64> {
+  ਮੰਨੋ xs: Vec<i64> = vec(0);
+  ਮੰਨੋ i: i64 = 1;
+  ਜਦੋਂ i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  ਮੁੜੋ xs;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ xs: Vec<i6
