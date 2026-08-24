@@ -11055,3 +11055,14 @@ BACKENDS AFFECTED:
 
 CURRENT STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260824-142608-run-crash-345d21634a
+
+Repro: `tools/localfuzz/findings/20260824-142608-run-crash-345d21634a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-142608-run-crash-345d21634a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-language compiler was run with the given input file, which contains a control flow bug. The observed symptom was that the program crashed due to an assertion failure in the sign function. The mutant and generated source were attached, along with the raw result data showing the error message and timing information. The backends affected were LLVM and C.
