@@ -10987,3 +10987,12 @@ Fix attempt: `tools/localfuzz/findings/20260824-032314-backend-divergence-9a541b
 The vani-compiler project encountered a backend-divergence issue with the mutant/generated source provided. Upon running the program using both LLVM and C backends, I observed divergent output due to unused variables in the `heartbeat_log` function. Specifically, the variable `hb` was declared but not referenced after its declaration. This warning was reported by the compiler as a warning for the line at `/tmp/localfuzz/candidate.vani:102`.
 
 **Status: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260824-034531-run-crash-1a50b0f96a
+
+Repro: `tools/localfuzz/findings/20260824-034531-run-crash-1a50b0f96a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-034531-run-crash-1a50b0f96a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
