@@ -10924,3 +10924,54 @@ only functional change is a deleted `i = i + 1;` inside `while i < 4 {
 … }`, making `i` never advance past 0 -- a genuine infinite loop in
 the mutated source (plus a harmless duplicated `print counter;`, moot
 since the loop never exits). Not a compiler bug.
+
+---
+
+## 2026-08-24 full re-verification of every "unverified" cluster in digests/20260824-013253.md
+
+Refreshed the worktree first (`refresh.sh`, merged 5 main commits
+including today's `step`/L32/localfuzz-tooling work, rebuilt), then
+directly re-ran a representative repro from each of the 11 clusters
+`digest.py` flagged "possible match, please re-verify" -- not trusting
+the digest's own keyword-match heuristic alone. **Zero open bugs
+found.** Every cluster is one of:
+
+- **Confirmed newly fixed** (both backends now succeed with matching
+  output, where the finding originally recorded a crash/divergence):
+  BUG-76 cluster (`20260803-143426-*`, Mongolian control-flow),
+  BUG-88 cluster (`20260803-112411-*`, Nepali box-recursive-drop),
+  BUG-201/getelementptr cluster (`20260817-002925-*`), and the
+  `free(): invalid pointer` cluster (`20260818-235449-*`, union-find
+  redundant-union example). All four print identical output on both
+  backends now.
+- **No longer diverging** (both backends now agree on rc + message,
+  where the finding originally recorded a mismatch): both "division
+  by zero" clusters (`20260812-012958-*`, `20260808-184931-*`, now
+  `rc=3` on both) and the non-timeout "assertion failed:" cluster
+  (`20260804-201316-*`, now `rc=3`/matching message on both).
+- **Same BUG-177-class pattern, just a different exact message text**
+  (so `digest.py`'s verbatim-keyword match against `docs/TODO_CURRENT.md`
+  didn't identify a BUG-N to compare against `KNOWN_ACCEPTED`): both
+  "loop bound out of vec range" clusters (`20260818-210209-*`,
+  `20260809-060704-*`) -- C backend `abort()`s (SIGABRT=134) while
+  LLVM `exit(3)`s cleanly for the identical out-of-bounds condition,
+  the exact BUG-177 shape (`docs/TODO_CURRENT.md`, 2026-08-11:
+  "Consistent across BOTH C backends... treated as accepted/
+  intentional design, not a bug") just with `RUN_TIMEOUT`'s specific
+  bounds-check message instead of a generic one. Genuinely accepted,
+  not chased further -- `KNOWN_ACCEPTED`'s coverage is intentionally
+  narrow (verbatim BUG-N doc match only); broadening it to catch every
+  message variant of this same shape would need matching on the
+  rc-pattern itself, not text, which is a bigger `digest.py` redesign
+  than this pass's scope.
+- **Already-documented, non-bug patterns**: the timeout "assertion
+  failed:" cluster (`20260813-144531-*`) is exactly L27's own
+  documented second trigger (`while i < 9223372036854775807 { i = i +
+  1; }` -- `vanic run`'s LLVM JIT skips `opt`, so it genuinely executes
+  every iteration; `--backend=c` finishes almost instantly). The
+  double-timeout cluster (`20260803-171656-*`) is the Priority-4
+  "correctly asking for an enormous amount of real work" pattern --
+  exactly what today's `harness.py` mutator fix (see the commit right
+  before this one) now biases away from for *future* findings; this
+  specific existing one predates that fix and is left as historical
+  record, not re-triaged further.
