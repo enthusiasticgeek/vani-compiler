@@ -11034,3 +11034,24 @@ Fix attempt: `tools/localfuzz/findings/20260824-105722-backend-divergence-645ee6
 }
 ```
 
+
+---
+
+### Candidate: 20260824-112916-run-crash-692401b685
+
+Repro: `tools/localfuzz/findings/20260824-112916-run-crash-692401b685/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-112916-run-crash-692401b685/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+```
+vani-compiler-localfuzz/examples/language/english/set_mut.vani --backend=c
+
+ERROR: Program crashed with exit code 255.
+
+BACKENDS AFFECTED:
+    LLVM backend
+    C backend
+
+CURRENT STATUS: needs human/frontier root-cause review.
+```
