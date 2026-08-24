@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.9.6] — 2026-08-24
+
+Same-day CI-fix follow-up to v0.9.5. See `RELEASE_NOTES/v0.9.6.md` for
+the full writeup.
+
+### Fixed
+
+- `tests/vtables_phase3.rs` used `step` as an interface method name,
+  colliding with v0.9.5's new `step` keyword — renamed to `advance`.
+- `tools/leak_sweep_baseline.json` was missing an entry for
+  `examples/embedded/dma_mmio_trigger.vani`'s expected ASan SEGV
+  (hardcoded hardware peripheral address, not runnable as a native
+  userspace process by design) — same pattern as the existing
+  `bare_metal.vani` entry.
+
+---
+
 ## [v0.9.5] — 2026-08-24
 
 Consolidates 21 bug fixes (BUG-202 through BUG-227) plus L29 (fully) and
