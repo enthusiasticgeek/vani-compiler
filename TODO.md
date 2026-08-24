@@ -7,7 +7,7 @@
 
 ## Current status (as of 2026-08-12)
 
-- **Version**: `0.9.5` (tagged v0.1.0 through v0.9.5; see RELEASING.md for full history).
+- **Version**: `0.9.6-dev` (tagged v0.1.0 through v0.9.6-dev; see RELEASING.md for full history).
   (2026-08-12). See [RELEASING.md](RELEASING.md) for the full version
   history and [CHANGELOG.md](CHANGELOG.md) for release-by-release detail.
 - **Tests**: 2906 lib tests passing, **0 failing**, plus 12 other test
