@@ -10975,3 +10975,15 @@ found.** Every cluster is one of:
   before this one) now biases away from for *future* findings; this
   specific existing one predates that fix and is left as historical
   record, not re-triaged further.
+
+---
+
+### Candidate: 20260824-032314-backend-divergence-9a541b39fb
+
+Repro: `tools/localfuzz/findings/20260824-032314-backend-divergence-9a541b39fb/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-032314-backend-divergence-9a541b39fb/fix_attempt.md`
+
+**Staging Entry:**
+The vani-compiler project encountered a backend-divergence issue with the mutant/generated source provided. Upon running the program using both LLVM and C backends, I observed divergent output due to unused variables in the `heartbeat_log` function. Specifically, the variable `hb` was declared but not referenced after its declaration. This warning was reported by the compiler as a warning for the line at `/tmp/localfuzz/candidate.vani:102`.
+
+**Status: needs human/frontier root-cause review.
