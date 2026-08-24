@@ -215,6 +215,14 @@ vanic test                 # scans the whole package, cargo-test style
 Outside any package (no `vani.toml` in the cwd or an ancestor), you
 still need to pass a path explicitly -- the error message says so.
 
+A package's `src/` tree almost always has ordinary library files
+alongside your actual tests -- a module with neither `#[test]` fns
+nor a top-level `fn main`. `vanic test` correctly skips those (they're
+not a test in either sense), so a bare `vanic test` from a package
+root only ever reports on files that are actually harness-mode or
+Legacy-mode tests, never fails on a plain library file just because it
+has no `fn main`.
+
 ---
 
 ## Faster suites: parallel execution by default
