@@ -2363,6 +2363,29 @@ impl Parser {
             });
         }
 
+        // L32: `नियोग<T>` (Task<R>'s Devanagari spelling) can't fall
+        // through to a plain `Ident` the way ASCII `Task` does --
+        // Devanagari has no case distinction, so नियोग always lexes
+        // to the reserved `TokenKind::Task` (same token the
+        // statement-form spawn `नियोग <fn_call>()` uses), regardless
+        // of position. `parse_type` is only ever called from a type
+        // position (after `:`, inside `<...>`, etc.), never from
+        // statement position -- the spawn-statement dispatch that
+        // also checks for `TokenKind::Task` lives in a separate
+        // function and runs first, so there's no ambiguity between
+        // the two call sites. Mirrors the `Ident("Task")` branch
+        // below exactly (same `<`-lookahead to distinguish bare
+        // `Task` from `Task<R>`).
+        if matches!(self.current().kind, TokenKind::Task) {
+            self.bump();
+            if self.check(|kind| matches!(kind, TokenKind::Less)) {
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let inner = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::TaskR(Box::new(inner)));
+            }
+            return Ok(Type::Task);
+        }
         // `Str` is recognized as a type via the ident token. It's
         // not a lexer keyword because the identifier `Str` may also
         // come up elsewhere; the type position is the only place we
@@ -4473,6 +4496,21 @@ impl Parser {
             ));
         }
         let end = self.parse_expr()?;
+        // `step EXPR` -- stride clause, sequential loops only (L29
+        // follow-up). Same slot both here and in the SOV parser use
+        // for `invariant`/`reduce`: after the range bounds, before
+        // the body.
+        let step = if let Some(step_tok) = self.match_token(|k| matches!(k, TokenKind::Step)) {
+            if parallel {
+                return Err(Diagnostic::new(
+                    step_tok.span,
+                    "'parallel for' does not support 'step' -- non-unit strides are sequential-only for now",
+                ));
+            }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
         if !reductions.is_empty() && !parallel {
@@ -4494,6 +4532,7 @@ impl Parser {
             parallel,
             reductions,
             descending,
+            step,
         })
     }
 
@@ -4540,6 +4579,17 @@ impl Parser {
                 "'parallel for' does not support 'downto' -- descending ranges are English-only, sequential for now",
             ));
         }
+        let step = if let Some(step_tok) = self.match_token(|k| matches!(k, TokenKind::Step)) {
+            if parallel {
+                return Err(Diagnostic::new(
+                    step_tok.span,
+                    "'parallel for' does not support 'step' -- non-unit strides are sequential-only for now",
+                ));
+            }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
         if !reductions.is_empty() && !parallel {
@@ -4564,6 +4614,7 @@ impl Parser {
             parallel,
             reductions,
             descending,
+            step,
         })
     }
 

@@ -1193,12 +1193,28 @@ fn wcet_stmt(
             Some(c.saturating_add(t.max(e)).saturating_add(2))
         }
         S::While { .. } => None, // unbounded — no static iteration count
-        S::For { start, end, body, descending, .. } => {
+        S::For { start, end, step, body, descending, .. } => {
             let start_const = const_int(start);
             let end_const = const_int(end);
-            let iters = match (start_const, end_const) {
-                (Some(s), Some(e)) if !descending && e >= s => (e - s) as u64,
-                (Some(s), Some(e)) if *descending && s >= e => (s - e) as u64,
+            // L29 follow-up: the trip count is now a ceiling
+            // division by `step` (default 1, same as the original
+            // `e - s` count when step is 1) -- only computable when
+            // `step`, like `start`/`end`, is ALSO a compile-time
+            // constant; a non-constant step falls back to `None`
+            // (unbounded), same as a non-constant start/end already
+            // does today.
+            let step_const = const_int(step);
+            let iters = match (start_const, end_const, step_const) {
+                (Some(s), Some(e), Some(st)) if st > 0 && !descending && e >= s => {
+                    let diff = (e - s) as u64;
+                    let st = st as u64;
+                    (diff + st - 1) / st
+                }
+                (Some(s), Some(e), Some(st)) if st > 0 && *descending && s >= e => {
+                    let diff = (s - e) as u64;
+                    let st = st as u64;
+                    (diff + st - 1) / st
+                }
                 _ => return None,
             };
             let body_cycles = wcet_body(body, fn_map, visiting, recursion_bound)?;

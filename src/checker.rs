@@ -3472,9 +3472,10 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
         S::FieldAssign { object, value, .. } => {
             expr_mentions_var(object, name) || expr_mentions_var(value, name)
         }
-        S::For { start, end, invariants, body, .. } => {
+        S::For { start, end, step, invariants, body, .. } => {
             expr_mentions_var(start, name)
                 || expr_mentions_var(end, name)
+                || step.as_ref().is_some_and(|e| expr_mentions_var(e, name))
                 || invariants.iter().any(|e| expr_mentions_var(e, name))
                 || body.iter().any(|s| stmt_mentions_var(s, name))
         }
@@ -3809,9 +3810,12 @@ fn walk_stmt_for_captures(
             walk_expr_for_captures(object, bound, env, top_level_names, captures, seen);
             walk_expr_for_captures(value, bound, env, top_level_names, captures, seen);
         }
-        S::For { var, start, end, invariants, body, .. } => {
+        S::For { var, start, end, step, invariants, body, .. } => {
             walk_expr_for_captures(start, bound, env, top_level_names, captures, seen);
             walk_expr_for_captures(end, bound, env, top_level_names, captures, seen);
+            if let Some(step_expr) = step {
+                walk_expr_for_captures(step_expr, bound, env, top_level_names, captures, seen);
+            }
             bound.insert(var.clone());
             for inv in invariants {
                 walk_expr_for_captures(inv, bound, env, top_level_names, captures, seen);
@@ -12211,9 +12215,9 @@ fn inject_shallow_free_before_returns(
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions, descending,
+                    label, var, ty, start, end, parallel, reductions, descending, step,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
@@ -12288,9 +12292,9 @@ fn inject_before_matching_continues(
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions, descending,
+                    label, var, ty, start, end, parallel, reductions, descending, step,
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
@@ -15782,6 +15786,7 @@ fn check_one_stmt(
             parallel,
             reductions,
             descending,
+            step,
         } => {
             verify_call_args_in_expr(start, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(end, smt_facts, env, signatures, diagnostics);
@@ -15881,12 +15886,66 @@ fn check_one_stmt(
                 }
             }
 
+            // L29 follow-up: `step EXPR` -- type-check like start/end
+            // (must be an integer), then reject a KNOWN non-positive
+            // constant outright. Unlike the to/downto direction
+            // mismatch above (a warning -- equal bounds are a
+            // legitimate empty-range edge case), there is no
+            // legitimate reading of `step 0` or a negative step, so
+            // this is a hard error, not a warning. A non-constant
+            // step (e.g. a variable or parameter) can't be judged
+            // here -- it gets a runtime guard in each backend
+            // instead, mirroring every other "prove at compile time
+            // when possible, trap at runtime otherwise" check in this
+            // compiler (divisor-zero, shift amount, etc.).
+            let step_checked = if let Some(step_expr) = step {
+                verify_call_args_in_expr(step_expr, smt_facts, env, signatures, diagnostics);
+                let checked = check_expr(step_expr, env, signatures, diagnostics);
+                if !checked.ty().is_integer() {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            step_expr.span,
+                            format!("for-loop 'step' must be an integer, got {}", checked.ty()),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()),
+                    );
+                    return false;
+                }
+                if let Some(TypedConst::Int(v)) = checked.constant() {
+                    if *v <= 0 {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                step_expr.span,
+                                format!(
+                                    "'step {v}' is invalid -- a for-loop stride must be a \
+                                     positive integer (got {v})",
+                                ),
+                            )
+                            .with_elaboration(crate::diagnostic_elaborations::for_step_non_positive(*v)),
+                        );
+                        return false;
+                    }
+                }
+                Some(checked)
+            } else {
+                None
+            };
+
             let Some(loop_ty) = promoted_integer_type(&start_checked, &end_checked, diagnostics)
             else {
                 return false;
             };
             let start_coerced = coerce_numeric_operand(start_checked, &loop_ty);
             let end_coerced = coerce_numeric_operand(end_checked, &loop_ty);
+            let step_coerced = match step_checked {
+                Some(checked) => coerce_numeric_operand(checked, &loop_ty),
+                None => CheckedExpr::new(
+                    TypedExprKind::Int(1),
+                    loop_ty.clone(),
+                    Some(TypedConst::Int(1)),
+                    *span,
+                ),
+            };
 
             let pre_env = env.clone();
             let pre_facts = smt_facts.clone();
@@ -16063,7 +16122,12 @@ fn check_one_stmt(
                 let mut summary = collect_last_reassigns_with_env(body_stmts, env);
                 // Implicit auto-increment (ascending `to`) or
                 // auto-decrement (descending `downto`) of the loop
-                // variable, each iteration.
+                // variable, each iteration -- by `step` (default 1
+                // when the source omitted the clause).
+                let step_source = step.clone().unwrap_or(Expr {
+                    kind: ExprKind::Int(1),
+                    span: *span,
+                });
                 summary.subs.insert(
                     var.clone(),
                     Expr {
@@ -16073,10 +16137,7 @@ fn check_one_stmt(
                                 kind: ExprKind::Var(var.clone()),
                                 span: *span,
                             }),
-                            right: Box::new(Expr {
-                                kind: ExprKind::Int(1),
-                                span: *span,
-                            }),
+                            right: Box::new(step_source),
                         },
                         span: *span,
                     },
@@ -16292,6 +16353,7 @@ fn check_one_stmt(
                 parallel: *parallel,
                 reductions: typed_reductions,
                 descending: *descending,
+                step: step_coerced.expr,
             });
             false
         }
@@ -38391,6 +38453,150 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
     }
 }
 
+/// BUG-227: prune `facts` down to the subset relevant to `goal`, via a
+/// transitive closure over shared variable names (drawn from `vars`,
+/// the full in-scope binding list already computed by the caller).
+/// Starts from the variables the goal itself mentions, then repeatedly
+/// pulls in any fact that mentions an already-relevant variable
+/// (adding its own variables to the relevant set), until a full pass
+/// adds nothing new. See the call site in `prove_with_calls_extra` for
+/// why this matters: it's the difference between an expensive fact
+/// (e.g. an `f64` division) being solved once versus re-solved from
+/// scratch by z3 for every unrelated proof later in the same function.
+/// Like `expr_mentions`, but a `Var("xs#3")` (a version-suffixed
+/// synthetic name -- see `parse_versioned_name` in smt.rs and the
+/// `__smt_store_eq` bridging fact emitted by `IndexAssign` handling)
+/// counts as mentioning base name `"xs"`. `filter_relevant_facts`
+/// needs this because `vars` only ever holds the bare binding name
+/// ("xs"), never any of its versioned forms, but a fact can easily
+/// only reference a versioned form (the store-eq bridge between two
+/// array versions references *only* `xs#N`/`xs#N+1`, never bare
+/// `xs`) -- matching by exact string equality would make such a fact
+/// permanently invisible to the relevance closure and drop it
+/// unconditionally, regardless of the Vec/Array seeding above.
+fn expr_mentions_versioned(expr: &Expr, name: &str) -> bool {
+    fn matches_base(n: &str, name: &str) -> bool {
+        n == name || n.rsplit_once('#').map(|(base, _)| base) == Some(name)
+    }
+    match &expr.kind {
+        ExprKind::Var(n) => matches_base(n, name),
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) => false,
+        ExprKind::Unary { expr, .. } => expr_mentions_versioned(expr, name),
+        ExprKind::Binary { left, right, .. } => {
+            expr_mentions_versioned(left, name) || expr_mentions_versioned(right, name)
+        }
+        ExprKind::Cast { expr, .. } => expr_mentions_versioned(expr, name),
+        ExprKind::Call { args, .. } => args.iter().any(|a| expr_mentions_versioned(a, name)),
+        ExprKind::MethodCall { receiver, args, .. } => {
+            expr_mentions_versioned(receiver, name) || args.iter().any(|a| expr_mentions_versioned(a, name))
+        }
+        ExprKind::ArrayLit { elements } => elements.iter().any(|e| expr_mentions_versioned(e, name)),
+        ExprKind::Index { array, index } => {
+            expr_mentions_versioned(array, name) || expr_mentions_versioned(index, name)
+        }
+        ExprKind::Len { array } => expr_mentions_versioned(array, name),
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => expr_mentions_versioned(inner, name),
+        ExprKind::Tuple(elements) => elements.iter().any(|e| expr_mentions_versioned(e, name)),
+        ExprKind::TupleAccess { tuple, .. } => expr_mentions_versioned(tuple, name),
+        ExprKind::StructLit { fields, .. } => {
+            fields.iter().any(|(_, e)| expr_mentions_versioned(e, name))
+        }
+        ExprKind::FieldAccess { object, .. } => expr_mentions_versioned(object, name),
+        ExprKind::Match { scrutinee, arms } => {
+            expr_mentions_versioned(scrutinee, name)
+                || arms.iter().any(|a| {
+                    expr_mentions_versioned(&a.body, name)
+                        || a.guard.as_ref().map_or(false, |g| expr_mentions_versioned(g, name))
+                })
+        }
+        ExprKind::IfExpr { cond, then_value, else_value } => {
+            expr_mentions_versioned(cond, name)
+                || expr_mentions_versioned(then_value, name)
+                || expr_mentions_versioned(else_value, name)
+        }
+        ExprKind::Block { stmts, tail } => {
+            stmts.iter().any(|s| match s {
+                Stmt::Let { expr, .. } => expr_mentions_versioned(expr, name),
+                _ => false,
+            }) || expr_mentions_versioned(tail, name)
+        }
+        ExprKind::Try { inner } => expr_mentions_versioned(inner, name),
+        ExprKind::WhileLoop { cond, body, .. } => {
+            expr_mentions_versioned(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
+        }
+        ExprKind::Forall { var, body, .. } => {
+            if var == name { false } else { expr_mentions_versioned(body, name) }
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            expr_mentions_versioned(callee, name) || args.iter().any(|a| expr_mentions_versioned(a, name))
+        }
+        ExprKind::AnonFn { .. } => {
+            unreachable!("AnonFn should have been lifted before expr_mentions_versioned")
+        }
+        ExprKind::TaskSpawnCall { args, .. } => args.iter().any(|a| expr_mentions_versioned(a, name)),
+        ExprKind::TaskJoinExpr { name: n, .. } => matches_base(n, name),
+    }
+}
+
+fn filter_relevant_facts(
+    goal: &Expr,
+    facts: Vec<Expr>,
+    vars: &[(String, Type)],
+) -> Vec<Expr> {
+    // Array/Vec-typed variables are always seeded as relevant, never
+    // pruned-into-relevance only via the goal. Their SMT encoding
+    // involves extra machinery keyed by `versions` (per-name array
+    // generation counters -- see `emit_versioned_array_declarations`
+    // / `array_versions()`) that lives outside this function's plain
+    // variable-name view of a fact/goal, so a fact that looks
+    // unrelated by name alone (e.g. it was recorded against an
+    // earlier version of the same array) can still be load-bearing
+    // for versioned-array reasoning (bounds, slot-preservation across
+    // `IndexAssign`, etc). Scalar (int/float/bool) facts don't have
+    // this hidden channel, so pruning them by name closure alone
+    // (the actual fix for BUG-227's slow-division-fact problem,
+    // e.g. `vani-matrix`'s `mat_inv_3x3`) stays safe.
+    let mut relevant: std::collections::HashSet<&str> = vars
+        .iter()
+        .filter(|(_, ty)| matches!(ty.deref(), Type::Vec(_) | Type::Array { .. }))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    relevant.extend(
+        vars.iter()
+            .map(|(n, _)| n.as_str())
+            .filter(|n| expr_mentions_versioned(goal, n)),
+    );
+    let mut kept = vec![false; facts.len()];
+    loop {
+        let mut changed = false;
+        for (i, f) in facts.iter().enumerate() {
+            if kept[i] {
+                continue;
+            }
+            let mentioned: Vec<&str> = vars
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .filter(|n| expr_mentions_versioned(f, n))
+                .collect();
+            if mentioned.iter().any(|n| relevant.contains(n)) {
+                kept[i] = true;
+                changed = true;
+                for n in mentioned {
+                    relevant.insert(n);
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    facts
+        .into_iter()
+        .zip(kept)
+        .filter_map(|(f, k)| k.then_some(f))
+        .collect()
+}
+
 /// Remove every fact in `smt_facts` that references the binding
 /// `name`. Used when `name` is reassigned/shadowed: the old binding's
 /// facts no longer describe the current value, and keeping them risks
@@ -38598,7 +38804,7 @@ fn strip_reduction_uses(
                         body: rec(body, reductions, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs, descending } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs, descending, step } => {
                     if any_read_of_reductions(start, reductions)
                         || any_read_of_reductions(end, reductions)
                     {
@@ -38614,6 +38820,7 @@ fn strip_reduction_uses(
                         parallel: *parallel,
                         reductions: rs.clone(),
                         descending: *descending,
+                        step: step.clone(),
                     });
                 }
                 other => {
@@ -38722,7 +38929,7 @@ fn strip_safe_same_index_writes(
                         body: rec(body, loop_var, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                     out.push(TypedStmt::For {
                         label: label.clone(),
                         var: var.clone(),
@@ -38743,6 +38950,7 @@ fn strip_safe_same_index_writes(
                         parallel: *parallel,
                         reductions: reductions.clone(),
                         descending: *descending,
+                        step: step.clone(),
                     });
                 }
                 other => out.push(other.clone()),
@@ -41699,6 +41907,28 @@ fn prove_with_calls_extra(
         .collect();
     rewritten_facts.extend(extra_facts);
     vars.extend(fresh_vars);
+
+    // BUG-227: drop facts that share no variable (even transitively)
+    // with the goal before handing the query to z3. Every fact
+    // accumulated so far in the function (every prior `let`-derived
+    // equality, struct-field binding, etc.) was unconditionally
+    // forwarded to *every* subsequent proof in the same function --
+    // including ones that can't possibly depend on it. This is sound
+    // to prune: BitVec/FP/Bool SMT theories have no hidden coupling
+    // between variables that never co-occur in an assertion, so a
+    // fact whose variables never connect back to the goal cannot
+    // affect the goal's provability. In practice this matters a lot:
+    // a single `f64` division fact (`inv = 1.0 / d`) is extremely
+    // expensive for z3 to bit-blast (multi-second per query), and
+    // without this filter that cost was re-paid from scratch on
+    // *every* later bounds-check / requires / ensures proof in the
+    // same function, even ones about unrelated integer indices --
+    // e.g. `vani-matrix`'s `mat_inv_3x3` (one division, nine
+    // subsequent array-bounds proofs) took ~30s to verify; the whole
+    // `vani-matrix`/`vani-algebra` dependency chain (pulled in
+    // transitively by `vani-symbolic`/`vani-ml`) made full SMT
+    // verification effectively hang.
+    let rewritten_facts = filter_relevant_facts(&prove_rewritten, rewritten_facts, &vars);
 
     let versions = env.array_versions();
     let verdict = try_prove(&prove_rewritten, &rewritten_facts, &vars, &versions);

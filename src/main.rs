@@ -679,9 +679,14 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         }
         // `downto` (descending) for-loops aren't lowered by the SSA
         // pass yet -- route through tree-C / tree-LLVM, which fully
-        // support them. Ascending `to` loops are unaffected.
-        TypedStmt::For { start, end, body, descending, .. } => {
+        // support them. Ascending `to` loops are unaffected. Same
+        // exclusion for a non-default `step` (L29 follow-up,
+        // 2026-08-23): `step` is always present at this typed level
+        // (defaults to a typed `Int(1)` constant), so "no step
+        // clause in the source" is "step's constant is exactly 1".
+        TypedStmt::For { start, end, step, body, descending, .. } => {
             !descending
+                && step.constant == Some(vani::ir::TypedConst::Int(1))
                 && expr_ssa_supported(start)
                 && expr_ssa_supported(end)
                 && stmts_ssa_supported(body, extra_reject)
@@ -3043,7 +3048,7 @@ fn run() -> Result<ExitCode, String> {
             }
             let mut plans: Vec<FileTestPlan> = Vec::with_capacity(files.len());
             for path in &files {
-                let harness_fns_all = detect_harness_test_fns(path);
+                let (harness_fns_all, has_main) = detect_harness_test_fns_and_main(path);
                 let mut harness_fns = harness_fns_all.clone();
                 if let Some(f) = &filter {
                     harness_fns.retain(|t| {
@@ -3056,6 +3061,18 @@ fn run() -> Result<ExitCode, String> {
                     plans.push(FileTestPlan::Skip);
                 } else if !harness_fns.is_empty() {
                     plans.push(FileTestPlan::Harness(harness_fns));
+                } else if !has_main {
+                    // BUG-226: neither `#[test]` fns nor `fn main` --
+                    // an ordinary library/module file (e.g. a Kosh
+                    // package's `src/lib.vani`, or any `use`d module
+                    // with no entry point of its own), not a test in
+                    // either sense. Used to fall through to Legacy
+                    // mode below, which requires `fn main` and so
+                    // always failed with "program must define fn
+                    // main() -> i64" -- a false positive on every
+                    // bare `vanic test` run over a package/directory
+                    // that contains any non-runnable module file.
+                    plans.push(FileTestPlan::Skip);
                 } else if filter
                     .as_ref()
                     .is_some_and(|f| !path.display().to_string().contains(f.as_str()))
@@ -4564,12 +4581,37 @@ struct HarnessTestFn {
     should_panic: bool,
 }
 
-fn detect_harness_test_fns(path: &Path) -> Vec<HarnessTestFn> {
+/// Detects every `#[test]` fn in a file, and also reports whether it
+/// declares a top-level `fn main() -> i64` (no params, matching the
+/// exact check `run_test_function` already uses to strip an existing
+/// `main` before synthesizing its own). BUG-226: a file with NEITHER
+/// `#[test]` fns NOR `fn main` -- an ordinary library/module file, the
+/// overwhelmingly common shape of a Kosh package's `src/lib.vani` (or
+/// any `use "other.vani";`-included module file with no entry point
+/// of its own) -- used to fall through to "Legacy" mode purely by
+/// elimination once `harness_fns` came back empty, which requires
+/// `fn main` and therefore ALWAYS fails for such a file with "program
+/// must define fn main() -> i64". Confirmed live: bare `vanic test`
+/// from any Kosh package root (the Test-fw Phase E default, which
+/// recurses the whole package tree) reports its own `src/lib.vani` as
+/// a spurious "FAILED (compile)" result -- not a real problem with
+/// the package, a false positive in test discovery itself. The
+/// original Phase E comment reasoned `detect_harness_test_fns` "only
+/// ever picks up genuine `#[test]`-containing, main-less files, so
+/// this is safe even if a dependency happens to ship one" -- true for
+/// what it detects, but didn't account for the fall-through case: a
+/// file that's neither. The call site now treats "no `#[test]` fns
+/// AND no `fn main`" as its own case (skip, not a test file at all),
+/// distinct from "no `#[test]` fns but has `fn main`" (still runs
+/// Legacy mode exactly as before -- that shape is a genuine
+/// standalone runnable program, and "does it exit 0" is still the
+/// right smoke test for it).
+fn detect_harness_test_fns_and_main(path: &Path) -> (Vec<HarnessTestFn>, bool) {
     let Ok(source) = fs::read_to_string(path) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let Ok(tokens) = vani::lexer::lex(&source) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     let (program, _parse_errors) = vani::parser::parse(tokens);
     // Test-fw Phase A (2026-08-14): a file may define `#[test]` fns
@@ -4581,7 +4623,7 @@ fn detect_harness_test_fns(path: &Path) -> Vec<HarnessTestFn> {
     // original `main` before synthesizing its own, so this can
     // report every `#[test]` fn regardless of whether `fn main` is
     // also there.
-    program
+    let test_fns = program
         .functions
         .iter()
         .filter(|f| f.is_test)
@@ -4589,7 +4631,12 @@ fn detect_harness_test_fns(path: &Path) -> Vec<HarnessTestFn> {
             name: f.name.clone(),
             should_panic: f.is_should_panic,
         })
-        .collect()
+        .collect();
+    let has_main = program
+        .functions
+        .iter()
+        .any(|f| f.name == "main" && f.params.is_empty());
+    (test_fns, has_main)
 }
 
 /// Compile+run a single `#[test]` fn from `path` in isolation: write

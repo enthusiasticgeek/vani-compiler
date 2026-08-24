@@ -168,8 +168,17 @@ not a quick pickup.
 ## "matched, already fixed" from "matched, explicitly accepted as
 ## non-bug"
 
-**Status: not a compiler bug -- a `tools/localfuzz/digest.py`
-usability gap, found while triaging this round's clusters.**
+**Status: FIXED 2026-08-24 -- see `tools/localfuzz/digest.py`'s
+`KNOWN_ACCEPTED` table on the `local-fuzz-findings` branch (commit
+`3fade5ad`; not on `main` -- these tools live only on that branch,
+same as `harness.py`/`digest.py` themselves). Verified against a
+real `--all` re-scan of the 460 accumulated findings: the 13 clusters
+matching BUG-177 now collapse to a single calm "accepted, see BUG-177"
+line each (no more spelling out every one of the ~100+ finding
+directories in that pattern), while the 11 genuinely-unverified
+clusters are untouched. Not a compiler bug -- a
+`tools/localfuzz/digest.py` usability gap, found while triaging this
+round's clusters.**
 
 ~103 of this round's 341 findings (48+35+10+7+2+1 signature
 occurrences, all variants of "C backend `abort()`s with SIGABRT=134,
@@ -208,8 +217,19 @@ doesn't affect compiler correctness, just triage ergonomics.
 ## Priority 4 (LOW, tooling) -- fuzzer mutator over-produces
 ## "correctly very slow" programs, not bugs
 
-**Status: not a compiler bug -- a `tools/localfuzz/harness.py`
-mutator-quality observation.**
+**Status: FIXED 2026-08-24 -- see `tools/localfuzz/harness.py`'s
+`_is_slow_prone_position` heuristic on the `local-fuzz-findings`
+branch (commit `3fade5ad`). `mut_numeric_boundary` now falls back to
+a smaller-magnitude literal pool when the mutated literal sits inside
+a `sleep_ms(...)` call or a `for`/`while` loop-bound header, keeping
+the full i64::MIN/MAX pool everywhere else. Known, deliberate
+limitation: `sleep_ms(...)` detection is dialect-universal (builtins
+aren't localized), but the loop-header heuristic is English-keyword-
+specific, so non-English corpus files keep the old (over-producing)
+behavior for loop bounds specifically -- matches this item's own
+"roughly a quarter" framing, not a claimed complete fix. Not a
+compiler bug -- a `tools/localfuzz/harness.py` mutator-quality
+observation.**
 
 The single largest signature cluster this round (83 of 341 findings,
 ~24%) is "both backends time out" with no stdout/stderr at all.
@@ -313,10 +333,12 @@ In priority order:
    **DONE 2026-08-14** -- see `docs/TODO_CURRENT.md`'s BUG-193 entry;
    the blast-radius worry didn't hold up once actually scoped (one
    match arm per backend).
-3. **Optional, cheap**: the two `tools/localfuzz` tooling
+3. ~~**Optional, cheap**: the two `tools/localfuzz` tooling
    improvements (Priorities 3 and 4) -- neither touches the compiler,
    both reduce future triage noise; fine to defer to whoever next
-   works on localfuzz specifically rather than blocking #187.
+   works on localfuzz specifically rather than blocking #187.~~
+   **DONE 2026-08-24** -- both fixed on the `local-fuzz-findings`
+   branch, commit `3fade5ad`. See each Priority's own entry above.
 4. **No action**: everything under "Confirmed FIXED / stale" and
    "`v1_limitations.md` -- re-confirmed still-open items" above --
    listed for completeness so a future session doesn't re-derive the

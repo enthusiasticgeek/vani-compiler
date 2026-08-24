@@ -636,7 +636,15 @@ fn build_query(
     // where `xs` is a Vec or Array binding, assert `0 ≤ i < len(xs)`.
     // This lets SMT use the element value in proofs (e.g., if requires
     // says `i < len(xs)`, the solver can confirm the access is safe).
-    let mut index_axioms: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // BUG-227: BTreeSet, not HashSet -- iteration order must be
+    // deterministic. The raw query TEXT is the cache key (see
+    // SMT_CACHE below), and `vanic test`'s worker-thread pool gives
+    // each thread its own randomly-seeded hasher, so a HashSet here
+    // would print these axioms in a different order per thread even
+    // for byte-identical logical queries -- silently defeating the
+    // cache across threads/files and forcing every shared library
+    // function to be re-solved by z3 on every worker instead of once.
+    let mut index_axioms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for req in requires {
         collect_index_bound_axioms(req, &declared, versions, &mut index_axioms);
     }
@@ -670,7 +678,7 @@ fn collect_index_bound_axioms(
     expr: &Expr,
     vars: &HashMap<String, Type>,
     versions: &HashMap<String, u32>,
-    out: &mut std::collections::HashSet<String>,
+    out: &mut std::collections::BTreeSet<String>,
 ) {
     use ExprKind::*;
     match &expr.kind {

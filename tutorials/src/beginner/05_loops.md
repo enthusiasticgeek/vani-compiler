@@ -120,37 +120,39 @@ countdown_sum(5) = 15
 `0`, the same half-open convention `to` uses for its own upper
 bound (`lo to hi` excludes `hi`; `hi downto lo` excludes `lo`).
 That's why `countdown_sum(5)` sums `5, 4, 3, 2, 1 = 15`, not
-`5, 4, 3, 2, 1, 0`. Like `to`, `downto` is step-1 only -- there's
-no `step`/`by` clause for a stride other than 1. For that, reach
-for `while` and do the arithmetic yourself:
+`5, 4, 3, 2, 1, 0`.
+
+By default `to`/`downto` both step by 1. For a different stride,
+add a `step N` clause after the range bounds:
 
 ```vani
 fn sum_every_third(start: i64, end: i64) -> i64 {
   let total: i64 = 0;
-  let i: i64 = start;
-  while i <= end {
+  for i from start to end step 3 {
     total = total + i;
-    i = i + 3;        // step of 3 instead of 1
   }
   return total;
 }
 ```
 
 ```
-sum_every_third(1, 10) = 22
+sum_every_third(1, 10) = 12
 ```
 
-`sum_every_third` walks `1, 4, 7, 10` (sum `22`) -- `i = i + 3` to
-step by 3. The same trick works in reverse: flip the comparison to
-`>=` and subtract instead of add:
+`for i from 1 to 10 step 3` walks `1, 4, 7` (sum `12`) -- half-open
+still excludes `10`, same as a plain `to` loop excludes its own
+upper bound, so `10` itself is never visited even though it lines up
+with the stride. Want `1, 4, 7, 10` included instead? Write `for i
+from 1 to 11 step 3` -- one past `10` is enough for the half-open
+exclusion to land past it, not on it. `step` only ever names the
+SIZE of each hop; `to`/`downto` still pick the direction, exactly as
+before. `step` works the same way with `downto`:
 
 ```vani
-fn sum_descending_step(hi: i64, lo: i64, step: i64) -> i64 {
+fn sum_descending_step(hi: i64, lo: i64, stride: i64) -> i64 {
   let total: i64 = 0;
-  let i: i64 = hi;
-  while i >= lo {
+  for i from hi downto lo step stride {
     total = total + i;
-    i = i - step;
   }
   return total;
 }
@@ -161,13 +163,18 @@ sum_descending_step(20, 0, 3) = 77
 ```
 
 `sum_descending_step(20, 0, 3)` walks `20, 17, 14, 11, 8, 5, 2` (sum
-`77`) -- `i = i - step` each time, stopping once `i` drops below
-`lo`. Note this version is *inclusive* of both ends (`i <= hi` isn't
-needed since `i` starts there; the loop keeps going `while i >= lo`),
-unlike `for ... to`/`downto`'s half-open, exclusive-of-one-end
-convention -- swap `>=`/`<=` for `>`/`<` if you want the exclusive
-version to match. `parallel for` doesn't support `downto` yet
-either; it's sequential-only for now.
+`77`) -- same half-open convention as a plain `downto` (stops once
+the next value would reach or pass `lo`), just with a stride of `3`
+instead of `1`. Omitting `step` defaults to a stride of 1, identical
+to the loops earlier in this chapter.
+
+A `step` of `0` or a negative number is always a mistake -- there's
+no direction to infer from it the way an empty `to`/`downto` range
+is a legitimate (if unusual) edge case -- so the compiler rejects it
+outright at compile time when it's a literal, and traps cleanly at
+runtime if it's a variable whose value turns out to be non-positive.
+`parallel for` doesn't support `step` (or `downto`) yet either;
+both are sequential-only for now.
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code does not do what it looks like it does"/>
 

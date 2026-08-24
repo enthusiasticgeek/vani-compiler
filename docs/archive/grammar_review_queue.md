@@ -225,6 +225,87 @@ Armenian, Arabic, Hebrew, Filipino, Yoruba) are the highest-priority
 revision targets — same languages/scripts flagged for human review in
 the BUG-171 native-speaker pass.
 
+## `step` keyword-parity sweep (2026-08-23) — needs review
+
+`step` (stride clause on a range-form `for`, see
+`docs/v1_limitations.md` L29's remaining gap after `downto`) shipped
+English-only first, then was extended to every dialect that already
+has a `to`/`downto` spelling, in the same session, matching the
+`downto` sweep above exactly. Unlike `downto` (a directional
+preposition needing a fused compound), `step` is a plain noun ("a
+step/stride/pace"), so most picks below are each dialect's own
+existing, real word for a walking step/stage/level — not new
+compound coinages — and confidence is correspondingly higher across
+the board. A handful of scripts with thin training coverage are
+still flagged **Low**, matching the same languages already flagged
+Low in the `downto` table above.
+
+| Dialect | Pick | Confidence | Notes |
+|---|---|---|---|
+| Sanskrit/Hindi/Marathi | `चरण` *caraṇ* | High | real word, "step/stage" |
+| Bengali | `ধাপ` *dhap* | High | real word, "step/stage" |
+| Tamil | `படி` *paḍi* | High | real word, "step/degree" |
+| Telugu | `అడుగు` *aḍugu* | High | real word, "step/footstep" |
+| Gujarati | `પગલું` *paglũ* | High | real word, "step" |
+| Punjabi | `ਕਦਮ` *kadam* | High | real word, "step" |
+| Kannada | `ಹಂತ` *hanta* | High | real word, "step/stage" |
+| Malayalam | `ഘട്ടം` *ghaṭṭam* | High | real word, "step/stage" |
+| Odia | `ଧାପ` *dhapa* | Medium-High | cognate of Bengali's real word |
+| Sinhala | `පියවර` *piyawara* | High | real word, "step" |
+| Urdu | `قدم` *qadam* | High | real word, "step" (cognate of Punjabi's) |
+| Persian | `گام` *gām* | **Low** | plausible real word ("step/pace") but unreviewed, same confidence class as its `downto` entry |
+| Pashto | `ګام` *gām* | **Low** | same caveat as Persian above |
+| Khmer | `ជំហាន` *chomhan* | **Low** | plausible real word but unreviewed |
+| Burmese | `အဆင့်` *a-sin* | Medium-High | real word, "step/stage/level" |
+| Amharic | `ደረጃ` *dereja* | **Low** | plausible real word ("step/level") but unreviewed |
+| Tibetan | `གོམ་པ` *gompa* | **Low** | plausible real word ("step/pace") but unreviewed |
+| Cherokee | `ᎠᏍᎦᏂ` *asgani* | **Low** | speculative coinage, no confident source |
+| Lao | `ຂັ້ນ` *khan* | Medium-High | real word, "step/level" (cognate of Thai's) |
+| Mongolian (traditional script) | `ᠠᠯᠬᠤᠮ` *alkhum* | **Low** | speculative transliteration of Cyrillic Mongolian "алхам" into the traditional script |
+| Slovak | `krok` | High | real Slovak word, "step" |
+| Finnish (ascii) | `askel` | High | real Finnish word, "step" |
+| Catalan (ascii) | `pas` | High | real Catalan word, "step" |
+| Yoruba | `igbesẹ` | Medium | real word ("step/footstep") but unreviewed |
+| Hausa (ascii) | `mataki` | High | real Hausa word, "step" (well-attested, e.g. "mataki-mataki" = step by step) |
+| Norwegian (ascii) | `steg` | High | real Norwegian word, "step" |
+| Danish (ascii) | `trin` | High | real Danish word, "step" |
+| Armenian | `քայլ` *k'ayl* | Medium | real word ("step") but unreviewed |
+| Georgian | `ნაბიჯი` *nabiji* | High | real Georgian word, "step" |
+| Hungarian | `lépés` / ascii `lepes` | High | real Hungarian word, "step" |
+| Czech | `krok` (both native+ascii) | High | real Czech word, "step" (cognate of Slovak's) |
+| Swedish | `steg` (both native+ascii) | High | real Swedish word, "step" (cognate of Norwegian's) |
+| Filipino (ascii) | `hakbang` | High | real Tagalog word, "step" (well-attested) |
+| Vietnamese | `bước` | High | real Vietnamese word, "step" |
+| Romanian | `pas` (both native+ascii) | High | real Romanian word, "step" |
+| Dutch (ascii) | `stap` | High | real Dutch word, "step" |
+| Thai | `ขั้น` *khan* | Medium-High | real word, "step/level" (cognate of Lao's) |
+| Polish (ascii) | `krok` | High | real Polish word, "step" (cognate of Czech/Slovak) |
+| Turkish | `adım` / ascii `adim` | High | real Turkish word, "step" |
+| Malay (ascii) | `langkah` | High | real Malay word, "step" |
+| Swahili (ascii) | `hatua` | High | real Swahili word, "step" (well-attested, e.g. "hatua kwa hatua") |
+| Italian (ascii) | `passo` | High | real Italian word, "step" |
+| Arabic | `خطوة` *khatwa* | Medium | real word ("step") but unreviewed |
+| Greek | `βήμα` *vima* | High | real Greek word, "step" |
+| Hebrew | `צעד` *tsa'ad* | Medium | real word ("step") but unreviewed |
+| Indonesian (ascii) | `langkah` | High | real Indonesian word, "step" (cognate of Malay's) |
+| Portuguese | `passo` (both native+ascii) | High | real Portuguese word, "step" (cognate of Italian/Spanish) |
+| Spanish (ascii) | `paso` | High | real Spanish word, "step" |
+| French (ascii) | `pas` | High | real French word, "step" (cognate of Catalan/Romanian) |
+| German (ascii) | `Schritt` | High | real German word, "step" |
+| Korean | `단계` *dan-gye* | High | real Korean word, "step/stage" |
+| Japanese | `段階` *dankai* | High | real Japanese word, "step/stage" (shares kanji with Korean's) |
+| Mandarin | `步长` *bùcháng* | High | the standard CS/math term for "step size/stride" -- literally "step-length" |
+| Russian (Cyrillic) | `шаг` *shag* | High | real Russian word, "step" -- also the standard programming term for loop stride |
+
+**Please revise.** Same process as the `downto` queue above: update
+the table, update `src/lexer.rs` (the relevant `*_keyword` function),
+add/adjust a lib test, and regenerate `tools/vani_translate.py` via
+`tools/regen_vani_translate_keywords.py`. The Low entries (Persian,
+Pashto, Khmer, Amharic, Tibetan, Cherokee, Mongolian) are the
+highest-priority revision targets — the same languages/scripts
+already flagged Low in the `downto` table above and in the BUG-171
+native-speaker pass.
+
 ## Sources / references
 
 - **Sanskrit**: Monier-Williams Sanskrit–English Dictionary

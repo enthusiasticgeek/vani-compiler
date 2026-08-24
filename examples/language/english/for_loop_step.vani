@@ -1,0 +1,45 @@
+// build & run:
+//   vanic run examples/language/english/for_loop_step.vani
+//   vanic run examples/language/english/for_loop_step.vani --backend=c
+
+intent "for VAR from LO to HI step N -- stride other than 1, ascending or descending";
+
+// `step N` names the SIZE of each hop; `to`/`downto` still pick the
+// direction. `for i from 0 to 20 step 3` walks 0, 3, 6, ..., 18 --
+// half-open, same as a step-1 `to` loop excluding its own upper
+// bound.
+fn sum_ascending_step(hi: i64, stride: i64) -> i64 {
+  let total: i64 = 0;
+  for i from 0 to hi step stride {
+    total = total + i;
+  }
+  return total;
+}
+
+// The descending counterpart: `for i from HIGH downto LOW step N`
+// walks HIGH, HIGH-N, ..., stopping once it would reach or pass
+// LOW -- same half-open convention `downto` alone already uses.
+fn sum_descending_step(hi: i64, lo: i64, stride: i64) -> i64 {
+  let total: i64 = 0;
+  for i from hi downto lo step stride {
+    total = total + i;
+  }
+  return total;
+}
+
+// `step` omitted defaults to 1 -- identical to a plain `to`/`downto`
+// loop.
+fn count_default_step(hi: i64) -> i64 {
+  let count: i64 = 0;
+  for i from 0 to hi {
+    count = count + 1;
+  }
+  return count;
+}
+
+fn main() -> i64 {
+  print "sum_ascending_step(20, 3)     =", sum_ascending_step(20, 3);
+  print "sum_descending_step(20, 0, 3) =", sum_descending_step(20, 0, 3);
+  print "count_default_step(10)        =", count_default_step(10);
+  return 0;
+}

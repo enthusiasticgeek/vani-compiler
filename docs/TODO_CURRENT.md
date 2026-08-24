@@ -17504,3 +17504,293 @@ on both backends (LLVM was already fine; C backend now matches).
 both unchanged.
 
 Next free bug number is **BUG-225**.
+
+## BUG-226 -- bare `vanic test` reports every library file as a spurious failure (2026-08-23)
+
+Found auditing the Kosh package ecosystem for gaps needing fixes.
+`cd vani-bignum && vanic test` (Test-fw Phase E's no-args default,
+which recurses the whole package root) reported "8 passed; 1 failed"
+-- the one failure was `src/lib.vani`, `FAILED (compile)`, `error:
+program must define fn main() -> i64`. Confirmed this affects every
+package with the same shape: `vani-matrix` (would have failed the
+same way), `vani-calculus`, `vani-symbolic`, `vani-ml` -- essentially
+the entire Kosh ecosystem, since a library package's `src/lib.vani`
+(or any `use`d module file with no entry point of its own) is exactly
+this shape, and it's the overwhelmingly common one.
+
+Root cause: the per-file test-plan decision (in the `test` subcommand
+handler) only had three real outcomes -- `#[test]` fns found -> run in
+harness mode; `--filter` excluded everything -> skip; otherwise ->
+"Legacy" mode, which compiles+runs the file and requires `fn main`.
+A file with *neither* `#[test]` fns *nor* `fn main` -- an ordinary
+library/module file -- fell into that last bucket purely by
+elimination, and Legacy mode's `fn main` requirement made it fail
+unconditionally. The Test-fw Phase E doc comment reasoned
+`detect_harness_test_fns` "only ever picks up genuine `#[test]`-
+containing, main-less files, so this is safe even if a dependency
+happens to ship one" -- true for what that function detects, but it
+never accounted for the fall-through case of a file that's neither.
+
+Fixed by having `detect_harness_test_fns` (renamed
+`detect_harness_test_fns_and_main`) also report whether the file
+declares a top-level `fn main() -> i64` (same `f.name == "main" &&
+f.params.is_empty()` check `run_test_function` already used
+elsewhere), and adding a fourth outcome to the per-file plan: no
+`#[test]` fns AND no `fn main` -> `Skip` (not a test file in either
+sense), distinct from "no `#[test]` fns but has `fn main`" (still
+Legacy mode exactly as before -- a standalone runnable program, where
+"does it exit 0" remains the right smoke test).
+
+Verification: `vani-bignum` now reports "8 passed; 0 failed" (the
+`src/lib.vani` false positive gone, every real test unaffected).
+Re-ran `vani-matrix` (11 passed, 0 failed), `vani-calculus` (69
+passed, 0 failed), `vani-symbolic` and `vani-ml` (197 and 31 passed
+respectively, both under `VANIC_NO_VERIFY=1` -- both packages hang
+under full SMT verification independent of this fix, the same known
+`vani-pde`/`vani-probability`-class slow-SMT issue, not a regression;
+`vani-ml`'s `examples/xor_mlp_demo.vani` specifically is legitimately
+slow on its own, 3000 real training epochs, confirmed by isolating
+`tests/` alone which completes in seconds). `--json` and `--filter`
+both re-verified working correctly against the new Skip case (no
+`src/lib.vani` entry in JSON output; filter still narrows correctly).
+`cargo test --release --lib` (3008 passed, 0 failed, 1 ignored) and
+`cargo test --release --test run_end_to_end` (278 passed, 0 failed, 8
+ignored), both unchanged.
+
+## BUG-227: full SMT verification hung indefinitely on `vani-symbolic`/`vani-ml` (two independent root causes, both fixed)
+
+**Symptom**: `vanic check`/`vanic test` without `VANIC_NO_VERIFY=1` never
+completed for `vani-symbolic` or `vani-ml` (timed out past 400s in
+earlier sessions; the previous writeup above worked around it with
+`VANIC_NO_VERIFY=1` rather than root-causing it). Bisected by
+truncating `vani-matrix/src/lib.vani` (a shared transitive dependency
+of both packages via `vani-algebra`) at function boundaries: a single
+function, `mat_inv_3x3` (3x3 matrix inverse, one `f64` division
+followed by nine `Vec` element writes), took ~30s to verify in
+isolation -- z3's `fp.div` bit-blasting is inherently expensive
+(multi-second per query), confirmed by extracting the raw SMT-LIB
+queries and timing each against `z3` directly.
+
+**Root cause 1 -- irrelevant facts re-paid the expensive query's cost
+on every later proof in the same function.** `prove_with_calls_extra`
+(checker.rs) forwards *every* accumulated fact in a function --
+every prior `let`-derived equality, struct-field binding, etc. -- to
+*every* subsequent proof, with no relevance filtering. `mat_inv_3x3`'s
+one division fact (`inv = 1.0 / d`) was included in all nine
+subsequent per-element bounds-check queries, so its ~5-6s cost was
+paid nine times instead of once (~30s per call instead of ~1s).
+
+Fixed with `filter_relevant_facts` (checker.rs): before each proof,
+prune the fact list to the transitive closure of facts sharing a
+variable with the goal. Sound because BitVec/FP/Bool SMT theories
+have no hidden coupling between disjoint variable sets -- a fact that
+shares no variable (even transitively) with the goal cannot affect
+its provability. Array/Vec-typed variables are always seeded as
+relevant regardless of the goal (see root cause 2 below for why).
+
+**Root cause 2 -- the SMT query cache was silently defeated by
+non-deterministic query text.** The process-wide `SMT_CACHE`
+(smt.rs) is keyed on exact query string, but `build_query`'s
+per-query index-bounds-axiom collector used a `HashSet<String>` --
+iteration order depends on each thread's randomly-seeded hasher, so
+`vanic test`'s worker-thread pool produced *different* query text for
+byte-identical logical queries depending on which thread ran them,
+defeating cross-thread/cross-file cache hits for any query with more
+than one axiom. Every shared-library function ended up re-solved by
+z3 once per file that `use`s it (both packages' package-level `vanic
+test` recurses `vendor/`, so ~17 files each independently re-verify
+the *entire* transitive closure of `lib.vani` + vendored deps).
+Fixed by switching `index_axioms` to `BTreeSet<String>` (deterministic
+sorted order).
+
+**A regression found and fixed during validation**: the first cut of
+`filter_relevant_facts` broke 5 existing tests
+(`smt_preserves_{bool,f64}_slots_across_constant_index_assign`,
+`smt_preserves_clone_relation_across_index_assign_via_versioning`,
+`smt_preserves_unrelated_slot_facts_across_index_assign`,
+`smt_two_step_index_assign_chains_through_versions`). Root cause:
+`IndexAssign`'s array-versioning bridge fact (`__smt_store_eq`, added
+for BUG-198/BUG-212's array-versioning work) references *only*
+version-suffixed synthetic names (`Var("xs#1")`, `Var("xs#2")`),
+never the bare binding name (`"xs"`) that appears in `vars` -- so
+name-based relevance matching could never see it as relevant and
+dropped it unconditionally, regardless of the Vec/Array seeding.
+Fixed with `expr_mentions_versioned`, a variant of the existing
+`expr_mentions` (scoped only to `filter_relevant_facts`, not touching
+the shared `expr_mentions` used elsewhere for different-purpose fact
+dropping) that strips a `#<version>` suffix before comparing.
+
+**Verification**: `mat_inv_3x3` in isolation: 30s -> ~1s.
+`vani-matrix`'s own full `vanic test`: 37s -> 8.3s (its previously
+35s-long `linear_system.vani` example: 35s -> ~4.9s). `vani-symbolic`
+full package `vanic test` (197 tests, recurses `vendor/algebra` +
+`vendor/calculus`): previously hung indefinitely (>400s) -- now
+completes in ~1m49s (default parallel threads) / ~2m22s (serial),
+197 passed, 0 failed, **no `VANIC_NO_VERIFY=1`**. `vani-ml`'s
+`tests/` (31 tests, previously required `VANIC_NO_VERIFY=1` to
+complete in reasonable time): now 31 passed, 0 failed in ~3m, full
+verification on. `cargo test --release --lib`: 3008 passed, 0 failed,
+1 ignored (this run surfaced and then confirmed-fixed the 5-test
+regression above). `cargo test --release --test run_end_to_end`: 278
+passed, 0 failed, 8 ignored.
+
+## `docs/v1_limitations.md` L32 fixed: `नियोग<T>` as a type annotation
+
+Devanagari has no case distinction, so `नियोग` (`Task<R>`'s Sanskrit
+spelling) always lexed to the reserved `TokenKind::Task` -- unlike
+ASCII `Task` (falls through to `Ident("Task")`, which `parse_type`'s
+string-matched type-name block already recognized), `नियोग` could
+never reach that branch, so an explicit `नियोग<i64>` annotation
+failed to parse even though the spawn syntax and detach/join both
+already worked fine on the inferred type.
+
+Fixed by adding a direct `TokenKind::Task` branch in `parse_type`
+(src/parser.rs), mirroring the existing `Ident("Task")` logic's
+`<`-lookahead (`Task<R>` vs bare `Task`). No conflict with the
+statement-form spawn dispatch -- `parse_type` only runs from type
+position, never statement position, so the two `TokenKind::Task`
+checks are structurally disjoint call sites.
+
+`examples/language/sanskrit/concurrency_primitives.vani` updated to
+use the explicit annotation directly rather than documenting the
+inference workaround. Two new regression tests in src/lib.rs
+(`devanagari_task_generic_type_annotation_parses`,
+`devanagari_task_bare_type_annotation_parses`) -- both initially
+failed the script-purity gate (mixed English `fn`/`main` with
+Devanagari body) until rewritten in pure Sanskrit matching the
+example's own style.
+
+Verification: `cargo test --release --lib` 3010 passed, 0 failed, 1
+ignored (up from 3008 -- the 2 new tests). Full `examples/` corpus
+`vanic check` sweep: all failures pre-existing (`xfail_*` by design,
+`mix_*`/embedded need special invocation, harness-test files lacking
+`main`), none related to this change. `cargo test --release --test
+run_end_to_end`: one flaky failure on first run
+(`concurrent_pipeline_dashboard_example_produces_correct_output_on_both_backends`,
+the documented **L31** upstream-`lli` detached-task-teardown race,
+unrelated to this change -- reproduced clean 3/3 in isolation, and a
+full clean re-run of the suite passed 278/0/8-ignored with zero
+failures).
+
+## L29 fully resolved: `step N` stride clause for range-form `for` loops
+
+`docs/v1_limitations.md`'s L29 flagged the remaining gap after
+`downto` shipped 2026-08-13: `for i from lo to hi` (and `downto`)
+only ever stepped by 1, no `step`/`by` clause for a different
+stride. Shipped the full feature, matching the `downto` precedent's
+scope exactly (core feature + same-day 62-dialect keyword-parity
+sweep), per explicit user confirmation to follow that precedent
+rather than ship English-only first.
+
+**Design**: `for i from 0 to 20 step 3` walks `0, 3, 6, ..., 18`
+(half-open, same convention `to`/`downto` already use). `step`
+omitted defaults to 1, identical to prior behavior. Rejected on
+`parallel for` at parse time (same scoping `downto` already has --
+OpenMP/GOMP index-partitioning math for a non-unit stride is a real
+follow-on, not bundled here). `step <= 0` is a hard compile-time
+error when the value is a known constant (unlike the `to`/`downto`
+direction mismatch, which is only a warning -- there's no legitimate
+reading of a non-positive stride); a non-constant step gets a
+runtime guard instead (`exit(3)` on both backends, clean message,
+not a raw signal).
+
+**Implementation** (compiler-guided via Rust's exhaustiveness
+checking to find every `TypedStmt::For` construction site needing
+the new field -- most of the ~35 read-only destructure sites already
+used `..` and needed no change at all):
+- `src/ast.rs`/`src/ir.rs`: `Stmt::For.step: Option<Expr>` (untyped,
+  `None` = default), `TypedStmt::For.step: TypedExpr` (typed, always
+  present -- checker defaults it to a typed `Int(1)` literal when
+  the source omitted the clause, so every downstream consumer reads
+  it unconditionally, same pattern `descending: bool` already uses).
+- `src/lexer.rs`: new `TokenKind::Step`, English `"step"` keyword,
+  then the 62-dialect sweep (one native word per dialect that
+  already has `to`/`downto`, mirroring `downto`'s own rollout --
+  see `docs/archive/grammar_review_queue.md`'s new "step
+  keyword-parity sweep" section for the full table).
+- `src/parser.rs`: both `parse_for_stmt_inner` (English/general) and
+  `parse_sov_for_stmt` (Devanagari SOV word order) consume an
+  optional `step EXPR` clause after the `to`/`downto` end-expr,
+  before `invariant`/`reduce`; reject `step` + `parallel` with a
+  diagnostic mirroring the existing `descending && parallel` one.
+- `src/checker.rs`: type-check `step` like `start`/`end` (integer,
+  coerced to the loop's type); new hard-error diagnostic (+
+  elaboration in `src/diagnostic_elaborations.rs`) for a known
+  non-positive constant; the implicit per-iteration reassignment
+  fact (`var = var +/- 1`, used for loop-invariant preservation
+  checking) now uses `step` instead of a hardcoded `1` -- no change
+  needed to the bound facts (`var >= start`/`var < end` etc.), since
+  they stay true regardless of stride, just a looser bound than
+  before.
+- `src/backend_c.rs`/`src/backend_llvm.rs`: evaluate `step` once
+  before the loop (same as `start`/`end`); `local++`/`local--`
+  becomes `local += step_v`/`local -= step_v`; inline runtime guard
+  (C: `if (step_v <= 0/== 0) { fprintf...; exit(3); }`, signedness-
+  aware since an unsigned step can only ever be invalid at exactly
+  0; LLVM: `icmp` + branch to a trap block calling the existing
+  `@__intent_trap`, new registered message `.msg.forstep`) emitted
+  only when `step` isn't a provably-positive compile-time constant.
+- `src/safety.rs`: WCET trip-count formula is now ceiling division
+  by `step` (`(diff + step - 1) / step`), only computable when
+  `start`, `end`, and now `step` are all compile-time constants
+  (same `None`/unbounded fallback as today otherwise). Empirically
+  verified against the real compiler: a step-1 10-iteration loop's
+  exact static estimate is 71 cycles; the same body with `step 3`
+  (4 iterations) is exactly 35 -- proves the ceiling-division count
+  is genuinely being used, not a leftover naive `end - start`.
+- `src/format.rs`: pretty-printer emits `step EXPR` when present.
+- `src/main.rs`: `stmt_ssa_supported`'s existing `!descending` SSA-
+  eligibility gate now also requires `step.is_none()`-equivalent
+  (`step.constant == Some(TypedConst::Int(1))`) -- a stepped loop
+  routes through the tree backends only, exactly like a descending
+  one already does; confirmed via `vanic emit --backend=llvm` that a
+  plain step-less loop still uses the fast SSA path (no
+  `for_header`/`for_step` labels in the IR) while a stepped loop
+  correctly falls back to tree-LLVM.
+
+**Two real bugs found and fixed during validation** (both pre-
+existing, not new regressions -- surfaced by dogfooding the new
+feature, matching this session's own established pattern):
+1. The unused-parameter/unused-variable style-warning lint's
+   `stmt_mentions_var`/`expr_mentions_var` walkers (`src/checker.rs`)
+   never scanned a `for` loop's `step` expression for usage --
+   `fn f(s: i64) { for i from 0 to 10 step s { ... } }` spuriously
+   warned `s` as unused even though it's read by the step clause.
+   Same walkers are shared by the SMT-fact-relevance filter
+   (`filter_relevant_facts`'s `expr_mentions_versioned`, added
+   earlier this session for BUG-227) and the closure-capture
+   analysis (`walk_stmt_for_captures`) -- fixed all three call sites.
+2. The dialect sweep's mechanical script initially produced a
+   duplicate `"langkah" => TokenKind::Step` match arm inside
+   `indonesian_ascii_keyword` (Indonesian has two alt spellings for
+   `downto`, `sampaibawah`/`hinggabawah`, that both got a `step`
+   companion by the sweep's per-string logic before the fix) --
+   caught by a post-sweep collision-detection script checking every
+   new `step` word against every other keyword already in the same
+   dialect's own match block; fixed by removing the redundant arm
+   (only one `step` spelling needed per dialect, matching every
+   other dialect's single-spelling coverage).
+
+**Verification**: `mat_inv_3x3`-style micro-repros aside, this is a
+language-feature change -- full battery: `cargo test --release --lib`
+3020 passed / 0 failed / 1 ignored (up from 3010: 9 new tests plus
+the dialect-parity test); `cargo test --release --test
+run_end_to_end` 279 passed / 0 failed / 8 ignored (up from 278: new
+`for_loop_step_example_produces_correct_output_on_both_backends`);
+full `examples/` corpus `vanic check` sweep byte-identical to the
+pre-change baseline failure set (22 known/expected failures, zero
+new); `vanic audit-safety` on the new example matches the existing
+`for_loop_downto.vani` precedent (neither carries `#[bounded_stack]`
+annotations). Manual smoke tests on both backends: ascending +
+step 3, descending + step 3, `step 0`/negative-constant rejected at
+compile time with a clear diagnostic, non-constant step traps
+cleanly at runtime (`exit(3)`, confirmed on both backends), `step` +
+`parallel for` rejected with the same cascade-error shape
+`downto` + `parallel for` already has (confirmed not a new
+regression by reproducing the identical cascade on the pre-existing
+`downto` case). Dialect spot-checks beyond the mechanical parity
+test: Devanagari SOV (`के लिए ... से ... तक ... चरण ...`) and
+Russian (`для ... от ... до ... шаг ...`), both backends, both
+producing the hand-computed expected sums.
+
+Next free bug number is **BUG-228**.

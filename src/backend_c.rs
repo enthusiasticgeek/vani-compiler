@@ -8659,10 +8659,11 @@ fn collect_vec_elements_in_stmt(
             collect_vec_elements_in_expr(value, seen, out);
         }
         TypedStmt::For {
-            start, end, body, ..
+            start, end, step, body, ..
         } => {
             collect_vec_elements_in_expr(start, seen, out);
             collect_vec_elements_in_expr(end, seen, out);
+            collect_vec_elements_in_expr(step, seen, out);
             for s in body {
                 collect_vec_elements_in_stmt(s, seen, out);
             }
@@ -15228,17 +15229,47 @@ return __intent_ret; }}\n",
             ty,
             start,
             end,
+            step,
             body,
             parallel,
             reductions,
             label,
             descending,
-            ..
         } => {
             let local = local_name(var);
             let c_ty = c_leaf_type(ty);
             let start_v = emit_expr(start);
             let end_v = emit_expr(end);
+            // L29 follow-up: `step` is always present at this typed
+            // level (checker defaults it to a typed `Int(1)` literal
+            // when the source omitted the clause). `parallel for`
+            // never has a non-default step (rejected at parse time),
+            // so the BUG-140 trip-count guard below is unaffected.
+            let step_v = emit_expr(step);
+            // The checker already rejects any KNOWN non-positive
+            // constant step as a hard compile error -- so a `step`
+            // that reaches codegen with a known constant is
+            // guaranteed positive already, and needs no runtime
+            // guard. Only a non-constant step (a variable/parameter)
+            // needs one, mirroring every other "prove at compile
+            // time when possible, trap at runtime otherwise" check
+            // in this backend (divisor-zero, shift amount, etc.).
+            if step.constant.is_none() {
+                // Unsigned types can't represent a negative step at
+                // all -- 0 is the only invalid runtime value there,
+                // so the guard is `== 0`, not `<= 0` (which a C
+                // compiler would rightly flag as always-false on an
+                // unsigned operand).
+                let guard_cmp = if ty.is_signed_integer() { "<= 0" } else { "== 0" };
+                out.push_str(&format!(
+                    "  if (__builtin_expect({0} {1}, 0)) {{\n\
+                    \x20   fprintf(stderr, \"for-loop step must be positive, got %lld\\n\", (long long){0});\n\
+                    \x20   fflush(stdout);\n\
+                    \x20   exit(3);\n\
+                    \x20 }}\n",
+                    step_v, guard_cmp
+                ));
+            }
             if *parallel {
                 // BUG-140 (2026-08-07): found via localfuzz. GCC's
                 // OpenMP canonical-loop-form trip-count computation
@@ -15340,19 +15371,21 @@ return __intent_ret; }}\n",
             }
             if *descending {
                 out.push_str(&format!(
-                    "  for ({0} {1} = {2}; {1} > {3}; {1}--) {{\n",
+                    "  for ({0} {1} = {2}; {1} > {3}; {1} -= {4}) {{\n",
                     c_ty,
                     local,
                     start_v,
-                    end_v
+                    end_v,
+                    step_v
                 ));
             } else {
                 out.push_str(&format!(
-                    "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
+                    "  for ({0} {1} = {2}; {1} < {3}; {1} += {4}) {{\n",
                     c_ty,
                     local,
                     start_v,
-                    end_v
+                    end_v,
+                    step_v
                 ));
             }
             for s in body {

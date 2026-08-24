@@ -40,14 +40,16 @@
 // Caveat: these are tatsama coinages (verified for face-validity
 // against spelling_supports_dialect, not native-speaker active-use
 // validated), same status as this session's async/await spellings.
-// A separate, real limitation this file works around: `नियोग<T>`
-// cannot be used as a TYPE annotation (`Task<T>`'s own spelling) --
-// Devanagari has no upper/lowercase distinction, so नियोग always
-// lexes to the reserved TokenKind::Task keyword and never falls
-// through to a plain identifier the way English relies on
-// capitalization to tell `Task` (type) apart from `task` (statement
-// keyword). `let x = task fn();` infers its type instead of
-// annotating it explicitly. See docs/v1_limitations.md L32.
+// `नियोग<T>` (Task<R>'s own spelling) as a TYPE annotation --
+// previously a real limitation (L32 in docs/v1_limitations.md,
+// fixed 2026-08-23): Devanagari has no upper/lowercase distinction,
+// so नियोग always lexes to the reserved TokenKind::Task keyword and
+// never falls through to a plain identifier the way English relies
+// on capitalization to tell `Task` (type) apart from `task`
+// (statement keyword). `parse_type` now recognizes a bare
+// `TokenKind::Task` directly (mirroring the `Ident("Task")` branch
+// it already had), so `माना x: नियोग<i64> = नियोग fn();` below
+// works as an explicit annotation, not just inferred.
 
 कार्य विलम्ब() -> i64 {
   पुनरागम 7;
@@ -73,7 +75,7 @@
   सिद्धम् guard_get(दृष्ट्या ग1) == 5;
 
   // वियोजन (detach): spawn, then let it run independently.
-  माना कार्यभारः = नियोग विलम्ब();
+  माना कार्यभारः: नियोग<i64> = नियोग विलम्ब();
   वियोजन कार्यभारः;
 
   // चयन (select) with a प्रतीक्षा (await) arm over a non-blocking

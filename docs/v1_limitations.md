@@ -38,6 +38,16 @@
 > program correctly every time), so there's no vāṇī-side codegen fix
 > available. Documented as a `vanic run`-only caveat instead.
 >
+> **Update (2026-08-23): L29 fully resolved (`step` added) and L32
+> fixed (nīyoga<T> type annotation).** L29's remaining gap --
+> `step N` (a stride other than 1) -- shipped with the same-day
+> 62-dialect keyword-parity sweep `downto` itself got, closing L29
+> completely (both `downto` and `step` now covered). L32 (the
+> Devanagari spelling of Task<T> couldn't be used as an explicit type
+> annotation, only inferred) fixed by teaching `parse_type` to
+> recognize a bare `TokenKind::Task` directly. Still open: L5, L6,
+> L10-macOS, L13 (partial), L14, L24, L26, L27, L31, L33, L34.
+>
 > | # | Summary | Status |
 > |---|---|---|
 > | L1 | Enum destructure-bindings of affine payloads | ✅ Resolved v0.1.0 (2026-06-07) |
@@ -68,7 +78,7 @@
 > | L26 | Vec/array indexing inside a loop body never elides its bounds check, even when provably safe | ⬜ By design since BUG-181 (2026-08-12) — soundness over performance |
 > | L27 | `vanic run`'s LLVM JIT path skips the `opt` optimizer, unlike `vanic build`/`--backend=c` | ⬜ Not fixed — deliberate latency/pathological-loop trade-off |
 > | L28 | `as i64` (and other float-to-int casts) is unchecked, real UB when the value doesn't fit | ⬜ Not fixed — needs a checked-vs-saturating semantics decision |
-> | L29 | `for i from lo to hi` is ascending-only | ✅ Partially resolved 2026-08-13 — `downto` added; `step`/stride-N still unsupported |
+> | L29 | `for i from lo to hi` is ascending-only | ✅ Fully resolved 2026-08-23 — `downto` added 2026-08-13, `step` added 2026-08-23 |
 > | L30 | `tcp_recv`'s received bytes are not inspectable from vani code | ⬜ Not fixed — no `tcp_buf_byte_at`-style builtin yet |
 > | L31 | `detach`'d task still running when `main` returns can segfault under `vanic run` (LLVM `lli` JIT only) | ⬜ Not fixable in vāṇī — root-caused to upstream `lli`'s own JIT teardown; `vanic build`/AOT confirmed correct |
 
@@ -1708,7 +1718,7 @@ negative-to-unsigned, and NaN cases on both backends, plus the full
 `leak_sweep.py` battery against the whole example corpus with zero
 regressions.
 
-### L29 -- `for i from lo to hi` is ascending-only ✅ Partially resolved 2026-08-13 (`downto` added; `step`/stride-N still unsupported)
+### L29 -- `for i from lo to hi` is ascending-only ✅ Fully resolved 2026-08-23 (`downto` added 2026-08-13; `step` added 2026-08-23)
 
 `for VAR from START to END { ... }` only ever counted up by 1, over
 the half-open range `START, START+1, ..., END-1`
@@ -1776,21 +1786,40 @@ Regression tests: `for_loop_downto_parses_and_compiles`,
 end-to-end stdout check on both backends in `tests/run_end_to_end.rs`
 against `examples/language/english/for_loop_downto.vani`.
 
-**Still open**: `step`/`by` (a stride other than 1, ascending or
-descending) is not implemented -- use a `while` loop with manual
-arithmetic:
+**Fixed 2026-08-23**: `step N` names a stride other than 1, on either
+`to` (ascending) or `downto` (descending):
 
 ```vani
-let i: i64 = 10;
-while i <= 20 {
+for i from 0 to 20 step 3 {   // 0, 3, 6, ..., 18
   print i;
-  i = i + 3;       // step of 3
+}
+for i from 20 downto 0 step 3 {   // 20, 17, 14, ..., 2
+  print i;
 }
 ```
 
-See [Beginner 5's "Counting down with `downto`, or stepping by more
-than 1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-with-downto-or-stepping-by-more-than-1)
-for the tutorial-side coverage.
+`step` is a new keyword (shipped in English plus a same-day sweep to
+every dialect that already has a `to`/`until` spelling, mirroring
+`downto`'s own rollout -- see `docs/archive/grammar_review_queue.md`'s
+"step keyword-parity sweep" section for per-dialect word choices and
+confidence ratings). Omitting the clause defaults to a stride of 1,
+identical to today's behavior. `step 0` or a negative constant step
+is a hard compile-time error (unlike the `to`/`downto` direction
+mismatch, which is only ever a warning -- there's no legitimate
+reading of a non-positive stride); a non-constant step that turns out
+to be non-positive at runtime traps cleanly (`exit(3)`) on both
+backends. Sequential loops only -- `step` is rejected on `parallel
+for` at parse time, the same scoping `downto` already has (a non-unit
+stride would need its own index-partitioning math in the OpenMP/GOMP
+lowering, a real follow-on, not bundled into this fix). WCET's static
+trip-count formula (`#[wcet(cycles=N)]`) accounts for `step` via
+ceiling division, same "compile-time-constant bounds only, else
+unbounded" fallback as `start`/`end` already have. See [Beginner 5's
+"Counting down with `downto`, or stepping by more than
+1"](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tutorials/src/beginner/05_loops.md#counting-down-with-downto-or-stepping-by-more-than-1)
+for the tutorial-side coverage (now rewritten to show the real `step`
+clause instead of a manual-`while` workaround), and
+`examples/language/english/for_loop_step.vani` for a worked example.
 
 ### L30 -- `tcp_recv`'s received bytes are not inspectable from vani code ✅ Fixed 2026-08-16
 
@@ -1892,7 +1921,7 @@ outside the JIT'd program (`vanic`'s own subprocess wrapper around
 `lli`), not from generated IR -- worth a dedicated design pass if this
 turns out to bite real (non-fuzzer-manufactured) programs.
 
-### L32 -- `नियोग<T>` (Task<R>'s Devanagari spelling) can't be used as a type annotation
+### L32 -- `नियोग<T>` (Task<R>'s Devanagari spelling) can't be used as a type annotation ✅ Fixed 2026-08-23
 
 Found auditing Sanskrit primitive/concurrency keyword coverage
 (2026-08-17): `Task<R>`'s type-annotation position relies on ASCII
@@ -1920,15 +1949,19 @@ inference fill in the `Task<R>` type from the spawn expression's
 return type, same as `examples/language/sanskrit/
 concurrency_primitives.vani` does.
 
-**Not fixed this pass**: a real fix means teaching `parse_type` to
-also recognize a bare `TokenKind::Task` token (not just
-`Ident("Task")`) with `<`-lookahead disambiguation against the
-statement-form spawn, mirroring the existing Ident-based logic --
-same shape, different token-kind check, but needs its own design/
-test pass to get the lookahead right without breaking `नियोग
-<fn_call>()` spawn parsing. Matches this file's `async_cancel_auto.vani`
-precedent: known Devanagari async-surface gaps get documented and
-queued rather than rushed.
+**Fixed 2026-08-23**: `parse_type` now recognizes a bare
+`TokenKind::Task` directly (in addition to the existing
+`Ident("Task")` branch), with the exact same `<`-lookahead
+disambiguation (`Task<R>` vs bare `Task`) the ASCII path already
+used. No conflict with the statement-form spawn (`नियोग
+<fn_call>()`): `parse_type` is only ever invoked from a type
+position (after `:`, inside `<...>`, etc.), never from statement
+position, so the two `TokenKind::Task` checks live in structurally
+disjoint call sites. `examples/language/sanskrit/
+concurrency_primitives.vani` now uses the explicit `नियोग<i64>`
+annotation directly instead of documenting the inference workaround.
+Regression tests: `devanagari_task_generic_type_annotation_parses`,
+`devanagari_task_bare_type_annotation_parses` (src/lib.rs).
 
 ## Standard-library / process-interface limitations
 

@@ -932,6 +932,32 @@ pub fn recursive_type_alias(name: &str) -> Vec<String> {
     ]
 }
 
+pub fn for_step_non_positive(value: i128) -> Vec<String> {
+    let consequence = if value == 0 {
+        "the loop variable would never move at all".to_string()
+    } else {
+        "the loop variable would move AWAY from the loop's end bound \
+         instead of toward it"
+            .to_string()
+    };
+    vec![
+        format!(
+            "The `step` clause gives the amount the loop variable \
+             advances by each iteration -- with `step {value}`, \
+             {consequence}.",
+        ),
+        "Both `to` and `downto` already pick the direction (ascending \
+         or descending); `step` only ever names the SIZE of each hop, \
+         not its sign -- `for i from 20 downto 0 step 3` walks 20, 17, \
+         14, ..., counting down by 3 each time, using the same positive \
+         `3` a `to` loop would."
+            .to_string(),
+        "Use a positive integer for `step` (or omit the clause entirely \
+         for the default stride of 1)."
+            .to_string(),
+    ]
+}
+
 /// No `fn main()` entry point found in the program.
 pub fn missing_main_function() -> Vec<String> {
     vec![
