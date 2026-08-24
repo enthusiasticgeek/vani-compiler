@@ -1,5 +1,105 @@
 # Changelog
 
+## [v0.9.6] — 2026-08-24
+
+Same-day CI-fix follow-up to v0.9.5. See `RELEASE_NOTES/v0.9.6.md` for
+the full writeup.
+
+### Fixed
+
+- `tests/vtables_phase3.rs` used `step` as an interface method name,
+  colliding with v0.9.5's new `step` keyword — renamed to `advance`.
+- `tools/leak_sweep_baseline.json` was missing an entry for
+  `examples/embedded/dma_mmio_trigger.vani`'s expected ASan SEGV
+  (hardcoded hardware peripheral address, not runnable as a native
+  userspace process by design) — same pattern as the existing
+  `bare_metal.vani` entry.
+
+---
+
+## [v0.9.5] — 2026-08-24
+
+Consolidates 21 bug fixes (BUG-202 through BUG-227) plus L29 (fully) and
+L32 closed since v0.9.4 (2026-08-17), a real feature (`step N` stride
+clauses), and a full 90-file tutorial accuracy audit. See
+`RELEASE_NOTES/v0.9.5.md` for the full writeup; full per-bug detail lives
+in `docs/TODO_CURRENT.md`.
+
+### Added
+
+- **`step N`**: a stride other than 1 for range-form `for` loops
+  (`for i from 0 to 20 step 3`), on both `to` and `downto`. Closes L29
+  completely. Same-day 62-dialect keyword-parity sweep, matching the
+  `downto` precedent's full scope.
+- **`vanic coverage-gaps`**: mechanical feature-combination gap-ranking
+  tool for audit rounds, wired into `tools/localfuzz`.
+- **`vanic check --coverage`**: feature-combination coverage scoring
+  against the example corpus.
+- A missing beginner-track capstone chapter
+  (`beginner/14_gradebook_capstone.md`), found while auditing all 90
+  tutorial files for accuracy against a current build.
+
+### Fixed
+
+- **BUG-202/BUG-203**: `Vec<bool>`'s LLVM backend — a wrong bit-capacity
+  formula causing a crash on the first `push` past an empty literal, and
+  a sign-extension bug silently corrupting every later element once any
+  element was set `true`.
+- **BUG-204**: `set`/`set_mut` had no bounds check at all on the LLVM
+  backend, corrupting the heap on an out-of-range index.
+- **BUG-206**: `vec_swap` had no bounds check on either index, on either
+  backend — the 7th bug in a recurring missing-bounds-check family.
+- **BUG-207**: `TypedStmt::For`/`ForIter` never updated
+  `ctx.current_block` on the LLVM backend, corrupting later phi-node
+  predecessors.
+- **BUG-208, BUG-210, BUG-211, BUG-212, BUG-213**: a family of stale-SMT-
+  fact soundness gaps — a `mut ref` call (to a user function or a
+  builtin) or an ordinary branch-merge/reassignment could leave a stale
+  fact in the checker's model after the state it described changed,
+  letting `prove`/`requires`/`ensures` accept false claims in the worst
+  cases. Consolidated into one `invalidate_facts_on_opaque_mutation()`
+  method.
+- **BUG-209**: `lex_ident` (every Latin-script dialect) never got
+  BUG-175's mid-word-apostrophe fix — French `l'arbre` failed to parse.
+- **BUG-214**: `parallel for`'s integer `+`/`*` reductions could silently
+  wrap on overflow in the C backend's OpenMP-generated final combine
+  step, invisible to this compiler's own checked-arithmetic guards.
+- **BUG-215**: `UnionFind.find()` silently returned an out-of-range index
+  unchanged instead of trapping, letting `union()` perform an
+  out-of-bounds heap write — a real, exploitable memory-safety bug.
+- **BUG-216, BUG-217, BUG-218**: `Vec<T>` heap corruption/leak for
+  level-4 builtin types, two more RAII-type instances in `Box`/`Region`,
+  a `Mutex`/`Guard`/`RwLock` SSA-LLVM naming mismatch, and a real
+  `Mutex<NonCopyT>` double-free soundness gap.
+- **BUG-219**: a duplicate `reduce <var> with <op>;` clause for the same
+  variable reached codegen instead of being rejected.
+- **BUG-220**: struct-literal arity errors reused function-call-argument
+  help text verbatim ("update the function's signature" for a struct).
+- **BUG-222**: `parallel for`'s integer `+` reduction could silently wrap
+  on overflow in LLVM's own manually-outlined pthread-pool combine step
+  (both the SSA and tree backends).
+- **BUG-223**: moving a heap-owning field out of a `ref`/`mut ref` struct
+  parameter was accepted by the affine checker but double-freed at
+  runtime.
+- **BUG-224**: `extern "C" fn ... -> Str` always spelled its return type
+  `const char*`, conflicting with real libc headers (`getenv`, `strdup`)
+  whose own signature isn't `const`-qualified.
+- **BUG-226**: bare `vanic test` reported every Kosh package's own
+  `src/lib.vani` as a spurious failed test.
+- **BUG-227**: full SMT verification hung indefinitely on several Kosh
+  packages (`vani-symbolic`, `vani-ml`, `vani-pde`, `vani-probability`) —
+  two independent verifier-performance bugs, both fixed.
+- **L32**: `नियोग<T>` (`Task<R>`'s Devanagari spelling) couldn't be used
+  as an explicit type annotation, only inferred.
+
+### Upgrade notes
+
+- **`step` is a new reserved word** (and its translation in every
+  dialect that already has `to`/`downto`). An identifier literally named
+  `step` will need renaming.
+
+---
+
 ## [v0.9.4] — 2026-08-17
 
 Consolidates 15 bug fixes (BUG-185 through BUG-199) plus two limitations
