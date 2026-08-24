@@ -17672,4 +17672,125 @@ unrelated to this change -- reproduced clean 3/3 in isolation, and a
 full clean re-run of the suite passed 278/0/8-ignored with zero
 failures).
 
+## L29 fully resolved: `step N` stride clause for range-form `for` loops
+
+`docs/v1_limitations.md`'s L29 flagged the remaining gap after
+`downto` shipped 2026-08-13: `for i from lo to hi` (and `downto`)
+only ever stepped by 1, no `step`/`by` clause for a different
+stride. Shipped the full feature, matching the `downto` precedent's
+scope exactly (core feature + same-day 62-dialect keyword-parity
+sweep), per explicit user confirmation to follow that precedent
+rather than ship English-only first.
+
+**Design**: `for i from 0 to 20 step 3` walks `0, 3, 6, ..., 18`
+(half-open, same convention `to`/`downto` already use). `step`
+omitted defaults to 1, identical to prior behavior. Rejected on
+`parallel for` at parse time (same scoping `downto` already has --
+OpenMP/GOMP index-partitioning math for a non-unit stride is a real
+follow-on, not bundled here). `step <= 0` is a hard compile-time
+error when the value is a known constant (unlike the `to`/`downto`
+direction mismatch, which is only a warning -- there's no legitimate
+reading of a non-positive stride); a non-constant step gets a
+runtime guard instead (`exit(3)` on both backends, clean message,
+not a raw signal).
+
+**Implementation** (compiler-guided via Rust's exhaustiveness
+checking to find every `TypedStmt::For` construction site needing
+the new field -- most of the ~35 read-only destructure sites already
+used `..` and needed no change at all):
+- `src/ast.rs`/`src/ir.rs`: `Stmt::For.step: Option<Expr>` (untyped,
+  `None` = default), `TypedStmt::For.step: TypedExpr` (typed, always
+  present -- checker defaults it to a typed `Int(1)` literal when
+  the source omitted the clause, so every downstream consumer reads
+  it unconditionally, same pattern `descending: bool` already uses).
+- `src/lexer.rs`: new `TokenKind::Step`, English `"step"` keyword,
+  then the 62-dialect sweep (one native word per dialect that
+  already has `to`/`downto`, mirroring `downto`'s own rollout --
+  see `docs/archive/grammar_review_queue.md`'s new "step
+  keyword-parity sweep" section for the full table).
+- `src/parser.rs`: both `parse_for_stmt_inner` (English/general) and
+  `parse_sov_for_stmt` (Devanagari SOV word order) consume an
+  optional `step EXPR` clause after the `to`/`downto` end-expr,
+  before `invariant`/`reduce`; reject `step` + `parallel` with a
+  diagnostic mirroring the existing `descending && parallel` one.
+- `src/checker.rs`: type-check `step` like `start`/`end` (integer,
+  coerced to the loop's type); new hard-error diagnostic (+
+  elaboration in `src/diagnostic_elaborations.rs`) for a known
+  non-positive constant; the implicit per-iteration reassignment
+  fact (`var = var +/- 1`, used for loop-invariant preservation
+  checking) now uses `step` instead of a hardcoded `1` -- no change
+  needed to the bound facts (`var >= start`/`var < end` etc.), since
+  they stay true regardless of stride, just a looser bound than
+  before.
+- `src/backend_c.rs`/`src/backend_llvm.rs`: evaluate `step` once
+  before the loop (same as `start`/`end`); `local++`/`local--`
+  becomes `local += step_v`/`local -= step_v`; inline runtime guard
+  (C: `if (step_v <= 0/== 0) { fprintf...; exit(3); }`, signedness-
+  aware since an unsigned step can only ever be invalid at exactly
+  0; LLVM: `icmp` + branch to a trap block calling the existing
+  `@__intent_trap`, new registered message `.msg.forstep`) emitted
+  only when `step` isn't a provably-positive compile-time constant.
+- `src/safety.rs`: WCET trip-count formula is now ceiling division
+  by `step` (`(diff + step - 1) / step`), only computable when
+  `start`, `end`, and now `step` are all compile-time constants
+  (same `None`/unbounded fallback as today otherwise). Empirically
+  verified against the real compiler: a step-1 10-iteration loop's
+  exact static estimate is 71 cycles; the same body with `step 3`
+  (4 iterations) is exactly 35 -- proves the ceiling-division count
+  is genuinely being used, not a leftover naive `end - start`.
+- `src/format.rs`: pretty-printer emits `step EXPR` when present.
+- `src/main.rs`: `stmt_ssa_supported`'s existing `!descending` SSA-
+  eligibility gate now also requires `step.is_none()`-equivalent
+  (`step.constant == Some(TypedConst::Int(1))`) -- a stepped loop
+  routes through the tree backends only, exactly like a descending
+  one already does; confirmed via `vanic emit --backend=llvm` that a
+  plain step-less loop still uses the fast SSA path (no
+  `for_header`/`for_step` labels in the IR) while a stepped loop
+  correctly falls back to tree-LLVM.
+
+**Two real bugs found and fixed during validation** (both pre-
+existing, not new regressions -- surfaced by dogfooding the new
+feature, matching this session's own established pattern):
+1. The unused-parameter/unused-variable style-warning lint's
+   `stmt_mentions_var`/`expr_mentions_var` walkers (`src/checker.rs`)
+   never scanned a `for` loop's `step` expression for usage --
+   `fn f(s: i64) { for i from 0 to 10 step s { ... } }` spuriously
+   warned `s` as unused even though it's read by the step clause.
+   Same walkers are shared by the SMT-fact-relevance filter
+   (`filter_relevant_facts`'s `expr_mentions_versioned`, added
+   earlier this session for BUG-227) and the closure-capture
+   analysis (`walk_stmt_for_captures`) -- fixed all three call sites.
+2. The dialect sweep's mechanical script initially produced a
+   duplicate `"langkah" => TokenKind::Step` match arm inside
+   `indonesian_ascii_keyword` (Indonesian has two alt spellings for
+   `downto`, `sampaibawah`/`hinggabawah`, that both got a `step`
+   companion by the sweep's per-string logic before the fix) --
+   caught by a post-sweep collision-detection script checking every
+   new `step` word against every other keyword already in the same
+   dialect's own match block; fixed by removing the redundant arm
+   (only one `step` spelling needed per dialect, matching every
+   other dialect's single-spelling coverage).
+
+**Verification**: `mat_inv_3x3`-style micro-repros aside, this is a
+language-feature change -- full battery: `cargo test --release --lib`
+3020 passed / 0 failed / 1 ignored (up from 3010: 9 new tests plus
+the dialect-parity test); `cargo test --release --test
+run_end_to_end` 279 passed / 0 failed / 8 ignored (up from 278: new
+`for_loop_step_example_produces_correct_output_on_both_backends`);
+full `examples/` corpus `vanic check` sweep byte-identical to the
+pre-change baseline failure set (22 known/expected failures, zero
+new); `vanic audit-safety` on the new example matches the existing
+`for_loop_downto.vani` precedent (neither carries `#[bounded_stack]`
+annotations). Manual smoke tests on both backends: ascending +
+step 3, descending + step 3, `step 0`/negative-constant rejected at
+compile time with a clear diagnostic, non-constant step traps
+cleanly at runtime (`exit(3)`, confirmed on both backends), `step` +
+`parallel for` rejected with the same cascade-error shape
+`downto` + `parallel for` already has (confirmed not a new
+regression by reproducing the identical cascade on the pre-existing
+`downto` case). Dialect spot-checks beyond the mechanical parity
+test: Devanagari SOV (`के लिए ... से ... तक ... चरण ...`) and
+Russian (`для ... от ... до ... шаг ...`), both backends, both
+producing the hand-computed expected sums.
+
 Next free bug number is **BUG-228**.

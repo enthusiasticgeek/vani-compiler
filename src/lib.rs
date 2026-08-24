@@ -1255,6 +1255,136 @@ mod tests {
     }
 
     #[test]
+    fn step_keyword_parity_all_62_dialects() {
+        // L29 follow-up (2026-08-23): `step` (stride clause, see
+        // docs/v1_limitations.md L29) shipped English-only first,
+        // then was extended to every dialect that already has a
+        // `to`/`until` spelling -- the exact same scope
+        // `downto_keyword_parity_all_62_dialects` above already
+        // proved is 100% of the dialects with a `To` spelling (that
+        // test's own gap list is empty), so this test reuses the
+        // identical dialect list and extraction helper, just
+        // checking `To` against `Step` instead of `To` against
+        // `DownTo`. See docs/archive/grammar_review_queue.md's
+        // "step keyword-parity sweep" section for per-dialect word
+        // choices and confidence ratings; this test only proves
+        // lexer-level reachability, not linguistic correctness.
+        let lexer_src: &str = include_str!("lexer.rs");
+
+        fn extract_kinds_for_fn(src: &str, fn_name: &str) -> Vec<String> {
+            let marker_variants = [
+                format!("fn {fn_name}(text: &str) -> Option<TokenKind> {{"),
+                format!("pub(crate) fn {fn_name}(text: &str) -> Option<TokenKind> {{"),
+            ];
+            let (start, marker_len) = marker_variants
+                .iter()
+                .find_map(|m| src.find(m).map(|idx| (idx, m.len())))
+                .unwrap_or_else(|| panic!("dialect fn `{fn_name}` not found in lexer.rs"));
+            let body_start = start + marker_len;
+            let close = src[body_start..]
+                .find("\n}\n")
+                .unwrap_or_else(|| panic!("no closing `}}` found for `{fn_name}`"));
+            let body = &src[body_start..body_start + close];
+            let mut kinds = Vec::new();
+            let mut rest = body;
+            while let Some(idx) = rest.find("TokenKind::") {
+                let after = &rest[idx + "TokenKind::".len()..];
+                let end = after
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .unwrap_or(after.len());
+                kinds.push(after[..end].to_string());
+                rest = &after[end..];
+            }
+            kinds
+        }
+
+        let single_table_dialects: &[(&str, &str)] = &[
+            ("Sanskrit/Hindi/Marathi", "devanagari_keyword"),
+            ("Bengali", "bengali_keyword"),
+            ("Tamil", "tamil_keyword"),
+            ("Telugu", "telugu_keyword"),
+            ("Gujarati", "gujarati_keyword"),
+            ("Punjabi", "punjabi_keyword"),
+            ("Kannada", "kannada_keyword"),
+            ("Malayalam", "malayalam_keyword"),
+            ("Odia", "odia_keyword"),
+            ("Sinhala", "sinhala_keyword"),
+            ("Urdu", "urdu_keyword"),
+            ("Persian", "persian_keyword"),
+            ("Pashto", "pashto_keyword"),
+            ("Khmer", "khmer_keyword"),
+            ("Burmese", "burmese_keyword"),
+            ("Amharic", "amharic_keyword"),
+            ("Tibetan", "tibetan_keyword"),
+            ("Cherokee", "cherokee_keyword"),
+            ("Lao", "lao_keyword"),
+            ("Mongolian", "mongolian_keyword"),
+            ("Yoruba", "yoruba_keyword"),
+            ("Armenian", "armenian_keyword"),
+            ("Georgian", "georgian_keyword"),
+            ("Filipino", "filipino_ascii_keyword"),
+            ("Dutch", "dutch_ascii_keyword"),
+            ("Thai", "thai_keyword"),
+            ("Malay", "malay_ascii_keyword"),
+            ("Swahili", "swahili_ascii_keyword"),
+            ("Italian", "italian_ascii_keyword"),
+            ("Arabic", "arabic_keyword"),
+            ("Greek", "greek_keyword"),
+            ("Hebrew", "hebrew_keyword"),
+            ("Indonesian", "indonesian_ascii_keyword"),
+            ("Korean", "korean_keyword"),
+            ("Japanese", "japanese_keyword"),
+            ("Mandarin", "mandarin_keyword"),
+            ("Russian", "cyrillic_keyword"),
+        ];
+        let split_table_dialects: &[(&str, &str, &str)] = &[
+            ("Spanish", "spanish_keyword", "spanish_ascii_keyword"),
+            ("French", "french_keyword", "french_ascii_keyword"),
+            ("German", "german_keyword", "german_ascii_keyword"),
+            ("Portuguese", "portuguese_keyword", "portuguese_ascii_keyword"),
+            ("Polish", "polish_keyword", "polish_ascii_keyword"),
+            ("Turkish", "turkish_keyword", "turkish_ascii_keyword"),
+            ("Romanian", "romanian_keyword", "romanian_ascii_keyword"),
+            ("Vietnamese", "vietnamese_keyword", "vietnamese_ascii_keyword"),
+            ("Hungarian", "hungarian_keyword", "hungarian_ascii_keyword"),
+            ("Czech", "czech_keyword", "czech_ascii_keyword"),
+            ("Swedish", "swedish_keyword", "swedish_ascii_keyword"),
+            ("Norwegian", "norwegian_keyword", "norwegian_ascii_keyword"),
+            ("Danish", "danish_keyword", "danish_ascii_keyword"),
+            ("Slovak", "slovak_keyword", "slovak_ascii_keyword"),
+            ("Finnish", "finnish_keyword", "finnish_ascii_keyword"),
+            ("Catalan", "catalan_keyword", "catalan_ascii_keyword"),
+            ("Hausa", "hausa_keyword", "hausa_ascii_keyword"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for &(dialect_name, fn_name) in single_table_dialects {
+            let kinds = extract_kinds_for_fn(lexer_src, fn_name);
+            let has_to = kinds.iter().any(|k| k == "To");
+            let has_step = kinds.iter().any(|k| k == "Step");
+            if has_to && !has_step {
+                gaps.push(format!("{dialect_name} ({fn_name}) has `To` but no `Step` spelling"));
+            }
+        }
+        for &(dialect_name, native_fn, ascii_fn) in split_table_dialects {
+            let mut kinds = extract_kinds_for_fn(lexer_src, native_fn);
+            kinds.extend(extract_kinds_for_fn(lexer_src, ascii_fn));
+            let has_to = kinds.iter().any(|k| k == "To");
+            let has_step = kinds.iter().any(|k| k == "Step");
+            if has_to && !has_step {
+                gaps.push(format!(
+                    "{dialect_name} ({native_fn} + {ascii_fn} union) has `To` but no `Step` spelling"
+                ));
+            }
+        }
+        assert!(
+            gaps.is_empty(),
+            "step keyword-parity gaps found (dialect has `to` but no `step`):\n{}",
+            gaps.join("\n")
+        );
+    }
+
+    #[test]
     fn bug170_pashto_dead_multiword_entries_now_reachable() {
         // BUG-170 follow-up (2026-08-10): found while auditing Pashto
         // keyword coverage. `pashto_keyword` had 5 entries whose
@@ -5127,6 +5257,117 @@ mod tests {
             }
         "#;
         compile(source).expect("empty downto range should compile");
+    }
+
+    #[test]
+    fn for_loop_step_parses_and_compiles() {
+        // L29 follow-up (2026-08-23): `step N` -- stride other than
+        // 1, both ascending and descending.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 20 step 3 { n = n + 1; }
+              let m: i64 = 0;
+              for j from 20 downto 0 step 3 { m = m + 1; }
+              return n + m;
+            }
+        "#;
+        compile(source).expect("step clause should parse and compile on both to and downto");
+    }
+
+    #[test]
+    fn for_loop_step_defaults_to_one_when_omitted() {
+        // Omitting `step` must still compile exactly as before --
+        // the checker defaults it to a typed Int(1) constant.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 0;
+              for i from 0 to 10 { n = n + 1; }
+              return n;
+            }
+        "#;
+        compile(source).expect("for-loop without a step clause should still compile");
+    }
+
+    #[test]
+    fn for_loop_step_rejected_on_parallel_for() {
+        // Mirrors `for_loop_downto_rejected_on_parallel_for` --
+        // non-unit strides are sequential-only for now.
+        let source = r#"
+            fn main() -> i64 {
+              parallel for i from 0 to 20 step 3 {
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("parallel for should reject a step clause");
+        assert!(
+            err.iter().any(|d| d.message.contains("does not support 'step'")),
+            "expected a 'step' rejection diagnostic, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn for_loop_step_zero_rejected_at_compile_time() {
+        let source = r#"
+            fn main() -> i64 {
+              for i from 0 to 10 step 0 {
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("step 0 should be rejected at compile time");
+        assert!(
+            err.iter().any(|d| d.message.contains("is invalid") && d.message.contains("step 0")),
+            "expected a non-positive-step diagnostic, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn for_loop_step_negative_constant_rejected_at_compile_time() {
+        let source = r#"
+            fn main() -> i64 {
+              for i from 0 to 10 step 0 - 3 {
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("a negative constant step should be rejected at compile time");
+        assert!(
+            err.iter().any(|d| d.message.contains("is invalid") && d.message.contains("step -3")),
+            "expected a non-positive-step diagnostic, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn for_loop_step_non_constant_traps_at_runtime_on_both_backends() {
+        // A step that isn't a compile-time constant (here, a
+        // function parameter) can't be judged at check time -- it
+        // gets a runtime guard in each backend instead. Confirms
+        // both backends trap cleanly (exit(3), not a raw signal) on
+        // a non-positive runtime step value, and that a genuinely
+        // positive runtime step still runs correctly.
+        let source = r#"
+            fn run_with_step(s: i64) -> i64 {
+              let total: i64 = 0;
+              for i from 0 to 10 step s {
+                total = total + i;
+              }
+              return total;
+            }
+            fn main() -> i64 {
+              print run_with_step(3);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("non-constant step should compile on the C backend");
+        assert!(
+            c.contains("for-loop step must be positive"),
+            "expected the C backend to emit the runtime step guard:\n{c}"
+        );
     }
 
     #[test]
@@ -53989,6 +54230,79 @@ função main() -> i64 {
             errs.iter().any(|d| d.message.contains("wcet")
                 && d.message.contains("exceeds")),
             "expected wcet-exceeded diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_computes_ceiling_trip_count_for_stepped_loop() {
+        // L29 follow-up (2026-08-23): `for i from 0 to 10 step 3`
+        // walks 0, 3, 6, 9 -- 4 iterations (ceiling division), NOT
+        // the 10 a step-1 loop over the same bounds would need.
+        // Confirmed empirically against this exact body: a step-1
+        // version of this loop needs a 71-cycle budget; this step-3
+        // version needs exactly 35 -- proving the trip count used
+        // here is really the stepped one (4 iterations), not a
+        // leftover naive `end - start` count that would demand the
+        // same 71 cycles a step-1 loop does.
+        let source = r#"
+            #[wcet(cycles=35)]
+            fn loops() -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 10 step 3 {
+                s = s + i;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        compile(source).expect("stepped loop should fit its ceiling-division trip count budget");
+    }
+
+    #[test]
+    fn wcet_rejects_over_budget_stepped_loop() {
+        let source = r#"
+            #[wcet(cycles=34)]
+            fn loops() -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 10 step 3 {
+                s = s + i;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        let errs = compile(source).expect_err("one cycle under the stepped loop's real cost must fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("wcet")
+                && d.message.contains("exceeds")
+                && d.message.contains("35 cycles")),
+            "expected a wcet-exceeded diagnostic citing 35 cycles, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_unbounded_for_non_constant_step() {
+        // A `step` that isn't a compile-time constant (here, a
+        // parameter) can't feed the static ceiling-division formula
+        // -- same UNBOUNDED fallback as a non-constant start/end.
+        let source = r#"
+            #[wcet(cycles=100000)]
+            fn loops(s_val: i64) -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 10 step s_val {
+                s = s + i;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(3); }
+        "#;
+        let errs = compile(source).expect_err("non-constant step must be UNBOUNDED, even with a huge budget");
+        assert!(
+            errs.iter().any(|d| d.message.contains("UNBOUNDED")
+                && d.message.contains("wcet")),
+            "expected UNBOUNDED diagnostic, got: {:?}",
             errs
         );
     }

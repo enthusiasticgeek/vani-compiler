@@ -292,6 +292,12 @@ pub enum TypedStmt {
         /// `to` (ascending, step 1, the default). See
         /// `ast::Stmt::For::descending` for the full semantics.
         descending: bool,
+        /// The per-iteration stride, always present at this typed
+        /// level (the checker fills in a typed `Int(1)` literal of
+        /// `ty` when the source omitted the `step` clause) so every
+        /// consumer can read it unconditionally. See
+        /// `ast::Stmt::For::step` for the source-level semantics.
+        step: TypedExpr,
     },
     ForIter {
         label: Option<String>,

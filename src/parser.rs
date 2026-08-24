@@ -4496,6 +4496,21 @@ impl Parser {
             ));
         }
         let end = self.parse_expr()?;
+        // `step EXPR` -- stride clause, sequential loops only (L29
+        // follow-up). Same slot both here and in the SOV parser use
+        // for `invariant`/`reduce`: after the range bounds, before
+        // the body.
+        let step = if let Some(step_tok) = self.match_token(|k| matches!(k, TokenKind::Step)) {
+            if parallel {
+                return Err(Diagnostic::new(
+                    step_tok.span,
+                    "'parallel for' does not support 'step' -- non-unit strides are sequential-only for now",
+                ));
+            }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
         if !reductions.is_empty() && !parallel {
@@ -4517,6 +4532,7 @@ impl Parser {
             parallel,
             reductions,
             descending,
+            step,
         })
     }
 
@@ -4563,6 +4579,17 @@ impl Parser {
                 "'parallel for' does not support 'downto' -- descending ranges are English-only, sequential for now",
             ));
         }
+        let step = if let Some(step_tok) = self.match_token(|k| matches!(k, TokenKind::Step)) {
+            if parallel {
+                return Err(Diagnostic::new(
+                    step_tok.span,
+                    "'parallel for' does not support 'step' -- non-unit strides are sequential-only for now",
+                ));
+            }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         let invariants = self.parse_invariants()?;
         let reductions = self.parse_reductions()?;
         if !reductions.is_empty() && !parallel {
@@ -4587,6 +4614,7 @@ impl Parser {
             parallel,
             reductions,
             descending,
+            step,
         })
     }
 

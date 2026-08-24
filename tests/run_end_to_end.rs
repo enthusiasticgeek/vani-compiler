@@ -420,6 +420,46 @@ fn for_loop_downto_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// L29 follow-up (2026-08-23): `step N` -- stride other than 1, both
+// ascending and descending. Execution test, not just a compile
+// check, for the same reason as the `downto` test above -- a step
+// that merely COMPILES could still emit the wrong per-iteration
+// delta and produce a wrong (but non-crashing) answer, which only
+// real stdout on both backends would catch.
+#[test]
+fn for_loop_step_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/for_loop_step.vani",
+        manifest_dir
+    );
+    let expected = "sum_ascending_step(20, 3)     = 63\n\
+                     sum_descending_step(20, 0, 3) = 77\n\
+                     count_default_step(10)        = 10\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "step example produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");

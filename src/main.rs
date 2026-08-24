@@ -679,9 +679,14 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         }
         // `downto` (descending) for-loops aren't lowered by the SSA
         // pass yet -- route through tree-C / tree-LLVM, which fully
-        // support them. Ascending `to` loops are unaffected.
-        TypedStmt::For { start, end, body, descending, .. } => {
+        // support them. Ascending `to` loops are unaffected. Same
+        // exclusion for a non-default `step` (L29 follow-up,
+        // 2026-08-23): `step` is always present at this typed level
+        // (defaults to a typed `Int(1)` constant), so "no step
+        // clause in the source" is "step's constant is exactly 1".
+        TypedStmt::For { start, end, step, body, descending, .. } => {
             !descending
+                && step.constant == Some(vani::ir::TypedConst::Int(1))
                 && expr_ssa_supported(start)
                 && expr_ssa_supported(end)
                 && stmts_ssa_supported(body, extra_reject)

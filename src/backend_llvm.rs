@@ -1046,6 +1046,12 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         ".msg.floatcast",
         "float-to-int cast out of range\n",
     ));
+    // L29 follow-up (2026-08-23): for-loop `step` clause's runtime
+    // guard message, same unconditional-registration reasoning.
+    out.push_str(&crate::ssa_backend_llvm::trap_msg_global_def(
+        ".msg.forstep",
+        "for-loop step must be positive\n",
+    ));
     // Test-fw Phase F (2026-08-14): assert_eq_* trap messages.
     // `.msg.assert_eq.str` is shared by assert_eq_bool (each side
     // resolved to a "true"/"false" i8* before formatting) and
@@ -4596,7 +4602,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; continue outside a loop\n");
             }
         }
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions, label, descending, .. } => {
+        TypedStmt::For { var, ty, start, end, step, body, parallel, reductions, label, descending } => {
             if !ty.is_integer() {
                 // The parser only accepts integer literals on the
                 // bounds and the checker enforces integer type on
@@ -4632,6 +4638,44 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let lty = llvm_type(ty);
             let start_v = emit_expr(start, ctx, out);
             let end_v = emit_expr(end, ctx, out);
+            // L29 follow-up: `step` is always present at this typed
+            // level (checker defaults it to a typed `Int(1)` literal
+            // when the source omitted the clause); `parallel for`
+            // never has a non-default step (rejected at parse time),
+            // so the `*parallel` branch above (returned already) is
+            // unaffected.
+            let step_v = emit_expr(step, ctx, out);
+            // Same "prove at compile time when possible, trap at
+            // runtime otherwise" discipline as the divisor-zero
+            // guard above -- the checker already rejects any KNOWN
+            // non-positive constant step as a hard error, so only a
+            // non-constant step (a variable/parameter) needs a
+            // runtime check here.
+            if step.constant.is_none() {
+                let step_ok_cmp = if ty.is_signed_integer() { "sgt" } else { "ne" };
+                let cmp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = icmp {} {} {}, 0\n",
+                    cmp, step_ok_cmp, lty, step_v
+                ));
+                let ok = ctx.fresh_label("forstep_ok");
+                let fail = ctx.fresh_label("forstep_fail");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    cmp, ok, fail
+                ));
+                out.push_str(&format!("{}:\n", fail));
+                out.push_str(&format!(
+                    "  call void @__intent_trap(i8* {})\n",
+                    crate::ssa_backend_llvm::trap_msg_ref(
+                        ".msg.forstep",
+                        "for-loop step must be positive\n"
+                    )
+                ));
+                out.push_str("  unreachable\n");
+                out.push_str(&format!("{}:\n", ok));
+                ctx.current_block = ok;
+            }
             // Use a fresh tmp prefix in the alloca name so two
             // for-loops in the same function with the same loop
             // variable (`for i in 0..n { … } parallel for i in
@@ -4704,7 +4748,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             let next = ctx.fresh_tmp();
             out.push_str(&format!("  {} = load {}, {}* {}\n", now, lty, lty, i_addr));
             let step_op = if *descending { "sub" } else { "add" };
-            out.push_str(&format!("  {} = {} {} {}, 1\n", next, step_op, lty, now));
+            out.push_str(&format!("  {} = {} {} {}, {}\n", next, step_op, lty, now, step_v));
             out.push_str(&format!("  store {} {}, {}* {}\n", lty, next, lty, i_addr));
             out.push_str(&format!("  br label %{}\n", header));
             ctx.terminated = outer_terminated;
@@ -47428,7 +47472,7 @@ fn rewrite_stmt_for_reductions(
             cond: cond.clone(),
             body: rewrite_body_for_reductions(body, reductions),
         },
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs, label, descending } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs, label, descending, step } => {
             TypedStmt::For {
                 label: label.clone(),
                 var: var.clone(),
@@ -47439,6 +47483,7 @@ fn rewrite_stmt_for_reductions(
                 parallel: *parallel,
                 reductions: rs.clone(),
                 descending: *descending,
+                step: step.clone(),
             }
         }
         other => other.clone(),

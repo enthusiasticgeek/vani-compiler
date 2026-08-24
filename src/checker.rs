@@ -3472,9 +3472,10 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
         S::FieldAssign { object, value, .. } => {
             expr_mentions_var(object, name) || expr_mentions_var(value, name)
         }
-        S::For { start, end, invariants, body, .. } => {
+        S::For { start, end, step, invariants, body, .. } => {
             expr_mentions_var(start, name)
                 || expr_mentions_var(end, name)
+                || step.as_ref().is_some_and(|e| expr_mentions_var(e, name))
                 || invariants.iter().any(|e| expr_mentions_var(e, name))
                 || body.iter().any(|s| stmt_mentions_var(s, name))
         }
@@ -3809,9 +3810,12 @@ fn walk_stmt_for_captures(
             walk_expr_for_captures(object, bound, env, top_level_names, captures, seen);
             walk_expr_for_captures(value, bound, env, top_level_names, captures, seen);
         }
-        S::For { var, start, end, invariants, body, .. } => {
+        S::For { var, start, end, step, invariants, body, .. } => {
             walk_expr_for_captures(start, bound, env, top_level_names, captures, seen);
             walk_expr_for_captures(end, bound, env, top_level_names, captures, seen);
+            if let Some(step_expr) = step {
+                walk_expr_for_captures(step_expr, bound, env, top_level_names, captures, seen);
+            }
             bound.insert(var.clone());
             for inv in invariants {
                 walk_expr_for_captures(inv, bound, env, top_level_names, captures, seen);
@@ -12211,9 +12215,9 @@ fn inject_shallow_free_before_returns(
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions, descending,
+                    label, var, ty, start, end, parallel, reductions, descending, step,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
@@ -12288,9 +12292,9 @@ fn inject_before_matching_continues(
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
-            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                 out.push(TypedStmt::For {
-                    label, var, ty, start, end, parallel, reductions, descending,
+                    label, var, ty, start, end, parallel, reductions, descending, step,
                     body: inject_before_matching_continues(body, checks, my_label, true),
                 });
             }
@@ -15782,6 +15786,7 @@ fn check_one_stmt(
             parallel,
             reductions,
             descending,
+            step,
         } => {
             verify_call_args_in_expr(start, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(end, smt_facts, env, signatures, diagnostics);
@@ -15881,12 +15886,66 @@ fn check_one_stmt(
                 }
             }
 
+            // L29 follow-up: `step EXPR` -- type-check like start/end
+            // (must be an integer), then reject a KNOWN non-positive
+            // constant outright. Unlike the to/downto direction
+            // mismatch above (a warning -- equal bounds are a
+            // legitimate empty-range edge case), there is no
+            // legitimate reading of `step 0` or a negative step, so
+            // this is a hard error, not a warning. A non-constant
+            // step (e.g. a variable or parameter) can't be judged
+            // here -- it gets a runtime guard in each backend
+            // instead, mirroring every other "prove at compile time
+            // when possible, trap at runtime otherwise" check in this
+            // compiler (divisor-zero, shift amount, etc.).
+            let step_checked = if let Some(step_expr) = step {
+                verify_call_args_in_expr(step_expr, smt_facts, env, signatures, diagnostics);
+                let checked = check_expr(step_expr, env, signatures, diagnostics);
+                if !checked.ty().is_integer() {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            step_expr.span,
+                            format!("for-loop 'step' must be an integer, got {}", checked.ty()),
+                        )
+                        .with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()),
+                    );
+                    return false;
+                }
+                if let Some(TypedConst::Int(v)) = checked.constant() {
+                    if *v <= 0 {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                step_expr.span,
+                                format!(
+                                    "'step {v}' is invalid -- a for-loop stride must be a \
+                                     positive integer (got {v})",
+                                ),
+                            )
+                            .with_elaboration(crate::diagnostic_elaborations::for_step_non_positive(*v)),
+                        );
+                        return false;
+                    }
+                }
+                Some(checked)
+            } else {
+                None
+            };
+
             let Some(loop_ty) = promoted_integer_type(&start_checked, &end_checked, diagnostics)
             else {
                 return false;
             };
             let start_coerced = coerce_numeric_operand(start_checked, &loop_ty);
             let end_coerced = coerce_numeric_operand(end_checked, &loop_ty);
+            let step_coerced = match step_checked {
+                Some(checked) => coerce_numeric_operand(checked, &loop_ty),
+                None => CheckedExpr::new(
+                    TypedExprKind::Int(1),
+                    loop_ty.clone(),
+                    Some(TypedConst::Int(1)),
+                    *span,
+                ),
+            };
 
             let pre_env = env.clone();
             let pre_facts = smt_facts.clone();
@@ -16063,7 +16122,12 @@ fn check_one_stmt(
                 let mut summary = collect_last_reassigns_with_env(body_stmts, env);
                 // Implicit auto-increment (ascending `to`) or
                 // auto-decrement (descending `downto`) of the loop
-                // variable, each iteration.
+                // variable, each iteration -- by `step` (default 1
+                // when the source omitted the clause).
+                let step_source = step.clone().unwrap_or(Expr {
+                    kind: ExprKind::Int(1),
+                    span: *span,
+                });
                 summary.subs.insert(
                     var.clone(),
                     Expr {
@@ -16073,10 +16137,7 @@ fn check_one_stmt(
                                 kind: ExprKind::Var(var.clone()),
                                 span: *span,
                             }),
-                            right: Box::new(Expr {
-                                kind: ExprKind::Int(1),
-                                span: *span,
-                            }),
+                            right: Box::new(step_source),
                         },
                         span: *span,
                     },
@@ -16292,6 +16353,7 @@ fn check_one_stmt(
                 parallel: *parallel,
                 reductions: typed_reductions,
                 descending: *descending,
+                step: step_coerced.expr,
             });
             false
         }
@@ -38742,7 +38804,7 @@ fn strip_reduction_uses(
                         body: rec(body, reductions, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs, descending } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs, descending, step } => {
                     if any_read_of_reductions(start, reductions)
                         || any_read_of_reductions(end, reductions)
                     {
@@ -38758,6 +38820,7 @@ fn strip_reduction_uses(
                         parallel: *parallel,
                         reductions: rs.clone(),
                         descending: *descending,
+                        step: step.clone(),
                     });
                 }
                 other => {
@@ -38866,7 +38929,7 @@ fn strip_safe_same_index_writes(
                         body: rec(body, loop_var, context, diagnostics),
                     });
                 }
-                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions, descending, step } => {
                     out.push(TypedStmt::For {
                         label: label.clone(),
                         var: var.clone(),
@@ -38887,6 +38950,7 @@ fn strip_safe_same_index_writes(
                         parallel: *parallel,
                         reductions: reductions.clone(),
                         descending: *descending,
+                        step: step.clone(),
                     });
                 }
                 other => out.push(other.clone()),

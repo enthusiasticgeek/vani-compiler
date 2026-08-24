@@ -1080,7 +1080,7 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             format_expr(value, false, out);
             out.push_str(";\n");
         }
-        Stmt::For { var, start, end, invariants, body, span, parallel, reductions, descending, .. } => {
+        Stmt::For { var, start, end, step, invariants, body, span, parallel, reductions, descending, .. } => {
             out.push_str(&pad);
             if *parallel {
                 out.push_str("parallel ");
@@ -1091,6 +1091,10 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             format_expr(start, false, out);
             out.push_str(if *descending { " downto " } else { " to " });
             format_expr(end, false, out);
+            if let Some(step_expr) = step {
+                out.push_str(" step ");
+                format_expr(step_expr, false, out);
+            }
             out.push('\n');
             for inv in invariants {
                 out.push_str(&pad);

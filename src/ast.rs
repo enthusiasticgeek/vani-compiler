@@ -1878,6 +1878,13 @@ pub enum Stmt {
         /// Both forms are half-open: `to` excludes `end`; `downto`
         /// excludes `end` too (walks `start, start-1, ..., end+1`).
         descending: bool,
+        /// `step EXPR` clause -- the stride between successive loop
+        /// variable values (`for i from 0 to 20 step 3` walks `0, 3,
+        /// 6, ..., 18`). `None` means the default stride of 1 (the
+        /// pre-existing behavior). Only valid on sequential loops --
+        /// rejected at parse time on `parallel for` (see L29 in
+        /// docs/v1_limitations.md).
+        step: Option<Expr>,
     },
     /// `for x in &xs { body }` (borrow) or `for x in xs { body }` (consume).
     /// In both cases `x` is the (Copy) element type. `consumes = true`
