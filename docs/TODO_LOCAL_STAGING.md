@@ -11005,3 +11005,32 @@ Repro: `tools/localfuzz/findings/20260824-065955-run-crash-8e9148a1da/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260824-065955-run-crash-8e9148a1da/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260824-105722-backend-divergence-645ee62d67
+
+Repro: `tools/localfuzz/findings/20260824-105722-backend-divergence-645ee62d67/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260824-105722-backend-divergence-645ee62d67/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 134,
+    "stdout": "",
+    "stderr": "loop bound out of vec range\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "",
+    "stderr": "index out of bounds: -1, len -1\n",
+    "timed_out": false
+  },
+  "coverage_score": 87
+}
+```
+
