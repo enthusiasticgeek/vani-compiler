@@ -12,7 +12,13 @@ Some flagged files are known, already-triaged findings (a
 methodology false positive, or a real bug deliberately left open
 with a documented reason) rather than new regressions -- those are
 listed in `tools/leak_sweep_baseline.json` so CI only fails on a
-NEW finding, not on rediscovering an already-tracked one.
+NEW finding, not on rediscovering an already-tracked one. An entry
+may additionally set `"flaky": true` when the underlying finding is
+inherently nondeterministic (races against a detached thread's own
+lifetime rather than a deterministic bug) -- such an entry is exempt
+from the "stale baseline entry did not reproduce" check, since not
+reproducing on a given run is expected, not a signal the bug got
+fixed.
 
 Usage:
     python3 tools/leak_sweep.py [--vanic PATH] [--fail-on-new]
@@ -184,7 +190,18 @@ def main():
 
     baseline = load_baseline()
     new_findings = {f: v for f, v in findings.items() if f not in baseline}
-    stale_baseline = {f: e for f, e in baseline.items() if f not in findings}
+    # A `"flaky": true` baseline entry documents a finding that is
+    # inherently nondeterministic (e.g. a LeakSanitizer report racing
+    # against a detached thread's own lifetime -- see
+    # concurrency_primitives.vani's entry). Such an entry reproducing
+    # is expected-but-not-guaranteed, so its ABSENCE this run is not
+    # "stale" the way a normal baseline entry's absence would be (which
+    # signals a fixed bug or a broken sweep). Only non-flaky entries
+    # can go stale.
+    stale_baseline = {
+        f: e for f, e in baseline.items()
+        if f not in findings and not e.get("flaky")
+    }
 
     if new_findings:
         print(f"\n=== {len(new_findings)} NEW finding(s) not in the baseline ===")

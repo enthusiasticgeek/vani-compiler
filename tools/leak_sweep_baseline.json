@@ -15,6 +15,12 @@
     "reason": "Added 2026-08-19/20 alongside the DMA/scatter-gather tutorial content (commit 05fc880a), baseline entry added 2026-08-24 after CI flagged it as new. Same methodology false positive as the pre-existing bare_metal.vani entry above: writes to a hardcoded STM32F4 DMA2 Stream0 peripheral base address (0x40026010, matching the crash address exactly) meant for real embedded hardware or QEMU, not native userspace execution. Correctly SEGVs when run the 'wrong' way; not a compiler bug."
   },
   {
+    "file": "examples/language/sanskrit/concurrency_primitives.vani",
+    "klass": "LEAK",
+    "flaky": true,
+    "reason": "Added 2026-08-24 after CI flagged it as new on the v0.9.6 post-release commit. Not a compiler bug -- a deliberate, documented tradeoff: detach() (src/backend_c.rs's TypedStmt::Detach codegen) intentionally leaks the task's heap-allocated ctx struct, since nobody ever joins to free it and the outline function is shared with join's codegen (which still needs ctx alive after the thread exits). Whether LeakSanitizer's exit-time reachability scan actually flags this leak is a genuine race against the detached thread's own lifetime: if the (trivial, no-sleep) thread has already exited and its stack -- which held the only pointer to ctx -- is gone by scan time, the block is truly unreachable and gets flagged; if the thread is still running (or its stack frame lingers in glibc's thread-stack cache), the pointer is still reachable and LSan stays quiet. Locally reproduced this as genuinely nondeterministic: 10 runs of the exact leak_sweep.py-flagged binary gave 9 clean + 1 leaked. Marked \"flaky\" so a run where it doesn't reproduce isn't treated as a stale baseline entry."
+  },
+  {
     "file": "examples/language/english/loop_carried_overflow_not_elided.vani",
     "klass": "UBSAN_MAYBE",
     "reason": "Round-8 audit (2026-08-09), triaged low severity, not fixed: the C backend emits vani's i64::MIN literal as `-(int64_t)9223372036854775808LL`, technically UB by the strict C standard (huge-unsigned-to-int64_t conversion + negating an unrepresentable value), but universally implemented as the intended two's-complement value via constant folding on every real compiler/CPU. The program's actual overflow-check logic (__builtin_add_overflow + abort()) is present and correct; this is purely about how the literal itself is spelled in the generated C, not a missing runtime check. No observed wrong output."
