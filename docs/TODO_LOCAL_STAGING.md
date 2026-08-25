@@ -11181,3 +11181,47 @@ BASE CORPUS FILE: /home/virgo/source/vani-compiler-localfuzz/examples/language/h
 MUTANT/GENERATED SOURCE:
 ...
 ```
+
+---
+
+### Candidate: 20260825-145715-run-crash-5faf1fd82f
+
+Repro: `tools/localfuzz/findings/20260825-145715-run-crash-5faf1fd82f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-145715-run-crash-5faf1fd82f/fix_attempt.md`
+
+STAGING ENTRY
+
+**Run Details:**
+- **Test Type:** Run-Crash
+- **Target Corpus File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/pashto/iterate.vani`
+- **Mutant Source:**
+  ```vani
+  // vani-lang: pashto
+  موخه "Pashto iterate smoke-test";
+  کار main() -> i64 {
+    ووایه لیست: Vec<i64> = vec();
+    لیست = push(لیست, 10);
+    لیست = push(лیست, 20);
+    لیست = push(لیست, 30);
+    تایید لیست[0] == 10;
+    تایید لیست[1] == 20;
+    تایید لیست[2] == 30;
+    ووایه ټول: i64 = 0;
+    ووایه i: i64 = 0;
+    ووایه i: i64 = 0;
+    تا i < (len(لیست) بطور i64) {
+      ټول = ټول + لیست[i];
+    }
+    تایید ټول == 60;
+    ولیکه "Pashto iterate OK";
+    بېرته 0;
+  }
+  ```
+
+**Observation:**
+- **Crash:** The program did not terminate as expected. It entered an infinite loop or encountered a segmentation fault.
+
+**Affected Backends:**
+- **Vani Compiler (vani):** The crash appears to be specific to the Vani compiler backend, as it affects the output of the `len` function and the comparison in the `if` statement.
+
+**Status:** Needs human
