@@ -11234,3 +11234,22 @@ Repro: `tools/localfuzz/findings/20260825-184010-run-crash-caf27c748f/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260825-184010-run-crash-caf27c748f/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260825-195356-check-crash-8411746505
+
+Repro: `tools/localfuzz/findings/20260825-195356-check-crash-8411746505/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-195356-check-crash-8411746505/fix_attempt.md`
+
+```plaintext
+Test run: Vani Compiler Bug Report
+
+Summary:
+The generated code contains an issue where the `bind` method for an `Atomic<NonCopyStruct>` is called with a non-Copy payload binding, which results in a crash.
+
+Steps to reproduce:
+1. Run the generated code.
+2. Observe the crash.
+
+Backend affected: None
