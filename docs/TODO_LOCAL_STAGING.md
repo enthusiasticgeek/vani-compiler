@@ -11253,3 +11253,14 @@ Steps to reproduce:
 2. Observe the crash.
 
 Backend affected: None
+
+---
+
+### Candidate: 20260825-215302-run-crash-bf789d814a
+
+Repro: `tools/localfuzz/findings/20260825-215302-run-crash-bf789d814a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-215302-run-crash-bf789d814a/fix_attempt.md`
+
+VANI Compiler localfuzz: ran `vanic run examples/language/english/mut_refs.vani` with a random seed, but it crashed before reaching any expected output or behavior.
+
+STATUS: needs human/frontier root-cause review.
