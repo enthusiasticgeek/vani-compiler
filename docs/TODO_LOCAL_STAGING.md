@@ -11165,3 +11165,19 @@ Please review the above details and provide a root cause analysis. If you need f
 ---
 
 **Staging Status:** needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260825-090635-run-crash-597e42d580
+
+Repro: `tools/localfuzz/findings/20260825-090635-run-crash-597e42d580/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-090635-run-crash-597e42d580/fix_attempt.md`
+
+```plaintext
+STATUS: needs human/frontier root-cause review.
+
+BASE CORPUS FILE: /home/virgo/source/vani-compiler-localfuzz/examples/language/hindi/control_flow.vani
+
+MUTANT/GENERATED SOURCE:
+...
+```
