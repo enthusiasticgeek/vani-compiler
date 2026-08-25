@@ -142,6 +142,21 @@ fn main() -> i64 {
   (a genuine background heartbeat, not one that's guaranteed to
   finish first), prefer `vanic build` or `--backend=c` over the
   default `vanic run`.
+- **`detach` leaks a small, bounded amount of memory, by design.**
+  `join` frees the task's heap-allocated capture struct (and, for
+  `Task<R>`, reads its result out of it first) once the thread
+  actually exits. `detach` has no such moment -- nothing ever learns
+  when a detached thread finishes, so nothing ever frees its capture
+  struct. This is a deliberate, one-time-per-`detach`-call tradeoff
+  (a handful to a few dozen bytes, reclaimed by the OS at process
+  exit like any other process memory), not a growing leak per
+  iteration of the *detached thread's own* work. It does mean a
+  program that calls `detach` in a hot loop -- spawning and detaching
+  many short-lived tasks over a long-running process's lifetime --
+  accumulates one unfreed capture struct per call. Prefer `join` (or
+  a bounded worker pool you `join` on a fixed set of tasks) over
+  `detach` for that shape; reach for `detach` for genuinely
+  one-off, background, outlive-the-caller work instead.
 
 ## `cancel` -- interrupting a thread stuck in a blocking call {#cancel}
 
