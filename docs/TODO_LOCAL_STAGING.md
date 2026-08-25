@@ -11113,3 +11113,16 @@ Mutant/generated source:
 
 ਕਾਰਜ main() -> i64 {
   ਮੰਨੋ xs: Vec<i6
+
+---
+
+### Candidate: 20260825-025639-run-crash-fb2b69eebc
+
+Repro: `tools/localfuzz/findings/20260825-025639-run-crash-fb2b69eebc/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-025639-run-crash-fb2b69eebc/fix_attempt.md`
+
+```
+2023-04-15 14:37:18 vanic vani-compiler-localfuzz examples/language/malayalam/async_cancel_auto.vani --backend=c
+
+ STATUS: needs human/frontier root-cause review.
+```
