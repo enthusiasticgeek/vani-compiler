@@ -11225,3 +11225,12 @@ STAGING ENTRY
 - **Vani Compiler (vani):** The crash appears to be specific to the Vani compiler backend, as it affects the output of the `len` function and the comparison in the `if` statement.
 
 **Status:** Needs human
+
+---
+
+### Candidate: 20260825-184010-run-crash-caf27c748f
+
+Repro: `tools/localfuzz/findings/20260825-184010-run-crash-caf27c748f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-184010-run-crash-caf27c748f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
