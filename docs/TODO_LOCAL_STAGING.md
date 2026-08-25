@@ -11126,3 +11126,42 @@ Fix attempt: `tools/localfuzz/findings/20260825-025639-run-crash-fb2b69eebc/fix_
 
  STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260825-050918-run-crash-3bee2a5d50
+
+Repro: `tools/localfuzz/findings/20260825-050918-run-crash-3bee2a5d50/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-050918-run-crash-3bee2a5d50/fix_attempt.md`
+
+**Staging Entry:**
+
+---
+
+### Compiler Fuzzing Bug Report
+
+**Status: needs human/frontier root-cause review.**
+
+#### Environment and Setup
+The compiler was built from source using the default configuration for `vanic`. The local staging log indicates that the mutation/fuzzing process has been executed to find a crash or hang in the `vani` compiler.
+
+#### Corpus File
+The base corpus file used is `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/barrier_sensor_rendezvous.vani`. This example demonstrates a concurrency-related issue where workers need to synchronize their actions without using join operations, causing potential deadlocks or race conditions. The source code contains functions such as `read_sensor`, `worker`, and `main` that are crucial for this bug.
+
+#### Mutant/generated Source
+The mutant/generated source provided is the exact reproduction of a scenario where two workers publish their readings simultaneously, causing a deadlock in the static lock-order checker (S-19) used by vāṇī. The mutex locking logic ensures that no cross-thread lock-order cycle occurs, allowing vāṇī to safely synchronize the worker actions.
+
+#### Observed Symptom
+The observed symptom is a crash or hang during the fuzzing process. This indicates that the compiler has encountered an issue that causes it to terminate unexpectedly when attempting to execute the generated code.
+
+#### Affected Backends
+The mutation/fuzzing process has been executed on both the LLVM backend and the C backend of vāṇī.
+
+---
+
+**Review Instructions:**
+Please review the above details and provide a root cause analysis. If you need further clarification or assistance, please respond directly to this report.
+
+---
+
+**Staging Status:** needs human/frontier root-cause review.
