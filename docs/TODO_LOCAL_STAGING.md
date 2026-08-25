@@ -11264,3 +11264,12 @@ Fix attempt: `tools/localfuzz/findings/20260825-215302-run-crash-bf789d814a/fix_
 VANI Compiler localfuzz: ran `vanic run examples/language/english/mut_refs.vani` with a random seed, but it crashed before reaching any expected output or behavior.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260825-224851-run-crash-6015543d5b
+
+Repro: `tools/localfuzz/findings/20260825-224851-run-crash-6015543d5b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260825-224851-run-crash-6015543d5b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
