@@ -17793,4 +17793,40 @@ test: Devanagari SOV (`के लिए ... से ... तक ... चरण ...`
 Russian (`для ... от ... до ... шаг ...`), both backends, both
 producing the hand-computed expected sums.
 
-Next free bug number is **BUG-228**.
+## BUG-228: `--no-std` C emission unconditionally pulled in hosted-only headers (`<pthread.h>`/`<sched.h>`/`<signal.h>`)
+
+**Symptom**: found during real bare-metal bring-up (Dhruva OS, an
+external ARM1176/BCM2835 bare-metal project), not localfuzz. `vanic
+emit --backend=c --no-std -o out.c` produced a `.c` file that still
+contained `#include <pthread.h>` / `<sched.h>` (POSIX) or
+`<windows.h>`/`<synchapi.h>` (Windows), plus `#include <signal.h>`
+with a `__attribute__((constructor))`-installed handler and
+`_Thread_local` storage -- none of which exist, or exist only as
+non-functional stubs, on a bare-metal cross toolchain (arm-none-eabi/
+newlib). This defeated the entire point of `--no-std`: a program with
+zero threading/cancellation usage still failed to compile against a
+real bare-metal sysroot.
+
+**Root cause**: `emit_c` (backend_c.rs) calls
+`emit_intent_thread_wrappers_c` and `emit_intent_cancel_infra_c`
+unconditionally, regardless of `NO_STD_MODE`. Both existed to support
+`task { .. }` and `cancel <name>;`, hosted-only concurrency constructs
+neither of which has (or needs) a bare-metal equivalent yet, so
+neither is reachable from a genuinely no-std program.
+
+**Fix**: gate both calls behind `if !no_std` at their single call site
+in `emit_c`. A no-std program that *does* try to use `task`/`cancel`
+now gets a plain, honest "undefined reference to intent_thread_create"
+at link time instead of a confusing header-not-found error even when
+it doesn't use threading at all -- clearer failure mode, not a
+regression, since bare-metal `task`/`cancel` support doesn't exist
+either way yet.
+
+**Verification**: full `cargo test --release` (lib + every integration
+test binary + doc-tests) -- 0 failed. Manually confirmed the specific
+regression: `vanic emit --backend=c --no-std` on a real bare-metal
+program (Dhruva's `kernel_main.vani`) no longer contains `pthread.h`/
+`sched.h`/`signal.h` in the emitted output (`grep -c` returns 0, was
+nonzero before the fix).
+
+Next free bug number is **BUG-229**.
