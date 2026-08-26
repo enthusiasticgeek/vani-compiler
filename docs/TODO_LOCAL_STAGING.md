@@ -11273,3 +11273,14 @@ Repro: `tools/localfuzz/findings/20260825-224851-run-crash-6015543d5b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260825-224851-run-crash-6015543d5b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260826-010050-backend-divergence-5a255ab875
+
+Repro: `tools/localfuzz/findings/20260826-010050-backend-divergence-5a255ab875/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260826-010050-backend-divergence-5a255ab875/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vanic compiler crashed during the `intent_vec_Struct_Resource__clone` function when trying to clone a node in a tree structure with nested vectors. The error message indicates implicit function declarations for `intent_vec_Struct_Resource__free` and `intent_vec_Struct_Resource__clone`, which are likely causing the crash.
