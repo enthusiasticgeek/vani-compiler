@@ -11293,3 +11293,53 @@ Repro: `tools/localfuzz/findings/20260826-041621-run-crash-d35aada92b/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260826-041621-run-crash-d35aada92b/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260826-084154-run-crash-ba44a6e3c4
+
+Repro: `tools/localfuzz/findings/20260826-084154-run-crash-ba44a6e3c4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260826-084154-run-crash-ba44a6e3c4/fix_attempt.md`
+
+Staging entry:
+```
+Test case `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/loop_carried_overflow_not_elided.vani` found a run-crash with following details:
+
+- `Base corpus file`: /home/virgo/source/vani-compiler-localfuzz/examples/language/english/loop_carried_overflow_not_elided.vani
+- Mutant/generated source:
+```vani
+fn main() -> i64 {
+  let n: i64 = 0;
+  while n < 100 {
+    if n == 5 {
+      break;
+    }
+    n = n + -1;
+  }
+  assert n == 5;
+  return 0;
+}
+```
+
+- Finding kind: run-crash
+- Raw result data:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
+STATUS: needs human/frontier root-cause review.
