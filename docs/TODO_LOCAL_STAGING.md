@@ -11381,3 +11381,22 @@ Repro: `tools/localfuzz/findings/20260826-170110-backend-divergence-79ee16ac39/r
 Fix attempt: `tools/localfuzz/findings/20260826-170110-backend-divergence-79ee16ac39/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260826-185652-run-crash-ead89fcfae
+
+Repro: `tools/localfuzz/findings/20260826-185652-run-crash-ead89fcfae/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260826-185652-run-crash-ead89fcfae/fix_attempt.md`
+
+ STATUS: needs human/frontier root-cause review.
+
+This bug report describes a crash in the vani-compiler when running with a specific mutant-generated source code for the Pashto language. The mutant was designed to cause an early exit from a function, and when this occurred, the compiler failed to execute properly, leading to a run-crash. 
+
+The mutant generated code includes a function `کار لومړی_صفر` that takes a vector of integers as input and exits if any element is zero. The main function in the example code then calls this function with a vector containing both positive and negative numbers.
+
+Running this mutant with the vani-compiler produces a crash, and the final output shows "Pashto early exit OK" followed by a `0`, indicating that the compiler executed to the end of the program without crashing. 
+
+The coverage score for the run-crash is set to 100, suggesting that all covered lines in the source code were executed during this test case.
+
+The error message provided does not give enough information to determine the root cause of the crash, so a human/frontier model review is required to identify and fix any underlying issues in the compiler's execution logic.
