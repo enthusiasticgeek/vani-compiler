@@ -11400,3 +11400,14 @@ Running this mutant with the vani-compiler produces a crash, and the final outpu
 The coverage score for the run-crash is set to 100, suggesting that all covered lines in the source code were executed during this test case.
 
 The error message provided does not give enough information to determine the root cause of the crash, so a human/frontier model review is required to identify and fix any underlying issues in the compiler's execution logic.
+
+---
+
+### Candidate: 20260826-213704-run-crash-0e756d2e4e
+
+Repro: `tools/localfuzz/findings/20260826-213704-run-crash-0e756d2e4e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260826-213704-run-crash-0e756d2e4e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The `vani-lang` compiler was run with the mutant source provided, and it resulted in a crash. The exact repro source can be found at `/home/virgo/source/vani-compiler-localfuzz/examples/language/sindhi/early_exit.vani`. The observed symptom is a crash due to an unhandled exception or infinite loop during execution. This bug affects the `vani-lang` compiler, specifically in the implementation of the `pee_routine` function, which is called within the main function. The backend(s) that this bug affects include any target platform where the compiler is executed.
