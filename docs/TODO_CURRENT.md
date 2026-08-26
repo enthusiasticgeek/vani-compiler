@@ -17793,4 +17793,93 @@ test: Devanagari SOV (`के लिए ... से ... तक ... चरण ...`
 Russian (`для ... от ... до ... шаг ...`), both backends, both
 producing the hand-computed expected sums.
 
-Next free bug number is **BUG-228**.
+## BUG-228: `--no-std` C emission unconditionally pulled in hosted-only headers (`<pthread.h>`/`<sched.h>`/`<signal.h>`)
+
+**Symptom**: found during real bare-metal bring-up (Dhruva OS, an
+external ARM1176/BCM2835 bare-metal project), not localfuzz. `vanic
+emit --backend=c --no-std -o out.c` produced a `.c` file that still
+contained `#include <pthread.h>` / `<sched.h>` (POSIX) or
+`<windows.h>`/`<synchapi.h>` (Windows), plus `#include <signal.h>`
+with a `__attribute__((constructor))`-installed handler and
+`_Thread_local` storage -- none of which exist, or exist only as
+non-functional stubs, on a bare-metal cross toolchain (arm-none-eabi/
+newlib). This defeated the entire point of `--no-std`: a program with
+zero threading/cancellation usage still failed to compile against a
+real bare-metal sysroot.
+
+**Root cause**: `emit_c` (backend_c.rs) calls
+`emit_intent_thread_wrappers_c` and `emit_intent_cancel_infra_c`
+unconditionally, regardless of `NO_STD_MODE`. Both existed to support
+`task { .. }` and `cancel <name>;`, hosted-only concurrency constructs
+neither of which has (or needs) a bare-metal equivalent yet, so
+neither is reachable from a genuinely no-std program.
+
+**Fix**: gate both calls behind `if !no_std` at their single call site
+in `emit_c`. A no-std program that *does* try to use `task`/`cancel`
+now gets a plain, honest "undefined reference to intent_thread_create"
+at link time instead of a confusing header-not-found error even when
+it doesn't use threading at all -- clearer failure mode, not a
+regression, since bare-metal `task`/`cancel` support doesn't exist
+either way yet.
+
+**Verification**: full `cargo test --release` (lib + every integration
+test binary + doc-tests) -- 0 failed. Manually confirmed the specific
+regression: `vanic emit --backend=c --no-std` on a real bare-metal
+program (Dhruva's `kernel_main.vani`) no longer contains `pthread.h`/
+`sched.h`/`signal.h` in the emitted output (`grep -c` returns 0, was
+nonzero before the fix).
+
+## BUG-229: LLVM backend declared `strlen` as returning `i64`, corrupting the high 32 bits on 32-bit targets
+
+**Symptom**: found during real bare-metal bring-up (Dhruva OS, an
+external ARM1176/BCM2835 bare-metal project) -- specifically, calling
+`uart_puts` (a user function that calls `str_len_bytes`, which lowers
+to a `strlen` call) from an interrupt handler produced a silent,
+massive runaway: the "length" used in the subsequent byte-copy loop
+was occasionally an astronomically large 64-bit value, causing the
+loop to read on through arbitrary memory for millions of iterations
+instead of stopping at the real (tiny) string length. No crash, no
+diagnostic -- just a wrong length, reproducing deterministically for a
+given binary but varying across binaries with different code layout
+(a classic symptom of reading an uninitialized/garbage register).
+
+**Root cause**: `strlen`'s real C ABI return type is `size_t`, which is
+32-bit on any ILP32 target (every 32-bit architecture: ARM32, x86,
+RISC-V32, ...) and 64-bit on LP64 targets (x86-64, ARM64, ...). Both
+`backend_llvm.rs` and `ssa_backend_llvm.rs` declared it unconditionally
+as `declare i64 @strlen(i8*)` and called it directly wherever a
+`str_len_bytes`-shaped result was needed (~45 call sites total). On a
+64-bit host this happens to be harmless (the real function's 64-bit
+`rax` return matches the declared width exactly). On a 32-bit target,
+the *real* `strlen` symbol -- whether a real libc's or a freestanding
+program's own minimal implementation -- only ever sets the low 32 bits
+of the return register; nothing sets the "high half" AAPCS's 64-bit
+return convention expects the caller to also read, so it comes out as
+whatever garbage was left in that register by earlier code -- directly
+explaining why the bug was interrupt-context-dependent (different
+register history immediately before the call) rather than a clean,
+always-reproducing crash. Notably, sibling functions right next to
+this one in the same file (`strcmp`, `memcmp`, `strncmp`, all
+genuinely `int`-returning on every platform) were already correctly
+declared at their true `i32` width -- `strlen` was the sole,
+isolated inconsistency, not a deliberate design choice.
+
+**Fix**: declare the *real* `strlen` symbol at its true `i32` width in
+both backends, and add one `intent_strlen64` wrapper (`zext i32 to
+i64`) that every former direct call site now calls instead. Correct on
+both 32- and 64-bit targets -- on 64-bit hosts this only changes
+behavior for strings longer than 4 GiB, which cannot occur in
+practice. Two existing tests in `lib.rs` asserting the literal string
+`"call i64 @strlen"` were updated to expect `"call i64
+@intent_strlen64"` instead.
+
+**Verification**: full `cargo test --release` (every test binary, not
+just the lib suite) -- 3020 passed in the main lib suite (0 failed, 1
+pre-existing ignored), 0 failed across every other integration test
+binary (`run_end_to_end`: 279 passed / 8 ignored; safety-diagnostics:
+31 passed; vtables_phase3: 11 passed; etc.). Manually confirmed the
+actual regression is gone: the real-world Dhruva OS bare-metal program
+that originally surfaced this (an ARM32 interrupt handler calling
+`uart_puts`) now runs correctly under QEMU with no runaway.
+
+Next free bug number is **BUG-230**.

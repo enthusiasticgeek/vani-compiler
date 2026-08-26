@@ -1285,7 +1285,32 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // memcpy is a libc intrinsic — LLVM auto-binds it, no
     // explicit declare needed (lli rejects a redeclaration).
     out.push_str("declare i32 @strncmp(i8*, i8*, i64)\n");
-    out.push_str("declare i64 @strlen(i8*)\n");
+    // BUG-229 (found via Dhruva OS bare-metal bring-up, 2026-08-25):
+    // strlen's real C ABI returns `size_t`, which is 32-bit on any
+    // ILP32 target (every 32-bit architecture: ARM32, x86, RISC-V32,
+    // ...) and 64-bit on LP64 targets (x86-64, ARM64, ...). Declaring
+    // it as `i64` unconditionally -- as every call site in this file
+    // used to do directly -- is only an accident-free match on 64-bit
+    // hosts; on a 32-bit target the real function only ever sets the
+    // low 32 bits of the return register, leaving the "high half" of
+    // whatever the caller's ABI expects as a 64-bit pair full of
+    // garbage from whatever was in that register beforehand. On ARM32
+    // this manifested as an intermittent, register-history-dependent
+    // wrong length for every `str_len_bytes` call and everything
+    // built on it (str concatenation, splitting, trimming, ...) --
+    // silent, no crash, just an occasionally-astronomical length that
+    // reads on through memory. Declaring the *real* symbol at its true
+    // 32-bit width and zero-extending in a wrapper is correct on both
+    // 32- and 64-bit targets (on 64-bit hosts this only changes
+    // behavior for strings longer than 4 GiB, which cannot occur in
+    // practice) -- everywhere in this file that used to call
+    // `i64 @strlen` directly now calls `i64 @intent_strlen64` instead.
+    out.push_str("declare i32 @strlen(i8*)\n");
+    out.push_str("define internal i64 @intent_strlen64(i8* %s) {\n");
+    out.push_str("  %r32 = call i32 @strlen(i8* %s)\n");
+    out.push_str("  %r64 = zext i32 %r32 to i64\n");
+    out.push_str("  ret i64 %r64\n");
+    out.push_str("}\n");
     // Closure #442: strchr returns pointer to first byte match
     // (or NULL) — used by str_index_of_byte.
     out.push_str("declare i8* @strchr(i8*, i32)\n");
@@ -15572,7 +15597,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let s = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n", dest, s
+                    "  {} = call i64 @intent_strlen64(i8* {})\n", dest, s
                 ));
                 return dest;
             }
@@ -16001,7 +16026,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let len = ctx.fresh_tmp();
                 let is_empty = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n", len, s
+                    "  {} = call i64 @intent_strlen64(i8* {})\n", len, s
                 ));
                 out.push_str(&format!(
                     "  {} = icmp eq i64 {}, 0\n", is_empty, len
@@ -16127,7 +16152,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let matches = ctx.fresh_tmp();
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n", len, s
+                    "  {} = call i64 @intent_strlen64(i8* {})\n", len, s
                 ));
                 out.push_str(&format!(
                     "  {} = icmp sgt i64 {}, 0\n", nonempty, len
@@ -17031,7 +17056,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let p = emit_expr(&args[1], ctx, out);
                 let pl = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n",
+                    "  {} = call i64 @intent_strlen64(i8* {})\n",
                     pl, p
                 ));
                 let cmp = ctx.fresh_tmp();
@@ -17052,11 +17077,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let sl = ctx.fresh_tmp();
                 let ul = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n",
+                    "  {} = call i64 @intent_strlen64(i8* {})\n",
                     sl, s
                 ));
                 out.push_str(&format!(
-                    "  {} = call i64 @strlen(i8* {})\n",
+                    "  {} = call i64 @intent_strlen64(i8* {})\n",
                     ul, u
                 ));
                 // Fast reject if suffix longer than string.
@@ -18119,7 +18144,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     s = inner;
                 }
                 let v = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = call i64 @strlen(i8* {})\n", v, s));
+                out.push_str(&format!("  {} = call i64 @intent_strlen64(i8* {})\n", v, s));
                 // Free fresh-OwnedStr operand after `strlen`
                 // (which doesn't consume its argument). Var /
                 // FieldAccess operands skip — outer binding's
@@ -20177,13 +20202,14 @@ fn icmp_predicate(op: BinaryOp, signed: bool) -> &'static str {
 /// Emits the `intent_str_concat` runtime helper that both
 /// the tree-LLVM backend and the SSA-LLVM backend can call
 /// from Str/OwnedStr `+` lowering. Always definition-only —
-/// callers add `declare i64 @strlen(i8*)`, `declare i8*
-/// @malloc(i64)`, `declare i8* @memcpy(i8*, i8*, i64)`, and
+/// callers add `declare i32 @strlen(i8*)` + the `intent_strlen64`
+/// wrapper (BUG-229), `declare i8* @malloc(i64)`,
+/// `declare i8* @memcpy(i8*, i8*, i64)`, and
 /// `declare void @free(i8*)` to the module preamble.
 pub(crate) fn emit_intent_str_concat_definition(out: &mut String) {
     out.push_str("define i8* @intent_str_concat(i8* %l, i32 %lo, i8* %r, i32 %ro) {\n");
-    out.push_str("  %ln = call i64 @strlen(i8* %l)\n");
-    out.push_str("  %rn = call i64 @strlen(i8* %r)\n");
+    out.push_str("  %ln = call i64 @intent_strlen64(i8* %l)\n");
+    out.push_str("  %rn = call i64 @intent_strlen64(i8* %r)\n");
     out.push_str("  %sum = add i64 %ln, %rn\n");
     out.push_str("  %total = add i64 %sum, 1\n");
     out.push_str("  %buf = call i8* @malloc(i64 %total)\n");
@@ -20396,7 +20422,7 @@ pub(crate) fn emit_intent_siphash_definitions(out: &mut String) {
     // ---------- intent_siphash_str ----------
     // vāṇī Str doesn't produce NULL; treat as plain C string.
     out.push_str("define i64 @intent_siphash_str(i64 %k0, i64 %k1, i8* %s) {\n");
-    out.push_str("  %n = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %n = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %r = call i64 @intent_siphash24_bytes(i64 %k0, i64 %k1, i8* %s, i64 %n)\n");
     out.push_str("  ret i64 %r\n");
     out.push_str("}\n\n");
@@ -25461,7 +25487,7 @@ pub(crate) fn emit_intent_str_lines_definition(out: &mut String) {
     out.push_str("  %sl_line_null = icmp eq i8* %sl_line, null\n");
     out.push_str("  br i1 %sl_line_null, label %sl_advance, label %sl_check_cr\n");
     out.push_str("sl_check_cr:\n");
-    out.push_str("  %sl_ll = call i64 @strlen(i8* %sl_line)\n");
+    out.push_str("  %sl_ll = call i64 @intent_strlen64(i8* %sl_line)\n");
     out.push_str("  %sl_has_chars = icmp ugt i64 %sl_ll, 0\n");
     out.push_str("  br i1 %sl_has_chars, label %sl_check_cr_body, label %sl_advance\n");
     out.push_str("sl_check_cr_body:\n");
@@ -25489,8 +25515,8 @@ pub(crate) fn emit_intent_str_lines_definition(out: &mut String) {
 pub(crate) fn emit_intent_str_strip_definitions(out: &mut String) {
     // strip_prefix
     out.push_str("define i8* @intent_str_strip_prefix(i8* %s, i8* %p) {\n");
-    out.push_str("  %sp_sl = call i64 @strlen(i8* %s)\n");
-    out.push_str("  %sp_pl = call i64 @strlen(i8* %p)\n");
+    out.push_str("  %sp_sl = call i64 @intent_strlen64(i8* %s)\n");
+    out.push_str("  %sp_pl = call i64 @intent_strlen64(i8* %p)\n");
     out.push_str("  %sp_p_nonempty = icmp ugt i64 %sp_pl, 0\n");
     out.push_str("  %sp_fits = icmp ule i64 %sp_pl, %sp_sl\n");
     out.push_str("  %sp_eligible = and i1 %sp_p_nonempty, %sp_fits\n");
@@ -25522,8 +25548,8 @@ pub(crate) fn emit_intent_str_strip_definitions(out: &mut String) {
 
     // strip_suffix
     out.push_str("define i8* @intent_str_strip_suffix(i8* %s, i8* %sfx) {\n");
-    out.push_str("  %ss_sl = call i64 @strlen(i8* %s)\n");
-    out.push_str("  %ss_fl = call i64 @strlen(i8* %sfx)\n");
+    out.push_str("  %ss_sl = call i64 @intent_strlen64(i8* %s)\n");
+    out.push_str("  %ss_fl = call i64 @intent_strlen64(i8* %sfx)\n");
     out.push_str("  %ss_f_nonempty = icmp ugt i64 %ss_fl, 0\n");
     out.push_str("  %ss_fits = icmp ule i64 %ss_fl, %ss_sl\n");
     out.push_str("  %ss_eligible = and i1 %ss_f_nonempty, %ss_fits\n");
@@ -25905,7 +25931,7 @@ pub(crate) fn emit_intent_str_count_char_definition(out: &mut String) {
 /// extended to i64).
 pub(crate) fn emit_intent_str_reverse_definition(out: &mut String) {
     out.push_str("define i8* @intent_str_reverse(i8* %s) {\n");
-    out.push_str("  %sr_sl = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sr_sl = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %sr_alloc_n = add i64 %sr_sl, 1\n");
     out.push_str("  %sr_out = call i8* @malloc(i64 %sr_alloc_n)\n");
     out.push_str("  %sr_i_p = alloca i64\n");
@@ -25935,7 +25961,7 @@ pub(crate) fn emit_intent_str_reverse_definition(out: &mut String) {
 
 pub(crate) fn emit_intent_str_chars_definition(out: &mut String) {
     out.push_str("define %intent_vec_i64 @intent_str_chars(i8* %s) {\n");
-    out.push_str("  %sc_sl = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sc_sl = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %sc_empty = icmp eq i64 %sc_sl, 0\n");
     out.push_str("  br i1 %sc_empty, label %sc_ret_empty, label %sc_alloc\n");
     out.push_str("sc_ret_empty:\n");
@@ -25986,7 +26012,7 @@ pub(crate) fn emit_intent_str_pad_definitions(out: &mut String) {
             fn_name = fn_name
         ));
         out.push_str(&format!(
-            "  %{p}_sl = call i64 @strlen(i8* %s)\n", p = p
+            "  %{p}_sl = call i64 @intent_strlen64(i8* %s)\n", p = p
         ));
         // fill = ch[0] != 0 ? ch[0] : ' '
         out.push_str(&format!(
@@ -27074,7 +27100,7 @@ pub(crate) fn emit_intent_str_join_definition(out: &mut String) {
     out.push_str("  ret i8* %sj_e\n");
     out.push_str("sj_proceed:\n");
     // sep_l = strlen(sep) (sep is never NULL in vāṇी surface)
-    out.push_str("  %sj_sep_l = call i64 @strlen(i8* %sep)\n");
+    out.push_str("  %sj_sep_l = call i64 @intent_strlen64(i8* %sep)\n");
     out.push_str("  %sj_src = load i8**, i8*** %sj_dp\n");
     // Pass 1: total = sum(strlen(xs[i])) + sep_l * (len - 1)
     out.push_str("  %sj_total_p = alloca i64\n");
@@ -27089,7 +27115,7 @@ pub(crate) fn emit_intent_str_join_definition(out: &mut String) {
     out.push_str("sj_p1_body:\n");
     out.push_str("  %sj_slot1 = getelementptr i8*, i8** %sj_src, i64 %sj_i1\n");
     out.push_str("  %sj_s1 = load i8*, i8** %sj_slot1\n");
-    out.push_str("  %sj_l1 = call i64 @strlen(i8* %sj_s1)\n");
+    out.push_str("  %sj_l1 = call i64 @intent_strlen64(i8* %sj_s1)\n");
     out.push_str("  %sj_t_old = load i64, i64* %sj_total_p\n");
     out.push_str("  %sj_t_new = add i64 %sj_t_old, %sj_l1\n");
     out.push_str("  store i64 %sj_t_new, i64* %sj_total_p\n");
@@ -27129,7 +27155,7 @@ pub(crate) fn emit_intent_str_join_definition(out: &mut String) {
     out.push_str("sj_p2_skip_sep:\n");
     out.push_str("  %sj_slot2 = getelementptr i8*, i8** %sj_src, i64 %sj_i2\n");
     out.push_str("  %sj_s2 = load i8*, i8** %sj_slot2\n");
-    out.push_str("  %sj_l2 = call i64 @strlen(i8* %sj_s2)\n");
+    out.push_str("  %sj_l2 = call i64 @intent_strlen64(i8* %sj_s2)\n");
     out.push_str("  %sj_w_pre = load i64, i64* %sj_w_p\n");
     out.push_str("  %sj_dst = getelementptr i8, i8* %sj_out, i64 %sj_w_pre\n");
     out.push_str("  %_sj_c = call i8* @memcpy(i8* %sj_dst, i8* %sj_s2, i64 %sj_l2)\n");
@@ -27158,11 +27184,11 @@ pub(crate) fn emit_intent_str_split_definition(out: &mut String) {
     out.push_str("  %z2 = insertvalue %intent_vec_i8p %z1, i64 0, 2\n");
     out.push_str("  store %intent_vec_i8p %z2, %intent_vec_i8p* %out_p\n");
     // strlen(delim); zero ⇒ single-element vec containing dup(s).
-    out.push_str("  %dl_real = call i64 @strlen(i8* %delim)\n");
+    out.push_str("  %dl_real = call i64 @intent_strlen64(i8* %delim)\n");
     out.push_str("  %dl_is_zero = icmp eq i64 %dl_real, 0\n");
     out.push_str("  br i1 %dl_is_zero, label %sp_empty_delim, label %sp_walk_init\n");
     out.push_str("sp_empty_delim:\n");
-    out.push_str("  %sl_e = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sl_e = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %slp1_e = add i64 %sl_e, 1\n");
     out.push_str("  %dup_e = call i8* @malloc(i64 %slp1_e)\n");
     out.push_str("  %_de = call i8* @memcpy(i8* %dup_e, i8* %s, i64 %slp1_e)\n");
@@ -27177,7 +27203,7 @@ pub(crate) fn emit_intent_str_split_definition(out: &mut String) {
     out.push_str("  ret %intent_vec_i8p %r2\n");
     // Main loop: walk via strstr, push each span.
     out.push_str("sp_walk_init:\n");
-    out.push_str("  %dl = call i64 @strlen(i8* %delim)\n");
+    out.push_str("  %dl = call i64 @intent_strlen64(i8* %delim)\n");
     out.push_str("  %p_p = alloca i8*\n");
     out.push_str("  store i8* %s, i8** %p_p\n");
     out.push_str("  br label %sp_loop\n");
@@ -27192,7 +27218,7 @@ pub(crate) fn emit_intent_str_split_definition(out: &mut String) {
     out.push_str("  %span_m = sub i64 %m_int, %p_int\n");
     out.push_str("  br label %sp_alloc_and_push\n");
     out.push_str("sp_tail:\n");
-    out.push_str("  %span_t = call i64 @strlen(i8* %p_cur)\n");
+    out.push_str("  %span_t = call i64 @intent_strlen64(i8* %p_cur)\n");
     out.push_str("  br label %sp_alloc_and_push\n");
     out.push_str("sp_alloc_and_push:\n");
     out.push_str("  %span = phi i64 [ %span_m, %sp_with_match ], [ %span_t, %sp_tail ]\n");
@@ -27260,8 +27286,8 @@ pub(crate) fn emit_intent_str_replace_definition(out: &mut String) {
     // vāṇī's Str surface doesn't produce NULL — string literals
     // resolve to private constants and OwnedStr always points
     // at a malloc'd buffer. Skip NULL normalization in the IR.
-    out.push_str("  %fn_len = call i64 @strlen(i8* %from)\n");
-    out.push_str("  %s_len = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %fn_len = call i64 @intent_strlen64(i8* %from)\n");
+    out.push_str("  %s_len = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %fn_zero = icmp eq i64 %fn_len, 0\n");
     out.push_str("  br i1 %fn_zero, label %rep_dup, label %rep_count_init\n");
     // Empty `from` ⇒ just dup `s` (no replacement loop).
@@ -27272,7 +27298,7 @@ pub(crate) fn emit_intent_str_replace_definition(out: &mut String) {
     out.push_str("  ret i8* %dup_buf\n");
     // Pass 1: count non-overlapping matches.
     out.push_str("rep_count_init:\n");
-    out.push_str("  %to_len = call i64 @strlen(i8* %to)\n");
+    out.push_str("  %to_len = call i64 @intent_strlen64(i8* %to)\n");
     out.push_str("  %hits_p = alloca i64\n");
     out.push_str("  store i64 0, i64* %hits_p\n");
     out.push_str("  %cp_p = alloca i8*\n");
@@ -27338,7 +27364,7 @@ pub(crate) fn emit_intent_str_replace_definition(out: &mut String) {
     // Tail: copy the remainder + NUL.
     out.push_str("rep_tail:\n");
     out.push_str("  %src_final = load i8*, i8** %src_p\n");
-    out.push_str("  %tail_len = call i64 @strlen(i8* %src_final)\n");
+    out.push_str("  %tail_len = call i64 @intent_strlen64(i8* %src_final)\n");
     out.push_str("  %dst_final = load i8*, i8** %dst_p\n");
     out.push_str("  %tail_pos = icmp ugt i64 %tail_len, 0\n");
     out.push_str("  br i1 %tail_pos, label %rep_memcpy_tail, label %rep_terminate\n");
@@ -27362,7 +27388,7 @@ pub(crate) fn emit_intent_substring_definition(out: &mut String) {
     out.push_str("  %sub_null = icmp eq i8* %s, null\n");
     out.push_str("  br i1 %sub_null, label %sub_zero_len, label %sub_strlen\n");
     out.push_str("sub_strlen:\n");
-    out.push_str("  %sub_sl_pre = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sub_sl_pre = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  br label %sub_clamp\n");
     out.push_str("sub_zero_len:\n");
     out.push_str("  br label %sub_clamp\n");
@@ -27409,7 +27435,7 @@ pub(crate) fn emit_intent_str_case_definition(out: &mut String) {
     out.push_str("  %su_null = icmp eq i8* %s, null\n");
     out.push_str("  br i1 %su_null, label %su_empty, label %su_strlen\n");
     out.push_str("su_strlen:\n");
-    out.push_str("  %su_sl = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %su_sl = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %su_alloc_n = add i64 %su_sl, 1\n");
     out.push_str("  %su_out = call i8* @malloc(i64 %su_alloc_n)\n");
     out.push_str("  br label %su_loop_head\n");
@@ -27444,7 +27470,7 @@ pub(crate) fn emit_intent_str_case_definition(out: &mut String) {
     out.push_str("  %sl_null = icmp eq i8* %s, null\n");
     out.push_str("  br i1 %sl_null, label %sl_empty, label %sl_strlen\n");
     out.push_str("sl_strlen:\n");
-    out.push_str("  %sl_sl = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sl_sl = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %sl_alloc_n = add i64 %sl_sl, 1\n");
     out.push_str("  %sl_out = call i8* @malloc(i64 %sl_alloc_n)\n");
     out.push_str("  br label %sl_loop_head\n");
@@ -27484,7 +27510,7 @@ pub(crate) fn emit_intent_str_repeat_definition(out: &mut String) {
     out.push_str("  %sr_null = icmp eq i8* %s, null\n");
     out.push_str("  br i1 %sr_null, label %sr_empty, label %sr_strlen\n");
     out.push_str("sr_strlen:\n");
-    out.push_str("  %sr_sl = call i64 @strlen(i8* %s)\n");
+    out.push_str("  %sr_sl = call i64 @intent_strlen64(i8* %s)\n");
     out.push_str("  %sr_zero_sl = icmp eq i64 %sr_sl, 0\n");
     out.push_str("  %sr_zero_n = icmp sle i64 %n, 0\n");
     out.push_str("  %sr_skip = or i1 %sr_zero_sl, %sr_zero_n\n");
@@ -27558,7 +27584,7 @@ pub(crate) fn emit_intent_str_trim_definition(out: &mut String) {
     // the trailing NUL if the string was all-whitespace).
     out.push_str("tr_after_lo:\n");
     out.push_str("  %lo_final = load i8*, i8** %lo_p\n");
-    out.push_str("  %n0 = call i64 @strlen(i8* %lo_final)\n");
+    out.push_str("  %n0 = call i64 @intent_strlen64(i8* %lo_final)\n");
     out.push_str("  %n_p = alloca i64\n");
     out.push_str("  store i64 %n0, i64* %n_p\n");
     out.push_str("  br label %tr_hi_loop\n");
@@ -28245,7 +28271,7 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String, uses_epoll: bool) {
          \x20 %is_null = icmp eq i8* %s, null\n\
          \x20 br i1 %is_null, label %ret_neg1, label %do_send\n\
          do_send:\n\
-         \x20 %len = call i64 @strlen(i8* %s)\n\
+         \x20 %len = call i64 @intent_strlen64(i8* %s)\n\
          \x20 %fd_i32 = trunc i64 %fd to i32\n\
          \x20 %n = call i64 @send(i32 %fd_i32, i8* %s, i64 %len, i32 0)\n\
          \x20 %err = icmp slt i64 %n, 0\n\
@@ -28522,7 +28548,7 @@ fn emit_intent_tcp_helpers_llvm_windows(out: &mut String, uses_epoll: bool) {
          \x20 %is_null = icmp eq i8* %s, null\n\
          \x20 br i1 %is_null, label %ret_neg1, label %do_strlen\n\
          do_strlen:\n\
-         \x20 %len_i64 = call i64 @strlen(i8* %s)\n\
+         \x20 %len_i64 = call i64 @intent_strlen64(i8* %s)\n\
          \x20 %too_big = icmp sgt i64 %len_i64, 2147483647\n\
          \x20 br i1 %too_big, label %ret_neg1, label %do_send\n\
          do_send:\n\
@@ -31477,7 +31503,7 @@ fn emit_intent_hashmap_pair_llvm_strk(
              \x20 ; safe (no double-free). Inline strdup via\n\
              \x20 ; strlen + malloc + memcpy (POSIX strdup avoids\n\
              \x20 ; -std=c11 portability quirks).\n\
-             \x20 %k_len = call i64 @strlen(i8* %k)\n\
+             \x20 %k_len = call i64 @intent_strlen64(i8* %k)\n\
              \x20 %k_len_p1 = add i64 %k_len, 1\n\
              \x20 %k_owned = call i8* @malloc(i64 %k_len_p1)\n\
              \x20 %k_copy = call i8* @memcpy(i8* %k_owned, i8* %k, i64 %k_len_p1)\n\
@@ -31976,7 +32002,7 @@ fn emit_intent_hashmap_pair_llvm_strk_strv(
              g_some:\n\
              \x20 %vcell = getelementptr i8*, i8** %vals, i64 %i\n\
              \x20 %vv = load i8*, i8** %vcell\n\
-             \x20 %vlen = call i64 @strlen(i8* %vv)\n\
+             \x20 %vlen = call i64 @intent_strlen64(i8* %vv)\n\
              \x20 %vlen_p1 = add i64 %vlen, 1\n\
              \x20 %v_copy = call i8* @malloc(i64 %vlen_p1)\n\
              \x20 %v_done = call i8* @memcpy(i8* %v_copy, i8* %vv, i64 %vlen_p1)\n\
@@ -32051,7 +32077,7 @@ fn emit_intent_hashmap_pair_llvm_strk_strv(
              \x20 ; Duplicate K: keep existing K, swap in fresh V clone.\n\
              \x20 %vcell_u = getelementptr i8*, i8** %vals, i64 %i\n\
              \x20 %old_v = load i8*, i8** %vcell_u\n\
-             \x20 %nv_len = call i64 @strlen(i8* %v)\n\
+             \x20 %nv_len = call i64 @intent_strlen64(i8* %v)\n\
              \x20 %nv_len_p1 = add i64 %nv_len, 1\n\
              \x20 %nv_owned = call i8* @malloc(i64 %nv_len_p1)\n\
              \x20 %nv_copied = call i8* @memcpy(i8* %nv_owned, i8* %v, i64 %nv_len_p1)\n\
@@ -32061,11 +32087,11 @@ fn emit_intent_hashmap_pair_llvm_strk_strv(
              \x20 ret %{opt} %r2\n\
              ins_place:\n\
              \x20 ; Clone both K and V before storage.\n\
-             \x20 %k_len = call i64 @strlen(i8* %k)\n\
+             \x20 %k_len = call i64 @intent_strlen64(i8* %k)\n\
              \x20 %k_len_p1 = add i64 %k_len, 1\n\
              \x20 %k_owned = call i8* @malloc(i64 %k_len_p1)\n\
              \x20 %k_copied = call i8* @memcpy(i8* %k_owned, i8* %k, i64 %k_len_p1)\n\
-             \x20 %v_len = call i64 @strlen(i8* %v)\n\
+             \x20 %v_len = call i64 @intent_strlen64(i8* %v)\n\
              \x20 %v_len_p1 = add i64 %v_len, 1\n\
              \x20 %v_owned = call i8* @malloc(i64 %v_len_p1)\n\
              \x20 %v_copied = call i8* @memcpy(i8* %v_owned, i8* %v, i64 %v_len_p1)\n\
@@ -33219,7 +33245,7 @@ fn emit_intent_hashmap_pair_llvm_i64k_strv(
              \x20 ; Clone stored V so caller's auto-drop is safe.\n\
              \x20 %vcell = getelementptr i8*, i8** %vals, i64 %i\n\
              \x20 %vv = load i8*, i8** %vcell\n\
-             \x20 %vlen = call i64 @strlen(i8* %vv)\n\
+             \x20 %vlen = call i64 @intent_strlen64(i8* %vv)\n\
              \x20 %vlen_p1 = add i64 %vlen, 1\n\
              \x20 %v_copy = call i8* @malloc(i64 %vlen_p1)\n\
              \x20 %v_done = call i8* @memcpy(i8* %v_copy, i8* %vv, i64 %vlen_p1)\n\
@@ -33294,7 +33320,7 @@ fn emit_intent_hashmap_pair_llvm_i64k_strv(
              \x20 ; store a fresh clone of the incoming V.\n\
              \x20 %vcell_u = getelementptr i8*, i8** %vals, i64 %i\n\
              \x20 %old_v = load i8*, i8** %vcell_u\n\
-             \x20 %nv_len = call i64 @strlen(i8* %v)\n\
+             \x20 %nv_len = call i64 @intent_strlen64(i8* %v)\n\
              \x20 %nv_len_p1 = add i64 %nv_len, 1\n\
              \x20 %nv_owned = call i8* @malloc(i64 %nv_len_p1)\n\
              \x20 %nv_copied = call i8* @memcpy(i8* %nv_owned, i8* %v, i64 %nv_len_p1)\n\
@@ -33305,7 +33331,7 @@ fn emit_intent_hashmap_pair_llvm_i64k_strv(
              ins_place:\n\
              \x20 ; New slot — clone V before storage (affine local\n\
              \x20 ; drop suppression workaround).\n\
-             \x20 %v_len = call i64 @strlen(i8* %v)\n\
+             \x20 %v_len = call i64 @intent_strlen64(i8* %v)\n\
              \x20 %v_len_p1 = add i64 %v_len, 1\n\
              \x20 %v_owned = call i8* @malloc(i64 %v_len_p1)\n\
              \x20 %v_copied = call i8* @memcpy(i8* %v_owned, i8* %v, i64 %v_len_p1)\n\

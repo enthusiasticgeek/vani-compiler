@@ -440,7 +440,18 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i32 @strcmp(i8*, i8*)\n");
-    out.push_str("declare i64 @strlen(i8*)\n");
+    // BUG-229: see the matching comment in backend_llvm.rs -- strlen's
+    // real ABI return width is 32-bit on ILP32 targets; declaring it
+    // as i64 and using its result directly leaves the "high half" of
+    // the 64-bit value full of whatever garbage was in that register,
+    // an intermittent, register-history-dependent bug on 32-bit
+    // targets (found via Dhruva OS bare-metal bring-up on ARM32).
+    out.push_str("declare i32 @strlen(i8*)\n");
+    out.push_str("define internal i64 @intent_strlen64(i8* %s) {\n");
+    out.push_str("  %r32 = call i32 @strlen(i8* %s)\n");
+    out.push_str("  %r64 = zext i32 %r32 to i64\n");
+    out.push_str("  ret i64 %r64\n");
+    out.push_str("}\n");
     // @llvm.assume: tells LLVM a condition is true at a point,
     // enabling downstream redundant-check elimination via the
     // ConstraintElimination pass. No runtime cost; ignored if
@@ -3927,7 +3938,7 @@ fn emit_instr(
                     _ => arg_str,
                 };
                 out.push_str(&format!(
-                    "  %v_{} = call i64 @strlen(i8* {})\n",
+                    "  %v_{} = call i64 @intent_strlen64(i8* {})\n",
                     instr.result.0, inner
                 ));
                 return Ok(());

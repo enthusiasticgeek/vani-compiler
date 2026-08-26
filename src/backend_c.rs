@@ -2051,8 +2051,20 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_print_int_sin_c(&mut out);
     emit_intent_print_int_urd_c(&mut out);
     emit_intent_print_int_per_c(&mut out);
-    emit_intent_thread_wrappers_c(&mut out);
-    emit_intent_cancel_infra_c(&mut out);
+    // BUG found 2026-08-25 via Dhruva OS bare-metal bring-up: both of
+    // these unconditionally pulled in hosted-only headers (<pthread.h>/
+    // <sched.h>/<windows.h> for threading, <signal.h> for cancellation)
+    // even under --no-std, defeating the entire point of no-std mode --
+    // a bare-metal cross toolchain either doesn't ship these headers at
+    // all or, worse, ships stubs that silently fail to link. Neither
+    // wrapper is reachable from a no-std program anyway: `task`/`cancel`
+    // are hosted-concurrency constructs with no bare-metal equivalent
+    // yet, so skipping their C-runtime support entirely under no_std
+    // costs nothing a bare-metal program could have used.
+    if !no_std {
+        emit_intent_thread_wrappers_c(&mut out);
+        emit_intent_cancel_infra_c(&mut out);
+    }
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
     emit_intent_str_trim_c(&mut out);

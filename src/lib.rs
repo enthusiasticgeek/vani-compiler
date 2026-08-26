@@ -36225,7 +36225,7 @@ fn main() -> i64 {
             .expect("SSA-LLVM emits without falling back");
         assert!(
             ll.contains("load i8*, i8** ")
-                && ll.contains("call i64 @strlen"),
+                && ll.contains("call i64 @intent_strlen64"),
             "expected `load i8*, i8** %v_…` before strlen on borrowed OwnedStr; \
              got:\n{}",
             ll.lines().take(80).collect::<Vec<_>>().join("\n")
@@ -53384,7 +53384,7 @@ função main() -> i64 {
         );
         // Key cloning via strlen + malloc + memcpy.
         assert!(
-            ll.contains("call i64 @strlen"),
+            ll.contains("call i64 @intent_strlen64"),
             "expected strlen call (insert clone path)"
         );
         assert!(
