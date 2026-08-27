@@ -11239,6 +11239,20 @@ STATUS: needs human/frontier root-cause review.
 
 ### Candidate: 20260825-195356-check-crash-8411746505
 
+**FIXED as BUG-230** (vani-compiler main commit 3387667c, 2026-08-27).
+Root cause had nothing to do with `Atomic<NonCopyStruct>`/`bind`
+specifically (the earlier auto-generated summary below misattributed
+it) -- the real crash was `src/diagnostic.rs` slicing a source string
+at a Span's raw byte offset with no char-boundary check. The checker's
+own synthetic `Option<T>` enum-variant diagnostic had a span that
+happened to land a few bytes short of a real boundary, inside an
+unrelated 3-byte em-dash character in this file's `intent "..."`
+pragma string. Fixed with defensive char-boundary snapping in
+`render_one`/`render_with_filemap`/`line_info`; see
+docs/TODO_CURRENT.md's BUG-230 writeup for the full root-cause trace
+and fix. Confirmed the exact repro.vani in this finding no longer
+panics against current main.
+
 Repro: `tools/localfuzz/findings/20260825-195356-check-crash-8411746505/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260825-195356-check-crash-8411746505/fix_attempt.md`
 
@@ -11543,3 +11557,12 @@ Fix attempt: `tools/localfuzz/findings/20260827-093440-run-crash-85880ea466/fix_
 STATUS: needs human/frontier root-cause review.
 
 The vani-compiler project's local staging log shows that a run-crash occurred with the provided mutant/generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/cherokee/vec_invariants.vani`. The crash was triggered by the backend `c`, which is likely due to a failure in handling invariant keyword usage in Cherokee. This issue affects both LLVM and C backends.
+
+---
+
+### Candidate: 20260827-114742-run-crash-4ff4d5d6f2
+
+Repro: `tools/localfuzz/findings/20260827-114742-run-crash-4ff4d5d6f2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-114742-run-crash-4ff4d5d6f2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
