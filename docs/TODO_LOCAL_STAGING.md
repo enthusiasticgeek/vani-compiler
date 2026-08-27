@@ -11411,3 +11411,32 @@ Fix attempt: `tools/localfuzz/findings/20260826-213704-run-crash-0e756d2e4e/fix_
 STATUS: needs human/frontier root-cause review.
 
 The `vani-lang` compiler was run with the mutant source provided, and it resulted in a crash. The exact repro source can be found at `/home/virgo/source/vani-compiler-localfuzz/examples/language/sindhi/early_exit.vani`. The observed symptom is a crash due to an unhandled exception or infinite loop during execution. This bug affects the `vani-lang` compiler, specifically in the implementation of the `pee_routine` function, which is called within the main function. The backend(s) that this bug affects include any target platform where the compiler is executed.
+
+---
+
+### Candidate: 20260827-005054-run-crash-8835bb846f
+
+Repro: `tools/localfuzz/findings/20260827-005054-run-crash-8835bb846f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-005054-run-crash-8835bb846f/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
