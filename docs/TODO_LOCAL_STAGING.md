@@ -11532,3 +11532,14 @@ Here's a summary of what was run:
    - The crash occurred on both the LLVM and C backends.
 
 This report provides the raw result data from executing the mutant with both backends, including any output or error messages that can help identify the root cause of the crash.
+
+---
+
+### Candidate: 20260827-093440-run-crash-85880ea466
+
+Repro: `tools/localfuzz/findings/20260827-093440-run-crash-85880ea466/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-093440-run-crash-85880ea466/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler project's local staging log shows that a run-crash occurred with the provided mutant/generated source file `/home/virgo/source/vani-compiler-localfuzz/examples/language/cherokee/vec_invariants.vani`. The crash was triggered by the backend `c`, which is likely due to a failure in handling invariant keyword usage in Cherokee. This issue affects both LLVM and C backends.
