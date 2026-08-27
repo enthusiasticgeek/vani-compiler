@@ -17948,4 +17948,37 @@ per-dialect keyword table directly from this file's own lexer.rs
 match arms (`tools/localfuzz/regen_loop_keywords.py`) instead of
 hand-copying English strings.
 
+**Follow-up sweep, same session**: BUG-230's investigation surfaced a
+much older, wider mojibake corruption -- some past tool/paste mangled
+UTF-8 typographic characters (em/en-dash, ellipsis, →/↔/∈/⇒/≤/≥, ×,
+and a couple of pinyin diacritics) into their double-encoded Latin-1-
+reinterpreted byte sequences ("â€"" etc.) directly in Rust string
+literals and comments across `src/checker.rs`, `src/parser.rs`, and
+one pre-existing test in `src/lib.rs` (already fixed once, narrowly,
+for that one test -- see `indexed_write_side_effect_diagnostic_uses_
+real_ellipsis_not_mojibake`'s own comment). This is exactly what
+directly caused the `â€"` garbage visible in this same BUG-230's own
+example diagnostic output above. Fixed 753 occurrences of 12 fully
+round-trip-verified sequences (checked byte-for-byte via a cp1252-
+encode/UTF-8-decode round trip, and manually reviewed for false-
+positive risk against legitimate short accented words) across all
+three files -- **user-facing diagnostic message text**, not just
+comments, so this was a real "users see garbled error messages" bug,
+not merely cosmetic. Full `cargo test --release` clean after (one
+unrelated, non-reproducing-in-isolation flake in `run_end_to_end`'s
+`concurrent_pipeline_dashboard_example_produces_correct_output_on_
+both_backends`, a pre-existing timing-sensitive test unrelated to this
+change).
+
+**Deliberately NOT fixed in this pass**: a separate, messier pocket of
+the same corruption class affecting Devanagari (Hindi) and CJK
+example text embedded in `src/parser.rs`'s own doc comments (e.g.
+mojibake for "यावत्", "जब तक", "异步") -- these are multi-character
+runs where a simple single-sequence substitution table isn't safe
+(some byte patterns don't round-trip cleanly through a single cp1252
+pass, needing more careful multi-character-run reconstruction to fix
+without risking further corruption), and they're comment-only text
+with no functional/user-facing impact, unlike the 753 already fixed.
+Left for a dedicated future pass rather than rushed here.
+
 Next free bug number is **BUG-231**.
