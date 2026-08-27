@@ -11566,3 +11566,57 @@ Repro: `tools/localfuzz/findings/20260827-114742-run-crash-4ff4d5d6f2/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260827-114742-run-crash-4ff4d5d6f2/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260827-164359-run-crash-6571329da0
+
+Repro: `tools/localfuzz/findings/20260827-164359-run-crash-6571329da0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-164359-run-crash-6571329da0/fix_attempt.md`
+
+STAGING ENTRY:
+
+**Bug Report: Early Exit in Bengali Language**
+
+**Summary**: The vani-compiler project is crashing when running a specific test case in the Bengali language, specifically `early_exit.vani`.
+
+**Repro Source**:
+```vani
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/early_exit.vani              # LLVM
+//   vanic run examples/language/bengali/early_exit.vani --backend=c  # C
+
+উদ্দেশ्य "break and continue for early exit and skip";
+
+// `বিরাম` = break, `এগিয়ে` = continue
+
+কাজ find_first_negative(xs: দেখ Vec<i64>) -> i64 {
+  মান i: u64 = 0;
+  মান result: i64 = 0 - 1;
+  যতক্ষণ i < len(xs) {
+    যদি xs[i] < 0 {
+      result = xs[i];
+      বিরাম;
+    }
+  }
+  ফেরত result;
+}
+
+কাজ count_positive(xs: দেখ Vec<i64>) -> i64 {
+  মান i: u64 = 0;
+  মান count: i64 = 0;
+  যতক্ষণ i < len(xs) {
+    যদি xs[i] <= 0 {
+      i = i + 1;
+      এগিয়ে;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  ফেরত count;
+}
+
+কাজ main() -> i64 {
+  মান xs: Vec<i6
