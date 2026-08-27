@@ -66,7 +66,11 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from loop_keywords import LOOP_KEYWORDS, FN_KEYWORDS, LET_KEYWORDS  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 VANIC = REPO / "target" / "release" / "vanic"
@@ -246,12 +250,26 @@ def _is_slow_prone_position(line):
     extra lines get the smaller-magnitude pool below, which is harmless;
     false negatives just mean the occasional slow-timeout finding still
     gets through, no worse than before this fix.
+
+    BUG (found 2026-08-27 triaging the digest's dominant timeout
+    clusters): this originally checked only the literal English
+    spellings ("while ", "for ", " from ", " to ", " downto "), which
+    is invisible on every one of this corpus's ~60 translated-dialect
+    example files -- a Russian `пока i < 9223372036854775807 { ... }`
+    (while-loop, mutated i64::MAX bound) sailed straight through this
+    check and produced exactly the "correctly asking for ~9.2
+    quintillion iterations" lli-interpreter timeout this function
+    exists to prevent, just in a language the check didn't recognize.
+    `sleep_ms(` is unaffected -- builtin/std function names are never
+    translated, only keywords are -- but the loop-keyword check needed
+    every dialect's spelling, not just English's. LOOP_KEYWORDS is
+    generated from vani-compiler's own src/lexer.rs (see
+    regen_loop_keywords.py) rather than hand-maintained, so it can't
+    drift the way a hand-copied list would.
     """
-    return (
-        "sleep_ms(" in line
-        or ("for " in line and (" from " in line) and (" to " in line or " downto " in line))
-        or "while " in line
-    )
+    if "sleep_ms(" in line:
+        return True
+    return any(kw in line for kw in LOOP_KEYWORDS)
 
 
 def mut_numeric_boundary(lines, rng):
@@ -292,7 +310,15 @@ def mut_duplicate_line(lines, rng):
 
 def mut_delete_line(lines, rng):
     lines = lines[:]
-    idxs = [i for i in _stmt_lines(lines) if "fn " not in lines[i]]
+    # BUG (found alongside _is_slow_prone_position's, 2026-08-27): this
+    # guard against deleting a function *signature* line (which just
+    # produces an uninteresting brace-mismatch parse error instead of a
+    # real semantic mutation) only recognized the English "fn " literal,
+    # so it silently never protected any translated-dialect file's own
+    # fn-keyword line (Russian "функция", Punjabi Shahmukhi "فنکشن", ...).
+    # FN_KEYWORDS is generated from lexer.rs (see regen_loop_keywords.py).
+    idxs = [i for i in _stmt_lines(lines)
+            if not any(kw in lines[i] for kw in FN_KEYWORDS)]
     if not idxs:
         return lines
     del lines[rng.choice(idxs)]
@@ -327,7 +353,13 @@ def mut_type_swap(lines, rng):
 
 def mut_wrap_redundant(lines, rng):
     lines = lines[:]
-    idxs = [i for i, l in enumerate(lines) if "let " in l and l.rstrip().endswith(";")]
+    # BUG (found alongside the other two in this file, 2026-08-27): only
+    # matched the English "let " literal, so this mutator was a silent
+    # no-op on nearly the whole corpus (every translated-dialect file's
+    # own let-keyword spelling went unrecognized). LET_KEYWORDS is
+    # generated from lexer.rs (see regen_loop_keywords.py).
+    idxs = [i for i, l in enumerate(lines)
+            if any(kw in l for kw in LET_KEYWORDS) and l.rstrip().endswith(";")]
     if not idxs:
         return lines
     i = rng.choice(idxs)
