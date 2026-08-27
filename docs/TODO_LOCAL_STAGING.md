@@ -11440,3 +11440,15 @@ Fix attempt: `tools/localfuzz/findings/20260827-005054-run-crash-8835bb846f/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260827-014205-run-crash-0b1bbed893
+
+Repro: `tools/localfuzz/findings/20260827-014205-run-crash-0b1bbed893/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-014205-run-crash-0b1bbed893/fix_attempt.md`
+
+```plaintext
+STATUS: needs human/frontier root-cause review.
+```
+This log entry indicates that a run-crash scenario occurred during the testing of a C backend for the vani-compiler project. The base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/async_cancel_auto.vani` was used, and the mutant/generated source included in the log is intended to test concurrency and error handling in asynchronous programming. Upon running these files with both the LLVM and C backends, the process encountered a crash or hang, as indicated by the `timed_out: true` field in the JSON response. The coverage score of 100 suggests that all statements within the code were executed, indicating that no runtime issues were detected.
