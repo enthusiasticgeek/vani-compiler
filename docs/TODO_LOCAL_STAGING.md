@@ -11452,3 +11452,61 @@ Fix attempt: `tools/localfuzz/findings/20260827-014205-run-crash-0b1bbed893/fix_
 STATUS: needs human/frontier root-cause review.
 ```
 This log entry indicates that a run-crash scenario occurred during the testing of a C backend for the vani-compiler project. The base corpus file `/home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/async_cancel_auto.vani` was used, and the mutant/generated source included in the log is intended to test concurrency and error handling in asynchronous programming. Upon running these files with both the LLVM and C backends, the process encountered a crash or hang, as indicated by the `timed_out: true` field in the JSON response. The coverage score of 100 suggests that all statements within the code were executed, indicating that no runtime issues were detected.
+
+---
+
+### Candidate: 20260827-020852-run-crash-4ca4372d04
+
+Repro: `tools/localfuzz/findings/20260827-020852-run-crash-4ca4372d04/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-020852-run-crash-4ca4372d04/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Bug Report: Crash in vani-compiler Local Staging Log**
+
+**Mutation/Generated Source:**
+```vani
+// vani-lang: punjabi-shahmukhi
+//
+// build & run:
+//   vanic run examples/language/punjabi_shahmukhi/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/punjabi_shahmukhi/async_cancel_auto.vani --backend=c  # C
+
+مقصد "Punjabi Shahmukhi async/await smoke";
+
+async فنکشن delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  واپس v;
+}
+
+فنکشن main() -> i64 {
+  مانیں a: i64 = await(delay(5, 42));
+  مانیں b: i64 = await(delay(10, 7));
+
+  یقینی a == 42;
+  یقینی b == 7;
+  لکھو "delays:", a, b;
+  لکھو "delays:", a, b;
+  واپس 0;
+}
+
+```
+
+**Finding Kind: run-crash**
+**Raw Result Data:**
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": 0,
+    "stdout": "delays: \u0664\u0662 \u0667\n delays: \u0664\u0662 \u0667\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score":
