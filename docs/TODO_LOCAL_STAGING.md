@@ -11620,3 +11620,12 @@ STAGING ENTRY:
 
 কাজ main() -> i64 {
   মান xs: Vec<i6
+
+---
+
+### Candidate: 20260827-191938-run-crash-5f5c47635f
+
+Repro: `tools/localfuzz/findings/20260827-191938-run-crash-5f5c47635f/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260827-191938-run-crash-5f5c47635f/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
