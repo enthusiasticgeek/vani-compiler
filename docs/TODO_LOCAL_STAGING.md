@@ -11784,3 +11784,32 @@ Repro: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260828-205250-run-crash-21b8303d2c
+
+Repro: `tools/localfuzz/findings/20260828-205250-run-crash-21b8303d2c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260828-205250-run-crash-21b8303d2c/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
