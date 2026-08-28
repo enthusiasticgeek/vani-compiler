@@ -61,31 +61,31 @@ thread_local! {
 
 const BUILTIN_FUNCTION_NAMES: &[&str] =
     &["vec", "push", "pop", "set", "sort", "sort_by", "sort_desc", "vec_swap", "vec_remove_at", "vec_replace_all", "reverse", "dedup", "find", "contains", "binary_search", "swap_remove", "insert", "clear", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_split", "parse_int", "parse_float", "i64_to_str", "f64_to_str", "bool_to_str", "str_index_of", "substring", "str_repeat", "str_to_upper", "str_to_lower", "parse_bool", "str_join", "str_pad_left", "str_pad_right", "str_lines", "str_chars", "str_reverse", "str_strip_prefix", "str_strip_suffix", "str_count_char", "pow", "sqrt", "sin", "cos", "tan", "floor", "ceil", "abs", "log", "log2", "log10", "exp", "atan2", "f64_is_nan", "f64_is_inf", "f64_is_finite", "f64_pi", "f64_e", "f64_inf", "f64_nan", "f64_round", "f64_trunc_to_i64", "i64_gcd", "i64_lcm", "i64_pow", "i64_abs_diff", "i64_signum", "f64_signum", "is_ascii_digit", "is_ascii_alpha", "is_ascii_alphanumeric", "is_ascii_whitespace", "i64_count_set_bits", "i64_leading_zeros", "i64_trailing_zeros", "i64_bswap", "i64_rotate_left", "i64_rotate_right", "f64_to_bits", "f64_from_bits", "i64_min_value", "i64_max_value", "f64_max_finite", "i64_div_floor", "i64_mod_floor", "f64_lerp", "f64_clamp01", "i64_log2_floor", "i64_log2_ceil", "i64_is_power_of_2", "i64_next_power_of_2", "i64_saturating_add", "i64_saturating_sub", "i64_saturating_mul", "i64_min", "i64_max", "i64_clamp", "f64_min", "f64_max", "f64_clamp", "i64_isqrt", "f64_hypot", "f64_to_radians", "f64_to_degrees", "asin", "acos", "atan", "sinh", "cosh", "tanh", "f64_epsilon", "f64_min_positive", "f64_min_subnormal", "f64_copysign", "f64_fma", "f64_remainder", "f64_is_normal", "f64_is_subnormal", "f64_sign_bit", "f64_next_up", "f64_next_down", "i64_div_ceil", "i64_div_round", "f64_trunc", "f64_frac", "i64_count_digits", "i64_log10_floor", "i64_log10_ceil", "i64_pow_mod", "i64_is_prime", "i64_factorial", "i64_fibonacci", "i64_binomial", "i64_perm", "i64_avg", "i64_wrap", "f64_wrap", "f64_mod_floor", "i64_min_3", "i64_max_3", "f64_min_3", "f64_max_3", "f64_sigmoid", "f64_softsign", "f64_step", "f64_smoothstep", "f64_smoothstep5", "f64_inv_lerp", "f64_chebyshev", "f64_l1_norm", "i64_isqrt_ceil", "i64_is_perfect_square", "i64_divisor_count", "i64_divisor_sum", "i64_totient", "i64_radical", "i64_next_prime", "i64_prev_prime", "i64_mod_inverse", "i64_set_bit", "i64_clear_bit", "i64_toggle_bit", "i64_test_bit", "i64_reverse_bits", "f64_relu", "f64_leaky_relu", "f64_softplus", "f64_swish", "f64_logit", "f64_sinc", "f64_safe_div", "f64_safe_sqrt", "i64_safe_div", "f64_safe_log", "f64_geometric_mean", "f64_harmonic_mean", "f64_quadratic_mean", "f64_log_b", "f64_erf", "f64_erfc", "f64_tgamma", "f64_lgamma", "f64_cbrt", "f64_expm1", "f64_log1p", "f64_exp2", "f64_exp10", "f64_inv_sqrt", "f64_round_to", "f64_sec", "f64_csc", "f64_cot", "f64_normal_pdf", "f64_normal_cdf", "f64_lerp_clamp", "f64_atan2_deg", "f64_uniform_random", "f64_inv_smoothstep", "f64_atan_deg", "f64_rgb_to_grayscale", "i64_pack_rgb", "i64_unpack_rgb_r", "i64_unpack_rgb_g", "i64_unpack_rgb_b", "f64_remap", "str_byte_at", "str_len_bytes", "str_starts_with_byte", "str_ends_with_byte", "str_byte_count", "str_index_of_byte", "str_last_index_of_byte", "str_count_ascii_digits", "str_count_ascii_alpha", "str_count_ascii_alphanumeric", "str_count_ascii_whitespace", "str_count_ascii_upper", "str_count_ascii_lower", "str_count_ascii_punct", "str_count_ascii_control", "str_first_byte", "str_last_byte", "seed_rng", "rand_i64", "rand_in_range", "hash_i64", "hash_f64", "hash_str", "hash_combine", "siphash_i64", "siphash_str", "heap_push", "heap_pop", "heap_peek", "heapify", "deque_new", "deque_push_back", "deque_push_front", "deque_pop_back", "deque_pop_front", "deque_peek_back", "deque_peek_front", "deque_len", "deque_clear", "hashset_new", "hashset_insert", "hashset_contains", "hashset_remove", "hashset_len", "hashset_clear", "hashmap_new", "hashmap_insert", "hashmap_get", "hashmap_contains_key", "hashmap_remove", "hashmap_len", "hashmap_clear", "btreeset_new", "btreeset_insert", "btreeset_contains", "btreeset_remove", "btreeset_len", "btreeset_range", "btreeset_min", "btreeset_max", "btreeset_clear", "btreemap_new", "btreemap_insert", "btreemap_get", "btreemap_contains_key", "btreemap_remove", "btreemap_len", "btreemap_range_keys", "btreemap_range_values", "btreemap_min_key", "btreemap_max_key", "btreemap_clear", "vec_map", "vec_fold", "vec_filter", "vec_position", "vec_count_if", "vec_max_by", "vec_min_by", "vec_zip_with", "vec_take", "vec_drop", "vec_take_while", "vec_drop_while", "vec_map_fold", "vec_filter_fold", "vec_map_filter", "vec_map_filter_fold", "vec_sum", "vec_product", "vec_min", "vec_max", "vec_count", "vec_any", "vec_all", "vec_chain", "vec_range", "vec_repeat", "vec_extend", "vec_concat", "vec_reverse_copy", "vec_unique", "vec_iota", "vec_first", "vec_last", "vec_running_sum", "vec_dot", "vec_intersect", "vec_difference", "vec_union", "option_unwrap_or", "option_is_some", "option_is_none", "option_map", "option_filter", "option_or", "option_and_then", "option_unwrap_or_f64", "option_is_some_f64", "option_is_none_f64", "union_find_new", "union_find_union", "union_find_find", "union_find_connected", "union_find_count", "union_find_clear", "binary_heap_new", "binary_heap_push", "binary_heap_pop", "binary_heap_peek", "binary_heap_len", "binary_heap_clear", "bloom_filter_new", "bloom_filter_insert", "bloom_filter_contains", "bloom_filter_len", "bloom_filter_count", "bloom_filter_clear", "bst_new", "bst_insert", "bst_contains", "bst_remove", "bst_len", "bst_min", "bst_max", "bst_clear", "graph_new", "graph_add_edge", "graph_num_nodes", "graph_num_edges", "graph_bfs_reach", "graph_dfs_reach", "graph_dijkstra", "graph_has_cycle", "graph_mst_kruskal", "graph_mst_prim", "graph_astar", "graph_topo_sort", "graph_clear", "trie_new", "trie_insert", "trie_contains", "trie_starts_with", "trie_delete", "trie_len", "trie_node_count", "trie_clear", "skiplist_new", "skiplist_insert", "skiplist_contains", "skiplist_remove", "skiplist_len", "skiplist_min", "skiplist_max", "skiplist_clear", "clone", "clone_at", "hash_combine_3", "hash_combine_4", "hash_pair", "hash_triple", "f64_hash_pair", "f64_hash_triple", "str_hash_pair", "str_hash_triple", "vec_argmin", "vec_argmax", "vec_count_value", "vec_index_of_value", "vec_last_index_of_value", "vec_cumulative_max", "vec_cumulative_min", "vec_running_product", "vec_running_xor", "vec_running_and", "vec_running_or", "vec_all_equal", "vec_is_sorted_asc", "vec_is_sorted_desc", "vec_is_palindrome", "vec_sliding_max", "vec_sliding_min", "vec_sliding_sum", "vec_sliding_product", "vec_abs", "vec_negate", "vec_signum", "vec_square", "vec_add_scalar", "vec_sub_scalar", "vec_mul_scalar", "vec_div_scalar", "vec_eq_mask", "vec_ne_mask", "vec_lt_mask", "vec_le_mask", "vec_gt_mask", "vec_ge_mask", "vec_min_with_scalar", "vec_max_with_scalar", "vec_clamp_scalar", "vec_add_pairwise", "vec_sub_pairwise", "vec_mul_pairwise", "vec_min_pairwise", "vec_max_pairwise", "vec_mod_scalar", "vec_pow_scalar", "vec_shl_scalar", "vec_shr_scalar", "vec_rotate_left", "vec_rotate_right", "vec_shift_left", "vec_shift_right", "vec_subset_of", "vec_disjoint", "vec_equal_set", "vec_equal_seq", "vec_diff", "vec_pad_left", "vec_pad_right", "vec_replace_value", "vec_count_distinct", "vec_indices_of_value", "vec_dedup_consecutive", "vec_mean", "vec_merge_sorted", "vec_insert_sorted", "vec_is_sorted_unique", "vec_range_span", "vec_mode", "vec_kth_smallest", "vec_median", "i64_byte_at", "i64_set_byte", "i64_count_leading_ones", "i64_count_trailing_ones", "f64_asin_deg", "f64_acos_deg", "f64_sec_deg", "f64_csc_deg", "f64_cot_deg", "str_is_ascii", "str_is_digit_only", "str_is_alpha_only", "str_is_alphanumeric_only", "str_is_whitespace_only", "str_is_empty", "rand_f64", "rand_in_range_f64", "rand_bool", "rand_choice", "rand_normal", "vec_chunks", "vec_windows", "vec_flatten", "vec_group_by_value", "i64_parity", "i64_mod_pos", "i64_cube_root", "f64_pow_int", "f64_round_to_multiple", "f64_quadratic_root", "vec_running_mean", "vec_intersperse", "pool_new", "pool_alloc", "pool_get", "pool_free", "taint", "assert_safe", "raw_load", "raw_store", "unsafe_alloc", "unsafe_free", "bptr_new", "bptr_get", "bptr_set", "bptr_len", "region_new", "region_alloc_i64", "region_len", "region_borrow_i64", "aref_load", "aref_store", "mmio_read_u32", "mmio_write_u32", "mmio_read_u8", "mmio_read_u16", "mmio_write_u8", "mmio_write_u16", "sleep_ms", "assert_eq_i64", "assert_eq_f64", "assert_eq_bool", "assert_eq_str",
-    // File I/O primitives â€” POSIX FILE* wrapped as i64 FileHandle.
+    // File I/O primitives — POSIX FILE* wrapped as i64 FileHandle.
     "file_open", "file_is_ok", "file_read_line", "file_write",
     "file_close", "file_flush", "stdin_read_line", "flush_stdout",
     "stdin_ready_within_ms",
-    // Arc 8 step 8e proper â€” TCP networking primitives. Real
+    // Arc 8 step 8e proper — TCP networking primitives. Real
     // sockets via libc; thread-local 4KB recv/send buffer.
     "tcp_listen", "tcp_socket_port", "tcp_accept",
     "tcp_connect_local", "tcp_send_str", "tcp_recv",
     "tcp_send_buf", "tcp_close",
     // L30 fix (2026-08-16): inspect tcp_recv's own scratch buffer.
     "tcp_buf_byte_at",
-    // Arc 8 v2 runtime â€” epoll-driven single-threaded
+    // Arc 8 v2 runtime — epoll-driven single-threaded
     // cooperative scheduling. Linux-only in v2 (kqueue/IOCP
     // queued). Plus non-blocking variants of the TCP primitives
     // returning sentinel codes (-2 = would-block / EAGAIN).
     "epoll_new", "epoll_add_read", "epoll_wait_one",
     "epoll_close",
     "tcp_set_nonblocking", "tcp_accept_nb", "tcp_recv_nb",
-    // Arc 8 v3 â€” async-flavored aliases for the v2 nb variants.
+    // Arc 8 v3 — async-flavored aliases for the v2 nb variants.
     // Same runtime behavior; the names reserve future state-
     // machine codegen semantics (when the compiler-driven
     // `async fn` -> `Task<T>` transform lands, calls to these
     // builtins inside an async fn body become suspend points).
     "io_recv_async", "io_send_async", "io_accept_async",
-    // Arc 8 v3.1 Phase 0 â€” timerfd-based non-blocking sleep.
+    // Arc 8 v3.1 Phase 0 — timerfd-based non-blocking sleep.
     // Composes with epoll for true single-thread cooperative
     // timers: caller calls sleep_ms_async, registers the
     // returned fd with epoll, waits via epoll_wait_one,
@@ -103,7 +103,7 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // Eliminates the phi-node aliasing that blocks SIMD vectorisation
     // when push_mut is used in tight initialization loops.
     "push_unchecked",
-    // Option 3 â€” native SIMD vector builtins.
+    // Option 3 — native SIMD vector builtins.
     // 128-bit family (vec128<T>): vec128 = 16-byte SIMD register.
     // 256-bit family (vec256<T>): vec256 = 32-byte SIMD register (AVX2/SVE-256/RVV-256).
     "simd_splat", "simd_load", "simd_store",
@@ -180,7 +180,7 @@ impl Env {
         // program has a single monomorphic instantiation should
         // pick that one up automatically. Without this, monomorph
         // generates `struct Holder__i64` and drops the template
-        // â€” the StructLit's bare `Holder` reference falls through
+        // — the StructLit's bare `Holder` reference falls through
         // to "unknown struct type 'Holder'".
         self.resolve_struct_name(name).and_then(|n| self.structs.get(&n))
     }
@@ -197,7 +197,7 @@ impl Env {
     // ONE monomorphic instantiation in the program. So
     // `Result.Ok(42)` resolves to `Result__i64__i64.Ok(42)`
     // automatically when the program contains only one
-    // `Result<â€¦>` use-site. Multiple instantiations require
+    // `Result<…>` use-site. Multiple instantiations require
     // the user to spell out the mangled name (or the future
     // expected-type threading; see TODO).
     fn resolve_enum_name(&self, name: &str) -> Option<String> {
@@ -256,11 +256,11 @@ impl Env {
         self.scopes.iter().rev().find_map(|scope| scope.get(name))
     }
 
-    /// L4 (B) Phase 2 â€” scope-escape analyzer support. Returns
+    /// L4 (B) Phase 2 — scope-escape analyzer support. Returns
     /// the source binding's scope-depth (1-indexed; outer-most
     /// fn body block = 1). A deeper depth means a more-nested
     /// scope (shorter lifetime). The escape rule: a binding
-    /// holding `ref X` must live in a scope at depth â‰¥ X's
+    /// holding `ref X` must live in a scope at depth ≥ X's
     /// depth (i.e., the holder is in the same or inner scope
     /// as the source).
     fn lookup_depth(&self, name: &str) -> Option<usize> {
@@ -364,7 +364,7 @@ struct Signature {
     /// cross-function double acquisition: if the caller holds
     /// a guard on the same mutex that the callee would lock,
     /// the call would deadlock. v1 doesn't compute the
-    /// transitive closure across calls â€” only direct lock
+    /// transitive closure across calls — only direct lock
     /// sites count.
     locks_params: Vec<bool>,
     /// L4 (C) lifetime elision (2026-06-09): when the function
@@ -454,11 +454,11 @@ struct VarInfo {
     /// holds a `ref T` / `mut ref T`, the set of root source-
     /// binding names whose scope its lifetime is bounded by.
     /// Populated at let-binding time from the initializer:
-    ///   * `let r = ref X;`         â†’ aliases = ["X"]
+    ///   * `let r = ref X;`         → aliases = ["X"]
     ///   * `let r = foo(ref X);` where `foo` returns ref via
-    ///     elision from its `i`-th ref param          â†’ aliases
+    ///     elision from its `i`-th ref param          → aliases
     ///     = [root_var_of(arg_i)]
-    ///   * `let r = some_other_ref_binding;`          â†’ aliases
+    ///   * `let r = some_other_ref_binding;`          → aliases
     ///     = (that binding's aliases, transitively)
     /// At ref-escape sites (push / FieldAssign / Return), the
     /// scope-escape analyzer resolves a Var-typed ref through
@@ -838,7 +838,7 @@ fn check_impl(
 
     // Closure #242: flatten modules into the global program
     // before anything else runs. Items inside a module
-    // `M { fn bar() â€¦ }` get renamed to `M::bar`, and any
+    // `M { fn bar() … }` get renamed to `M::bar`, and any
     // intra-module reference (Call/Var/StructLit) to a
     // sibling item gets rewritten with the `M::` prefix.
     // After this pass, `program.modules` is empty and the
@@ -853,8 +853,8 @@ fn check_impl(
     // the original expression with `Var(name)`. Downstream
     // passes see a flat program of named top-level fns; the
     // existing fn-pointer infrastructure resolves Var(name)
-    // â†’ FnRef via the signatures map. v1 has no captured
-    // environment â€” references to outer locals from the
+    // → FnRef via the signatures map. v1 has no captured
+    // environment — references to outer locals from the
     // anon fn body surface as the usual `unknown variable`
     // diagnostic once check_function runs (captures land
     // in the next closure under Level 3).
@@ -883,13 +883,13 @@ fn check_impl(
     // let t = m.fold(init, g);` patterns into a single
     // `vec_map_fold(ref xs, init, f, g)` call when `m` has
     // no other uses. Eliminates the intermediate Vec
-    // allocation transparently â€” users get the perf benefit
+    // allocation transparently — users get the perf benefit
     // without rewriting to the fused builtin manually. Runs
     // after lambda-lift so closures-in-Let-RHS positions
     // (closure #314/#315) are already lifted.
     fuse_combinator_chains_in_program(&mut program);
 
-    // Pre-pass: resolve `Type::Struct(name)` â†’ `Type::Enum(name)`
+    // Pre-pass: resolve `Type::Struct(name)` → `Type::Enum(name)`
     // for every name declared as an enum. The parser can't
     // distinguish at parse time, so we run this before anything
     // else (signatures, struct validation, etc.) so all downstream
@@ -916,14 +916,14 @@ fn check_impl(
         substitute_aliases_in_program(&mut program, &aliases_resolved);
     }
 
-    // T1.2 phase 2a: hoist each `methods on T { fn m(â€¦) {â€¦} }`
+    // T1.2 phase 2a: hoist each `methods on T { fn m(…) {…} }`
     // method into the regular function table with name
     // mangled as `<T>_<m>`. After this pass, the methods
-    // blocks are drained â€” downstream signature collection
+    // blocks are drained — downstream signature collection
     // + function checking treats them as ordinary functions.
     // Method-call sugar `p.method(args)` was already lowered
     // by the checker's MethodCall handling to a regular
-    // `Call { name: "<T>_<method>", args: [receiver, â€¦] }`,
+    // `Call { name: "<T>_<method>", args: [receiver, …] }`,
     // so resolving against the mangled name "just works".
     hoist_methods_into_functions(&mut program, &mut diagnostics);
 
@@ -983,7 +983,7 @@ fn check_impl(
     monomorphize_type_decls_in_program(&mut program, &mut diagnostics);
 
     // T1.4 phase 2: monomorphize generic functions. Walks the
-    // program for calls to `fn name<T>(â€¦)` generic functions,
+    // program for calls to `fn name<T>(…)` generic functions,
     // infers T from each call site's argument types, generates
     // a specialized copy per (fn, concrete-type) combo, and
     // rewrites call sites to use the specialized name. Removes
@@ -1062,10 +1062,10 @@ fn check_impl(
         }
     }
 
-    // T1.5 phase 2: hoist `implement Iface for Type { fn m â€¦ }`
+    // T1.5 phase 2: hoist `implement Iface for Type { fn m … }`
     // method bodies into regular functions named
     // `<TypeName>_<method>` (same convention as `methods on
-    // T { â€¦ }`). This lets the existing method-dispatch
+    // T { … }`). This lets the existing method-dispatch
     // path (closure #82 etc.) resolve `recv.method()` calls
     // statically. The interface declaration is preserved
     // for signature validation; impl method signatures must
@@ -1081,7 +1081,7 @@ fn check_impl(
             diagnostics.push(Diagnostic::new(
                 clause.span,
                 format!(
-                    "non-generic function '{}' carries `where {} is {}` â€” \
+                    "non-generic function '{}' carries `where {} is {}` — \
                      where-bounds apply only to generic type parameters",
                     func.name, clause.type_param, clause.interface_name
                 ),
@@ -1096,11 +1096,11 @@ fn check_impl(
 
     // Reject struct/enum/alias declarations whose name
     // collides with a reserved built-in type. Lexer
-    // keywords (i8, i16, â€¦, Vec) are caught at parse time,
+    // keywords (i8, i16, …, Vec) are caught at parse time,
     // but `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`,
     // `OwnedStr` lex as identifiers and only become
     // reserved when `parse_type` sees them. Without this
-    // gate, `struct Task { â€¦ }` parses fine but every
+    // gate, `struct Task { … }` parses fine but every
     // reference to `Task` in type position resolves to the
     // built-in `Type::Task`, leading to confusing
     // "got Task" errors deep in the pipeline.
@@ -1112,7 +1112,7 @@ fn check_impl(
             diagnostics.push(Diagnostic::new(
                 decl.name_span,
                 format!(
-                    "struct name '{}' is a reserved built-in type â€” pick a \
+                    "struct name '{}' is a reserved built-in type — pick a \
                      different name",
                     decl.name
                 ),
@@ -1124,7 +1124,7 @@ fn check_impl(
             diagnostics.push(Diagnostic::new(
                 decl.name_span,
                 format!(
-                    "enum name '{}' is a reserved built-in type â€” pick a \
+                    "enum name '{}' is a reserved built-in type — pick a \
                      different name",
                     decl.name
                 ),
@@ -1136,7 +1136,7 @@ fn check_impl(
             diagnostics.push(Diagnostic::new(
                 alias.name_span,
                 format!(
-                    "type alias name '{}' is a reserved built-in type â€” pick a \
+                    "type alias name '{}' is a reserved built-in type — pick a \
                      different name",
                     alias.name
                 ),
@@ -1146,9 +1146,9 @@ fn check_impl(
 
     // Validate struct declarations + build the registry.
     // v1 caps fields in 1..=64 (raised from 8 for
-    // real-world usability; many domain types â€” game
+    // real-world usability; many domain types — game
     // entities, configuration structs, protocol
-    // messages â€” naturally have 10-30 fields). The
+    // messages — naturally have 10-30 fields). The
     // upper bound is generous enough that hitting it
     // is a code-smell signal worth a diagnostic, while
     // not blocking common shapes. Each field must
@@ -1440,7 +1440,7 @@ fn check_impl(
                 &interface_names_for_type_check,
                 &mut diagnostics,
             );
-            // (ref-field rejection lifted 2026-06-08 â€” see L4 (B)
+            // (ref-field rejection lifted 2026-06-08 — see L4 (B)
             //  Phase 3 + 4 comment above. Both v3.1 synth and
             //  user-declared structs may now carry ref fields.)
             // T1.2 phase 2b: allow most affine types as struct
@@ -1452,7 +1452,7 @@ fn check_impl(
             // explicit wiring (their RAII shape is bespoke) and
             // remain rejected. Vec field indexing / mutation
             // through `t.xs[i]` and method calls on a Vec field
-            // (`t.xs.push(...)`) are still WIP â€” for now, the
+            // (`t.xs.push(...)`) are still WIP — for now, the
             // struct carries the Vec and frees it; operating on
             // it requires moving the Vec out via a let binding.
             let field_allowed = field.ty.is_copy()
@@ -1471,7 +1471,7 @@ fn check_impl(
                 // recursively through the per-backend Drop
                 // emit. T1.2 phase 2b follow-up.
                 || matches!(&field.ty, Type::Struct(_))
-                // L2 Phase 1 (2026-06-07): Box<T> field storage â€”
+                // L2 Phase 1 (2026-06-07): Box<T> field storage —
                 // the documented blocker for the limitation
                 // `struct Drawer { r: Box<dyn Renderer> }`. Box
                 // is a single pointer at the machine level; the
@@ -1488,7 +1488,7 @@ fn check_impl(
                 diagnostics.push(Diagnostic::new(
                     field.span,
                     format!(
-                        "struct field '{}::{}' has non-Copy type {} â€” \
+                        "struct field '{}::{}' has non-Copy type {} — \
                          v1 supports Copy types, OwnedStr, Vec<T>, \
                          [T; N] of Copy elements, Task, Atomic<T>, \
                          Mutex<T>, Channel<T, N>, Box<T>, and enum \
@@ -1539,12 +1539,12 @@ fn check_impl(
     // Detect recursive struct definitions: a value
     // containing itself transitively has infinite size,
     // so the codegen can't lay it out. Build the
-    // direct-field-type adjacency map (struct â†’ set of
+    // direct-field-type adjacency map (struct → set of
     // referenced struct names in its inline fields) and
     // surface a clear diagnostic if any node has a
     // cycle back to itself. Indirect references through
     // `ref T` / `Vec<T>` (heap-allocated) don't count
-    // â€” they'd be fine. T1.2.
+    // — they'd be fine. T1.2.
     {
         use std::collections::HashSet;
         fn direct_struct_deps(ty: &Type, out: &mut HashSet<String>) {
@@ -1560,7 +1560,7 @@ fn check_impl(
                 Type::Array { element, .. } => direct_struct_deps(element, out),
                 // Ref / RefMut / Vec / Atomic / Mutex /
                 // Guard / Channel / FnPtr all break the
-                // direct-size dependency â€” they're
+                // direct-size dependency — they're
                 // pointers or heap-allocated. So don't
                 // recurse through them.
                 _ => {}
@@ -1607,7 +1607,7 @@ fn check_impl(
                 diagnostics.push(Diagnostic::new(
                     decl.span,
                     format!(
-                        "struct '{}' is recursive (directly or transitively) â€” \
+                        "struct '{}' is recursive (directly or transitively) — \
                          contains itself by value, which has infinite size; \
                          use `ref T` / `Vec<T>` to break the cycle via the heap",
                         decl.name
@@ -1632,7 +1632,7 @@ fn check_impl(
             ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, "variants")));
         }
         for i in 0..decl.variants.len() {
-            // T1.3 phase 2b â€” payloaded variants are now
+            // T1.3 phase 2b — payloaded variants are now
             // executable in tree-C: backend lays the enum out
             // as a tagged-union struct (`Enum_<Name>`),
             // constructors build the struct literal, match
@@ -1646,7 +1646,7 @@ fn check_impl(
                 diagnostics.push(Diagnostic::new(
                     decl.variants[i].name_span,
                     format!(
-                        "enum '{}' variant '{}' has {} payload fields â€” \
+                        "enum '{}' variant '{}' has {} payload fields — \
                          only single-field payloads supported in v1 (T1.3 \
                          phase 2b)",
                         decl.name,
@@ -1671,7 +1671,7 @@ fn check_impl(
                 // added Task and Atomic<T>; #124 adds Mutex
                 // and Channel (parallel to closure #123's
                 // struct-field work). Only Guard<T> remains
-                // rejected â€” its RAII unlock needs bespoke
+                // rejected — its RAII unlock needs bespoke
                 // wiring through the enum-Drop dispatch.
                 let array_of_copy = matches!(
                     payload_ty,
@@ -1717,7 +1717,7 @@ fn check_impl(
                         decl.variants[i].name_span,
                         format!(
                             "enum '{}' variant '{}' payload type {} is not \
-                             admitted in v1 â€” supported payloads are Copy \
+                             admitted in v1 — supported payloads are Copy \
                              types, OwnedStr, Vec<T>, Box<T>, [T;N] of Copy \
                              elements, Task, Atomic<T>, Mutex<T>, and \
                              Channel<T, N>; only Guard<T> still needs \
@@ -1735,7 +1735,7 @@ fn check_impl(
         // Closure #283: mixed payload types across variants
         // ARE allowed. The backend tagged-union layout uses
         // a C `union` keyed by the variant's tag, so each
-        // variant can carry its own payload type â€” see
+        // variant can carry its own payload type — see
         // `enum_has_mixed_payloads` in backend_c.rs.
         // `Result<T, E> { Ok(T), Err(E) }` works even with
         // T != E. Drop dispatch + match-extract switch on
@@ -1817,7 +1817,7 @@ fn check_impl(
             continue;
         }
         // v1: type must be a Copy scalar (no Vec, struct,
-        // tuple, string in const yet â€” those require
+        // tuple, string in const yet — those require
         // initializer-time allocation).
         if !decl.ty.is_copy() || decl.ty.is_ref() || decl.ty.is_ref_mut() {
             diagnostics.push(Diagnostic::new(
@@ -1885,7 +1885,7 @@ fn check_impl(
     // `#[no_heap]`. Runs after per-fn typechecking so the
     // typed IR is settled. The global mode flag
     // (`INTENT_NO_HEAP=1`) is consulted ONLY in non-test
-    // builds â€” under `cargo test`'s parallel harness, the
+    // builds — under `cargo test`'s parallel harness, the
     // process-global env var would race with the 1500+ other
     // tests that don't take the lock. Per-fn `#[no_heap]`
     // annotations always apply, both in test and production
@@ -1902,91 +1902,91 @@ fn check_impl(
         #[cfg(test)]
         let global = false;
         crate::safety::enforce_no_heap(&typed_program_view, global, &mut diagnostics);
-        // T2.3 / T2.5 â€” additional per-function safety
+        // T2.3 / T2.5 — additional per-function safety
         // attributes. No env-var global mode for these in v1;
         // strict opt-in via the function annotation.
         crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_nan(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
-        // T2.2 â€” `#[interrupt]` ISR calling convention. Local
+        // T2.2 — `#[interrupt]` ISR calling convention. Local
         // pass checks for blocking lock acquires + task spawn +
         // parallel-for inside marked fns. The no_heap and
         // no_recursion components piggyback on the dedicated
         // passes above (the parser sets `f.no_heap = true` /
         // `f.no_recursion = true` automatically when
-        // `#[interrupt]` is present â€” see parser hook).
+        // `#[interrupt]` is present — see parser hook).
         crate::safety::enforce_interrupt(&typed_program_view, &mut diagnostics);
-        // T3.1 â€” `#[bounded_stack(bytes=N)]`. Runs the call-graph
+        // T3.1 — `#[bounded_stack(bytes=N)]`. Runs the call-graph
         // stack-depth estimator for each annotated function and
         // verifies the worst-case bound is within budget. Unbounded
         // recursion in the call graph also reports here.
         crate::safety::enforce_bounded_stack(&typed_program_view, &mut diagnostics);
-        // T3.2 â€” `#[wcet(cycles=N)]`. Coarse cycle estimator
+        // T3.2 — `#[wcet(cycles=N)]`. Coarse cycle estimator
         // walks the fn body; reports UNBOUNDED for non-const-bound
         // loops / unbounded recursion / ForIter / While / spawn,
         // exceeded budget when the static estimate > N.
         crate::safety::enforce_wcet(&typed_program_view, &mut diagnostics);
-        // T3.4 â€” `#[deterministic_timing]`. Reject branches with
+        // T3.4 — `#[deterministic_timing]`. Reject branches with
         // unequal arm cycles, while loops, non-const-bound for,
         // collection iteration, and calls to non-deterministic
         // / non-WCET-declared user functions. DO-178C Level A.
         crate::safety::enforce_deterministic_timing(
             &typed_program_view, &mut diagnostics,
         );
-        // T3.5 â€” MISRA C 2012 Rule 13.5 tightening. Reject
+        // T3.5 — MISRA C 2012 Rule 13.5 tightening. Reject
         // function calls in the RHS of `&&` / `||` for pure fns
         // and for fns tagged with a standard composite. Short-
         // circuit evaluation makes the side effect conditional,
         // creating evaluation-order-dependent behaviour.
         crate::safety::enforce_misra_13(&typed_program_view, &mut diagnostics);
-        // S-5 â€” MISRA C 2012 Rule 14.1: no unreachable / always-dead
+        // S-5 — MISRA C 2012 Rule 14.1: no unreachable / always-dead
         // branches (literal true/false conditions) in functions tagged
         // with any composite standard.
         crate::safety::enforce_misra_no_dead_branch(
             &typed_program_view, &mut diagnostics,
         );
-        // S-6 â€” MISRA C 2012 Rule 15.5: single point of exit. Flag
+        // S-6 — MISRA C 2012 Rule 15.5: single point of exit. Flag
         // functions with more than one `return` under composite tags.
         crate::safety::enforce_misra_single_exit(
             &typed_program_view, &mut diagnostics,
         );
-        // S-10 â€” MISRA C 2012 Rule 2.1: unreachable code after
+        // S-10 — MISRA C 2012 Rule 2.1: unreachable code after
         // unconditional jump (return/break/continue). Fires for all
-        // functions (Required rule â€” not gated behind a composite tag).
+        // functions (Required rule — not gated behind a composite tag).
         crate::safety::enforce_dead_code_after_jump(
             &typed_program_view, &mut diagnostics,
         );
-        // S-8 â€” MISRA C 2012 Rule 17.1: no variadic fn declarations
+        // S-8 — MISRA C 2012 Rule 17.1: no variadic fn declarations
         // under composite safety tags. vÄá¹‡Ä« has no user-level variadics
         // but the pass guards against future backend changes.
         crate::safety::enforce_misra_no_variadic(
             &typed_program_view, &mut diagnostics,
         );
-        // S-9 â€” MISRA C 2012 Rules 11.1 / 11.3: fn-ptr â†” data-ptr
+        // S-9 — MISRA C 2012 Rules 11.1 / 11.3: fn-ptr ↔ data-ptr
         // casts and incompatible data-ptr casts forbidden under
         // composite-tagged functions.
         crate::safety::enforce_misra_no_fnptr_cast(
             &typed_program_view, &mut diagnostics,
         );
-        // S-7 â€” MISRA C 2012 Rule 13.2: same binding in two argument
-        // positions of a single call â€” C evaluation order is
+        // S-7 — MISRA C 2012 Rule 13.2: same binding in two argument
+        // positions of a single call — C evaluation order is
         // unspecified; forbidden under composite-tagged functions.
         crate::safety::enforce_misra_eval_order(
             &typed_program_view, &mut diagnostics,
         );
-        // S-19 â€” Lock-order cycle detection. Builds a directed
+        // S-19 — Lock-order cycle detection. Builds a directed
         // acquisition-order graph across all functions and reports
         // any cycle as a potential deadlock (warning level).
         crate::safety::enforce_lock_order(
             &typed_program_view, &mut diagnostics,
         );
-        // S-20 â€” ISR priority and preemption check. Warns when two
+        // S-20 — ISR priority and preemption check. Warns when two
         // ISRs at different priority levels both acquire the same
         // mutex (potential priority inversion / deadlock).
         crate::safety::enforce_isr_preemption(
             &typed_program_view, &mut diagnostics,
         );
-        // T2.4 â€” cyclomatic complexity warning. Opt-in via
+        // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
         // preserve compile-with-and-without parity.
@@ -2140,7 +2140,7 @@ fn propagate_locks_params(
             // Read-only snapshot of the current signature table
             // so we can mutate the target inside the loop. Since
             // we only flip bits to `true`, monotonicity guarantees
-            // termination â€” the lattice has finite height.
+            // termination — the lattice has finite height.
             let snapshot = signatures.clone();
             let target = signatures
                 .get_mut(&function.name)
@@ -2356,11 +2356,11 @@ fn validate_main(
     }
 }
 
-/// Walk a `Program` and rewrite `Type::Struct(name)` â†’
+/// Walk a `Program` and rewrite `Type::Struct(name)` →
 /// `Type::Enum(name)` everywhere the name matches a declared
 /// enum. The parser can't distinguish struct vs enum at parse
 /// time (both look like uppercase identifiers in type
-/// Closure #242: flatten `module M { itemsâ€¦ }` declarations
+/// Closure #242: flatten `module M { items… }` declarations
 /// into the program's global item lists. Each item inside M
 /// gets renamed to `M::<original_name>`; intra-module
 /// references (Call / Var / StructLit using the bare name)
@@ -2370,7 +2370,7 @@ fn validate_main(
 /// V1 restrictions:
 /// - No nested modules (parser rejects them).
 /// - Visibility (`pub` modifier) is parsed but not yet
-///   enforced â€” every module item is effectively public. The
+///   enforced — every module item is effectively public. The
 ///   enforcement layer lands in a follow-up commit; this
 ///   first cut establishes the name-flow infrastructure.
 /// - Cross-module impl orphan rules unchecked in v1.
@@ -2412,7 +2412,7 @@ fn find_returned_affine_closure_var(stmts: &[Stmt]) -> Option<String> {
     None
 }
 
-/// Closure #308 â€” lambda-lift anonymous fn expressions.
+/// Closure #308 — lambda-lift anonymous fn expressions.
 ///
 /// Walks each top-level function's body / requires / ensures
 /// clauses and replaces every `fn(...) -> R { body }`
@@ -2424,7 +2424,7 @@ fn find_returned_affine_closure_var(stmts: &[Stmt]) -> Option<String> {
 /// first lifts AnonFns inside the body, so by the time the
 /// outer fn is created its body contains only Var references.
 ///
-/// v1 has no captured environment â€” the body is type-checked
+/// v1 has no captured environment — the body is type-checked
 /// in a fresh scope containing only its own params (plus
 /// top-level functions). References to outer let-bound vars
 /// surface as `unknown variable` diagnostics. The next
@@ -2466,7 +2466,7 @@ fn lambda_lift_program(program: &mut Program) {
 
     // Lift closures inside `methods on T { ... }` and `implement
     // Iface for T { ... }` blocks BEFORE they get hoisted into
-    // program.functions â€” otherwise inline closures inside an
+    // program.functions — otherwise inline closures inside an
     // iface impl method survive past lift and panic at typecheck
     // with "anonymous fn expression survived the lambda-lift
     // pass". Caught by the adversarial test set 2026-06-09.
@@ -2556,7 +2556,7 @@ fn lambda_lift_program(program: &mut Program) {
         // `hoisted`).
         let mut f = program.functions[idx].clone();
 
-        // Closure #314 phase 1 â€” capture-by-value closures.
+        // Closure #314 phase 1 — capture-by-value closures.
         // Detect `let f = fn(...) -> R { ...captures... };` at
         // the top level of this fn's body. For each such Let:
         //   - compute free vars (captures) inside the AnonFn body
@@ -2564,7 +2564,7 @@ fn lambda_lift_program(program: &mut Program) {
         //   - delete the original Let from the body
         //   - rewrite every `f(args)` Call in the rest of the body
         //     to `__anon_fn_<N>(<capture vars...>, args...)`
-        // The closure binding `f` is purely compile-time â€” it
+        // The closure binding `f` is purely compile-time — it
         // never exists at runtime. v1 restrictions:
         //   - only direct Let-of-AnonFn (no nested-block Lets)
         //   - captured bindings must have an explicit type
@@ -2580,7 +2580,7 @@ fn lambda_lift_program(program: &mut Program) {
         }
         // closure_handle = (hoist_name, capture_names_in_order,
         // ref_capture_names). Ref-captured names appear in BOTH
-        // lists â€” the second tells the rewriter which ones to
+        // lists — the second tells the rewriter which ones to
         // pass as `ref name` rather than `name`. ARC 3a.
         let mut closure_handles: std::collections::HashMap<String, (String, Vec<String>, Vec<String>)> =
             std::collections::HashMap::new();
@@ -2624,7 +2624,7 @@ fn lambda_lift_program(program: &mut Program) {
 /// Closure #314 helper: walk an anon fn body, return the
 /// ordered list of free var names that are captured from the
 /// enclosing fn's environment. Captures must be in `env`
-/// (the enclosing fn's annotated/param bindings) â€” anything
+/// (the enclosing fn's annotated/param bindings) — anything
 /// else (top-level fns / consts / builtins / params declared
 /// in the anon fn itself / lets declared inside the body) is
 /// not a capture. Names are returned in first-appearance
@@ -2635,7 +2635,7 @@ fn lambda_lift_program(program: &mut Program) {
 /// deletes the Let in place, and records the closure handle.
 /// Then recurses into nested block bodies (`if`/`while`/`for`/
 /// `TaskSpawn`/`ForIter`) with the SAME env + closure-handle
-/// map â€” bindings introduced in outer scope are visible to
+/// map — bindings introduced in outer scope are visible to
 /// inner-scope closures, and closure handles propagate down
 /// (so a closure declared in an outer scope can be called from
 /// an inner scope). The map mutates as we go; closure names
@@ -2672,12 +2672,12 @@ fn lift_closures_in_block(
                 // ARC 3a: validate every name in `ref_captures`
                 // is actually a free var in the body. Otherwise
                 // the user wrote `[ref n]` for a name that never
-                // appears in the closure â€” that's a typo, not a
+                // appears in the closure — that's a typo, not a
                 // useful escape hatch.
                 for r in ref_captures {
                     if !captures.contains(r) {
                         // Defer the diagnostic until after the
-                        // pass â€” we don't have the diagnostics
+                        // pass — we don't have the diagnostics
                         // sink here. Skip the unused entry; the
                         // checker's later free-var pass will fire
                         // on use. For v1 the silent skip is
@@ -2696,7 +2696,7 @@ fn lift_closures_in_block(
                     for cap in &captures {
                         let cap_ty = env.get(cap).cloned().unwrap();
                         // ARC 3a: ref-captured names get `Ref<T>`
-                        // typing on the hoisted fn's param â€”
+                        // typing on the hoisted fn's param —
                         // otherwise by-value (legacy).
                         let final_ty = if ref_captures_clone.contains(cap) {
                             crate::ast::Type::Ref(Box::new(cap_ty))
@@ -3023,18 +3023,18 @@ fn fuse_chains_in_block(body: &mut Vec<crate::ast::Stmt>) {
     }
     // Scan for adjacent producer+consumer combinator pairs and
     // fuse them. Patterns recognized (closures #318 + #319):
-    //   map      + fold    â†’ vec_map_fold
-    //   filter   + fold    â†’ vec_filter_fold
-    //   map      + filter  â†’ vec_map_filter
-    //   map_filter + fold  â†’ vec_map_filter_fold
+    //   map      + fold    → vec_map_fold
+    //   filter   + fold    → vec_filter_fold
+    //   map      + filter  → vec_map_filter
+    //   map_filter + fold  → vec_map_filter_fold
     // The map+filter rewrite leaves the result as a Let-of-
     // map_filter, which the next iteration may then chain with
-    // a following fold â€” yielding map_filter_fold for the
-    // 3-stage `map â†’ filter â†’ fold` pattern.
+    // a following fold — yielding map_filter_fold for the
+    // 3-stage `map → filter → fold` pattern.
     let mut i: usize = 0;
     while i + 1 < body.len() {
         if try_fuse_pair(body, i) {
-            // Don't increment â€” the position now holds either
+            // Don't increment — the position now holds either
             // a fused stmt (if both were consumed) or a
             // partially-fused stmt (if a further fusion remains
             // available). Retry from the same position.
@@ -3052,7 +3052,7 @@ fn fuse_chains_in_block(body: &mut Vec<crate::ast::Stmt>) {
 /// directly at `body[i+1]`). Closure #323 extends this to
 /// **non-adjacent** chains: the consumer may live at any
 /// `body[j]` (j > i) where every intervening statement is
-/// "neutral" â€” neither references the intermediate `m` (since
+/// "neutral" — neither references the intermediate `m` (since
 /// we want m to be unused outside the chain) NOR references the
 /// source binding `xs` (to prevent its mutation between
 /// producer and consumer changing the fused result vs the
@@ -3071,7 +3071,7 @@ fn try_fuse_pair(body: &mut Vec<crate::ast::Stmt>, i: usize) -> bool {
     };
     // The original source binding name (`xs` in `vec_map(ref xs, f)`).
     // None when the producer's first arg isn't a simple
-    // `ref Var(name)` (e.g. `ref t.field` paths â€” those are
+    // `ref Var(name)` (e.g. `ref t.field` paths — those are
     // sufficiently uncommon in combinator chains that we just
     // bail out of non-adjacent fusion when we can't pin the
     // source name).
@@ -3091,7 +3091,7 @@ fn try_fuse_pair(body: &mut Vec<crate::ast::Stmt>, i: usize) -> bool {
             consumer_idx = Some(j);
             break;
         }
-        // The intervening statement doesn't reference m â€” but
+        // The intervening statement doesn't reference m — but
         // it might reference / mutate xs, which would make the
         // fusion observe a different snapshot of xs than the
         // unfused chain. Bail if it touches xs.
@@ -3100,7 +3100,7 @@ fn try_fuse_pair(body: &mut Vec<crate::ast::Stmt>, i: usize) -> bool {
                 return false;
             }
         } else {
-            // No pinnable source name â†’ only adjacent fusion
+            // No pinnable source name → only adjacent fusion
             // is safe.
             if j > i + 1 {
                 return false;
@@ -3339,7 +3339,7 @@ fn extract_filter_call(expr: &crate::ast::Expr) -> Option<(crate::ast::Expr, cra
 
 /// Extract `(xs_ref, f, p)` if `expr` is a `vec_map_filter(ref xs, f, p)`
 /// or `xs.map_filter(f, p)` call. Closure #319. The map_filter
-/// producer is what emerges after a prior `map â†’ filter`
+/// producer is what emerges after a prior `map → filter`
 /// fusion rewrote two statements into one; this extractor
 /// lets the next iteration chain it with a fold.
 fn extract_map_filter_call(
@@ -4677,7 +4677,7 @@ fn flatten_modules_in_program(
     // name mangling. Public items mangle to `<module>__<name>`
     // (which matches what the parser produces for source
     // `module::name`). Private items mangle to
-    // `<module>__priv__<name>` â€” a form the parser CAN'T
+    // `<module>__priv__<name>` — a form the parser CAN'T
     // produce, so outside references can't reach them. Inside
     // the module, the flattening pass rewrites bare names to
     // the appropriate mangled form. The PRIVATE_ITEMS
@@ -4723,7 +4723,7 @@ fn flatten_modules_in_program(
         // Queue any nested modules for processing with the
         // current path as their prefix. They run AFTER the
         // current module's items are processed (LIFO via Vec
-        // pop), but that's fine â€” items don't depend on
+        // pop), but that's fine — items don't depend on
         // which module gets processed first.
         for (idx, nested) in module.modules.iter().enumerate() {
             let _is_pub = module
@@ -4733,7 +4733,7 @@ fn flatten_modules_in_program(
                 .copied()
                 .unwrap_or(false);
             // V1: nested modules inherit "always visible
-            // via path" semantics â€” no separate privacy
+            // via path" semantics — no separate privacy
             // bit enforcement yet (the inner module's items
             // still respect their own `pub` flags). A
             // `pub mod` visibility tier can land later.
@@ -4823,7 +4823,7 @@ fn flatten_modules_in_program(
         // entry binds a local name to the fully-mangled
         // top-level form (`other__bar`). v1 admits only
         // explicit single-item and brace-list forms inside
-        // modules â€” globs are rejected at parse time because
+        // modules — globs are rejected at parse time because
         // the post-flatten name set isn't available during
         // per-module processing.
         let mut module_use_aliases: std::collections::HashMap<String, String> =
@@ -4879,12 +4879,12 @@ fn flatten_modules_in_program(
         }
 
         // Helper: rewrite a name reference. Four cases (in order):
-        // 1. Bare intra-module item â†’ `<mod>__<name>` (public)
+        // 1. Bare intra-module item → `<mod>__<name>` (public)
         //    or `<mod>__priv__<name>` (private).
-        // 2. Module-local `use` alias â†’ the imported mangled
+        // 2. Module-local `use` alias → the imported mangled
         //    form. Closure #256.
-        // 3. Path starting with `<nested>__â€¦` where `<nested>`
-        //    is a child-module name â†’ prepend `<mod>__` so the
+        // 3. Path starting with `<nested>__…` where `<nested>`
+        //    is a child-module name → prepend `<mod>__` so the
         //    reference resolves to the fully-qualified
         //    flattened name. Lets users write `inner::f`
         //    from inside `outer` instead of `outer::inner::f`.
@@ -5320,11 +5320,11 @@ fn flatten_modules_in_program(
     crate::ast::set_kosh_module_items(kosh_items);
 
     // Closure #245: apply `use foo::bar;` aliases. For each
-    // import, build the alias `bar â†’ foo__bar`, then walk
+    // import, build the alias `bar → foo__bar`, then walk
     // top-level item bodies (functions + impls + methods
     // blocks) rewriting bare references. Module bodies were
     // already flattened above, so they don't need the
-    // alias pass â€” references inside a module that match a
+    // alias pass — references inside a module that match a
     // sibling get the intra-module prefix; references that
     // don't match a sibling stay bare; we don't apply
     // top-level `use` aliases inside module bodies in v1
@@ -5333,7 +5333,7 @@ fn flatten_modules_in_program(
     // Closure #257: resolve the re-export map transitively, so
     // chained re-exports (`mod1::pub use mod2::X`,
     // `mod2::pub use mod3::X`) collapse to a single hop
-    // (`mod1__X â†’ mod3__X`). Iterate until fixed-point â€”
+    // (`mod1__X → mod3__X`). Iterate until fixed-point —
     // chains can't loop (the parser produces a DAG by
     // construction since `pub use` paths name CONCRETE module
     // items, not re-export entries; we just resolve through
@@ -5410,7 +5410,7 @@ fn flatten_modules_in_program(
     // Closure #254: track the source-form of each alias's first
     // binding so a duplicate brings a clean diagnostic ("the name
     // `bar` is already imported from a different module"). Silent
-    // last-wins is a footgun â€” two `use a::bar; use b::bar;`
+    // last-wins is a footgun — two `use a::bar; use b::bar;`
     // imports compiled to a tail program that called only b's
     // bar, with no warning at the conflict site.
     let mut alias_origin: std::collections::HashMap<String, (String, String)> =
@@ -5421,7 +5421,7 @@ fn flatten_modules_in_program(
     // type aliases) so glob imports can expand. The flatten
     // pass has already run, so module items now live at the
     // top level with mangled names (`mod__name` for public,
-    // `mod__priv__name` for private â€” the latter aren't
+    // `mod__priv__name` for private — the latter aren't
     // brought into scope by globs).
     let mut all_top_level_names: Vec<String> = Vec::new();
     all_top_level_names.extend(program.functions.iter().map(|f| f.name.clone()));
@@ -5444,7 +5444,7 @@ fn flatten_modules_in_program(
             // whose name starts with `<module>__`, PLUS the
             // keys of `re_exports` that share the same prefix.
             // The latter covers `pub use inner::alpha;` inside
-            // `module outer { â€¦ }` â€” `outer__alpha` isn't a
+            // `module outer { … }` — `outer__alpha` isn't a
             // real top-level item (only `inner__alpha` is),
             // but the re-export map records the rewrite, and a
             // `use outer::*;` should pick `alpha` up via that
@@ -5471,7 +5471,7 @@ fn flatten_modules_in_program(
                 if suffix.starts_with("priv__") {
                     continue;
                 }
-                // Skip transitive descendants â€” globs only
+                // Skip transitive descendants — globs only
                 // pull direct children (matches Rust's
                 // `use foo::*;` semantics).
                 if suffix.contains("__") {
@@ -5487,7 +5487,7 @@ fn flatten_modules_in_program(
                 // Glob collision: a prior explicit `use` (or a
                 // prior glob from another module) already
                 // bound this name. Surface a clear diagnostic
-                // â€” the user has to rename one with
+                // — the user has to rename one with
                 // `use ... as ...;`.
                 if let Some((prev_module, prev_item)) =
                     alias_origin.get(suffix.as_ref() as &str)
@@ -5520,7 +5520,7 @@ fn flatten_modules_in_program(
         // 2026-06-10: when `up.module` is itself a re-exporting
         // facade (`module outer { pub use inner::helper; }`),
         // the mangled name `outer__helper` doesn't point at a
-        // real top-level item â€” the re-export map records
+        // real top-level item — the re-export map records
         // `outer__helper -> inner__helper`. Resolve through it
         // here so the alias stored in use_aliases points at the
         // implementation, not the re-export ghost. Without this,
@@ -5551,7 +5551,7 @@ fn flatten_modules_in_program(
         for f in &mut program.functions {
             // Don't rewrite top-level fns whose names came from
             // a flattened module (they have `__` in their
-            // names) â€” those bodies already use module-qualified
+            // names) — those bodies already use module-qualified
             // names where appropriate. Apply to fns without
             // `__` (i.e. truly top-level fns) so user code in
             // `fn main()` benefits from the `use` aliases.
@@ -5571,7 +5571,7 @@ fn flatten_modules_in_program(
 /// the aliased mangled form.
 /// Closure #260: build the "consider `ref` / `clone(name)`" hint that
 /// accompanies the "value 'name' was moved" diagnostic. The shape
-/// depends on the binding's type â€” Vec / OwnedStr / affine structs
+/// depends on the binding's type — Vec / OwnedStr / affine structs
 /// support both `ref` and `clone`; handle types (Atomic / Mutex /
 /// Channel / Guard / Task) cannot be cloned and only accept `ref`.
 /// Returns None for primitives (which are Copy and never trigger
@@ -5584,7 +5584,7 @@ fn move_recovery_hint(name: &str, ty: &Type) -> Option<String> {
             name, name
         )),
         Type::Array { .. } => Some(format!(
-            "consider borrowing with `ref {}` for read-only access â€” \
+            "consider borrowing with `ref {}` for read-only access — \
              arrays are affine in v1; restructure if you need both \
              bindings to own data",
             name
@@ -5593,13 +5593,13 @@ fn move_recovery_hint(name: &str, ty: &Type) -> Option<String> {
         | Type::Mutex(_)
         | Type::Channel(_, _)
         | Type::Guard(_) => Some(format!(
-            "share via `ref {}` â€” `{}` is an exclusive single-owner \
+            "share via `ref {}` — `{}` is an exclusive single-owner \
              handle and cannot be cloned (use `Atomic<T>` or `Channel` \
              through a borrow if multiple threads need access)",
             name, name
         )),
         Type::Task => Some(format!(
-            "task handles cannot be shared â€” keep one handle per \
+            "task handles cannot be shared — keep one handle per \
              spawn and `join {}` on exactly one path",
             name
         )),
@@ -5609,7 +5609,7 @@ fn move_recovery_hint(name: &str, ty: &Type) -> Option<String> {
             name, name
         )),
         // Primitives + references + Str are Copy and shouldn't be
-        // reaching this diagnostic â€” fall through with no hint.
+        // reaching this diagnostic — fall through with no hint.
         _ => None,
     }
 }
@@ -5781,7 +5781,7 @@ fn resolve_enum_types_in_program(
     // typed as `Type::Enum("Inner")` rather than the parser-stamped
     // `Type::Struct("Inner")`. Without this, `Outer.Wrap(Inner.A(...))`
     // rejects with "enum payload must be assignable to Inner, got
-    // Inner" â€” same name on both sides, different Type variant.
+    // Inner" — same name on both sides, different Type variant.
     // Caught by the adversarial test set (`examples/edge_cases/`
     // m4_simplest.vani).
     for decl in &mut program.enums {
@@ -5815,7 +5815,7 @@ fn resolve_enum_types_in_program(
             }
         }
     }
-    // `implement Iface for T { â€¦ }` impls carry a target
+    // `implement Iface for T { … }` impls carry a target
     // type plus methods that may reference enums in their
     // signatures and bodies (e.g. `implement Eq for Color`
     // needs `self: Color` to resolve to `Type::Enum`).
@@ -5992,7 +5992,7 @@ fn resolve_enum_types_in_stmt(
 /// Recurse into an expression tree, resolving enum-name type
 /// annotations that the parser produced as `Type::Struct`.
 /// Critical for Block-expressions, whose inner `let X: Enum =
-/// â€¦;` annotations would otherwise stay as `Type::Struct(Enum)`
+/// …;` annotations would otherwise stay as `Type::Struct(Enum)`
 /// and fail the `coerce_checked` equality check against the
 /// resolved `Type::Enum(Enum)` returned by `check_expr`.
 fn resolve_enum_types_in_expr(
@@ -6421,7 +6421,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
 /// Mirror of `resolve_enum_types_in_expr` for type-alias
 /// substitution: recurse into expression trees so Lets inside
 /// Block-expressions get their annotation aliases substituted.
-/// Without this, `let p: AliasName = â€¦;` inside `{ let r = â€¦;
+/// Without this, `let p: AliasName = …;` inside `{ let r = …;
 /// p.0 }` would never have its annotation rewritten and the
 /// checker would reject with "Pair vs (i64, i64)" (or similar).
 fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
@@ -6539,7 +6539,7 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
     }
 }
 
-/// Hoist methods from `methods on T { â€¦ }` blocks into the
+/// Hoist methods from `methods on T { … }` blocks into the
 /// regular function table. Each method gets renamed to
 /// `<T>_<methodName>`. Validates that the methods-block
 /// target is a nominal type (struct/enum) and that no
@@ -6553,7 +6553,7 @@ fn hoist_methods_into_functions(
     for block in &program.methods_blocks {
         let type_name = match &block.for_type {
             Type::Struct(name) | Type::Enum(name) => name.clone(),
-            // Generic instantiation: `methods on Pair<i64> { â€¦ }` â€”
+            // Generic instantiation: `methods on Pair<i64> { … }` —
             // mangle to the monomorphized struct name (`Pair__i64`)
             // so the hoisted functions live under the same name the
             // monomorphizer will produce for `struct Pair<T>`.
@@ -6567,7 +6567,7 @@ fn hoist_methods_into_functions(
                 diagnostics.push(Diagnostic::new(
                     block.for_type_span,
                     format!(
-                        "`methods on â€¦` target must be a struct or enum type, \
+                        "`methods on …` target must be a struct or enum type, \
                          got {}",
                         other
                     ),
@@ -6588,7 +6588,7 @@ fn hoist_methods_into_functions(
                 ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("method", &method.name)));
                 continue;
             }
-            // Self-less methods are accepted â€” they become
+            // Self-less methods are accepted — they become
             // "type-associated functions" callable via
             // `Type.method(args)`. The hoist gives them the
             // same mangled name (`<TypeName>_<methodName>`)
@@ -6603,7 +6603,7 @@ fn hoist_methods_into_functions(
                     method.span,
                     format!(
                         "method '{}::{}' (mangled to '{}') collides with an \
-                         existing function â€” pick a different method name",
+                         existing function — pick a different method name",
                         type_name, method.name, mangled
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("method", &method.name)));
@@ -6618,7 +6618,7 @@ fn hoist_methods_into_functions(
     program.methods_blocks.clear();
 }
 
-/// T1.5 phase 2: hoist `implement Iface for Type { fn m â€¦ }`
+/// T1.5 phase 2: hoist `implement Iface for Type { fn m … }`
 /// method bodies into regular functions named
 /// `<TypeName>_<method>`, validating each method's signature
 /// against the interface's declared shape. Once hoisted, the
@@ -6634,7 +6634,7 @@ fn hoist_methods_into_functions(
 ///   must match the interface's declaration after
 ///   substituting `Self` (`Type::Param("Self")`-style placeholder
 ///   if used) with `for_type`. v1 doesn't actually require
-///   a Self placeholder â€” interface methods specify
+///   a Self placeholder — interface methods specify
 ///   parameters directly; the validation is positional
 ///   parameter-type matching.
 /// - The impl must not collide with an existing
@@ -6745,7 +6745,7 @@ fn hoist_impls_into_functions(
         .map(|i| (i.name.clone(), i))
         .collect();
     // Closure #221 / vtables Phase 2a: register (iface, type)
-    // pairs so `coerce_checked` can validate `T â†’ dyn Iface`
+    // pairs so `coerce_checked` can validate `T → dyn Iface`
     // coercions. Populated before the impls get drained by
     // the hoist loop below.
     let iface_impl_pairs: Vec<(String, String)> = program
@@ -6821,7 +6821,7 @@ fn hoist_impls_into_functions(
     let mut hoisted: Vec<Function> = Vec::new();
     for imp in &program.impls {
         // BUG-15 fix (2026-07-27): a blanket impl
-        // (`implement<T> Iface for Wrap<T> { â€¦ }`, `imp.type_params`
+        // (`implement<T> Iface for Wrap<T> { … }`, `imp.type_params`
         // non-empty) must NOT have its own raw method bodies hoisted
         // here -- they still reference the unresolved generic
         // `Type::Param("T")` from the impl block, since substitution
@@ -6847,7 +6847,7 @@ fn hoist_impls_into_functions(
         // until then, users can declare the impl and call
         // `t.drop()` manually. The shape is validated here
         // so the contract is forward-compatible: `fn drop(self:
-        // T) -> i64` (i64 return for v1 â€” return-type
+        // T) -> i64` (i64 return for v1 — return-type
         // generalization waits on T2.7 phase 2). Anything
         // else surfaces a targeted diagnostic.
         if imp.interface_name == "Drop" {
@@ -6869,7 +6869,7 @@ fn hoist_impls_into_functions(
                 // Epic C: accept either by-value `self: T` or
                 // mut-ref `self: mut ref T`. The mut-ref form
                 // lets the user run cleanup BEFORE the auto-
-                // emitted per-field drop pass â€” useful when
+                // emitted per-field drop pass — useful when
                 // the struct owns OwnedStr / Vec fields (the
                 // by-value form had to be suppressed to avoid
                 // double-free).
@@ -6882,7 +6882,7 @@ fn hoist_impls_into_functions(
                         format!(
                             "Drop impl for '{}' must have signature \
                              `fn drop(self: {}) -> i64` or \
-                             `fn drop(self: mut ref {}) -> i64` â€” got {} params, \
+                             `fn drop(self: mut ref {}) -> i64` — got {} params, \
                              return type {}",
                             type_name, type_name, type_name, m.params.len(), m.return_type
                         ),
@@ -6905,7 +6905,7 @@ fn hoist_impls_into_functions(
                     }
                 }
             }
-            // Note about future work â€” non-blocking informational.
+            // Note about future work — non-blocking informational.
             // (Not emitted as a diagnostic to keep the impl
             // useful for manual-call patterns today.)
         }
@@ -6958,7 +6958,7 @@ fn hoist_impls_into_functions(
                     diagnostics.push(Diagnostic::new(
                         method.span,
                         format!(
-                            "interface '{}' has no method '{}' â€” the impl declares \
+                            "interface '{}' has no method '{}' — the impl declares \
                              a method not in the interface",
                             imp.interface_name, method.name
                         ),
@@ -6969,7 +6969,7 @@ fn hoist_impls_into_functions(
             // Validate signature: parameter count + per-param types + return
             // type. Blanket-expanded impls (type_params was non-empty before
             // expansion) use concrete param types that differ from the
-            // interface's generic-instantiated param types â€” skip the
+            // interface's generic-instantiated param types — skip the
             // per-param type check; only count and return type matter.
             let is_blanket = !imp.type_params.is_empty();
             if method.params.len() != iface_method.params.len() {
@@ -7050,7 +7050,7 @@ fn hoist_impls_into_functions(
                     method.span,
                     format!(
                         "impl method '{}::{}' (mangled to '{}') collides with an \
-                         existing function â€” `implement` and `methods on T` can't \
+                         existing function — `implement` and `methods on T` can't \
                          both define the same method",
                         type_name, method.name, mangled
                     ),
@@ -7150,8 +7150,8 @@ fn hoist_impls_into_functions(
 /// ```ignore
 /// fn name(args) -> EnumType {
 ///   let v: T = try opt;
-///   let a: â€¦  = â€¦;     // any number of let-stmts
-///   â€¦
+///   let a: …  = …;     // any number of let-stmts
+///   …
 ///   return E;          // E has type EnumType
 /// }
 /// ```
@@ -7163,8 +7163,8 @@ fn hoist_impls_into_functions(
 ///   return match opt {
 ///     EnumType.SomeLike(__try_v_<n>) then {
 ///       let v: T = __try_v_<n>;
-///       let a: â€¦ = â€¦;
-///       â€¦
+///       let a: … = …;
+///       …
 ///       E
 ///     },
 ///     EnumType.NoneLike then EnumType.NoneLike,
@@ -7172,7 +7172,7 @@ fn hoist_impls_into_functions(
 /// }
 /// ```
 /// For v1 the rewrite is restricted to functions where the
-/// body has shape `[Let(try) , Let*, Return]` â€” the try-let
+/// body has shape `[Let(try) , Let*, Return]` — the try-let
 /// is the first statement, intermediate stmts are all
 /// `let`-bindings (block-expressions accept Let only), and
 /// the last stmt is a `return`. Functions that don't match
@@ -7185,7 +7185,7 @@ fn desugar_try_let_in_program(
 ) {
     // EnumDecl is already imported at the file's top-level `use`;
     // drop the redundant local re-import.
-    // Build a quick enum registry: name â†’ decl, so the
+    // Build a quick enum registry: name → decl, so the
     // rewriter can find Some-like / None-like variants.
     let enum_by_name: std::collections::HashMap<String, EnumDecl> =
         program
@@ -7198,7 +7198,7 @@ fn desugar_try_let_in_program(
     for function in program.functions.iter_mut() {
         // Closure #232: rewrite `if cond { return X; }`
         // guards into tail match expressions BEFORE the
-        // try desugar fires â€” but ONLY for functions that
+        // try desugar fires — but ONLY for functions that
         // contain a `try` somewhere. Non-try functions
         // benefit from the existing direct if/else
         // lowering (backends emit explicit `then`/`else`
@@ -7455,7 +7455,7 @@ fn try_rewrite_stmt_list(
 
 /// Check whether `body` contains any Let(try) and rewrite all
 /// occurrences in place. Multiple Let(try) stmts in the same
-/// body get nested (closure #218) â€” each try lifts the rest of
+/// body get nested (closure #218) — each try lifts the rest of
 /// the body into its Some-arm Block-expr, then the recursive
 /// rewriter processes the inner stmts to find further trys.
 /// Returns silently when no Let(try) is present; emits a
@@ -7539,7 +7539,7 @@ fn try_rewrite_at_top(
     // `Option.None`) carry through the later monomorphization
     // pass and get mangled in lockstep with everything else.
     //
-    // Future<T> / Poll<T> are deliberately excluded â€” those are
+    // Future<T> / Poll<T> are deliberately excluded — those are
     // async-sugar synthetic return types (the user wrote
     // `async fn f() -> i64`, sugar rewrites to `-> Future<i64>`),
     // and `try X` is rejected there per v3.1 design.
@@ -7724,7 +7724,7 @@ fn try_rewrite_block_stmts(
         },
         span: try_span,
     };
-    // Pop the (now empty) try-let stmt and any stmts after â€”
+    // Pop the (now empty) try-let stmt and any stmts after —
     // `drain(i+1..)` already removed the trailing portion; the
     // try-let itself sits at index i, remove it too.
     stmts.truncate(i);
@@ -7732,7 +7732,7 @@ fn try_rewrite_block_stmts(
 }
 
 /// T1.4 phase 2: monomorphize generic functions. Walks the
-/// program for calls to `fn name<T>(â€¦)` generic functions,
+/// program for calls to `fn name<T>(…)` generic functions,
 /// infers T from each call site's argument types (only literal
 /// args supported in v1), generates a specialized copy per
 /// (fn, concrete-type) combo, and rewrites call sites to use
@@ -7744,7 +7744,7 @@ fn try_rewrite_block_stmts(
 ///   call site. Other arguments must coerce to the same T.
 /// - Only integer / float / bool literal arguments support
 ///   inference. Var arguments need type-checking context that
-///   doesn't exist at this pre-pass â€” defer to a follow-up.
+///   doesn't exist at this pre-pass — defer to a follow-up.
 fn monomorphize_generics_in_program(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
@@ -8232,8 +8232,8 @@ fn collect_generic_calls_in_expr(
 /// we walk the declared params, find the first generic one,
 /// and infer from the matching actual arg.
 ///
-/// For v3.1 `__poll_*` calls â€” the called fn's first param is
-/// declared as `mut ref Task__X<T>` â€” we apply structural
+/// For v3.1 `__poll_*` calls — the called fn's first param is
+/// declared as `mut ref Task__X<T>` — we apply structural
 /// unwrap (peel RefMut/Ref, peel single-arg Type::Apply) on
 /// the actual arg's resolved type to extract T. Restricted to
 /// `__poll_*` call names so non-v3.1 generic-fn callsites keep
@@ -8248,7 +8248,7 @@ fn infer_concrete_type_for_call(
 ) -> Option<Type> {
     let is_v31_poll = call_name.starts_with("__poll_");
     // Find the first param whose declared type structurally
-    // contains a Type::Param â€” that's the T-bearing slot.
+    // contains a Type::Param — that's the T-bearing slot.
     // Recurse through Ref/RefMut/Apply/Vec/Array to find it.
     fn first_param_idx_with_t(params: &[Param]) -> Option<usize> {
         fn ty_has_param(ty: &Type) -> bool {
@@ -8267,7 +8267,7 @@ fn infer_concrete_type_for_call(
     /// Structural unification: walk the param-type pattern and
     /// the arg-type in lockstep, returning the concrete type
     /// bound to the unique `Type::Param` slot. For `param =
-    /// Box<T>`, `arg = Box<i64>` â†’ returns `i64`. Peels matching
+    /// Box<T>`, `arg = Box<i64>` → returns `i64`. Peels matching
     /// `Ref/RefMut/Vec/Box/Array/Apply(_, [..])` wrappers.
     /// Returns None on shape mismatch so the caller can fall
     /// back to the legacy "T = whole arg type" inference.
@@ -8340,7 +8340,7 @@ fn infer_concrete_type_for_call(
     // v3.1 structural-unwrap helper. Peels Ref/RefMut at the
     // type level, then peels a single-arg Type::Apply. Also
     // parses ALREADY-COLLAPSED Type::Struct names back into T
-    // â€” `monomorphize_type_decls_in_program` runs before
+    // — `monomorphize_type_decls_in_program` runs before
     // `monomorphize_generics_in_program`, so the user's
     // non-generic call site (e.g. `drive(t: mut ref
     // Task__identity<i64>)`) has had its Type::Apply collapsed
@@ -8381,7 +8381,7 @@ fn infer_concrete_type_for_call(
                     span,
                     format!(
                         "cannot infer generic type parameter from variable '{}' \
-                         â€” the monomorphizer pre-pass only resolves bindings \
+                         — the monomorphizer pre-pass only resolves bindings \
                          declared with a let-annotation or as a function \
                          parameter at the call site",
                         name
@@ -8448,7 +8448,7 @@ fn infer_concrete_type_for_call(
         raw.map(|ty| if is_v31_poll { extract_t_v31(&ty) } else { ty })
     };
     // Pick the T-bearing slot. Default to position 0 when no
-    // param mentions Type::Param (degenerate case â€” kept for
+    // param mentions Type::Param (degenerate case — kept for
     // compat with existing non-generic-shaped templates).
     let t_idx = first_param_idx_with_t(params).unwrap_or(0);
     let arg = args.get(t_idx)?;
@@ -8791,7 +8791,7 @@ fn monomorphize_type_decls_in_program(
         needed_enums: &mut Vec<(String, Vec<Type>)>,
     ) {
         // Phase 4c-broad: skip Type::Apply use-sites whose args
-        // contain unresolved Type::Param â€” those occur inside
+        // contain unresolved Type::Param — those occur inside
         // generic fn templates (e.g. v3.1-synthesized
         // `Task__identity<T>` referenced by the generic
         // identity<T> ctor's return type). Specializing such
@@ -8885,7 +8885,7 @@ fn monomorphize_type_decls_in_program(
             // for BTreeMap which also returns Option<V>.
             //
             // Only register Option<V> when V is a payload-eligible
-            // type â€” scalars/bool/OwnedStr/Str. Nested aggregates
+            // type — scalars/bool/OwnedStr/Str. Nested aggregates
             // like Vec / HashMap / Tuple are not admitted as
             // Option payload in v1; auto-registering them would
             // produce a confusing later-stage diagnostic.
@@ -9058,11 +9058,11 @@ fn monomorphize_type_decls_in_program(
                 | "graph_mst_kruskal" | "graph_mst_prim"
                 | "graph_astar"
                 | "skiplist_min" | "skiplist_max"
-                // Layer 2 of `unsafe.md` â€” `pool_get` returns
+                // Layer 2 of `unsafe.md` — `pool_get` returns
                 // `Option<i64>` (None on use-after-free /
                 // double-free via generation mismatch).
                 | "pool_get"
-                // Layer 3.2 of `unsafe.md` â€” `bptr_get` returns
+                // Layer 3.2 of `unsafe.md` — `bptr_get` returns
                 // `Option<i64>` (None on out-of-bounds).
                 | "bptr_get" => Some(Type::I64),
                 "parse_float"
@@ -9592,7 +9592,7 @@ fn monomorphize_type_decls_in_program(
             }
         }
     }
-    // Phase 2: expand blanket impls â€” `implement<T> Iface for Wrapper<T>`.
+    // Phase 2: expand blanket impls — `implement<T> Iface for Wrapper<T>`.
     // For each blanket impl (type_params non-empty), look for all known
     // monomorphizations of the base type and instantiate the impl with
     // T bound to each concrete arg, provided the bound is satisfied.
@@ -10255,9 +10255,9 @@ fn resolve_bare_struct_lits_in_stmt(
 /// Phase 2: expand blanket impls.
 /// For each `implement<T> Iface for Wrapper<T> where T is Bound` in
 /// `program.impls`, enumerate all known monomorphizations of `Wrapper`
-/// (i.e. `Wrapper__Foo`, `Wrapper__Bar`, â€¦) that exist in struct_names/
+/// (i.e. `Wrapper__Foo`, `Wrapper__Bar`, …) that exist in struct_names/
 /// enum_names, check the where-clause bounds, and synthesize a concrete
-/// `ImplDecl { for_type: Struct("Wrapper__Foo"), type_params: [], â€¦ }`
+/// `ImplDecl { for_type: Struct("Wrapper__Foo"), type_params: [], … }`
 /// with T substituted by the concrete arg everywhere. The synthesized
 /// impls are appended to `program.impls` so the normal hoist pass
 /// processes them.
@@ -10266,7 +10266,7 @@ fn expand_blanket_impls(
     struct_names: &std::collections::HashSet<String>,
     enum_names: &std::collections::HashSet<String>,
     // Template names (e.g. "Wrap") used by rewrite_apply_in_ty to convert
-    // Type::Apply { "Wrap", [i64] } â†’ Type::Struct("Wrap__i64") in synthesized impls.
+    // Type::Apply { "Wrap", [i64] } → Type::Struct("Wrap__i64") in synthesized impls.
     tmpl_struct_names: &std::collections::HashSet<String>,
     tmpl_enum_names: &std::collections::HashSet<String>,
 ) {
@@ -10289,7 +10289,7 @@ fn expand_blanket_impls(
 
     for imp in program.impls.iter() {
         if imp.type_params.is_empty() {
-            continue; // concrete impl â€” skip
+            continue; // concrete impl — skip
         }
         // Only handle single-param blanket impls for now:
         //   `implement<T> Iface for Wrapper<T>`
@@ -10339,14 +10339,14 @@ fn expand_blanket_impls(
                     "u64" => Type::U64, "u32" => Type::U32, "u16" => Type::U16, "u8" => Type::U8,
                     "f32" => Type::F32, "f64" => Type::F64,
                     "bool" => Type::Bool, "str" => Type::Str,
-                    _ => continue, // unrecognized arg â€” skip
+                    _ => continue, // unrecognized arg — skip
                 }
             };
             // Check where-clause bounds: for each `T is Bound`, verify
             // that `implement Bound for concrete_arg` exists.
             let bounds_satisfied = imp.where_clauses.iter().all(|wc| {
                 if wc.type_param != param_name {
-                    return true; // unrelated param â€” assume ok
+                    return true; // unrelated param — assume ok
                 }
                 let concrete_type_name = match &concrete_arg {
                     Type::Struct(n) | Type::Enum(n) => n.clone(),
@@ -10367,7 +10367,7 @@ fn expand_blanket_impls(
             if !bounds_satisfied {
                 continue;
             }
-            // Substitute T â†’ concrete_arg everywhere in param types, return type, body.
+            // Substitute T → concrete_arg everywhere in param types, return type, body.
             fn subst_ty(ty: &Type, param: &str, concrete: &Type) -> Type {
                 match ty {
                     Type::Param(p) if p == param => concrete.clone(),
@@ -10432,7 +10432,7 @@ fn expand_blanket_impls(
                 m2.body = m2.body.iter().map(|s| subst_stmt(s, &param_name, &concrete_arg)).collect();
                 m2
             }).collect();
-            // After Tâ†’concrete substitution, types may still contain
+            // After T→concrete substitution, types may still contain
             // `Type::Apply { "Wrap", [i64] }` (from `Wrap<T>` after
             // subst). Rewrite those to `Type::Struct("Wrap__i64")`
             // using the template-name sets (the same pass the rest of
@@ -10505,7 +10505,7 @@ fn rewrite_apply_in_ty(
             // mangling them produces garbage names like
             // `Task__identity__Param_T_`. Concrete specializations
             // arrive via fn-mono's substitute_type_param, which
-            // collapses concrete Type::Apply â†’ Type::Struct in
+            // collapses concrete Type::Apply → Type::Struct in
             // each per-T specialization.
             fn has_param_local(ty: &Type) -> bool {
                 match ty {
@@ -10529,7 +10529,7 @@ fn rewrite_apply_in_ty(
             } else if enum_names.contains(name) {
                 Type::Enum(mangled)
             } else {
-                // Unknown generic â€” leave as-is; the
+                // Unknown generic — leave as-is; the
                 // checker will surface a "not declared"
                 // diagnostic.
                 return;
@@ -10879,7 +10879,7 @@ fn rewrite_apply_in_stmt(
 }
 
 /// Mangle a concrete type to a name fragment for the
-/// specialized function. e.g. `Type::I64` â†’ "i64".
+/// specialized function. e.g. `Type::I64` → "i64".
 fn type_mangle(ty: &Type) -> String {
     match ty {
         Type::I64 => "i64".to_string(),
@@ -10913,13 +10913,13 @@ fn type_mangle(ty: &Type) -> String {
     }
 }
 
-/// Substitute Type::Param(t_name) â†’ concrete in a Type.
+/// Substitute Type::Param(t_name) → concrete in a Type.
 ///
 /// Phase 4c-broad extension (2026-06-06): after substituting,
 /// any `Type::Apply { name, args }` whose args become all-
 /// concrete (no remaining Type::Param) collapses into
 /// `Type::Struct(format!("{}__{}", name, type_mangle(args[0])))`
-/// â€” the mangled specialized struct name. This matches the
+/// — the mangled specialized struct name. This matches the
 /// naming convention used by monomorphize_type_decls so the
 /// downstream lookup finds the right specialization.
 ///
@@ -11038,18 +11038,18 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
     }
 }
 
-/// Substitute Type::Param(t_name) â†’ concrete in a Stmt's
+/// Substitute Type::Param(t_name) → concrete in a Stmt's
 /// type annotations + expression contents.
 ///
 /// Phase 4c-broad extension (2026-06-06): also recurses into
 /// expressions to rewrite:
-///   - `StructLit { type_name }` â€” generic struct constructor
+///   - `StructLit { type_name }` — generic struct constructor
 ///     references get mangled to their specialized name (e.g.
-///     `Task__identity` â†’ `Task__identity__i64`). Required so
+///     `Task__identity` → `Task__identity__i64`). Required so
 ///     the v3.1-synthesized constructor body's bare-name
 ///     StructLit gets specialized in lockstep with the enclosing
 ///     fn template.
-///   - `Call { name }` â€” generic helper-fn calls likewise get
+///   - `Call { name }` — generic helper-fn calls likewise get
 ///     mangled (e.g. user-code `__poll_identity(...)` inside a
 ///     non-generic driver fn's body needs the qualified name
 ///     after specialization).
@@ -11113,7 +11113,7 @@ fn substitute_type_param_in_expr(expr: &mut Expr, t_name: &str, concrete: &Type)
         E::StructLit { type_name, fields, .. } => {
             // Phase 4c-broad: ONLY rewrite v3.1-synthesized
             // Task__X struct names. User-declared generic structs
-            // (`Box<T>` etc.) are NOT touched here â€” they get
+            // (`Box<T>` etc.) are NOT touched here — they get
             // resolved via vÄá¹‡Ä«'s existing StructLit inference
             // path. The Task__-prefix is unique to the v3.1
             // synthesizer's name mangling so this is safe.
@@ -11127,7 +11127,7 @@ fn substitute_type_param_in_expr(expr: &mut Expr, t_name: &str, concrete: &Type)
         E::Call { name, args, .. } => {
             // Phase 4c-broad: rewrite ONLY v3.1-synthesized
             // poll-fn calls (`__poll_X`). Non-v3.1 generic Calls
-            // are NOT touched here â€” they're handled by the
+            // are NOT touched here — they're handled by the
             // existing `rewrite_generic_calls_in_stmt` pass.
             if name.starts_with("__poll_") {
                 *name = format!("{}__{}", name, type_mangle(concrete));
@@ -11174,7 +11174,7 @@ fn substitute_type_param_in_expr(expr: &mut Expr, t_name: &str, concrete: &Type)
     }
 }
 
-/// Try to fold a `const X: T = â€¦;` initializer into a
+/// Try to fold a `const X: T = …;` initializer into a
 /// concrete `TypedConst`. v1 accepts plain integer/float/bool
 /// literals and unary-minus-of-literal. Anything else returns
 /// `None` and the caller surfaces a clear diagnostic. T4.15.
@@ -11424,7 +11424,7 @@ fn make_dyn_coerce(
 // for safe types and a migration hint string for unsafe ones.
 //
 // Safe: scalars (Copy primitives), `Str` (`i8*` pointer), and
-// any reference (`ref T` / `mut ref T`) â€” pointers cross the
+// any reference (`ref T` / `mut ref T`) — pointers cross the
 // FFI boundary cleanly.
 //
 // Unsafe: aggregates (Struct / Tuple / Array / Enum), heap
@@ -11437,7 +11437,7 @@ fn make_dyn_coerce(
 // classification. System V x86-64 (and most other ABIs) pass
 // these in integer registers and pack adjacent fields into
 // 64-bit "eightbytes". Float fields would route through SSE
-// regs â€” defer until v2.
+// regs — defer until v2.
 fn is_ffi_integer_class(ty: &Type) -> bool {
     matches!(
         ty,
@@ -11450,8 +11450,8 @@ fn is_ffi_integer_class(ty: &Type) -> bool {
 }
 
 // Arc 7 remainder: floats get classified into SSE registers on
-// SysV x86-64 (XMM0â€“XMM7 for parameters). Mixed integer/float
-// aggregates pack into separate "eightbytes" â€” one INTEGER
+// SysV x86-64 (XMM0–XMM7 for parameters). Mixed integer/float
+// aggregates pack into separate "eightbytes" — one INTEGER
 // chunk + one SSE chunk for a `{i64, f64}` struct, for
 // instance. The C compiler (cc / gcc / clang) handles the
 // per-eightbyte classification automatically when emitting
@@ -11477,12 +11477,12 @@ fn ffi_byte_size(ty: &Type) -> u64 {
     }
 }
 
-// Arc 7 â€” Win64 ABI (x86-64 Windows calling convention).
+// Arc 7 — Win64 ABI (x86-64 Windows calling convention).
 // Structs of exactly 1, 2, 4, or 8 bytes with all-scalar
 // fields pass by value in a single integer register. All
 // other structs (including 12 / 16 byte) are passed via a
 // hidden pointer; the caller allocates the buffer. Unlike
-// SysV there is no "two-eightbyte" split â€” the struct is
+// SysV there is no "two-eightbyte" split — the struct is
 // treated as a single opaque unit.
 fn is_ffi_safe_struct_win64(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
     let Some(info) = structs.get(name) else {
@@ -11499,13 +11499,13 @@ fn is_ffi_safe_struct_win64(name: &str, structs: &BTreeMap<String, StructInfo>) 
     info.fields.iter().all(|(_, t)| is_ffi_safe_scalar(t))
 }
 
-// Arc 7 â€” AArch64 AAPCS64 ABI.
+// Arc 7 — AArch64 AAPCS64 ABI.
 // Two pass-by-value cases:
-//   HFA (Homogeneous Floating-point Aggregate): 1â€“4 fields all
-//   of the same type (all f32 OR all f64). Passed in v0â€“v7
+//   HFA (Homogeneous Floating-point Aggregate): 1–4 fields all
+//   of the same type (all f32 OR all f64). Passed in v0–v7
 //   floating-point registers.
-//   Scalar-only, total â‰¤ 16 bytes: passed in x0â€“x7 integer
-//   registers (may span two registers for 9â€“16-byte structs).
+//   Scalar-only, total ≤ 16 bytes: passed in x0–x7 integer
+//   registers (may span two registers for 9–16-byte structs).
 // Structs > 16 bytes or with non-scalar fields require a
 // hidden-pointer (caller allocates).
 fn is_ffi_hfa_aarch64(info: &StructInfo) -> bool {
@@ -11537,12 +11537,12 @@ fn is_ffi_safe_struct_aarch64(name: &str, structs: &BTreeMap<String, StructInfo>
 
 // Closure #285 + Arc 7: classifies a struct as FFI-safe-by-value.
 // Dispatches to the platform-specific classifier at compile time:
-//   Win64 (x86-64 Windows): scalar-only, size âˆˆ {1,2,4,8}
-//   AArch64 (AAPCS64): HFA (1â€“4 same float) OR scalar-only â‰¤ 16 B
-//   SysV x86-64 (Linux/macOS): scalar-only, total â‰¤ 16 B
+//   Win64 (x86-64 Windows): scalar-only, size ∈ {1,2,4,8}
+//   AArch64 (AAPCS64): HFA (1–4 same float) OR scalar-only ≤ 16 B
+//   SysV x86-64 (Linux/macOS): scalar-only, total ≤ 16 B
 //
 // Aggregate-in-aggregate (struct fields holding nested structs /
-// tuples / arrays) falls through to rejection on all platforms â€”
+// tuples / arrays) falls through to rejection on all platforms —
 // recursive per-eightbyte classification is left to the C compiler
 // when the user passes by pointer.
 fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
@@ -11558,7 +11558,7 @@ fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> boo
     )))]
     {
         // SysV x86-64 (Linux / macOS) and any other platform:
-        // scalar-only, total â‰¤ 16 bytes.
+        // scalar-only, total ≤ 16 bytes.
         let Some(info) = structs.get(name) else {
             return false;
         };
@@ -11620,36 +11620,36 @@ fn extern_param_rejection_hint(
         Type::Struct(name) => {
             let rule = ffi_struct_abi_rule_text();
             Some(format!(
-                "pass struct '{}' by reference instead â€” write `ref {}` \
+                "pass struct '{}' by reference instead — write `ref {}` \
                  ({}; this struct has aggregates, generics, or exceeds \
                  the platform size limit)",
                 name, name, rule
             ))
         }
         Type::Tuple(_) => Some(
-            "pass the tuple by reference instead â€” write `ref (â€¦)` \
+            "pass the tuple by reference instead — write `ref (…)` \
              (tuples have ABI-dependent packing that v1 FFI doesn't model)"
                 .to_string(),
         ),
         Type::Array { element, length } => Some(format!(
-            "pass arrays by reference instead â€” write `ref [{}; {}]` \
+            "pass arrays by reference instead — write `ref [{}; {}]` \
              (array-by-value has platform-specific calling conventions)",
             element, length
         )),
         Type::Enum(name) => Some(format!(
-            "pass enum '{}' by reference instead â€” write `ref {}` \
+            "pass enum '{}' by reference instead — write `ref {}` \
              (enum-by-value layout is not yet wired through FFI)",
             name, name
         )),
         Type::Vec(_) | Type::OwnedStr => Some(
-            "owned heap handles cannot cross the FFI boundary â€” \
+            "owned heap handles cannot cross the FFI boundary — \
              expose a scalar / pointer entry point in your foreign \
              code, or pass `Str` (for read-only NUL-terminated \
              buffers) / `ref` (for borrows) instead"
                 .to_string(),
         ),
         Type::Param(_) => Some(
-            "generic type parameters are not allowed on extern fns â€” \
+            "generic type parameters are not allowed on extern fns — \
              concretize the type at the declaration site"
                 .to_string(),
         ),
@@ -11665,7 +11665,7 @@ fn extern_param_rejection_hint(
 // than parameters: extern returns can't yield owned heap
 // handles back into vÄá¹‡à¥€ (no way to enforce the handle is
 // freed correctly on the foreign side). Pointer returns are
-// allowed but discouraged â€” the caller must reason about
+// allowed but discouraged — the caller must reason about
 // lifetime independently.
 fn extern_return_rejection_hint(
     ty: &Type,
@@ -11679,24 +11679,24 @@ fn extern_return_rejection_hint(
         Type::FnPtr(_, _) => None,
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
         Type::Struct(name) => Some(format!(
-            "return a pointer instead â€” declare the return type as \
+            "return a pointer instead — declare the return type as \
              `ref {}` (struct/enum return-by-value requires platform-specific \
              ABI handling; only all-scalar structs within the platform size \
-             limit pass by value â€” {})",
+             limit pass by value — {})",
             name, ffi_struct_abi_rule_text()
         )),
         Type::Enum(name) => Some(format!(
-            "return a pointer instead â€” declare the return type as \
+            "return a pointer instead — declare the return type as \
              `ref {}` (enum-by-value layout is not yet wired through FFI)",
             name
         )),
         Type::Tuple(_) | Type::Array { .. } => Some(
-            "return a pointer / reference instead â€” aggregate-by-value \
+            "return a pointer / reference instead — aggregate-by-value \
              returns have platform-specific calling conventions"
                 .to_string(),
         ),
         Type::Vec(_) | Type::OwnedStr => Some(
-            "owned heap handles cannot be returned from extern fns â€” \
+            "owned heap handles cannot be returned from extern fns — \
              vÄá¹‡à¥€ can't reason about the foreign code's allocator"
                 .to_string(),
         ),
@@ -11746,7 +11746,7 @@ fn check_function(
             function.span,
             format!(
                 "generic function '{}' is declared but never called with concrete \
-                 types â€” monomorphization couldn't specialize it. Either call it \
+                 types — monomorphization couldn't specialize it. Either call it \
                  from a non-generic call site or remove the declaration.",
                 function.name
             ),
@@ -11787,7 +11787,7 @@ fn check_function(
     // definition. Calls bypass the `fn_` prefix to match the
     // bare C-ABI symbol the linker provides.
     if function.is_extern {
-        // Closure #273: v1 FFI ABI scope â€” scalars, `Str`, and
+        // Closure #273: v1 FFI ABI scope — scalars, `Str`, and
         // reference types only. Struct / Tuple / Vec / OwnedStr
         // by value silently corrupt under System V x86-64 ABI
         // (vÄá¹‡à¥€'s `declare i32 @f(%Struct_T)` doesn't match cc's
@@ -11883,7 +11883,7 @@ fn check_function(
         );
     }
 
-    // Layer 1.1+ of `unsafe.md` â€” gate raw pointer types in
+    // Layer 1.1+ of `unsafe.md` — gate raw pointer types in
     // function return types on hosted. The per-param gate
     // lives inside `validate_param_type`; the return type
     // doesn't go through that helper.
@@ -12099,12 +12099,12 @@ fn check_function(
     // return-terminated paths too.
     verify_task_affine(&body, diagnostics);
 
-    // Layer 1.2 of `unsafe.md` â€” no-escape analysis on `&local`-
+    // Layer 1.2 of `unsafe.md` — no-escape analysis on `&local`-
     // derived raw pointers. A raw pointer obtained by casting a
     // borrow of a stack-local cannot escape its frame: it can't
     // be returned, stored into a heap location (Vec slot, struct
     // field, IndexAssign destination), or assigned to a function
-    // parameter (the only thing that outlives the frame in v1 â€”
+    // parameter (the only thing that outlives the frame in v1 —
     // we don't have globals or `static mut` yet).
     //
     // Why this layer matters: a `*const T` derived from a stack
@@ -12188,7 +12188,7 @@ struct LoopFrame {
 /// If/While/For/ForIter/UnsafeBlock bodies). Used to ensure that a
 /// consuming `for x in xs` frees the Vec buffer on early-return paths;
 /// the normal-exit path already emits a free at the loop's exit point.
-/// TaskSpawn bodies are skipped â€” a return there is a task-level return,
+/// TaskSpawn bodies are skipped — a return there is a task-level return,
 /// not a function-level one.
 fn inject_shallow_free_before_returns(
     stmts: Vec<TypedStmt>,
@@ -12465,8 +12465,8 @@ fn clear_constants_for(
 /// passed by `&mut` to a callee (which may overwrite the storage);
 /// recurses into nested `if`/`while`/`for`/`for-iter` bodies and
 /// `Stmt::Let` initializers. Shadow-`let`s themselves don't
-/// invalidate the outer binding â€” the inner shadow dies with its
-/// scope â€” so the LHS of a `Let` is intentionally NOT added.
+/// invalidate the outer binding — the inner shadow dies with its
+/// scope — so the LHS of a `Let` is intentionally NOT added.
 fn collect_branch_mutations(stmts: &[Stmt]) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     walk_branch_mutations(stmts, &mut out);
@@ -12652,7 +12652,7 @@ fn walk_branch_mutations_in_expr(
         }
         ExprKind::Block { tail, .. } => {
             // Block-stmts' mut-refs (if any) are scoped to the
-            // block â€” they don't escape because mut-refs are
+            // block — they don't escape because mut-refs are
             // call-arg-only and the inner call's aliasing is
             // checked locally. Walk only the tail value for
             // mutation tracking of the surrounding expression.
@@ -12702,7 +12702,7 @@ fn walk_branch_mutations_in_expr(
 /// Vec<TypedStmt> sequence, with the join positioned after the
 /// spawn). Also flags double-joins. v1 keeps the scope rule
 /// tight: cross-branch or cross-loop joins aren't supported.
-/// Layer 1.2 of `unsafe.md` â€” no-escape analysis on `&local`-
+/// Layer 1.2 of `unsafe.md` — no-escape analysis on `&local`-
 /// derived raw pointers.
 ///
 /// Approach: collect the set of binding names that hold raw
@@ -12718,7 +12718,7 @@ fn walk_branch_mutations_in_expr(
 /// - `IndexAssign { value }` / `FieldAssign { value }` where
 ///   `value` reads a tainted value (escape into a heap location)
 /// - `Reassign { name, expr }` where `name` is a parameter and
-///   `expr` reads a tainted value (escape via param mutation â€”
+///   `expr` reads a tainted value (escape via param mutation —
 ///   parameters outlive the frame in v1 since vÄá¹‡à¥€ doesn't yet
 ///   have globals or `static mut`)
 ///
@@ -12749,7 +12749,7 @@ fn verify_raw_ptr_no_escape(
 /// Pass 1: walk the body collecting:
 /// - `locals`: every local-binding name (so we can distinguish
 ///   `ref local_binding` from `ref param_binding` when the cast
-///   is `(ref name) as *const T` â€” the latter is an
+///   is `(ref name) as *const T` — the latter is an
 ///   already-out-of-frame source and not tainted)
 /// - `tainted`: names of let-bindings whose RHS is a raw
 ///   pointer derived from a local binding
@@ -12885,7 +12885,7 @@ fn check_escapes(
                     diagnostics.push(Diagnostic::new(
                         expr.span,
                         format!(
-                            "{} cannot be returned â€” the source storage dies on \
+                            "{} cannot be returned — the source storage dies on \
                              function exit, leaving a dangling reference. Pass \
                              the value downward to a function that only borrows \
                              it, or use a `Handle<T>` from a `Pool<T>` for a \
@@ -12902,7 +12902,7 @@ fn check_escapes(
                     diagnostics.push(Diagnostic::new(
                         value.span,
                         "pointer / ArenaRef tied to a local source cannot be \
-                         stored into a heap location â€” the source storage dies \
+                         stored into a heap location — the source storage dies \
                          on function exit, but the Vec / array slot would \
                          outlive it. Use a `Handle<T>` from a `Pool<T>` for \
                          stored references (Layer 2 of `unsafe.md`)."
@@ -12917,7 +12917,7 @@ fn check_escapes(
                     diagnostics.push(Diagnostic::new(
                         value.span,
                         "pointer / ArenaRef tied to a local source cannot be \
-                         stored into a struct field â€” the source storage dies \
+                         stored into a struct field — the source storage dies \
                          on function exit, but the field would outlive it. Use \
                          a `Handle<T>` from a `Pool<T>` for stored references \
                          (Layer 2 of `unsafe.md`)."
@@ -12932,7 +12932,7 @@ fn check_escapes(
                 // outer storage. (Caller passes a &mut, we
                 // overwrite the pointee with a tainted ptr.)
                 // V1 doesn't have a way to actually mutate the
-                // pointee through a `mut ref T` rebinding â€”
+                // pointee through a `mut ref T` rebinding —
                 // Reassign reassigns the binding name itself,
                 // which for a parameter mutates its own slot
                 // only within the callee's frame, so this is
@@ -13410,7 +13410,7 @@ fn check_one_stmt(
             expr,
             span,
         } => {
-            // Special-case: `let x: T = while ... { break val; }` â€” loop-as-expression.
+            // Special-case: `let x: T = while ... { break val; }` — loop-as-expression.
             // Lower before the normal check_expr path since WhileLoop needs statement-level context.
             if let ExprKind::WhileLoop { label: loop_label, cond: loop_cond, body: loop_body } = &expr.kind {
                 return check_while_loop_as_let_init(
@@ -13490,7 +13490,7 @@ fn check_one_stmt(
                     // L2 follow-up (2026-06-08): `let b: Box<dyn Iface> =
                     // box(value);` synthesizes the DynCoerce that the
                     // explicit `box(value as dyn Iface)` form built
-                    // manually â€” the `as` cast is now optional.
+                    // manually — the `as` cast is now optional.
                     elaborated
                 } else {
                     let raw = check_expr(expr, env, signatures, diagnostics);
@@ -13618,7 +13618,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     expr.span,
                     "nested field move (`o.inner.s`) on a non-Copy field is \
-                     not supported yet â€” move the inner struct out first \
+                     not supported yet — move the inner struct out first \
                      (`let inner = o.inner;` then `let s = inner.s;`)",
                 ).with_elaboration(crate::diagnostic_elaborations::move_nested_field()));
             }
@@ -13659,7 +13659,7 @@ fn check_one_stmt(
             // doesn't leak. Closure #179.
             inject_branch_drops(&mut checked.expr);
 
-            // `let _ = expr;` â€” discard pattern. Evaluate expr (consuming
+            // `let _ = expr;` — discard pattern. Evaluate expr (consuming
             // moved vars above) but do not introduce a binding. Repeated
             // uses don't collide because nothing is inserted into env.
             if name == "_" {
@@ -13691,7 +13691,7 @@ fn check_one_stmt(
             //   "references cannot be stored in 'let' bindings;
             //    pass '&{}' directly to a function parameter
             //    instead"
-            // â€” that workaround is now unnecessary.
+            // — that workaround is now unnecessary.
             let _ = var_ty.is_ref();
             let constant = checked.constant().cloned();
             let same_scope_existing = env.current_get(name).cloned();
@@ -13699,7 +13699,7 @@ fn check_one_stmt(
 
             // Same-scope shadowing semantically reassigns `name`.
             // Outside of a loop body, drop the prior facts about the
-            // old value â€” see the longer note in Stmt::Assign for the
+            // old value — see the longer note in Stmt::Assign for the
             // reasoning around in-loop preservation.
             if was_shadow && loops.is_empty() {
                 drop_facts_mentioning(smt_facts, name);
@@ -13721,7 +13721,7 @@ fn check_one_stmt(
             let real_shadow = same_scope_existing.filter(|old| !old.is_const);
 
             if let Some(old) = real_shadow {
-                // Same-scope let â†’ Reassign (type must match).
+                // Same-scope let → Reassign (type must match).
                 if old.ty != var_ty {
                     diagnostics.push(
                         Diagnostic::new(
@@ -13809,17 +13809,17 @@ fn check_one_stmt(
             // can verify the binding doesn't outlive its source.
             //
             // Sources we propagate:
-            //   * `let r = ref X;`             â†’ ["X"]
-            //   * `let r = mut ref X;`         â†’ ["X"]
-            //   * `let r = ref t.field;`       â†’ ["t"]
-            //   * `let r = ref xs[i];`         â†’ ["xs"]
-            //   * `let r = foo(ref X, â€¦);` where `foo`'s signature
+            //   * `let r = ref X;`             → ["X"]
+            //   * `let r = mut ref X;`         → ["X"]
+            //   * `let r = ref t.field;`       → ["t"]
+            //   * `let r = ref xs[i];`         → ["xs"]
+            //   * `let r = foo(ref X, …);` where `foo`'s signature
             //     has `elided_ref_source = Some(i)` and arg[i]
-            //     is the chosen ref input              â†’ walk
+            //     is the chosen ref input              → walk
             //     arg[i] to its root var.
-            //   * `let r = other_ref_binding;` (Var)  â†’ inherit
+            //   * `let r = other_ref_binding;` (Var)  → inherit
             //     that binding's aliases (transitive chain).
-            //   * else â†’ empty (no propagation; the analyzer
+            //   * else → empty (no propagation; the analyzer
             //     treats this as having no known source).
             // BUG-7 fix (2026-07-25): this used to be gated on
             // `var_ty` being `Ref`/`RefMut` -- but an *owned*
@@ -13884,7 +13884,7 @@ fn check_one_stmt(
             // Array rebind: `let ys = xs;` where xs is a previously
             // bound Vec/Array. The new binding's symbolic SMT array
             // (`arr_ys`) is fresh, but the value is the same one as
-            // `xs` â€” emit `arr_ys = arr_xs` so proofs about ys
+            // `xs` — emit `arr_ys = arr_xs` so proofs about ys
             // chain through any literal-init facts on xs. xs is
             // moved by the rebind, so the user can't reference it
             // post-move, but the facts that mention xs by name
@@ -13978,7 +13978,7 @@ fn check_one_stmt(
             // Refines #8: `xs = vec();` borrows the element
             // type from the existing binding. We do a pre-
             // peek lookup *only* to recognize the empty-vec
-            // shape before running `check_expr` â€” the
+            // shape before running `check_expr` — the
             // non-elaborated path must run `check_expr` BEFORE
             // the lookup we feed into `drop_old`, because
             // `check_expr` mutates `env.moved` for affine
@@ -13987,7 +13987,7 @@ fn check_one_stmt(
             // the previous value. (Pre-#8 the lookup happened
             // after `check_expr`, so flipping it broke
             // self-consuming reassigns like
-            // `xs = push(xs, i)` â€” they double-freed.)
+            // `xs = push(xs, i)` — they double-freed.)
             let empty_vec_elab = if matches!(
                 &expr.kind,
                 ExprKind::Call { name: n, args, .. }
@@ -14159,7 +14159,7 @@ fn check_one_stmt(
         }
         Stmt::Return { expr, .. } => {
             verify_call_args_in_expr(expr, smt_facts, env, signatures, diagnostics);
-            // L4 (B) Phase 2 (2026-06-08) â€” scope-escape check.
+            // L4 (B) Phase 2 (2026-06-08) — scope-escape check.
             // Returning a value that internally borrows a non-
             // parameter binding lets the caller see a stale ref
             // (the borrowed binding drops at fn-exit). Reject any
@@ -14185,7 +14185,7 @@ fn check_one_stmt(
                         Diagnostic::new(
                             *ref_span,
                             format!(
-                                "ref to local binding '{}' escapes the function via return â€” \
+                                "ref to local binding '{}' escapes the function via return — \
                                  the binding drops when the function exits, leaving a \
                                  dangling reference. Refs to non-parameter bindings cannot \
                                  leave their declaring function.",
@@ -14240,7 +14240,7 @@ fn check_one_stmt(
             // Materialize the return expression into a fresh temp
             // *before* emitting drops. Otherwise a return like
             // `return xs[1]` (where xs: Vec<i64> falls out of scope)
-            // would lower as `drop xs; return xs[1];` â€” use-after-
+            // would lower as `drop xs; return xs[1];` — use-after-
             // free. Storing the value first decouples the two:
             //   let __ret = xs[1];   // reads from live buffer
             //   drop xs;             // frees buffer
@@ -14538,8 +14538,8 @@ fn check_one_stmt(
             );
 
             // Detect dead branches when the condition is a *syntactic*
-            // boolean literal â€” catches accidentally-disabled debug code
-            // like `if false { â€¦ }`. We deliberately do not flag values
+            // boolean literal — catches accidentally-disabled debug code
+            // like `if false { … }`. We deliberately do not flag values
             // that only fold to a constant via the checker's
             // const-tracking (e.g. `i >= 5` when `i` was just `let i = 0`);
             // those frequently appear at loop entry where `i` will change
@@ -14696,7 +14696,7 @@ fn check_one_stmt(
                         if then_is_moved == else_is_moved {
                             then_moved
                         } else if then_is_moved {
-                            // then moved x but else didn't â€” auto-drop in else.
+                            // then moved x but else didn't — auto-drop in else.
                             else_stmts.push(TypedStmt::Drop {
                                 name: name.clone(),
                                 ty: pre_info.ty.clone(),
@@ -14704,7 +14704,7 @@ fn check_one_stmt(
                             });
                             then_moved
                         } else {
-                            // else moved x but then didn't â€” auto-drop in then.
+                            // else moved x but then didn't — auto-drop in then.
                             then_stmts.push(TypedStmt::Drop {
                                 name: name.clone(),
                                 ty: pre_info.ty.clone(),
@@ -14818,7 +14818,7 @@ fn check_one_stmt(
             // could have mutated (direct reassign, `&mut`-arg
             // mutation through a callee, or `IndexAssign` on the
             // binding's storage). Bindings provably untouched by
-            // both branches keep their constant â€” refines #4 from
+            // both branches keep their constant — refines #4 from
             // STATUS.md (was: blanket clear of every binding's
             // constant after if/else). `branch_muts` was already computed
             // above (BUG-183 fix) for the analogous smt_facts cleanup.
@@ -14865,7 +14865,7 @@ fn check_one_stmt(
 
             // Type-check each invariant (Bool, vars resolve in current env).
             // Inline call args in the invariant must also satisfy the
-            // callee's requires â€” same compile-time check as for any
+            // callee's requires — same compile-time check as for any
             // expression-level call site. Uses a CLONED env so this
             // pure syntax/type round-trip can't interact with the
             // REAL env's move/constant tracking before the entry-check
@@ -15009,7 +15009,7 @@ fn check_one_stmt(
                     },
                 );
             }
-            // Use the popped frame's label â€” a nested `break outer/middle` may
+            // Use the popped frame's label — a nested `break outer/middle` may
             // have assigned a synthetic label to this frame while it was on the stack.
             let popped_while = loops.pop().unwrap();
 
@@ -15084,11 +15084,11 @@ fn check_one_stmt(
             // Clear constants only for bindings the loop body
             // could have mutated. Untouched bindings (rare-but-
             // real: locals declared before the loop but never
-            // touched inside) keep their constant facts â€” refines
+            // touched inside) keep their constant facts — refines
             // #4 from STATUS.md.
             let body_muts = collect_branch_mutations(body_stmts);
             clear_constants_for(env, &body_muts);
-            // Post-loop facts: invariants (sound â€” proved at entry and
+            // Post-loop facts: invariants (sound — proved at entry and
             // preserved) plus `!cond` at the natural exit. `!cond` is
             // sound only when no `break` in the body skips the condition
             // check; we scan the body for `break` and conservatively
@@ -15288,7 +15288,7 @@ fn check_one_stmt(
                 // Vec): those route through a "free old +
                 // store new" emit in the backend (closure
                 // #126 / F2). Intermediate segments still
-                // require Copy â€” non-Copy intermediates would
+                // require Copy — non-Copy intermediates would
                 // need full path-level Drop chains which the
                 // backends don't yet emit through index+field
                 // assigns.
@@ -15299,7 +15299,7 @@ fn check_one_stmt(
                     diagnostics.push(Diagnostic::new(
                         *span,
                         format!(
-                            "field '{}.{}' has non-Copy type {} â€” mixed \
+                            "field '{}.{}' has non-Copy type {} — mixed \
                              index+field assignment requires Copy types on \
                              intermediate path segments; only the leaf may \
                              be OwnedStr or Vec<T>",
@@ -15440,7 +15440,7 @@ fn check_one_stmt(
             // axiom: `arr_xs_v{new} = (store arr_xs_v{old} i v)`.
             // The SMT solver can then derive `xs[j] == old_value_j`
             // for every untouched slot, and the new value at the
-            // touched slot, without us dropping any prior facts â€”
+            // touched slot, without us dropping any prior facts —
             // old facts that mentioned `arr_xs_v{old}` (via bare
             // `Var("xs")` resolved to the previous current version
             // when emitted) still pin the prior state. References
@@ -15483,7 +15483,7 @@ fn check_one_stmt(
 
             // Synthetic store-eq fact bridging the two versions.
             // Only emit when the binding supports SMT array modeling
-            // (smt-array-element returns Some â€” i.e., int/bool/float
+            // (smt-array-element returns Some — i.e., int/bool/float
             // element type); otherwise the fact wouldn't encode.
             // Always safe to emit because the encoder graciously
             // skips facts it can't encode.
@@ -15545,7 +15545,7 @@ fn check_one_stmt(
             //   - a plain `Var` whose binding type is an
             //     owned struct
             //   - a `Var` whose binding is `mut ref Struct`
-            //     (covers `self.field = â€¦` in methods that
+            //     (covers `self.field = …` in methods that
             //     take `self: mut ref T`)
             verify_call_args_in_expr(object, smt_facts, env, signatures, diagnostics);
             verify_call_args_in_expr(value, smt_facts, env, signatures, diagnostics);
@@ -15558,7 +15558,7 @@ fn check_one_stmt(
                         diagnostics.push(Diagnostic::new(
                             *span,
                             format!(
-                                "cannot assign through `mut ref {}` â€” only structs \
+                                "cannot assign through `mut ref {}` — only structs \
                                  support field assignment in v1",
                                 other
                             ),
@@ -15569,7 +15569,7 @@ fn check_one_stmt(
                 Type::Ref(_) => {
                     diagnostics.push(Diagnostic::new(
                         *span,
-                        "cannot field-assign through an immutable `ref` â€” use \
+                        "cannot field-assign through an immutable `ref` — use \
                          `mut ref T` on the binding"
                             .to_string(),
                     ).with_elaboration(crate::diagnostic_elaborations::assign_to_immutable("")));
@@ -15579,7 +15579,7 @@ fn check_one_stmt(
                     diagnostics.push(Diagnostic::new(
                         *span,
                         format!(
-                            "cannot field-assign onto {} â€” only structs support \
+                            "cannot field-assign onto {} — only structs support \
                              field assignment in v1",
                             other
                         ),
@@ -15635,14 +15635,14 @@ fn check_one_stmt(
                 diagnostics,
             );
             // Mark the RHS Var as moved when the field-assign
-            // takes ownership of a non-Copy operand â€” same
+            // takes ownership of a non-Copy operand — same
             // shape as Let / Reassign / Call-arg. Without
             // this, the source binding would scope-exit-drop
             // and double-free the heap now owned by the
             // struct's field. Closure #166.
             reject_affine_closure_into_struct_field(value, field_ty, field, diagnostics);
             consume_if_moved_var(value, &value_coerced, env, diagnostics);
-            // L4 (B) Phase 2 (2026-06-08) â€” scope-escape check
+            // L4 (B) Phase 2 (2026-06-08) — scope-escape check
             // for FieldAssign. When the RHS contains a `ref X`
             // (or `mut ref X`), X must outlive the binding being
             // assigned-to (the `object`'s root Var). Otherwise
@@ -15651,7 +15651,7 @@ fn check_one_stmt(
             // Lookup: find the root Var name of `object` (the
             // struct binding), get its depth via lookup_depth,
             // then for each ref source in the RHS verify
-            // source.depth â‰¤ object.depth.
+            // source.depth ≤ object.depth.
             if let ExprKind::Var(obj_name) = &object.kind {
                 if let Some(obj_depth) = env.lookup_depth(obj_name) {
                     let mut ref_sources: Vec<(String, Span)> = Vec::new();
@@ -15690,7 +15690,7 @@ fn check_one_stmt(
                                         *ref_span,
                                         format!(
                                             "ref to '{}' cannot be stored through '{}' (a \
-                                             `mut ref` parameter) â€” the struct '{}' points \
+                                             `mut ref` parameter) — the struct '{}' points \
                                              to lives in the caller's frame, which outlives \
                                              '{}'. Only a ref to one of this function's own \
                                              parameters can safely be stored here.",
@@ -15713,7 +15713,7 @@ fn check_one_stmt(
                                         *ref_span,
                                         format!(
                                             "ref to '{}' (declared in an inner scope) cannot \
-                                             be stored in '{}'s field â€” the ref would dangle \
+                                             be stored in '{}'s field — the ref would dangle \
                                              when '{}'s scope ends. Declare '{}' in the same \
                                              scope as '{}', or copy the underlying value \
                                              instead of taking a ref.",
@@ -16234,8 +16234,8 @@ fn check_one_stmt(
             // Resolve each reduction clause against an outer
             // binding and verify the variable's type. Reduction is
             // currently only on integer scalars (the `+` op + the
-            // backend lowerings â€” `atomicrmw add` for LLVM,
-            // `reduction(+:var)` for OpenMP â€” assume an integer
+            // backend lowerings — `atomicrmw add` for LLVM,
+            // `reduction(+:var)` for OpenMP — assume an integer
             // alloca). Floats/bools are rejected for now.
             let mut typed_reductions: Vec<crate::ir::TypedReduction> = Vec::new();
             let mut reduction_set: std::collections::HashSet<String> =
@@ -16257,8 +16257,8 @@ fn check_one_stmt(
                     continue;
                 };
                 // Type rule per reduction op:
-                //   + / * / min / max / & / | / ^ â†’ integer.
-                //   && / || â†’ bool.
+                //   + / * / min / max / & / | / ^ → integer.
+                //   && / || → bool.
                 use crate::ast::ReductionOp;
                 let ty_ok = match r.op {
                     ReductionOp::Add
@@ -16330,7 +16330,7 @@ fn check_one_stmt(
             // body has no observable side effects. Pure rules apply
             // except that Reassigns of the form
             //   <reduce_var> = <reduce_var> <op> X
-            // are tolerated â€” the runtime gives each thread a
+            // are tolerated — the runtime gives each thread a
             // private partial and combines them, so the body looks
             // mutating but actually doesn't share state.
             if *parallel {
@@ -16437,7 +16437,7 @@ fn check_one_stmt(
                 // Use the field's plain type at the checker
                 // level; the access path takes care of the
                 // through-ref deref at codegen time. Don't wrap
-                // in Ref/RefMut here â€” that would confuse the
+                // in Ref/RefMut here — that would confuse the
                 // is_ref logic in emit_for_iter.
                 info = VarInfo {
                     ty: fty.clone(),
@@ -16530,7 +16530,7 @@ fn check_one_stmt(
             env.push_scope();
             // For non-consuming `for v in &xs` over a Vec
             // with non-Copy elements, `v` is a view into
-            // `xs.data[i]` â€” the body reads the slot via a
+            // `xs.data[i]` — the body reads the slot via a
             // struct-copy that aliases the owner's data. We
             // mark the binding `no_drop` so scope exit
             // doesn't free the aliased buffer (which would
@@ -16761,7 +16761,7 @@ fn check_one_stmt(
         }
         Stmt::TaskSpawn { name, body: task_body, span } => {
             // Verify there's no existing binding with this name in
-            // the current scope â€” Task handles can't shadow other
+            // the current scope — Task handles can't shadow other
             // handles or other bindings.
             if env.current_has(name) {
                 diagnostics.push(Diagnostic::new(
@@ -16775,7 +16775,7 @@ fn check_one_stmt(
 
             // Type-check the body in a pushed scope. Bindings inside
             // the body don't leak out. Outer bindings stay
-            // read-only â€” the purity pass below enforces this by
+            // read-only — the purity pass below enforces this by
             // flagging any IndexAssign/print/etc. as a side effect.
             env.push_scope();
             let mut typed_body: Vec<TypedStmt> = Vec::new();
@@ -16812,7 +16812,7 @@ fn check_one_stmt(
             // intra-task lifetime tracking, captures must be
             // Copy (the value is duplicated into the ctx).
             // Affine handles (Vec, Atomic, Mutex, Guard,
-            // Channel, OwnedStr, arrays) can't ride along â€”
+            // Channel, OwnedStr, arrays) can't ride along —
             // pre-extract scalar values from them before the
             // spawn site.
             let mut declared: std::collections::HashSet<String> =
@@ -16835,7 +16835,7 @@ fn check_one_stmt(
                                 *span,
                                 format!(
                                     "task body captures non-Copy binding '{}' (type {}). \
-                                     Captures must be Copy types â€” pre-extract scalar \
+                                     Captures must be Copy types — pre-extract scalar \
                                      values from `{}` before the spawn site.",
                                     cap, info.ty, cap,
                                 ),
@@ -17012,7 +17012,7 @@ fn check_one_stmt(
         } => {
             // Layer 1.1 of the embedded-vÄá¹‡à¥€ unsafe plan. The
             // parser has already enforced the reason-string rules
-            // (non-empty, â‰¤256 chars, ASCII-printable, no
+            // (non-empty, ≤256 chars, ASCII-printable, no
             // embedded newlines). At this point the only thing
             // the checker has to do is recurse into the body in
             // a fresh inner scope and emit the typed wrapper so
@@ -17020,13 +17020,13 @@ fn check_one_stmt(
             // readable deviation metadata.
             //
             // No language construct yet *requires* the unsafe
-            // context â€” raw pointer types (Layer 1.2+) and the
+            // context — raw pointer types (Layer 1.2+) and the
             // Tainted<T> wrapper (Layer 1.3) land in follow-up
             // commits and will read this scope's
             // `is_unsafe_context` flag (threaded as a future
             // field on Env). For now, the block is a recognized
             // syntactic boundary that propagates reason metadata
-            // through the IR â€” that alone unblocks ASIL-D /
+            // through the IR — that alone unblocks ASIL-D /
             // DO-178C / IEC 62304 deviation-audit tooling.
             //
             // Hosted-only gate: vÄá¹‡à¥€ v1 ships hosted only. Until
@@ -17034,7 +17034,7 @@ fn check_one_stmt(
             // a stop-gap env-var check. With `INTENT_TARGET_EMBEDDED=1`
             // set, the block is permitted (so the feature can be
             // exercised end-to-end today). Without it, the
-            // checker emits the rejection diagnostic â€” which
+            // checker emits the rejection diagnostic — which
             // matches the standing position recorded in
             // README.md ("hosted rejects at parse time").
             // Replacing the env-var gate with a proper
@@ -17044,10 +17044,10 @@ fn check_one_stmt(
                 diagnostics.push(
                     Diagnostic::new(
                         *span,
-                        "`unsafe(reason = \"â€¦\")` is gated to embedded build \
-                         targets â€” current vÄá¹‡Ä« builds default to hosted, \
+                        "`unsafe(reason = \"…\")` is gated to embedded build \
+                         targets — current vÄá¹‡Ä« builds default to hosted, \
                          which rejects the construct (README: *Embedded \
-                         targets â€” current position*). Set `INTENT_TARGET_EMBEDDED=1` \
+                         targets — current position*). Set `INTENT_TARGET_EMBEDDED=1` \
                          to opt in until the `--target embedded` flag ships.",
                     )
                     .with_elaboration(
@@ -17069,7 +17069,7 @@ fn check_one_stmt(
                 diagnostics,
             );
             // Skip the scope-exit drops when the inner body has
-            // already terminated via return â€” the return path
+            // already terminated via return — the return path
             // already emitted them. Otherwise emit normally.
             // 2026-06-09: also propagate `inner_terminated` to
             // the outer caller so a `return` inside an
@@ -17288,7 +17288,7 @@ fn check_one_stmt(
             // If the RHS is a direct variable reference, mark it as moved so
             // the scope-exit Drop pass does not also free the same heap data
             // that the per-element bindings now own. Without this, both `pair`
-            // and the extracted `s` binding would be dropped â€” double-free.
+            // and the extracted `s` binding would be dropped — double-free.
             if let ExprKind::Var(src_name) = &expr.kind {
                 if let Some(info_mut) = env.lookup_mut(src_name) {
                     if !info_mut.ty.is_copy() {
@@ -17979,7 +17979,7 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
         // index site (mirrors Vec's restriction); user
         // takes a borrow via `ref xs[i]` or extracts via
         // `clone_at(ref xs, i)`. References as elements
-        // remain rejected â€” a `[&T; N]` would dangle when
+        // remain rejected — a `[&T; N]` would dangle when
         // referents go out of scope.
         if element.is_ref() {
             diagnostics.push(Diagnostic::new(
@@ -18008,7 +18008,7 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
-                        "HashMap key type '{}' must implement `Hash` â€” add \
+                        "HashMap key type '{}' must implement `Hash` — add \
                          `implement Hash for {} {{ fn hash(self: ref Self) -> i64 {{ ... }} }}` \
                          in the same module as either `Hash` or `{}`.",
                         name, name, name
@@ -18025,7 +18025,7 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
     }
 }
 
-/// L4 (B) Phase 2 (2026-06-08) â€” scope-escape analyzer support.
+/// L4 (B) Phase 2 (2026-06-08) — scope-escape analyzer support.
 /// Walks `expr` collecting every `(source_name, span)` pair that
 /// represents a `ref X` / `mut ref X` expression where `X` is a
 /// plain Var. The downstream checks (return / assign) decide
@@ -18033,7 +18033,7 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
 ///
 /// Non-Var refs (`ref obj.field`, `mut ref vec[i]`) are gated by
 /// existing checks (the `ref` checker rejects non-Var/non-field
-/// sources). Field-borrows (`ref t.x`) ARE walked â€” they create
+/// sources). Field-borrows (`ref t.x`) ARE walked — they create
 /// a ref whose lifetime is bounded by `t`'s, so the source-name
 /// here is `t` (the outer binding).
 ///
@@ -18041,9 +18041,9 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
 /// helper:
 /// - Return-escape: skip Call/MethodCall args because the ref
 ///   is being consumed by the call (the call returns a non-ref
-///   type â€” rejected at signature otherwise). Only ref-creations
+///   type — rejected at signature otherwise). Only ref-creations
 ///   in the "structural" return value count as escapes.
-/// - FieldAssign-escape: same â€” refs as call args don't end up
+/// - FieldAssign-escape: same — refs as call args don't end up
 ///   in the assigned slot.
 fn collect_ref_sources_in_expr(
     expr: &Expr,
@@ -18150,7 +18150,7 @@ fn find_live_borrow_of<'a>(
 
 /// has recorded `ref_aliases` (populated by
 /// `compute_ref_aliases_from_let_rhs` at the binding site).
-/// Each alias becomes a `(source_name, span)` entry â€” the
+/// Each alias becomes a `(source_name, span)` entry — the
 /// downstream depth-comparison treats it identically to a
 /// directly-collected `Ref { inner: Var(name) }` source.
 ///
@@ -18208,7 +18208,7 @@ fn compute_ref_aliases_from_let_rhs(
 ) -> Vec<String> {
     match &expr.kind {
         ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
-            // `ref X` / `ref t.f` / `ref xs[i]` â€” walk to the
+            // `ref X` / `ref t.f` / `ref xs[i]` — walk to the
             // root Var name. Returns one alias.
             root_var_of_expr(inner).map(|n| vec![n]).unwrap_or_default()
         }
@@ -18252,7 +18252,7 @@ fn compute_ref_aliases_from_let_rhs(
             // elided ref-source index (path-C, single ref-param
             // rule), the result borrows from the chosen arg's
             // root binding. Multi-ref or non-elision signatures
-            // return None â†’ no propagation; the analyzer treats
+            // return None → no propagation; the analyzer treats
             // the result as having an unknown lifetime and the
             // existing return-position rejection (or successful
             // value-return) handles it.
@@ -18376,7 +18376,7 @@ fn collect_ref_sources_in_expr_impl(
             collect_ref_sources_in_expr_impl(tuple, skip_call_args, out)
         }
         ExprKind::Len { array } => {
-            // Len consumes its arg (returns u64) â€” refs inside
+            // Len consumes its arg (returns u64) — refs inside
             // don't propagate to the enclosing value, same as
             // Call/MethodCall args.
             if !skip_call_args {
@@ -18399,7 +18399,7 @@ fn collect_ref_sources_in_expr_impl(
             }
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            // 2026-06-09: the receiver is the "self" argument â€”
+            // 2026-06-09: the receiver is the "self" argument —
             // refs inside it are consumed by the method call,
             // same as refs inside other call args. Skip when
             // we're in the consuming context (return-escape /
@@ -18548,14 +18548,14 @@ fn validate_no_nested_ref_in_return_type(
 /// elision rule.
 ///
 /// Rules (path C, v1):
-///   * If return type isn't a ref â†’ no-op (existing behavior).
-///   * If return type is a ref AND there are zero ref params â†’
+///   * If return type isn't a ref → no-op (existing behavior).
+///   * If return type is a ref AND there are zero ref params →
 ///     reject ("nothing for the returned ref to borrow from").
-///   * If return type is a ref AND there's exactly one ref param â†’
+///   * If return type is a ref AND there's exactly one ref param →
 ///     accept; record the source param index for call-site
 ///     lifetime propagation.
 ///   * If return type is a ref AND there are two or more ref
-///     params â†’ reject ("ambiguous; v1 needs exactly one ref
+///     params → reject ("ambiguous; v1 needs exactly one ref
 ///     param to elide from").
 fn validate_return_ref_elision(
     function: &Function,
@@ -18579,7 +18579,7 @@ fn validate_return_ref_elision(
                     function.span,
                     format!(
                         "function '{}' returns a reference but has no \
-                         reference parameter to borrow from â€” the returned \
+                         reference parameter to borrow from — the returned \
                          ref would dangle. Add a `ref T` / `mut ref T` \
                          parameter, return by value instead, or use `Box<T>` \
                          for owned heap allocation.",
@@ -18592,7 +18592,7 @@ fn validate_return_ref_elision(
             );
         }
         1 => {
-            // Accept â€” `compute_elided_ref_source` will record
+            // Accept — `compute_elided_ref_source` will record
             // the single source-param index on the Signature.
         }
         _ => {
@@ -18605,7 +18605,7 @@ fn validate_return_ref_elision(
                     function.span,
                     format!(
                         "function '{}' returns a reference but has {} \
-                         reference parameters ({}) â€” the elision rule needs \
+                         reference parameters ({}) — the elision rule needs \
                          exactly one ref parameter to borrow from. Either \
                          drop one borrow (make it a value parameter or \
                          remove it), or split into two narrower functions, \
@@ -18626,7 +18626,7 @@ fn validate_return_ref_elision(
 /// L4 (C) lifetime elision (2026-06-09): compute the index of the
 /// single ref parameter whose lifetime the ref-typed return value
 /// inherits. Mirrors the rule in `validate_return_ref_elision` but
-/// returns the index instead of emitting diagnostics â€” used at
+/// returns the index instead of emitting diagnostics — used at
 /// signature-construction time.
 fn compute_elided_ref_source(function: &Function) -> Option<usize> {
     if !function.return_type.is_ref() {
@@ -18636,7 +18636,7 @@ fn compute_elided_ref_source(function: &Function) -> Option<usize> {
     for (i, p) in function.params.iter().enumerate() {
         if matches!(p.ty, Type::Ref(_) | Type::RefMut(_)) {
             if found.is_some() {
-                // Multi-ref case â€” the validator rejected at
+                // Multi-ref case — the validator rejected at
                 // collect time; signal "no elision" so the
                 // body-validator path stays conservative.
                 return None;
@@ -18708,7 +18708,7 @@ fn validate_no_raw_ptr_on_hosted(
             Diagnostic::new(
                 span,
                 format!(
-                    "raw pointer type `{}` not permitted in {} on hosted targets â€” \
+                    "raw pointer type `{}` not permitted in {} on hosted targets — \
                      set `INTENT_TARGET_EMBEDDED=1` to opt in to embedded mode \
                      (Layer 1.1 of `unsafe.md`; the `--target embedded` flag will \
                      supersede the env-var gate)",
@@ -18811,7 +18811,7 @@ fn diagnose_partial_then_whole_move(
                     Diagnostic::new(
                         source.span,
                         format!(
-                            "cannot move '{}' â€” its field '{}' was previously \
+                            "cannot move '{}' — its field '{}' was previously \
                              moved out, leaving the struct only partially \
                              initialized",
                             name, field
@@ -18865,7 +18865,7 @@ fn collect_branch_var_leaves(expr: &TypedExpr, out: &mut Vec<(String, Type)>) {
         }
         TypedExprKind::Block { stmts, tail } => {
             // Vars declared inside the Block are out of scope
-            // for sibling if/match branches â€” collect from the
+            // for sibling if/match branches — collect from the
             // tail but filter out any name that a Let in this
             // Block introduces. Without the filter, the spill
             // from closure #194 (`__block_tail_<span>`) and
@@ -18916,7 +18916,7 @@ fn wrap_branch_with_drops(
         .collect();
     // Take the original branch out so we can re-box it as
     // the Block's tail. Replace with a placeholder Int(0)
-    // briefly â€” the placeholder is immediately overwritten.
+    // briefly — the placeholder is immediately overwritten.
     let placeholder = TypedExpr {
         kind: TypedExprKind::Int(0),
         ty: Type::I64,
@@ -19004,7 +19004,7 @@ fn inject_branch_drops(expr: &mut TypedExpr) {
                         }
                     }
                 }
-                // The arm's body is a TypedExpr â€” we need a
+                // The arm's body is a TypedExpr — we need a
                 // Box wrapper to reuse wrap_branch_with_drops.
                 // Match arms hold the body inline, so do the
                 // wrap manually.
@@ -19127,7 +19127,7 @@ fn consume_if_moved_var(
         // Conservative move tracking for if-expression
         // branches. `let chosen = if cond { a } else { b };`
         // where both a and b are non-Copy Vars must mark
-        // BOTH as moved â€” otherwise the codegen ternary
+        // BOTH as moved — otherwise the codegen ternary
         // aliases v_chosen with v_a OR v_b, and the
         // scope-exit drop of all three would double-free.
         // Both Vars-as-moved means the unchosen alternative
@@ -19151,12 +19151,12 @@ fn consume_if_moved_var(
                 consume_if_moved_var(&arm.body, checked, env, diagnostics);
             }
         }
-        // Block expression tail: `let y = { let _ = â€¦; a };`
-        // â€” the tail expression is what the block yields,
+        // Block expression tail: `let y = { let _ = …; a };`
+        // — the tail expression is what the block yields,
         // so a Var tail is moved into the binding the
         // block initializes. Without descending into the
         // tail, the Var's scope-exit drop fires AND the
-        // binding frees the same heap â†’ double-free.
+        // binding frees the same heap → double-free.
         // Closure #174.
         ExprKind::Block { stmts, tail } => {
             // Skip the recursion when the tail is a bare Var
@@ -19165,7 +19165,7 @@ fn consume_if_moved_var(
             // time the outer caller (Let RHS, etc.) reaches
             // here, so a naive `lookup_mut` would walk past the
             // gone-inner shadow and mark an outer-scope binding
-            // of the same name as moved â€” incorrectly. The
+            // of the same name as moved — incorrectly. The
             // inner Block-expr's own `consume_if_moved_var`
             // (closure #194) already marked the inner binding
             // before pop_scope. Closure #199 plugs the
@@ -19184,7 +19184,7 @@ fn consume_if_moved_var(
     }
 }
 
-/// Desugar `match s { "a" then â€¦, "b" then â€¦, _ then â€¦ }` on
+/// Desugar `match s { "a" then …, "b" then …, _ then … }` on
 /// a `Str` / `OwnedStr` scrutinee into a nested if-expression
 /// chain. The scrutinee binds to a single temp so any side
 /// effect runs once. A wildcard arm is required (the string
@@ -19306,7 +19306,7 @@ fn check_match_str(
                         arm.pattern_span,
                         format!(
                             "match scrutinee is {}, but pattern is not a string \
-                             literal â€” use `\"text\" then â€¦` or `_ then â€¦`",
+                             literal — use `\"text\" then …` or `_ then …`",
                             scrut_s
                         ),
                     )
@@ -19324,7 +19324,7 @@ fn check_match_str(
         diagnostics.push(Diagnostic::new(
             span,
             "non-exhaustive match: string scrutinees require a wildcard \
-             `_ then â€¦` arm to cover values not explicitly listed"
+             `_ then …` arm to cover values not explicitly listed"
                 .to_string(),
         ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
     }
@@ -19418,7 +19418,7 @@ fn check_match_str(
     // heap allocation that no other binding holds. Var /
     // FieldAccess / TupleAccess scrutinees reference a
     // value that's already tracked by some outer binding
-    // â€” emitting a Drop on the temp here would double-free
+    // — emitting a Drop on the temp here would double-free
     // (the outer binding's scope-exit Drop frees the same
     // pointer). Closure #137 mirrors closure #135's
     // print-of-OwnedStr whitelist.
@@ -19465,7 +19465,7 @@ fn check_match_str(
     )
 }
 
-/// BUG-28 fix (2026-07-28) â€” see the call site in `check_expr`'s
+/// BUG-28 fix (2026-07-28) — see the call site in `check_expr`'s
 /// `ExprKind::Match` handling (int / bool / enum-tag / wildcard
 /// dispatch) for the full story. Guarded match arms are represented
 /// as a placeholder `Block { stmts: [Assert(guard)], tail }` (crash
@@ -19482,11 +19482,11 @@ fn check_match_str(
 /// followed by one more arm) fold correctly.
 ///
 /// Returns `true` (and mutates `body` in place) if a pending guard
-/// was found and folded â€” the caller should NOT push `new_tail` as
+/// was found and folded — the caller should NOT push `new_tail` as
 /// a separate arm, since it's now folded into `body`. Returns
 /// `false` if `body` has no unresolved guard at its rightmost spine
 /// (e.g. the previous arm was unguarded, or this is the first arm
-/// for its tag) â€” the caller should push `new_tail` as a fresh arm.
+/// for its tag) — the caller should push `new_tail` as a fresh arm.
 fn fold_guard_chain(body: &mut crate::ir::TypedExpr, new_tail: crate::ir::TypedExpr) -> bool {
     enum Action {
         FoldHere(crate::ir::TypedExpr, crate::ir::TypedExpr),
@@ -19533,11 +19533,11 @@ fn fold_guard_chain(body: &mut crate::ir::TypedExpr, new_tail: crate::ir::TypedE
 }
 
 // Closure #278: match on f32 / f64 scrutinee. Mirrors
-// `check_match_str` shape â€” desugar to a nested IfExpr chain
+// `check_match_str` shape — desugar to a nested IfExpr chain
 // keyed on `scrut == lit_arm` with the wildcard body as the
 // final else. Wildcard is required since the float space is
 // open. NaN scrutinees never match any literal arm (IEEE 754
-// `NaN != NaN`), so they fall through to the wildcard â€”
+// `NaN != NaN`), so they fall through to the wildcard —
 // documented as v1 limitation.
 fn check_match_float(
     scrutinee: &CheckedExpr,
@@ -19581,7 +19581,7 @@ fn check_match_float(
                     diagnostics.push(Diagnostic::new(
                         arm.pattern_span,
                         "NaN match pattern never fires (IEEE 754 `NaN != NaN`) \
-                         â€” use a guard like `if x.is_nan() { â€¦ }` or fall \
+                         — use a guard like `if x.is_nan() { … }` or fall \
                          through to the wildcard arm"
                             .to_string(),
                     ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
@@ -19656,7 +19656,7 @@ fn check_match_float(
                         arm.pattern_span,
                         format!(
                             "match scrutinee is {}, but pattern is not a float \
-                             literal â€” use `3.14 then â€¦` or `_ then â€¦`",
+                             literal — use `3.14 then …` or `_ then …`",
                             scrut_s
                         ),
                     )
@@ -19674,7 +19674,7 @@ fn check_match_float(
         diagnostics.push(Diagnostic::new(
             span,
             "non-exhaustive match: float scrutinees require a wildcard \
-             `_ then â€¦` arm to cover values not explicitly listed (and \
+             `_ then …` arm to cover values not explicitly listed (and \
              NaN, which never compares equal to any literal)"
                 .to_string(),
         ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
@@ -20125,7 +20125,7 @@ fn check_match_slice(
         diagnostics.push(Diagnostic::new(
             span,
             "non-exhaustive match: slice/array scrutinees require a wildcard \
-             `_ then â€¦` arm (or exact-length arms plus a `[.., x]`-shaped \
+             `_ then …` arm (or exact-length arms plus a `[.., x]`-shaped \
              arm covering every remaining length) to cover lengths not \
              explicitly listed"
                 .to_string(),
@@ -20374,7 +20374,7 @@ fn check_expr(
             None => {
                 // Bare identifier resolved against the env
                 // failed. Check if it names a top-level
-                // function â€” that produces a first-class
+                // function — that produces a first-class
                 // function pointer value of type
                 // `fn(T1, ..., Tn) -> R`.
                 if let Some(sig) = signatures.get(name) {
@@ -20494,7 +20494,7 @@ fn check_expr(
                         // `EnumInfo` only carries variant names;
                         // payload types live on the `EnumDecl` in
                         // the program. Pull from signatures-like
-                        // registry via the program AST â€” we
+                        // registry via the program AST — we
                         // shortcut by re-walking `env.enums`'s
                         // companion decls. For v1, we attach the
                         // payload type by looking it up in the
@@ -20523,7 +20523,7 @@ fn check_expr(
                             );
                             // Enum constructor transfers ownership
                             // of the payload into the tagged-union
-                            // â€” mark the source Var moved so the
+                            // — mark the source Var moved so the
                             // scope-exit drop doesn't fire on a
                             // heap the enum now owns. Same family
                             // as vec / push / set (closures
@@ -20545,12 +20545,12 @@ fn check_expr(
                             );
                         } else {
                             // Calling a payload-less variant with
-                            // args â€” clean diagnostic.
+                            // args — clean diagnostic.
                             diagnostics.push(
                                 Diagnostic::new(
                                     expr.span,
                                     format!(
-                                        "enum variant '{}.{}' has no payload â€” use \
+                                        "enum variant '{}.{}' has no payload — use \
                                          `{}.{}` without parentheses",
                                         enum_name, method, enum_name, method
                                     ),
@@ -20568,13 +20568,13 @@ fn check_expr(
                     }
                 }
             }
-            // Closure #311 â€” Vec method-call sugar. `xs.map(f)`
+            // Closure #311 — Vec method-call sugar. `xs.map(f)`
             // where `xs: Vec<T>` rewrites to `vec_map(ref xs, f)`;
             // `xs.sort_by(cmp)` to `sort_by(mut ref xs, cmp)`,
             // etc. The receiver must be a simple `Var` binding
             // whose type (after stripping `ref` / `mut ref`) is
             // `Vec<T>`. Non-Var receivers (`f().map(...)`) need
-            // an explicit named intermediate in v1 â€” same rule
+            // an explicit named intermediate in v1 — same rule
             // as `ref` borrowing only named places. Falls
             // through to the generic method-dispatch logic
             // when the method name isn't a Vec builtin.
@@ -20592,13 +20592,13 @@ fn check_expr(
                     .unwrap_or(false);
                 if is_vec {
                     // ARC 3c: `.collect()` postfix is identity on
-                    // Vec (vÄá¹‡à¥€'s combinators are eager â€” `.map(f)`
+                    // Vec (vÄá¹‡à¥€'s combinators are eager — `.map(f)`
                     // already returns a fresh Vec<T>). The chain
                     // `xs.map(f).collect()` is sugar for
                     // `xs.map(f)`; collect just terminates the
                     // chain explicitly for Rust-trained readers.
                     // Receiver must be a fresh Vec (not a
-                    // borrowed Ref/RefMut Vec) â€” a borrowed Vec
+                    // borrowed Ref/RefMut Vec) — a borrowed Vec
                     // can't be returned without a clone, which
                     // collect doesn't perform in v1.
                     if method == "collect" && args.is_empty() {
@@ -20608,11 +20608,11 @@ fn check_expr(
                             }
                             Some(Type::Ref(_) | Type::RefMut(_)) => {
                                 // Borrowed Vec: would need a
-                                // clone to produce an owned Vec â€”
+                                // clone to produce an owned Vec —
                                 // out of v1 scope.
                                 diagnostics.push(Diagnostic::new(
                                     expr.span,
-                                    "`.collect()` on a borrowed `Vec<T>` needs an explicit clone â€” \
+                                    "`.collect()` on a borrowed `Vec<T>` needs an explicit clone — \
                                      use `clone(xs).collect()` or drop the borrow first; \
                                      `collect()` doesn't clone in v1.",
                                 ).with_elaboration(crate::diagnostic_elaborations::move_out_of_borrowed("")));
@@ -20622,7 +20622,7 @@ fn check_expr(
                         }
                     }
                     // `xs.len()` is the only Vec-method sugar that
-                    // doesn't lower to a regular builtin Call â€” it
+                    // doesn't lower to a regular builtin Call — it
                     // produces `ExprKind::Len { array: xs }` directly,
                     // matching the surface `len(xs)` builtin. Handle
                     // before the table-driven Call synthesis.
@@ -20638,7 +20638,7 @@ fn check_expr(
                     }
                     let (builtin_name, want_mut_ref): (&str, bool) =
                         match method.as_str() {
-                            // Iterator combinators â€” borrow read-only.
+                            // Iterator combinators — borrow read-only.
                             "map" => ("vec_map", false),
                             "filter" => ("vec_filter", false),
                             "fold" => ("vec_fold", false),
@@ -20677,7 +20677,7 @@ fn check_expr(
                             "find" => ("find", false),
                             "contains" => ("contains", false),
                             "binary_search" => ("binary_search", false),
-                            // In-place mutators â€” borrow exclusively.
+                            // In-place mutators — borrow exclusively.
                             "sort" => ("sort", true),
                             "sort_by" => ("sort_by", true),
                             "sort_desc" => ("sort_desc", true),
@@ -20727,7 +20727,7 @@ fn check_expr(
                 }
             }
 
-            // Closure #375 â€” method-call sugar for `Str` /
+            // Closure #375 — method-call sugar for `Str` /
             // `OwnedStr` receivers. Mirrors the Vec sugar
             // pattern but the str-family builtins take Str by
             // value (no ref-injection needed). `s.len()` is
@@ -20737,7 +20737,7 @@ fn check_expr(
             // We accept both Var receivers (`s.contains("x")`)
             // and string-literal receivers (`"abc".repeat(3)`).
             // The literal case is determined by checking the
-            // ExprKind directly â€” a Str literal is always
+            // ExprKind directly — a Str literal is always
             // type Str, even though we can't look it up in env.
             {
                 let recv_is_str_literal = matches!(
@@ -20800,7 +20800,7 @@ fn check_expr(
                     }
                 }
             }
-            // Closure #383 â€” method-call sugar for primitive
+            // Closure #383 — method-call sugar for primitive
             // `.to_str()` on bool / i64 / f64. Routes through
             // the existing bool_to_str / i64_to_str / f64_to_str
             // builtins. Accepts both Var receivers (`b.to_str()`)
@@ -20852,12 +20852,12 @@ fn check_expr(
                     );
                 }
             }
-            // Closure #376 â€” method-call sugar for `Option<i64>` /
+            // Closure #376 — method-call sugar for `Option<i64>` /
             // `Option<f64>` receivers. `o.unwrap_or(def)` /
             // `o.is_some()` / `o.is_none()` desugar to the
             // matching `option_*` builtin (with the `_f64` suffix
             // when the inner type is f64). Only `Var` receivers
-            // for now â€” non-trivial Option-producing expressions
+            // for now — non-trivial Option-producing expressions
             // (like `parse_int("x").is_some()`) need an explicit
             // intermediate, same rule as Vec method sugar.
             if let ExprKind::Var(recv_name) = &receiver.kind {
@@ -20907,7 +20907,7 @@ fn check_expr(
                 }
             }
 
-            // Closure #321 â€” method-call sugar for `[T; N]`
+            // Closure #321 — method-call sugar for `[T; N]`
             // Arrays. Mirrors the Vec sugar arm above but
             // dispatches to the array-prefixed builtins
             // (sort / sort_by / reverse / find / contains /
@@ -20969,14 +20969,14 @@ fn check_expr(
                 }
             }
 
-            // Closure #312 â€” method-call sugar for affine
+            // Closure #312 — method-call sugar for affine
             // containers. `m.get(k)` / `s.insert(v)` / `d.pop_back()`
             // etc. on HashMap / HashSet / BTreeMap / BTreeSet /
             // Deque receivers rewrite to the existing
             // `<container>_<method>(<borrow> recv, args...)`
             // builtins. Same restriction as #311: receiver must
             // be a simple `Var`. Borrow shape (`ref` vs
-            // `mut ref`) is per-method â€” readers borrow shared,
+            // `mut ref`) is per-method — readers borrow shared,
             // mutators borrow exclusive.
             if let ExprKind::Var(recv_name) = &receiver.kind {
                 let recv_ty_opt = env.lookup(recv_name).map(|i| i.ty.clone());
@@ -21147,7 +21147,7 @@ fn check_expr(
             // `<Type>_<fn>` is in scope. This is the
             // constructor pattern (`Point.new(1, 2)`) and
             // any other self-less helper attached to a type
-            // via `methods on T { fn helper(â€¦) { â€¦ } }`.
+            // via `methods on T { fn helper(…) { … } }`.
             // T1.2 phase 2a follow-up (closure #114).
             if let ExprKind::Var(type_name) = &receiver.kind {
                 let mangled = format!("{}_{}", type_name, method);
@@ -21220,14 +21220,14 @@ fn check_expr(
             // node that Phase 3 codegen lowers into a
             // function-pointer call.
             // Vtables Phase 4c: also accept `ref dyn Iface` /
-            // `mut ref dyn Iface` receivers â€” the fat pointer
+            // `mut ref dyn Iface` receivers — the fat pointer
             // sits behind a borrow. Dispatch through the
             // same vtable; the data side is the same data
             // pointer the fat pointer already carries.
             // L2 Phase 3 (2026-06-08): also accept `Box<dyn Iface>`
             // (and `ref Box<dyn Iface>`) as a method receiver.
             // Box<dyn Iface> has the same machine layout as
-            // plain `dyn Iface` (a 16-byte fat pointer) â€” the
+            // plain `dyn Iface` (a 16-byte fat pointer) — the
             // only difference is ownership of `.data`. Method
             // dispatch is identical.
             let dyn_iface: Option<String> = match &recv_ty {
@@ -21268,7 +21268,7 @@ fn check_expr(
                         *method_span,
                         format!(
                             "interface '{}' method '{}' is missing a `self` \
-                             parameter â€” interface methods must take a \
+                             parameter — interface methods must take a \
                              receiver in v1",
                             iface_name, method
                         ),
@@ -21323,7 +21323,7 @@ fn check_expr(
             }
             // ARC 3c: `.collect()` on any Vec<T> receiver
             // (including chained-call results like
-            // `xs.map(f).collect()`) is identity â€” the chain
+            // `xs.map(f).collect()`) is identity — the chain
             // already produces an owned Vec<T>. Handle BEFORE
             // the "only struct/enum support methods" rejection
             // so non-Var receivers (Call / MethodCall) reach
@@ -21344,7 +21344,7 @@ fn check_expr(
                         diagnostics.push(Diagnostic::new(
                             *method_span,
                             format!(
-                                "cannot call method '{}' on {} â€” methods are \
+                                "cannot call method '{}' on {} — methods are \
                                  attached to struct/enum types only in v1",
                                 method, other
                             ),
@@ -21356,7 +21356,7 @@ fn check_expr(
                     diagnostics.push(Diagnostic::new(
                         *method_span,
                         format!(
-                            "cannot call method '{}' on {} â€” methods are \
+                            "cannot call method '{}' on {} — methods are \
                              attached to struct/enum types only in v1",
                             method, other
                         ),
@@ -21367,7 +21367,7 @@ fn check_expr(
             // 2026-06-09: reject explicit `.drop()` calls on
             // types implementing the Drop iface. Without this
             // guard, `r.drop()` runs the user-defined destructor
-            // AND scope-exit auto-Drop still fires â€” leading to
+            // AND scope-exit auto-Drop still fires — leading to
             // a double-drop (potential double-free if the body
             // mutates heap state). Matches Rust's
             // `std::mem::drop(v)` which consumes v by-value;
@@ -21380,7 +21380,7 @@ fn check_expr(
                     *method_span,
                     format!(
                         "explicit `.drop()` calls on a `Drop`-implementing type are \
-                         rejected â€” the destructor fires automatically at scope exit. \
+                         rejected — the destructor fires automatically at scope exit. \
                          Calling it manually would cause a double-drop (the auto-call \
                          still runs on scope exit). To end the binding's lifetime \
                          early, restructure to move it out of scope (e.g. \
@@ -21402,7 +21402,7 @@ fn check_expr(
                             *method_span,
                             format!(
                                 "no method '{}' on type '{}'; expected a `methods on {}` \
-                                 block declaring `fn {}(self: {}, â€¦)`",
+                                 block declaring `fn {}(self: {}, …)`",
                                 method, type_name, type_name, method, type_name
                             ),
                         )
@@ -21424,7 +21424,7 @@ fn check_expr(
             // the method binds `self` by value or by
             // borrow. Conversely, when the method binds by
             // value but the receiver is a borrow, leave
-            // the receiver alone â€” `check_call` will
+            // the receiver alone — `check_call` will
             // surface the existing type-mismatch
             // diagnostic. T1.2 phase 2a auto-ref.
             let expected_self_ty = sig.params.first().cloned();
@@ -21433,7 +21433,7 @@ fn check_expr(
             // already a borrow (`ref T` / `mut ref T`) but
             // the method takes `self: T` by value. We don't
             // have an implicit deref expression, so this
-            // can't be silently auto-coerced â€” but we can
+            // can't be silently auto-coerced — but we can
             // tell the user the two viable workarounds.
             if let (Some(expected), recv) = (expected_self_ty.as_ref(), &recv_ty) {
                 if matches!(recv, Type::Ref(_) | Type::RefMut(_))
@@ -21528,7 +21528,7 @@ fn check_expr(
             //
             // When a variable is moved into the tuple, mark it as
             // moved so the scope-exit Drop pass doesn't also free
-            // it â€” that would double-free the same heap buffer.
+            // it — that would double-free the same heap buffer.
             for (elem_expr, checked) in elements.iter().zip(typed.iter()) {
                 if let ExprKind::Var(src_name) = &elem_expr.kind {
                     if !checked.ty().is_copy() {
@@ -21580,7 +21580,7 @@ fn check_expr(
                 diagnostics.push(Diagnostic::new(
                     expr.span,
                     format!(
-                        "tuple element {} has non-Copy type {} â€” direct `.{}` \
+                        "tuple element {} has non-Copy type {} — direct `.{}` \
                          access would alias the tuple's heap data. Use tuple \
                          destructuring `let ({}, ...) = tup` to move elements out.",
                         index, elt_ty, index,
@@ -21634,7 +21634,7 @@ fn check_expr(
                 diagnostics.push(diag);
                 return CheckedExpr::fallback_integer(expr.span);
             };
-            // Build name â†’ declared type map for lookup.
+            // Build name → declared type map for lookup.
             let decl_fields: Vec<(String, Type)> = decl.fields.clone();
             // Check arity + names match.
             if fields.len() != decl_fields.len() {
@@ -21722,7 +21722,7 @@ fn check_expr(
                 }
             }
             // Resolve the struct name to its monomorphic form
-            // before stamping it onto the typed expression â€” a
+            // before stamping it onto the typed expression — a
             // bare-generic name like `Holder` (when only
             // `Holder__i64` is in scope) must surface as
             // `Holder__i64` to backends; otherwise the C / LLVM
@@ -21974,7 +21974,7 @@ fn check_expr(
             // scrutinee's scope-exit Drop.
             let mut any_arm_moved_ownedstr_direct = false;
             // A wildcard arm covers every remaining variant. v1
-            // requires it to appear last â€” once seen, arms after
+            // requires it to appear last — once seen, arms after
             // it are dead.
             let mut wildcard_seen = false;
             let mut wildcard_arm_index: Option<usize> = None;
@@ -22064,7 +22064,7 @@ fn check_expr(
                         diagnostics.push(Diagnostic::new(
                             arm.pattern_span,
                             "string literal match patterns are not yet supported \
-                             in v1 â€” use if/else chains with `==` on Str/OwnedStr",
+                             in v1 — use if/else chains with `==` on Str/OwnedStr",
                         ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("string", &scrut_ty.to_string())));
                         continue;
                     }
@@ -22072,7 +22072,7 @@ fn check_expr(
                         // Float scrutinees route through
                         // `check_match_float` (early dispatch);
                         // reaching here means the scrutinee was
-                        // not f32/f64 â€” diagnose.
+                        // not f32/f64 — diagnose.
                         diagnostics.push(Diagnostic::new(
                             arm.pattern_span,
                             format!(
@@ -22258,7 +22258,7 @@ fn check_expr(
                 // borrowed-view counterpart (Str) so the
                 // scrutinee retains ownership and its existing
                 // scope-exit Drop frees the heap exactly once.
-                // The binding is a read-only view in v1 â€”
+                // The binding is a read-only view in v1 —
                 // escaping the borrow past the scrutinee's
                 // scope is the same dangling-Str hazard that
                 // already exists for any Str produced from an
@@ -22285,7 +22285,7 @@ fn check_expr(
                                 // Enum`, give non-Copy payload bindings
                                 // a `ref T` borrow-view type instead of
                                 // the owned type. This prevents
-                                // double-frees â€” the binding borrows
+                                // double-frees — the binding borrows
                                 // into the scrutinee's payload slot
                                 // rather than moving it out. Copy types
                                 // and OwnedStr (which already uses the
@@ -22343,12 +22343,12 @@ fn check_expr(
                     };
                     // Phase 11 (2026-06-07): for affine-payload
                     // bindings (Vec<T>, structs with owning fields,
-                    // â€¦) the binding is a non-owning view over the
-                    // scrutinee's heap â€” the scrutinee's own
+                    // …) the binding is a non-owning view over the
+                    // scrutinee's heap — the scrutinee's own
                     // scope-exit drop handles freeing the buffer.
                     // The binding's scope-exit must NOT drop too,
                     // or we'd double-free. Copy payloads (i64,
-                    // bool, â€¦) drop trivially so the flag has no
+                    // bool, …) drop trivially so the flag has no
                     // observable effect on them.
                     let binding_is_affine = !actual_bty.is_copy();
                     env.insert_current(bname.clone(), VarInfo {
@@ -22522,7 +22522,7 @@ fn check_expr(
                     diagnostics.push(Diagnostic::new(
                         expr.span,
                         "non-exhaustive match: integer scrutinees require a wildcard \
-                         `_ then â€¦` arm to cover values not explicitly listed"
+                         `_ then …` arm to cover values not explicitly listed"
                             .to_string(),
                     ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
                 } else if is_bool_dispatch {
@@ -22596,7 +22596,7 @@ fn check_expr(
             // constant and one of the arms' int_value matches
             // (or the wildcard catches it), and that arm's
             // body is itself constant, the whole match folds.
-            // Lets `let r: i64 = match x { â€¦ };` propagate the
+            // Lets `let r: i64 = match x { … };` propagate the
             // match's value through the let-binding's constant
             // tracker, so downstream `prove r == k` discharges
             // via constant-fold without round-tripping to SMT.
@@ -22630,7 +22630,7 @@ fn check_expr(
         }
         ExprKind::Block { stmts, tail } => {
             // T-block MVP: `{ let a = e1; print "log"; tail }`.
-            // V1 admits `let` bindings (including `let _ = â€¦`,
+            // V1 admits `let` bindings (including `let _ = …`,
             // which is also what the parser produces for bare
             // `f();` discarded calls) plus `print` stmts before
             // the tail expression. Control flow (if/while/for),
@@ -22656,7 +22656,7 @@ fn check_expr(
                         // rewrite. Without `consume_if_moved_var`
                         // here, `let n = b.name` inside a Block-
                         // expr never marks `b.moved_fields["name"]`
-                        // â†’ the struct's per-field free at scope
+                        // → the struct's per-field free at scope
                         // exit double-frees `b.name`'s heap (also
                         // freed via the moved-out binding's
                         // drop). Same family for Var moves of
@@ -22866,7 +22866,7 @@ fn check_expr(
                         // stmt vocabulary the outer Block-expr
                         // accepts (Let / Print / Assign / While).
                         // This unblocks `while` between `try` and
-                        // `return` â€” the most common iteration
+                        // `return` — the most common iteration
                         // shape in a try-error-propagation chain.
                         let cond_checked = check_expr(cond, env, signatures, diagnostics);
                         if !matches!(cond_checked.ty(), Type::Bool) {
@@ -22983,7 +22983,7 @@ fn check_expr(
                     _ => {
                         diagnostics.push(Diagnostic::new(
                             s.span(),
-                            "block expressions in v1 only allow `let` bindings, `print` statements, reassignments, and `while` loops before the tail expression â€” hoist `if`/`for` / other constructs outside the block",
+                            "block expressions in v1 only allow `let` bindings, `print` statements, reassignments, and `while` loops before the tail expression — hoist `if`/`for` / other constructs outside the block",
                         ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("block-expr statement")));
                     }
                 }
@@ -22993,7 +22993,7 @@ fn check_expr(
             // Mark Vars consumed by the tail as moved before
             // computing scope-exit drops. consume_if_moved_var
             // recurses into Var/IfExpr/Match/Block/FieldAccess
-            // tails â€” Call/Binary args already marked themselves
+            // tails — Call/Binary args already marked themselves
             // moved during check_expr of the tail (closure #178
             // for vec-elements, str_concat for binary, named-
             // call args). Closure #194.
@@ -23001,7 +23001,7 @@ fn check_expr(
             // Collect scope-exit drops for non-moved non-Copy
             // bindings in the inner Block-expr scope. Without
             // this, a sibling `let b = "x"+""` declared next to
-            // the tail-yielded `let a = â€¦; a` leaks b's heap.
+            // the tail-yielded `let a = …; a` leaks b's heap.
             let mut drop_stmts: Vec<TypedStmt> = Vec::new();
             emit_current_scope_drops(env, &mut drop_stmts, diagnostics);
             env.pop_scope();
@@ -23065,7 +23065,7 @@ fn check_expr(
             // T4 if-as-expression. cond must be bool;
             // then/else branch types must unify into the
             // result. Behaves identically to a 2-arm match
-            // for codegen purposes â€” both backends emit
+            // for codegen purposes — both backends emit
             // `cond` evaluation, a branch, and a merge that
             // unifies the two branch values.
             let cond_checked = check_expr(cond, env, signatures, diagnostics);
@@ -23173,13 +23173,13 @@ fn check_expr(
             // by `lambda_lift_program` before signature collection
             // and check_function run. Reaching check_expr with an
             // AnonFn means the lift pass missed an expression
-            // context â€” surface a clear diagnostic rather than
+            // context — surface a clear diagnostic rather than
             // panic so users get an actionable bug report.
             diagnostics.push(
                 Diagnostic::new(
                     expr.span,
                     "internal: anonymous fn expression survived the lambda-lift \
-                     pass. This is a vÄá¹‡à¥€ compiler bug â€” please report.".to_string(),
+                     pass. This is a vÄá¹‡à¥€ compiler bug — please report.".to_string(),
                 )
                 .with_elaboration(
                     crate::diagnostic_elaborations::unknown_function("__anon_fn"),
@@ -23197,10 +23197,10 @@ fn check_ref_mut(
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
-    // A4.3 (2026-06-08): `mut ref vec[i]` â€” mut-borrow of a
+    // A4.3 (2026-06-08): `mut ref vec[i]` — mut-borrow of a
     // Vec element by index. Restricted to Var-shaped Vec source;
     // the index sub-expression is type-checked through check_expr
-    // (needs &mut Env for that â€” historical signature was &Env).
+    // (needs &mut Env for that — historical signature was &Env).
     if let ExprKind::Index { array, index, .. } = &inner.kind {
         if let ExprKind::Var(vec_name) = &array.kind {
             let info = match env.lookup(vec_name) {
@@ -23229,7 +23229,7 @@ fn check_ref_mut(
             let element_ty = match info.ty.deref() {
                 Type::Vec(elem) => (**elem).clone(),
                 _ => {
-                    // Not a Vec â€” fall through to the regular
+                    // Not a Vec — fall through to the regular
                     // Var/FieldAccess error paths below. The
                     // user probably wanted `mut ref Var` and
                     // accidentally indexed.
@@ -23237,7 +23237,7 @@ fn check_ref_mut(
                         Diagnostic::new(
                             array.span,
                             format!(
-                                "`mut ref {}[â€¦]` requires '{}' to be a Vec; got {}",
+                                "`mut ref {}[…]` requires '{}' to be a Vec; got {}",
                                 vec_name, vec_name, info.ty
                             ),
                         )
@@ -23280,7 +23280,7 @@ fn check_ref_mut(
             }
             let checked_idx = check_expr(index, env, signatures, diagnostics);
             // Index must be an integer. coerce_checked would be
-            // overkill â€” Vec indexing already requires i64 in
+            // overkill — Vec indexing already requires i64 in
             // check_index.
             if !matches!(checked_idx.ty(), Type::I64) {
                 diagnostics.push(
@@ -23310,7 +23310,7 @@ fn check_ref_mut(
             );
         }
     }
-    // `mut ref t.field` â€” single-level field-borrow. The base
+    // `mut ref t.field` — single-level field-borrow. The base
     // binding must be an owned struct and have a field of the
     // given name. T1.2 phase 2b follow-up.
     if let ExprKind::FieldAccess { object, field, .. } = &inner.kind {
@@ -23520,7 +23520,7 @@ fn check_ref(
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
-    // `ref t.field` â€” single-level field-borrow. Mirrors
+    // `ref t.field` — single-level field-borrow. Mirrors
     // `check_ref_mut`'s field-borrow arm. T1.2 phase 2b
     // follow-up.
     if let ExprKind::FieldAccess { object, field, .. } = &inner.kind {
@@ -23963,7 +23963,7 @@ fn check_len(
         Type::Str | Type::OwnedStr => CheckedExpr::new(
             // `length: 0` is the same sentinel used for Vec: the
             // backend dispatches on `array.ty` to decide how to fetch
-            // the size. For Str/OwnedStr that's `strlen(s)` â€” the
+            // the size. For Str/OwnedStr that's `strlen(s)` — the
             // byte length, not counting the NUL terminator.
             TypedExprKind::Len {
                 array: Box::new(array_checked.expr),
@@ -24127,10 +24127,10 @@ fn check_binary(
     // Short-circuit && / || at compile time: if the LHS const-folds
     // to a value that determines the result (`false &&` / `true ||`),
     // skip the RHS check entirely. Reasons:
-    //   1. Matches runtime semantics â€” the RHS would never execute.
+    //   1. Matches runtime semantics — the RHS would never execute.
     //   2. Avoids spurious diagnostics from dead code that the user
     //      gated behind a `false` constant (e.g. debug toggles, feature
-    //      flags) â€” including const-fold panics on the RHS like
+    //      flags) — including const-fold panics on the RHS like
     //      `false && (10 / 0) > 0`.
     if matches!(op, BinaryOp::And | BinaryOp::Or) {
         if let Some(TypedConst::Bool(lhs_value)) = lhs.constant() {
@@ -24142,7 +24142,7 @@ fn check_binary(
                 let span = left.span.merge(right.span);
                 let result = *lhs_value;
                 // Still type-check that the RHS is a bool by parsing
-                // it shape-only â€” discard any diagnostics it would
+                // it shape-only — discard any diagnostics it would
                 // produce so dead code stays quiet. We achieve this
                 // by routing RHS check through a throwaway diagnostic
                 // buffer.
@@ -24165,7 +24165,7 @@ fn check_binary(
     let rhs = check_expr(right, env, signatures, diagnostics);
     let span = left.span.merge(right.span);
 
-    // T2.6 of safety-standard arc â€” pointer-arithmetic ban
+    // T2.6 of safety-standard arc — pointer-arithmetic ban
     // (MISRA C 2012 Rule 18.4). Detect operands of raw-pointer
     // type and emit an explicit MISRA-aware diagnostic instead
     // of the generic "no implicit promotion" error users would
@@ -24194,7 +24194,7 @@ fn check_binary(
                 span,
                 format!(
                     "pointer arithmetic on raw pointer ({} is a `*const T` / \
-                     `*mut T`) â€” MISRA C 2012 Rule 18.4 forbids `+`/`-` / shift / \
+                     `*mut T`) — MISRA C 2012 Rule 18.4 forbids `+`/`-` / shift / \
                      bitwise on pointer types. Use indices into a `Vec<T>` or wrap \
                      the pointer in `BoundedPtr<T>` (Layer 3.2 of `unsafe.md`) \
                      and use `bptr_get(bp, i)` / `bptr_set(bp, i, v)` for \
@@ -24234,7 +24234,7 @@ fn check_binary(
         }
         BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
             // Allow ordering on Str/OwnedStr via strcmp lowering.
-            // Any combination of Str and OwnedStr is accepted â€”
+            // Any combination of Str and OwnedStr is accepted —
             // both lower to a `char*`/`i8*` operand and `strcmp`
             // only reads (no allocation, no free), so OwnedStr
             // operands are auto-borrowed (not consumed).
@@ -24510,7 +24510,7 @@ fn check_shift(
     )
 }
 
-/// Type-check `Str + Str` (or `OwnedStr + Str`, etc.) â†’ `OwnedStr`.
+/// Type-check `Str + Str` (or `OwnedStr + Str`, etc.) → `OwnedStr`.
 /// The result is a fresh heap-allocated string. If either operand is
 /// an `OwnedStr` bound to a Var, that Var is marked moved so the
 /// affine machinery prevents double-use; the lhs/rhs runtime values
@@ -24658,7 +24658,7 @@ fn check_equality(
     }
 
     // Str / OwnedStr equality lowers to a strcmp call in both
-    // backends. Accept any combination of the two â€” OwnedStr is
+    // backends. Accept any combination of the two — OwnedStr is
     // auto-borrowed to Str-like behavior since strcmp only reads.
     // No constant-fold path; literals are interned per-call site
     // so identity comparison would be misleading.
@@ -24694,7 +24694,7 @@ fn check_equality(
     }
 
     // Aggregate types (struct, tuple, enum) don't have built-in
-    // `==`/`!=` â€” but if the user has declared an `Eq` impl
+    // `==`/`!=` — but if the user has declared an `Eq` impl
     // (`implement Eq for T { fn eq(self: T, other: T) -> bool }`),
     // the hoisted `<T>_eq` function dispatches the operation.
     // `a == b` desugars to `<T>_eq(a, b)`; `a != b` to
@@ -24709,7 +24709,7 @@ fn check_equality(
     );
     if lhs_is_aggregate || rhs_is_aggregate {
         // Tuple auto-`==`: compiler-derived field-by-field
-        // equality. `(a, b) == (c, d)` â†’ `a == c && b == d`.
+        // equality. `(a, b) == (c, d)` → `a == c && b == d`.
         // Tuples are anonymous so there's no user impl path;
         // each element must itself be comparable (primitive
         // or a nominal type with an Eq impl). T1.5 phase 2
@@ -24938,18 +24938,18 @@ fn check_equality(
         }
         let hint = match (lhs.ty(), rhs.ty()) {
             (Type::Struct(name), _) | (_, Type::Struct(name)) => format!(
-                "struct '{}' has no built-in `==` â€” declare \
-                 `implement Eq for {} {{ fn eq(self: {}, other: {}) -> bool {{ â€¦ }} }}` \
+                "struct '{}' has no built-in `==` — declare \
+                 `implement Eq for {} {{ fn eq(self: {}, other: {}) -> bool {{ … }} }}` \
                  to define equality, or compare field-by-field",
                 name, name, name, name
             ),
             (Type::Tuple(_), _) | (_, Type::Tuple(_)) => {
                 "tuple `==` requires both operands to be tuples of the same \
-                 shape â€” use matching arities and element types".to_string()
+                 shape — use matching arities and element types".to_string()
             }
             (Type::Enum(name), _) | (_, Type::Enum(name)) => format!(
-                "enum '{}' has no built-in `==` â€” declare \
-                 `implement Eq for {} {{ fn eq(self: {}, other: {}) -> bool {{ â€¦ }} }}` \
+                "enum '{}' has no built-in `==` — declare \
+                 `implement Eq for {} {{ fn eq(self: {}, other: {}) -> bool {{ … }} }}` \
                  to define equality, or use `match` to discriminate",
                 name, name, name, name
             ),
@@ -25098,7 +25098,7 @@ fn check_indirect_call(
             &format!("indirect call argument {}", idx),
             diagnostics,
         );
-        // Closure #213: mirror the regular `check_call` arm â€”
+        // Closure #213: mirror the regular `check_call` arm —
         // mark non-Copy arg bindings as moved (`fn_ptr(s)`
         // where `s: OwnedStr` transfers ownership to the
         // callee just like a named call), and rewrite if-expr
@@ -25113,7 +25113,7 @@ fn check_indirect_call(
         inject_branch_drops(&mut arg_expr);
         typed_args.push(arg_expr);
     }
-    // Build the callee expression â€” a TypedExpr that loads
+    // Build the callee expression — a TypedExpr that loads
     // the fn-ptr binding's current value.
     let callee = TypedExpr {
         kind: TypedExprKind::Var(name.to_string()),
@@ -25176,13 +25176,13 @@ fn check_call(
     // `TypedExprKind::Call` (the main user-function path
     // below) carries the precise span. Sub-helpers that
     // construct synthetic calls (vec/push/atomic_*/etc.)
-    // still receive `span` (the outer call span) â€” that's
+    // still receive `span` (the outer call span) — that's
     // close enough for LSP highlighting; refining it would
     // require plumbing name_span through every builtin
     // checker, which is a follow-up.
     match name {
         // L2 Phase 1 (2026-06-07): Box<T> heap-allocating
-        // constructor. `box(expr)` â†’ `Box<typeof expr>`. See
+        // constructor. `box(expr)` → `Box<typeof expr>`. See
         // `check_box_builtin`'s own doc comment for the current
         // (as of BUG-97, 2026-08-04) supported-type surface.
         "box" => return check_box_builtin(args, env, signatures, name_span, span, diagnostics),
@@ -25715,7 +25715,7 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
-        // T2.2 â€” `volatile_read(ptr: ref i64) -> i64` and
+        // T2.2 — `volatile_read(ptr: ref i64) -> i64` and
         // `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
         // Ref-based volatile access for embedded MMIO registers.
         // Gated to INTENT_TARGET_EMBEDDED=1; rejected on hosted
@@ -25725,12 +25725,12 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
-        // Arc 8 step 8e â€” `sleep_ms(ms: i64) -> i64`. Blocking
+        // Arc 8 step 8e — `sleep_ms(ms: i64) -> i64`. Blocking
         // millisecond sleep, primary building block for the
         // async runtime's timer primitives until the real
         // epoll-driven event loop lands. The async surface
         // (`async fn` + `await`) still desugars synchronously
-        // in v1, so a blocking sleep is the right semantics â€”
+        // in v1, so a blocking sleep is the right semantics —
         // an `async fn delay(ms) { sleep_ms(ms); }` is exactly
         // a timer-deferred completion.
         "sleep_ms" => {
@@ -25757,7 +25757,7 @@ fn check_call(
                 args, env, signatures, span, diagnostics,
             );
         }
-        // Arc 8 step 8e proper â€” TCP networking. All wrap
+        // Arc 8 step 8e proper — TCP networking. All wrap
         // libc socket / bind / listen / accept / connect /
         // read / write / close via per-backend runtime
         // helpers. See `check_tcp_builtin` for per-call
@@ -25774,19 +25774,19 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
-        // Arc 8 v2 â€” epoll event loop + non-blocking I/O.
+        // Arc 8 v2 — epoll event loop + non-blocking I/O.
         // Linux epoll(7) wrappers; would-block variants of
         // accept / recv return -2 instead of -1.
         "epoll_new" | "epoll_add_read" | "epoll_wait_one"
         | "epoll_close"
         | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb"
-        // Arc 8 v3 â€” async-flavored aliases route to the same
+        // Arc 8 v3 — async-flavored aliases route to the same
         // checker; the alias is rewritten to its v2 nb variant
         // at codegen so behavior is identical TODAY. The names
         // reserve the future state-machine-suspend-point
         // semantics for the v3.1 compiler-driven transform.
         | "io_recv_async" | "io_send_async" | "io_accept_async"
-        // Arc 8 v3.1 Phase 0 â€” timerfd-based non-blocking
+        // Arc 8 v3.1 Phase 0 — timerfd-based non-blocking
         // sleep. Returns the timerfd / clears the timer; the
         // user pairs them with epoll for cooperative timing.
         | "sleep_ms_async" | "sleep_ms_finish" => {
@@ -25841,7 +25841,7 @@ fn check_call(
         "min" | "max" => {
             return check_min_max_builtin(name, args, env, signatures, span, diagnostics);
         }
-        // Closure #362: `clamp(x, lo, hi)` â€” pure intrinsic. Only
+        // Closure #362: `clamp(x, lo, hi)` — pure intrinsic. Only
         // dispatched to the builtin path when the user hasn't
         // shadowed the name with a user-defined `fn clamp`.
         // The pre-existing `min` / `max` dispatch doesn't have
@@ -25891,7 +25891,7 @@ fn check_call(
         _ => {}
     }
 
-    // Arc 5c: `__intent_make_closure_<N>(captures...)` â€” magic
+    // Arc 5c: `__intent_make_closure_<N>(captures...)` — magic
     // call synthesized by the lift pass when a captured anon-fn
     // appears in a value-binding position. Looks up the registry
     // entry and produces a TypedExpr of type `Closure(args, ret)`.
@@ -26122,7 +26122,7 @@ fn check_call(
     // me" in `locks_params`, find the corresponding arg's
     // tracked mutex name. If any currently-live binding in
     // env guards that mutex, the call would deadlock on
-    // entry â€” flag it at compile time.
+    // entry — flag it at compile time.
     for (index, arg) in args.iter().enumerate() {
         if !signature.locks_params.get(index).copied().unwrap_or(false) {
             continue;
@@ -26449,9 +26449,9 @@ fn check_arg_aliasing(
     }
 }
 
-/// `min(a, b)` and `max(a, b)` â€” pure built-in intrinsics that
+/// `min(a, b)` and `max(a, b)` — pure built-in intrinsics that
 /// return the smaller / larger of two operands of the same
-/// numeric type. Promoted numeric type rules apply (i32 + i64 â†’
+/// numeric type. Promoted numeric type rules apply (i32 + i64 →
 /// i64). Lowering is per-backend: C inlines a ternary; LLVM
 /// emits a `select` on `icmp`. As a regular `Call` expression
 /// they fit existing infrastructure (effects checker treats them
@@ -26491,7 +26491,7 @@ fn check_min_max_builtin(
     )
 }
 
-/// Closure #362: `clamp(x, lo, hi)` â€” pure built-in intrinsic that
+/// Closure #362: `clamp(x, lo, hi)` — pure built-in intrinsic that
 /// returns `x` clipped to `[lo, hi]`. Three operands promote through
 /// the same `promoted_numeric_type` chain as `min` / `max`, so an
 /// `i64` `x` with an `i32` `lo` and `f64` `hi` would promote to
@@ -26574,7 +26574,7 @@ fn check_atomic_builtin(
             let initial = check_expr(&args[0], env, signatures, diagnostics);
             // Pick the element type from the argument. A
             // flexible integer literal (e.g. `atomic_new(0)`)
-            // defaults to i64 â€” preserves v1 source compat.
+            // defaults to i64 — preserves v1 source compat.
             // Otherwise the argument's concrete type wins:
             // `atomic_new(0u8)`, `atomic_new(false)`, or
             // `let x: i32 = 7; atomic_new(x)` all pick their
@@ -26627,7 +26627,7 @@ fn check_atomic_builtin(
 /// backend uses `_Atomic <c_type>` (with `_Bool` for bool); the
 /// LLVM backend stores integer widths natively and uses an i8
 /// shadow for bool (`i1` atomic ops aren't byte-addressable).
-/// `atomic_fetch_add` is *not* defined for bool â€” callers
+/// `atomic_fetch_add` is *not* defined for bool — callers
 /// reject it in the per-op helper.
 fn is_supported_atomic_element(ty: &Type) -> bool {
     matches!(
@@ -26662,7 +26662,7 @@ fn atomic_element_of(ty: &Type) -> Option<Type> {
 /// Atomically reads the cell; if it equals `expected`, writes
 /// `new` and returns `true`. Otherwise leaves the cell alone
 /// and returns `false`. The return type is `bool` (the CAS
-/// success bit) â€” distinct from the other atomic ops which
+/// success bit) — distinct from the other atomic ops which
 /// return `T`.
 fn check_atomic_cas(
     name: &str,
@@ -26792,7 +26792,7 @@ fn check_atomic_binary_ref(
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         Type::I64
     });
-    // `atomic_fetch_add` is an arithmetic op â€” reject it on
+    // `atomic_fetch_add` is an arithmetic op — reject it on
     // bool cells. `atomic_store` works on every supported
     // element type including bool.
     if name == "atomic_fetch_add" && matches!(element, Type::Bool) {
@@ -27005,7 +27005,7 @@ fn is_supported_channel_element(ty: &Type) -> bool {
     ) || (matches!(ty, Type::Struct(_) | Type::Enum(_)) && ty.is_copy())
 }
 
-/// Whether `n` is a power of two â‰¥ 1. The Vyukov ring buffer
+/// Whether `n` is a power of two ≥ 1. The Vyukov ring buffer
 /// uses `t & (N-1)` to wrap indices into the buffer, so N
 /// must be a power of two for that mask to address all slots
 /// exactly once.
@@ -27036,7 +27036,7 @@ fn guard_element_from_ref(ty: &Type) -> Option<Type> {
 }
 
 /// Type-check the four mutex/guard builtins. Phase 2: parametric
-/// over T â€” any scalar / struct type is accepted.
+/// over T — any scalar / struct type is accepted.
 ///
 ///   mutex_new(initial: T) -> Mutex<T>         // affine handle
 ///   mutex_lock(m: &Mutex<T>) -> Guard<T>      // affine guard
@@ -27046,7 +27046,7 @@ fn guard_element_from_ref(ty: &Type) -> Option<Type> {
 /// The `Guard<T>` handle is affine. Scope-exit drops the
 /// guard, which the backend lowers to a runtime
 /// `mutex_unlock`. The user does not write `mutex_unlock`
-/// explicitly â€” RAII via the existing drop machinery.
+/// explicitly — RAII via the existing drop machinery.
 fn check_mutex_builtin(
     name: &str,
     args: &[Expr],
@@ -27175,7 +27175,7 @@ fn check_mutex_builtin(
             // is non-reentrant); flagging it at compile time
             // turns the deadlock into an error. Indirect
             // references (e.g. `mutex_lock(f())`) can't be
-            // tracked syntactically â€” we skip the check
+            // tracked syntactically — we skip the check
             // rather than overreport.
             if let Some(target) = extract_locked_mutex_name(&args[0]) {
                 let already_held = env
@@ -27292,7 +27292,7 @@ fn check_mutex_builtin(
 /// When the `mutex_lock` argument has a name we can track,
 /// return it. Two shapes count:
 ///
-///   1. `mutex_lock(&m)` â€” explicit reference to a local
+///   1. `mutex_lock(&m)` — explicit reference to a local
 ///      `Mutex<T>` binding; the underlying mutex name is the
 ///      Var's name.
 ///   2. `mutex_lock(p)` where `p` is a binding of reference
@@ -27303,7 +27303,7 @@ fn check_mutex_builtin(
 ///      ref parameter rather than an owned mutex.
 ///
 /// Anything else (e.g. `mutex_lock(get_ref())`) returns
-/// `None` â€” conservatively skipping the check rather than
+/// `None` — conservatively skipping the check rather than
 /// overreporting. The type check upstream guarantees the
 /// arg's type is `&Mutex<T>` / `&mut Mutex<T>`, so a bare Var
 /// here is necessarily a reference-typed binding.
@@ -27493,7 +27493,7 @@ fn is_guard_ref_mut(ty: &Type, element: &Type) -> bool {
 ///   condvar_notify_one(cv: &Condvar) -> i64
 ///   condvar_notify_all(cv: &Condvar) -> i64
 ///
-/// `Condvar` is affine â€” scope-exit drops free the kernel
+/// `Condvar` is affine — scope-exit drops free the kernel
 /// state. `wait` takes the guard by `mut ref` so the lock stays
 /// logically held; the kernel atomically releases + parks +
 /// re-acquires. v1 pairs with `Mutex<i64>` only (matches the
@@ -27752,7 +27752,7 @@ fn check_barrier_builtin(
 ///   stdin_read_line() -> OwnedStr
 ///   flush_stdout() -> i64
 ///
-/// `FileHandle` is affine â€” it wraps a FILE* as i64 and is dropped
+/// `FileHandle` is affine — it wraps a FILE* as i64 and is dropped
 /// at scope exit via fclose if nonzero.
 fn check_file_builtin(
     name: &str,
@@ -28201,10 +28201,10 @@ fn check_rwlock_builtin(
 
 /// Type-directed elaboration for `vec()` (zero args). The
 /// element type can't be inferred from the call alone, but
-/// when the call appears in a context that names the type â€”
+/// when the call appears in a context that names the type —
 /// a `let xs: Vec<T> = vec();`, an `xs = vec();` reassign,
 /// or a `return vec();` from a function whose return type is
-/// `Vec<T>` â€” we elaborate the call against that type and
+/// `Vec<T>` — we elaborate the call against that type and
 /// produce a typed `vec()` call with the right element. Refines
 /// #8 from STATUS.md. Returns `Some(CheckedExpr)` when both
 /// the syntactic shape (`vec()` with no args) and the
@@ -28287,7 +28287,7 @@ fn try_elaborate_vec_with_capacity(
     ))
 }
 
-// ARC 1.1: generic-context `hashmap_new()` â€” read the binding's
+// ARC 1.1: generic-context `hashmap_new()` — read the binding's
 // type annotation to infer (K, V) when present. Otherwise the
 // fallback in `check_hashmap_builtin` returns
 // `HashMap<i64, i64>` (backwards-compatible default for code
@@ -28338,7 +28338,7 @@ fn try_elaborate_empty_hashmap(
 /// When the let annotation is `Box<dyn Iface>` and the user writes
 /// `let b: Box<dyn Iface> = box(value);` without the explicit
 /// `as dyn Iface` cast, this helper synthesizes the DynCoerce node
-/// that `__box_new` codegen expects â€” making the cast optional in
+/// that `__box_new` codegen expects — making the cast optional in
 /// the common case.
 ///
 /// Restrictions kept from the explicit-cast path:
@@ -28375,11 +28375,11 @@ fn try_elaborate_box_to_dyn(
         _ => return None,
     };
     // Don't intercept if the user already wrote `box(value as dyn Iface)`
-    // (or any cast at the top level) â€” let the existing path handle it.
+    // (or any cast at the top level) — let the existing path handle it.
     if matches!(&args[0].kind, ExprKind::Cast { .. }) {
         return None;
     }
-    // Only the Var(_) source shape is supported â€” see the
+    // Only the Var(_) source shape is supported — see the
     // doc-comment restriction above.
     if !matches!(&args[0].kind, ExprKind::Var(_)) {
         return None;
@@ -28492,7 +28492,7 @@ fn check_try_vec_builtin(
 
 /// L2 Phase 1 (2026-06-07): `box(expr)` heap-allocating
 /// constructor. Returns `Box<typeof expr>`. v1 accepts
-/// primitives (`i64`, `bool`, â€¦), `dyn Iface`, `Vec<T>`,
+/// primitives (`i64`, `bool`, …), `dyn Iface`, `Vec<T>`,
 /// `OwnedStr`, and (as of BUG-97, 2026-08-04) any struct type --
 /// including non-Copy and self-referential ("recursive") ones,
 /// whose Drop is walked recursively by the backends (see
@@ -28530,7 +28530,7 @@ fn check_box_builtin(
     // drop (Vec, OwnedStr) and are queued. `dyn Iface` ships in
     // Phase 3 (2026-06-08): Box<dyn Iface> is a 16-byte fat
     // pointer { vtable, heap_data_ptr } where the data slot is
-    // heap-allocated and owned â€” unlocks the documented
+    // heap-allocated and owned — unlocks the documented
     // blocker `struct Drawer { r: Box<dyn Renderer> }`.
     let is_supported = match &inner_ty {
         Type::I8 | Type::I16 | Type::I32 | Type::I64
@@ -28576,7 +28576,7 @@ fn check_box_builtin(
                 format!(
                     "box() v1 supports Copy + sized scalar types (primitives), any \
                      struct type, `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. \
-                     Other owning inner types (Box<Box<T>>, Box<HashMap<â€¦>>, tuples, \
+                     Other owning inner types (Box<Box<T>>, Box<HashMap<…>>, tuples, \
                      etc.) remain a follow-up.",
                     inner_ty
                 ),
@@ -28588,7 +28588,7 @@ fn check_box_builtin(
         return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
     }
     // L2 follow-up: for non-Copy inner (Vec, OwnedStr), the
-    // source Var is moved into the box â€” mark it so the
+    // source Var is moved into the box — mark it so the
     // scope-exit pass doesn't emit a Drop for it (which would
     // double-free the inner buffer the box now owns).
     consume_if_moved_var(&args[0], &inner, env, diagnostics);
@@ -28613,7 +28613,7 @@ fn check_box_builtin(
 ///
 /// L2 follow-up (2026-06-08): when `box()` accepts `Vec<T>` /
 /// `OwnedStr` inner (recursive-drop wiring), `unbox(ref b)` is
-/// still gated to Copy inner â€” returning the affine value by
+/// still gated to Copy inner — returning the affine value by
 /// value would alias the box's heap slot and double-free on
 /// scope exit. Users access non-Copy inner via method calls
 /// or by storing the box in a struct field.
@@ -28664,7 +28664,7 @@ fn check_unbox_builtin(
                 Diagnostic::new(
                     args[0].span,
                     format!(
-                        "unbox() needs a `ref Box<T>` argument, got `{}` â€” \
+                        "unbox() needs a `ref Box<T>` argument, got `{}` — \
                          take a reference: `unbox(ref b)`",
                         checked.ty()
                     ),
@@ -28679,7 +28679,7 @@ fn check_unbox_builtin(
     // L2 follow-up (2026-06-08): reject unbox of non-Copy inner.
     // `box()` accepts `Vec<T>` / `OwnedStr` for recursive-drop
     // storage, but copying the inner value back out via unbox
-    // would alias the box's heap slot â€” the temp and the box
+    // would alias the box's heap slot — the temp and the box
     // would both think they own the inner buffer and double-free
     // on scope exit. Pass the box by ref to a function, or
     // store it as a struct field, to use non-Copy inner.
@@ -28745,12 +28745,12 @@ fn check_vec_builtin(
     // `T: Copy`. Non-Copy elements (`Vec<Vec<i64>>` etc.) flow
     // through with element-aware free / clone / set helpers
     // emitted in the backend. The vec literal `vec(a, b, c)`
-    // still consumes each element by value â€” affine bindings
+    // still consumes each element by value — affine bindings
     // get moved into the call, same as before. Reference
     // types (`&T`, `&mut T`) remain rejected as a separate
     // category (they're not aggregates with ownership; they'd
     // dangle). Fixed-size arrays as Vec elements are tracked
-    // as #7 phase 2b â€” gate clearly until per-shape typedef
+    // as #7 phase 2b — gate clearly until per-shape typedef
     // + memcpy push/set lands.
     // L4 (B) Phase 4 (2026-06-09): non-empty `vec(ref a, ref b, ...)`
     // accepting a `Vec<ref T>` element type. Refs are Copy at
@@ -28881,7 +28881,7 @@ fn check_vec_builtin(
             diagnostics,
         );
         // Mark each Var argument as moved when the element
-        // type owns non-Copy heap â€” `vec(a, b)` transfers
+        // type owns non-Copy heap — `vec(a, b)` transfers
         // ownership of each Var into the new Vec's slot, so
         // the source binding's scope-exit drop would double-
         // free the heap now in the buffer. Mirrors push()
@@ -28984,7 +28984,7 @@ fn check_push_builtin(
     // `push(mut ref xs: Vec<ref T>, ref X)`. The Vec's element
     // type is `ref T` (or `mut ref T`); the pushed `ref X` must
     // reference a binding at the same-or-outer scope as the Vec
-    // receiver â€” otherwise X drops while `xs` still holds a
+    // receiver — otherwise X drops while `xs` still holds a
     // pointer into its storage, leaving a dangle on the next
     // Vec access.
     //
@@ -29057,7 +29057,7 @@ fn check_push_builtin(
                                     *ref_span,
                                     format!(
                                         "ref to '{}' cannot be pushed into '{}' (a `mut \
-                                         ref` parameter) â€” the Vec '{}' points to lives \
+                                         ref` parameter) — the Vec '{}' points to lives \
                                          in the caller's frame, which outlives '{}'. Only \
                                          a ref to one of this function's own parameters \
                                          can safely be pushed here.",
@@ -29080,7 +29080,7 @@ fn check_push_builtin(
                                     *ref_span,
                                     format!(
                                         "ref to '{}' (declared in an inner scope) cannot \
-                                         be pushed into '{}' â€” the pushed pointer would \
+                                         be pushed into '{}' — the pushed pointer would \
                                          dangle when '{}'s scope ends. Declare '{}' in \
                                          the same scope as '{}', or push by value with a \
                                          copy.",
@@ -29107,7 +29107,7 @@ fn check_push_builtin(
         diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
         consume_if_moved_var(&args[0], &xs, env, diagnostics);
     }
-    // The pushed value is taken by value â€” for non-Copy
+    // The pushed value is taken by value — for non-Copy
     // element types (OwnedStr / Vec / struct with heap),
     // the source Var binding must be marked moved.
     // Otherwise its scope-exit drop fires after push
@@ -29136,7 +29136,7 @@ fn check_push_builtin(
     )
 }
 
-/// `push_unchecked(mut ref xs, v)` â€” same as `push(mut ref xs, v)`
+/// `push_unchecked(mut ref xs, v)` — same as `push(mut ref xs, v)`
 /// but emits no capacity check and no realloc branch. The caller
 /// *must* ensure `xs` was pre-allocated with `vec_with_capacity(n)`
 /// and that no more than `n` elements are pushed. Violating this
@@ -29207,13 +29207,13 @@ fn check_push_unchecked_builtin(
     )
 }
 
-/// `pop(mut ref xs)` â€” remove and return the last element of
+/// `pop(mut ref xs)` — remove and return the last element of
 /// `xs`. The Vec's `len` decrements by one; the returned T
 /// is by-move for non-Copy element types (caller owns the
 /// heap, scope-exit drop on the binding fires). Runtime
 /// check aborts on empty Vec (no Option<T> sugar yet).
 ///
-/// Only the mut-ref form is supported in v1 â€” a consuming
+/// Only the mut-ref form is supported in v1 — a consuming
 /// form would have to return `(Vec<T>, T)` which requires
 /// non-Copy tuple elements (currently rejected). The mut-ref
 /// form composes cleanly: `let v = pop(mut ref xs);`.
@@ -29275,7 +29275,7 @@ fn check_pop_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” `sort(mut ref xs)` /
+/// Data-structures roadmap Level 1 — `sort(mut ref xs)` /
 /// `sort_by(mut ref xs, cmp)` on `Vec<i64>`.
 ///
 ///   sort(mut ref xs: Vec<i64>) -> i64
@@ -29287,7 +29287,7 @@ fn check_pop_builtin(
 /// existing Mutex<i64> / Atomic / Channel scoping); wider widths
 /// follow when the runtime helpers are parameterized.
 ///
-/// The Vec is borrowed via `mut ref` â€” sort is in-place, doesn't
+/// The Vec is borrowed via `mut ref` — sort is in-place, doesn't
 /// move ownership, and returns `i64 0` so it composes with
 /// `let _ = sort(mut ref xs);`.
 fn check_sort_builtin(
@@ -29416,10 +29416,10 @@ fn check_sort_builtin(
     )
 }
 
-/// Data-structures roadmap Level 3 â€” eager iterator combinators
+/// Data-structures roadmap Level 3 — eager iterator combinators
 /// on Vec<i64> (closures #309 + #310). All take fn-pointer args
 /// (which anon fn expressions from closure #308 supply
-/// ergonomically). v1 is eager â€” `vec_map` / `vec_filter`
+/// ergonomically). v1 is eager — `vec_map` / `vec_filter`
 /// materialize fresh Vecs. Loop fusion at monomorphization time
 /// is queued as a follow-up.
 ///
@@ -29653,7 +29653,7 @@ fn check_vec_replace_all_builtin(
 /// Closure #387: `vec_swap(mut ref xs, i, j) -> i64`. Swaps
 /// elements at indices `i` and `j`. Returns 0 (unit-style)
 /// for compatibility with the rest of the mutator family.
-/// Out-of-bounds indices are caller's responsibility â€” same
+/// Out-of-bounds indices are caller's responsibility — same
 /// no-runtime-check policy as `xs[i]` reads.
 fn check_vec_swap_builtin(
     args: &[Expr],
@@ -29713,7 +29713,7 @@ fn check_vec_swap_builtin(
 /// Closure #388: `vec_remove_at(mut ref xs, i) -> i64`. Removes
 /// element at index `i` while preserving order; shifts later
 /// elements left by one. Returns the removed value. Out-of-
-/// bounds is undefined (caller's responsibility) â€” same policy
+/// bounds is undefined (caller's responsibility) — same policy
 /// as swap_remove.
 fn check_vec_remove_at_builtin(
     args: &[Expr],
@@ -29766,7 +29766,7 @@ fn check_vec_remove_at_builtin(
 }
 
 /// Closure #397: `vec_zip_with(ref xs, ref ys, f) -> Vec<i64>`.
-/// Pairwise apply f to each (xs[i], ys[i]) â€” truncating to the
+/// Pairwise apply f to each (xs[i], ys[i]) — truncating to the
 /// shorter Vec. f has shape `fn(i64, i64) -> i64`.
 fn check_vec_zip_with_builtin(
     args: &[Expr],
@@ -29904,7 +29904,7 @@ fn check_vec_max_min_by_builtin(
 
 /// Closure #386: `vec_count_if(ref xs, pred) -> i64`. Returns
 /// the count of elements where pred(x) is true. Predicate has
-/// the same shape as vec_filter â€” `fn(i64) -> bool`.
+/// the same shape as vec_filter — `fn(i64) -> bool`.
 fn check_vec_count_if_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -29981,7 +29981,7 @@ fn check_vec_count_if_builtin(
 /// Closure #378: `vec_position(ref xs, pred) -> Option<i64>`.
 /// Returns the first index in xs where pred(x) is true, or
 /// Option.None if no element matches. Predicate has the same
-/// shape as vec_filter â€” `fn(i64) -> bool`.
+/// shape as vec_filter — `fn(i64) -> bool`.
 fn check_vec_position_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -30056,10 +30056,10 @@ fn check_vec_position_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” `reverse(mut ref xs)` /
+/// Data-structures roadmap Level 1 — `reverse(mut ref xs)` /
 /// `dedup(mut ref xs)`.
 ///
-/// Data-structures roadmap Level 3 â€” eager slicing combinators
+/// Data-structures roadmap Level 3 — eager slicing combinators
 /// on Vec<i64> (closure #313). Both borrow the input read-only
 /// and materialize a fresh Vec the caller owns + drops.
 ///
@@ -30301,9 +30301,9 @@ fn check_vec_utility_builtin(
         }
         "vec_concat"
         // Closure #407: vec_intersect / vec_difference / vec_union
-        // â€” all (ref Vec<i64>, ref Vec<i64>) -> Vec<i64>.
+        // — all (ref Vec<i64>, ref Vec<i64>) -> Vec<i64>.
         | "vec_intersect" | "vec_difference" | "vec_union" => {
-            // Both ref Vec<i64> (or mut ref â€” both readable).
+            // Both ref Vec<i64> (or mut ref — both readable).
             let ok = |t: &Type| -> bool {
                 matches!(
                     t,
@@ -30450,7 +30450,7 @@ fn check_option_i64_builtin(
     }
     if name == "option_and_then" {
         // Closure #391: f must be fn(i64) -> Option<i64>. Same
-        // as option_map but with the option-returning shape â€” no
+        // as option_map but with the option-returning shape — no
         // double-wrap.
         let a1_raw = check_expr(&args[1], env, signatures, diagnostics);
         let expected_fn = Type::FnPtr(
@@ -30618,7 +30618,7 @@ fn check_vec_take_drop_builtin(
 
 /// Closure #540: `vec_clamp_scalar(ref xs: Vec<i64>, lo: i64, hi: i64)
 /// -> Vec<i64>`. Element-wise clamp; result[i] = min(max(xs[i], lo), hi).
-/// No special handling when lo > hi â€” caller's responsibility.
+/// No special handling when lo > hi — caller's responsibility.
 fn check_vec_clamp_scalar_builtin(
     name: &str,
     args: &[Expr],
@@ -30731,11 +30731,11 @@ fn check_vec_take_drop_while_builtin(
     )
 }
 
-/// Data-structures roadmap Level 3 â€” fused map-then-fold
+/// Data-structures roadmap Level 3 — fused map-then-fold
 /// combinator (closure #316). Single-pass: `acc = g(acc, f(xs[i]))`
 /// for each element; no intermediate Vec allocation. The opt-in
 /// fused form for the common `vec_fold(ref vec_map(ref xs, f),
-/// init, g)` chain â€” equivalent results but zero heap traffic
+/// init, g)` chain — equivalent results but zero heap traffic
 /// for the intermediate.
 ///
 ///   vec_map_fold(ref xs: Vec<i64>, init: i64,
@@ -30836,7 +30836,7 @@ fn check_vec_map_fold_fused_builtin(
     )
 }
 
-/// Data-structures roadmap Level 3 â€” rest of the fused
+/// Data-structures roadmap Level 3 — rest of the fused
 /// combinator family (closure #317). Single-pass forms that
 /// avoid materializing intermediates between stages:
 ///
@@ -30847,13 +30847,13 @@ fn check_vec_map_fold_fused_builtin(
 ///   vec_map_filter(ref xs: Vec<i64>,
 ///                  f: fn(i64) -> i64,
 ///                  p: fn(i64) -> bool) -> Vec<i64>
-///       map then filter â€” two-pass internally (count, fill).
+///       map then filter — two-pass internally (count, fill).
 ///       Returns a fresh Vec the caller owns.
 ///   vec_map_filter_fold(ref xs: Vec<i64>, init: i64,
 ///                       f: fn(i64) -> i64,
 ///                       p: fn(i64) -> bool,
 ///                       g: fn(i64, i64) -> i64) -> i64
-///       map â†’ filter â†’ fold in one pass; no Vec materializes.
+///       map → filter → fold in one pass; no Vec materializes.
 fn check_vec_fused_family_builtin(
     name: &str,
     args: &[Expr],
@@ -31031,9 +31031,9 @@ fn check_vec_fused_family_builtin(
     )
 }
 
-/// Data-structures roadmap Level 3 â€” reduction combinators on
+/// Data-structures roadmap Level 3 — reduction combinators on
 /// Vec<i64> (closure #322). Single-pass loop with a fixed
-/// kernel â€” useful shorthands that don't need a user-supplied
+/// kernel — useful shorthands that don't need a user-supplied
 /// fn-ptr for the common cases:
 ///
 ///   vec_sum(ref xs) -> i64
@@ -31207,7 +31207,7 @@ fn check_vec_reduction_builtin(
     )
 }
 
-/// Data-structures roadmap Level 3 â€” vec_chain (closure #324).
+/// Data-structures roadmap Level 3 — vec_chain (closure #324).
 /// Concatenates two Vec<i64>s into a fresh result Vec. Both
 /// inputs are borrowed read-only; the caller owns + drops the
 /// returned Vec.
@@ -31335,10 +31335,10 @@ fn check_vec_pairwise_builtin(
 
 /// Closures #554-#557: bool-returning dual-Vec<i64> predicates.
 ///
-///   vec_subset_of(ref xs, ref ys)  â€” every elt of xs appears in ys (set sense)
-///   vec_disjoint(ref xs, ref ys)   â€” no elt appears in both
-///   vec_equal_set(ref xs, ref ys)  â€” same elts ignoring order/multiplicity
-///   vec_equal_seq(ref xs, ref ys)  â€” same length AND xs[i] == ys[i] for all i
+///   vec_subset_of(ref xs, ref ys)  — every elt of xs appears in ys (set sense)
+///   vec_disjoint(ref xs, ref ys)   — no elt appears in both
+///   vec_equal_set(ref xs, ref ys)  — same elts ignoring order/multiplicity
+///   vec_equal_seq(ref xs, ref ys)  — same length AND xs[i] == ys[i] for all i
 fn check_vec_dual_predicate_builtin(
     name: &str,
     args: &[Expr],
@@ -31444,8 +31444,8 @@ fn check_vec_chunks_builtin(
 }
 
 /// Closure #596: vec_group_by_value(ref xs: Vec<i64>) -> Vec<Vec<i64>>.
-/// Groups consecutive runs of equal values. e.g. [1,1,2,3,3,3] â†’ [[1,1],[2],[3,3,3]].
-/// Empty input â†’ empty outer.
+/// Groups consecutive runs of equal values. e.g. [1,1,2,3,3,3] → [[1,1],[2],[3,3,3]].
+/// Empty input → empty outer.
 fn check_vec_group_by_value_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -31533,7 +31533,7 @@ fn check_vec_flatten_builtin(
     )
 }
 
-/// Data-structures roadmap Level 4 #1 â€” Union-Find / disjoint-set
+/// Data-structures roadmap Level 4 #1 — Union-Find / disjoint-set
 /// (closure #325). First arena-based container under the
 /// affine model. v1 fixed i64 indices (no per-set payload).
 ///
@@ -31675,7 +31675,7 @@ fn check_union_find_builtin(
     )
 }
 
-/// Data-structures roadmap Level 4 #2 â€” BinaryHeap<T> wrapper
+/// Data-structures roadmap Level 4 #2 — BinaryHeap<T> wrapper
 /// type (closure #326). A dedicated affine handle that owns its
 /// own heap-ordered i64 buffer. v1: T = i64 only.
 ///
@@ -31807,7 +31807,7 @@ fn check_binary_heap_builtin(
     )
 }
 
-/// Bloom-filter builtins â€” closure #327, Level 4 #6.
+/// Bloom-filter builtins — closure #327, Level 4 #6.
 ///
 ///   bloom_filter_new(num_bits: i64, num_hashes: i64) -> BloomFilter
 ///       Fresh filter with `num_bits` bits and `num_hashes`
@@ -31941,7 +31941,7 @@ fn check_bloom_filter_builtin(
     )
 }
 
-/// Bst<T> builtins â€” closure #328, Level 4 #3.
+/// Bst<T> builtins — closure #328, Level 4 #3.
 ///
 ///   bst_new() -> Bst<i64>
 ///   bst_insert(mut ref bst, x: i64) -> bool
@@ -32072,7 +32072,7 @@ fn check_bst_builtin(
     )
 }
 
-/// Graph builtins â€” closure #329, Level 4 #5.
+/// Graph builtins — closure #329, Level 4 #5.
 ///
 ///   graph_new(num_nodes: i64) -> Graph
 ///       Empty weighted directed graph.
@@ -32084,7 +32084,7 @@ fn check_bst_builtin(
 ///       Count of nodes reachable from `start` (inclusive)
 ///       via BFS along directed edges.
 ///   graph_dfs_reach(ref g, start: i64) -> i64
-///       Same count using iterative DFS â€” equal to
+///       Same count using iterative DFS — equal to
 ///       `bfs_reach` modulo bug, separate for sanity checks.
 ///   graph_dijkstra(ref g, src: i64, dst: i64) -> Option<i64>
 ///       Shortest path weight via O(V^2) inner loop (no
@@ -32270,7 +32270,7 @@ fn check_graph_builtin(
     )
 }
 
-/// Trie builtins â€” closure #330, Level 4 #4.
+/// Trie builtins — closure #330, Level 4 #4.
 ///
 ///   trie_new() -> Trie
 ///   trie_insert(mut ref t, s: Str) -> bool
@@ -32390,7 +32390,7 @@ fn check_trie_builtin(
     )
 }
 
-/// SkipList builtins â€” closure #331, Level 4 #7.
+/// SkipList builtins — closure #331, Level 4 #7.
 ///
 ///   skiplist_new() -> SkipList
 ///   skiplist_insert(mut ref sl, x: i64) -> bool
@@ -32512,9 +32512,9 @@ fn check_skiplist_builtin(
 }
 
 ///   reverse(mut ref xs: Vec<T>) -> i64
-///       â€” in-place reverse, any element type. Returns 0.
+///       — in-place reverse, any element type. Returns 0.
 ///   dedup(mut ref xs: Vec<i64>) -> i64
-///       â€” in-place removal of consecutive duplicates; returns
+///       — in-place removal of consecutive duplicates; returns
 ///         the post-dedup length. v1: Vec<i64> only (needs
 ///         equality on the element type; will widen with the
 ///         Hash + Eq interfaces later).
@@ -32580,7 +32580,7 @@ fn check_reverse_dedup_builtin(
             return CheckedExpr::fallback_integer(span);
         }
     };
-    // dedup needs `==` on the element type â€” v1 ships i64 only,
+    // dedup needs `==` on the element type — v1 ships i64 only,
     // matching sort's scoping. reverse works for any Copy
     // element type (swap by value); affine handles aren't
     // a meaningful target.
@@ -32616,17 +32616,17 @@ fn check_reverse_dedup_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” Vec search ops on
+/// Data-structures roadmap Level 1 — Vec search ops on
 /// `Vec<i64>`. Read-only; the Vec is borrowed via `ref` (not
 /// `mut ref`).
 ///
 ///   find(ref xs: Vec<i64>, needle: i64) -> Option<i64>
-///       â€” linear scan; returns Some(index) of first match
+///       — linear scan; returns Some(index) of first match
 ///         or None.
 ///   contains(ref xs: Vec<i64>, needle: i64) -> bool
-///       â€” same scan, just returns the boolean.
+///       — same scan, just returns the boolean.
 ///   binary_search(ref xs: Vec<i64>, needle: i64) -> Option<i64>
-///       â€” assumes xs is sorted ascending. Returns Some(index)
+///       — assumes xs is sorted ascending. Returns Some(index)
 ///         on match, None on absent. Caller responsibility to
 ///         pre-sort (we don't verify).
 ///
@@ -32735,13 +32735,13 @@ fn check_search_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” math surface builtins.
+/// Data-structures roadmap Level 1 — math surface builtins.
 ///
 ///   pow(base: f64, exp: f64) -> f64
 ///   sqrt(x: f64) -> f64
 ///   sin(x: f64) -> f64 / cos / tan
 ///   floor(x: f64) -> f64 / ceil
-///   abs(x: i64) -> i64 (or abs(x: f64) -> f64) â€” overloaded
+///   abs(x: i64) -> i64 (or abs(x: f64) -> f64) — overloaded
 ///     on argument type. i64 path: `x < 0 ? -x : x` inline;
 ///     f64 path: libm fabs.
 ///
@@ -32890,10 +32890,10 @@ fn check_math_builtin(
             span,
         );
     }
-    // Closure #380 + #393: integer math â€” i64_gcd / i64_lcm /
+    // Closure #380 + #393: integer math — i64_gcd / i64_lcm /
     // i64_pow / i64_abs_diff / i64_signum. All take i64 args
     // and return i64. Branch before the f64 coerce loop below.
-    // Closure #400: ASCII byte-class predicates (1-arg i64 â†’ bool).
+    // Closure #400: ASCII byte-class predicates (1-arg i64 → bool).
     if matches!(
         name,
         "is_ascii_digit" | "is_ascii_alpha"
@@ -32915,11 +32915,11 @@ fn check_math_builtin(
             span,
         );
     }
-    // Closure #403: f64_to_bits takes f64 â†’ i64. Special-case
+    // Closure #403: f64_to_bits takes f64 → i64. Special-case
     // here so the F64 coerce loop below doesn't promote the
-    // return type. f64_from_bits takes i64 â†’ f64 (handled below
+    // return type. f64_from_bits takes i64 → f64 (handled below
     // by the existing fallthrough since I64 doesn't promote to
-    // F64 silently â€” we explicitly coerce).
+    // F64 silently — we explicitly coerce).
     if name == "f64_to_bits" {
         let arg = check_expr(&args[0], env, signatures, diagnostics);
         let coerced = coerce_checked(
@@ -32955,7 +32955,7 @@ fn check_math_builtin(
         );
     }
     // Closure #496: f64_remap(x, from_lo, from_hi, to_lo, to_hi) -> f64.
-    // 5-arg primitive â€” special-cased since the generic
+    // 5-arg primitive — special-cased since the generic
     // want_args path supports 0/1/2/3 only.
     if name == "f64_remap" {
         if args.len() != 5 {
@@ -32986,7 +32986,7 @@ fn check_math_builtin(
             span,
         );
     }
-    // Closure #437: f64_round_to(x, digits) â€” (f64, i64) -> f64.
+    // Closure #437: f64_round_to(x, digits) — (f64, i64) -> f64.
     // Mixed-type signature so we can't rely on the generic
     // f64-coerce loop below.
     if name == "f64_round_to" {
@@ -33139,7 +33139,7 @@ fn check_math_builtin(
             span,
         );
     }
-    // Closure #600: f64_pow_int(base: f64, k: i64) â€” mixed args.
+    // Closure #600: f64_pow_int(base: f64, k: i64) — mixed args.
     if name == "f64_pow_int" {
         let b_raw = check_expr(&args[0], env, signatures, diagnostics);
         let b = coerce_checked(
@@ -33197,12 +33197,12 @@ fn check_math_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” RNG surface builtins.
+/// Data-structures roadmap Level 1 — RNG surface builtins.
 ///
-///   seed_rng(seed: u64) -> i64       â€” set thread-local RNG state
-///   rand_i64() -> i64                â€” next 64-bit pseudo-random
+///   seed_rng(seed: u64) -> i64       — set thread-local RNG state
+///   rand_i64() -> i64                — next 64-bit pseudo-random
 ///   rand_in_range(lo: i64, hi: i64) -> i64
-///                                    â€” uniform `lo..hi` (exclusive)
+///                                    — uniform `lo..hi` (exclusive)
 ///
 /// Backed by a thread-local xorshift64 PRNG state per backend.
 /// Deterministic from a given seed; thread-local means each
@@ -33310,7 +33310,7 @@ fn check_rng_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” hash surface builtins.
+/// Data-structures roadmap Level 1 — hash surface builtins.
 ///
 ///   hash_i64(x: i64) -> u64
 ///   hash_str(s: Str) -> u64
@@ -33320,7 +33320,7 @@ fn check_rng_builtin(
 /// prime 0x100000001b3). Good enough for hash-table buckets;
 /// SipHash queued as a future hardening step for
 /// adversarial-input scenarios. All hash builtins are pure +
-/// deterministic â€” same input â‡’ same output every time.
+/// deterministic — same input ⇒ same output every time.
 fn check_hash_builtin(
     name: &str,
     args: &[Expr],
@@ -33582,18 +33582,18 @@ fn check_assert_eq_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” BinaryHeap-on-Vec ops.
+/// Data-structures roadmap Level 2 — BinaryHeap-on-Vec ops.
 /// v1 design: a `Vec<i64>` used as a min-heap. Dedicated
 /// `BinaryHeap<T>` wrapper type is a v2 ergonomic layer.
 ///
 ///   heap_push(mut ref xs: Vec<i64>, v: i64) -> i64
-///       â€” push v + sift-up; returns the new len
+///       — push v + sift-up; returns the new len
 ///   heap_pop(mut ref xs: Vec<i64>) -> Option<i64>
-///       â€” extract min + sift-down (or None on empty)
+///       — extract min + sift-down (or None on empty)
 ///   heap_peek(ref xs: Vec<i64>) -> Option<i64>
-///       â€” read the min (heap root) without modifying
+///       — read the min (heap root) without modifying
 ///   heapify(mut ref xs: Vec<i64>) -> i64
-///       â€” transform an arbitrary Vec into a valid min-heap
+///       — transform an arbitrary Vec into a valid min-heap
 ///         via Floyd's O(n) bottom-up algorithm
 fn check_heap_builtin(
     name: &str,
@@ -33725,7 +33725,7 @@ fn check_heap_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” Deque<i64> ring buffer
+/// Data-structures roadmap Level 2 — Deque<i64> ring buffer
 /// builtins.
 ///
 ///   deque_new() -> Deque<i64>                          empty
@@ -33891,7 +33891,7 @@ fn check_deque_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” HashSet<i64> builtins.
+/// Data-structures roadmap Level 2 — HashSet<i64> builtins.
 ///
 ///   hashset_new() -> HashSet<i64>                empty
 ///   hashset_insert(mut ref s, v: i64) -> bool    true if newly inserted
@@ -34030,14 +34030,14 @@ fn check_hashset_builtin(
     )
 }
 
-/// Layer 2 of `unsafe.md` â€” `Pool<T>` / `Handle<T>` builtins.
+/// Layer 2 of `unsafe.md` — `Pool<T>` / `Handle<T>` builtins.
 ///
 ///   pool_new() -> Pool<i64>                     empty
 ///   pool_alloc(mut ref p, v: i64) -> Handle<i64>
 ///   pool_get(ref p, h: Handle<i64>) -> Option<i64>
 ///       Returns None on generation mismatch (use-after-free).
 ///   pool_free(mut ref p, h: Handle<i64>) -> i64
-///       Returns 0 (dummy â€” vÄá¹‡à¥€ has no Unit type today;
+///       Returns 0 (dummy — vÄá¹‡à¥€ has no Unit type today;
 ///       semantically void). Bumps the slot's generation so
 ///       any surviving Handle gets the UAF-via-None signal on
 ///       the next `pool_get`.
@@ -34046,7 +34046,7 @@ fn check_hashset_builtin(
 /// embedded plan. Use-after-free becomes a `None` return
 /// instead of UB; double-free becomes a no-op (the second
 /// `pool_free` sees a generation mismatch and silently skips).
-/// Layer 2.1b â€” codegen lands in 2.1c.
+/// Layer 2.1b — codegen lands in 2.1c.
 ///
 /// V1: T = i64 only (mirrors HashSet / HashMap / etc.).
 fn check_pool_builtin(
@@ -34096,7 +34096,7 @@ fn check_pool_builtin(
     }
     // First arg is always the pool ref. `pool_alloc` / `pool_free`
     // need `mut ref Pool<T>`; `pool_get` accepts either `ref` or
-    // `mut ref` (read-only inspection â€” the generation check is
+    // `mut ref` (read-only inspection — the generation check is
     // a load, not a store).
     let p = check_expr(&args[0], env, signatures, diagnostics);
     let is_mut_op = matches!(name, "pool_alloc" | "pool_free");
@@ -34188,17 +34188,17 @@ fn check_pool_builtin(
     )
 }
 
-/// Layer 1.3 of `unsafe.md` â€” `Tainted<T>` wrapper builtins.
+/// Layer 1.3 of `unsafe.md` — `Tainted<T>` wrapper builtins.
 ///
-/// `taint(v: T) -> Tainted<T>` â€” explicit wrap. Intended as a
+/// `taint(v: T) -> Tainted<T>` — explicit wrap. Intended as a
 /// testing / bootstrapping hook for the wrapper type until the
 /// `*p` raw-pointer deref operator lands as the canonical
 /// producer of tainted values. The wrap is purely a type-level
 /// discipline; the runtime representation is unchanged.
 ///
-/// `assert_safe(t: Tainted<T>) -> T` â€” strip. The user vouches
+/// `assert_safe(t: Tainted<T>) -> T` — strip. The user vouches
 /// that the invariant the safe surface assumes (pointer was
-/// valid, load wasn't torn, â€¦) actually holds. V1 emits no
+/// valid, load wasn't torn, …) actually holds. V1 emits no
 /// runtime check; future revisions could thread bounds or
 /// canary verification through this call.
 ///
@@ -34247,7 +34247,7 @@ fn check_tainted_builtin(
         );
     }
     // assert_safe(t: Tainted<T>) -> T. The argument must already
-    // be of type Tainted<â€¦>; we don't auto-coerce safe values
+    // be of type Tainted<…>; we don't auto-coerce safe values
     // into a Tainted wrapper just to strip it.
     match inner.ty() {
         Type::Tainted(t) => {
@@ -34276,20 +34276,20 @@ fn check_tainted_builtin(
     }
 }
 
-/// Layer 1.3 of `unsafe.md` â€” raw-pointer load/store ops.
+/// Layer 1.3 of `unsafe.md` — raw-pointer load/store ops.
 ///
-/// `raw_load(p: *const T) -> Tainted<T>` â€” reads through the
+/// `raw_load(p: *const T) -> Tainted<T>` — reads through the
 /// pointer. The result is wrapped in `Tainted<T>` to force
 /// the user to vouch for the load's validity (via
 /// `assert_safe`) before flowing into safe-typed slots. Also
 /// accepts `*mut T` since reads through mut pointers are
 /// equally suspect.
 ///
-/// `raw_store(p: *mut T, v: T) -> i64` â€” writes `v` through
+/// `raw_store(p: *mut T, v: T) -> i64` — writes `v` through
 /// the pointer. Only `*mut T` is accepted (storing through
 /// a `*const T` would be a const-correctness violation). The
 /// value `v` must already be of type T (no auto-Tainted
-/// passthrough â€” the user must `assert_safe()` first if the
+/// passthrough — the user must `assert_safe()` first if the
 /// source is tainted).
 ///
 /// Both builtins are gated by `INTENT_TARGET_EMBEDDED=1`
@@ -34395,15 +34395,15 @@ fn check_raw_load_store_builtin(
     )
 }
 
-/// Layer 3.1 of `unsafe.md` â€” heap allocation in `unsafe`.
+/// Layer 3.1 of `unsafe.md` — heap allocation in `unsafe`.
 ///
-/// `unsafe_alloc(n: i64) -> *mut i64` â€” allocates `n` zero-
+/// `unsafe_alloc(n: i64) -> *mut i64` — allocates `n` zero-
 /// initialized i64 slots on the heap. Returns the base pointer.
 /// The user is responsible for tracking the length (or wrapping
 /// in `BoundedPtr<T>` from Layer 3.2 once that lands).
 ///
-/// `unsafe_free(p: *mut i64) -> i64` â€” releases an allocation
-/// previously returned by `unsafe_alloc`. Returns 0 (dummy â€”
+/// `unsafe_free(p: *mut i64) -> i64` — releases an allocation
+/// previously returned by `unsafe_alloc`. Returns 0 (dummy —
 /// vÄá¹‡à¥€ has no Unit type today). Freeing a null pointer or
 /// double-freeing is undefined behavior at the user's level;
 /// the canary instrumentation (Layer 3.1+ follow-up) will add
@@ -34413,7 +34413,7 @@ fn check_raw_load_store_builtin(
 /// they're indirectly gated by `INTENT_TARGET_EMBEDDED=1`
 /// (raw ptr types in safe signatures are rejected on hosted).
 ///
-/// V1 restricts T to `i64` â€” same as Pool / Tainted / raw_load.
+/// V1 restricts T to `i64` — same as Pool / Tainted / raw_load.
 fn check_unsafe_alloc_free_builtin(
     name: &str,
     args: &[Expr],
@@ -34481,13 +34481,13 @@ fn check_unsafe_alloc_free_builtin(
     }
 }
 
-/// Layer 3.2 of `unsafe.md` â€” `BoundedPtr<T>` fat pointer
+/// Layer 3.2 of `unsafe.md` — `BoundedPtr<T>` fat pointer
 /// with runtime bounds checks.
 ///
 ///   bptr_new(p: *mut i64, len: i64, capacity: i64) -> BoundedPtr<i64>
 ///       wraps a raw pointer with its bounds. `len` must
-///       be â‰¤ `capacity` â‰¤ the underlying allocation's slot
-///       count â€” the user vouches for that invariant at
+///       be ≤ `capacity` ≤ the underlying allocation's slot
+///       count — the user vouches for that invariant at
 ///       construction time.
 ///   bptr_get(bp: ref BoundedPtr<i64>, i: i64) -> Option<i64>
 ///       bounds-checked load; None on out-of-bounds.
@@ -34678,7 +34678,7 @@ fn check_bptr_builtin(
     )
 }
 
-/// Layer 5 v2 foundation of `unsafe.md` â€” `Region` bump-
+/// Layer 5 v2 foundation of `unsafe.md` — `Region` bump-
 /// allocator arena builtins.
 ///
 ///   region_new() -> Region                          empty arena
@@ -34694,7 +34694,7 @@ fn check_bptr_builtin(
 /// adds the lifetime annotation as a follow-up commit; the
 /// runtime side is identical, only the type-system refinement
 /// changes. Today the safety property is "arena's affinity +
-/// scope-exit drop frees everything together" â€” which gives
+/// scope-exit drop frees everything together" — which gives
 /// you deterministic O(1)-per-region free and rules out the
 /// most common arena-bug class (forgetting to free individual
 /// slots) by construction.
@@ -34806,12 +34806,12 @@ fn check_region_builtin(
     )
 }
 
-/// Layer 5 of `unsafe.md` â€” `ArenaRef<T>` load/store builtins.
+/// Layer 5 of `unsafe.md` — `ArenaRef<T>` load/store builtins.
 ///
-/// `aref_load(r: ArenaRef<i64>) -> i64` â€” direct read through
-///   the lifetime-tagged pointer. No `Tainted<T>` wrapping â€”
+/// `aref_load(r: ArenaRef<i64>) -> i64` — direct read through
+///   the lifetime-tagged pointer. No `Tainted<T>` wrapping —
 ///   the compile-time scope binding IS the safety proof.
-/// `aref_store(r: ArenaRef<i64>, v: i64) -> i64` â€” direct write.
+/// `aref_store(r: ArenaRef<i64>, v: i64) -> i64` — direct write.
 ///   Returns 0 (dummy void).
 ///
 /// V1: T = i64.
@@ -34877,23 +34877,23 @@ fn check_aref_builtin(
     )
 }
 
-/// T2.1 of safety-standard arc â€” memory-mapped register I/O.
+/// T2.1 of safety-standard arc — memory-mapped register I/O.
 /// V1: u32-width registers only (the most common MMIO width
 /// for ARM Cortex-M and similar embedded targets).
 ///
-/// `mmio_read_u32(addr: i64) -> u32` â€” volatile load. The
+/// `mmio_read_u32(addr: i64) -> u32` — volatile load. The
 /// `volatile` qualifier on the emitted load instruction
 /// prevents the compiler from coalescing or reordering reads
 /// across the call site. Required for peripheral registers
 /// where the act of reading itself has side effects (e.g.,
 /// clearing an interrupt-pending flag).
 ///
-/// `mmio_write_u32(addr: i64, v: u32) -> i64` â€” volatile store.
-/// Same reasoning â€” peripheral writes can latch state and the
+/// `mmio_write_u32(addr: i64, v: u32) -> i64` — volatile store.
+/// Same reasoning — peripheral writes can latch state and the
 /// compiler mustn't elide or reorder them.
 ///
 /// Both builtins are gated by `INTENT_TARGET_EMBEDDED=1`
-/// indirectly â€” they take an `i64` address but produce
+/// indirectly — they take an `i64` address but produce
 /// effects only meaningful in an embedded context; the
 /// surrounding `unsafe(reason = "...") { ... }` block is the
 /// auditable trail. Future Tier 3 work could thread a `Mmio<T>`
@@ -35012,7 +35012,7 @@ fn check_mmio_builtin(
     }
 }
 
-/// T2.2 â€” `volatile_read(ptr: ref i64) -> i64` and
+/// T2.2 — `volatile_read(ptr: ref i64) -> i64` and
 /// `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
 ///
 /// Ref-based volatile MMIO access. The caller passes a reference
@@ -35024,7 +35024,7 @@ fn check_mmio_builtin(
 ///
 /// **Why not a C-style `volatile` storage qualifier?**
 /// A type-level qualifier would infect every type that mentions
-/// the register â€” `Vec<volatile i64>` would be meaningless, and
+/// the register — `Vec<volatile i64>` would be meaningless, and
 /// the qualifier would silently disappear in generic parameters.
 /// Keeping volatility at the *access* level (these two builtins)
 /// instead of the *storage* level keeps the type system clean.
@@ -35117,13 +35117,13 @@ fn check_volatile_rw_builtin(
     )
 }
 
-/// Arc 8 step 8e â€” `sleep_ms(ms: i64) -> i64`. Blocking
+/// Arc 8 step 8e — `sleep_ms(ms: i64) -> i64`. Blocking
 /// millisecond-precision delay backed by POSIX `usleep` (C
 /// backend) / declared `@usleep` (LLVM backend). Returns 0
 /// on success.
 ///
 /// **Semantics in v1.5:** truly blocks the calling OS thread.
-/// Used as the primary timing primitive for async fns â€” the
+/// Used as the primary timing primitive for async fns — the
 /// async-fn body desugars synchronously, so an
 /// `async fn delay(ms) { sleep_ms(ms); }` is exactly a
 /// timer-deferred completion in the synchronous v1 model.
@@ -35207,7 +35207,7 @@ fn check_stdin_ready_within_ms_builtin(
     )
 }
 
-/// Arc 8 step 8e proper â€” TCP networking primitives.
+/// Arc 8 step 8e proper — TCP networking primitives.
 ///
 ///   tcp_listen(port: i64) -> i64
 ///       Create a TCP server socket bound to 127.0.0.1:port.
@@ -35238,7 +35238,7 @@ fn check_stdin_ready_within_ms_builtin(
 /// All eight wrap libc directly. The thread-local recv buffer
 /// is 4096 bytes; one buffer per OS thread so concurrent
 /// `task` bodies have independent buffers. v1.6 limitation:
-/// recv is blocking (no `O_NONBLOCK` + epoll yet) â€” pair with
+/// recv is blocking (no `O_NONBLOCK` + epoll yet) — pair with
 /// `task` + `join` for concurrency. The Arc 8 runtime arc
 /// (8c state-machine + 8d epoll event loop) upgrades these
 /// to non-blocking variants without breaking source.
@@ -35310,7 +35310,7 @@ fn check_tcp_builtin(
     )
 }
 
-/// Arc 8 v2 â€” epoll event-loop primitives + non-blocking
+/// Arc 8 v2 — epoll event-loop primitives + non-blocking
 /// I/O variants. Linux only in v2 (kqueue + IOCP queued).
 ///
 ///   epoll_new() -> i64
@@ -35379,7 +35379,7 @@ fn check_epoll_builtin(
         );
         typed_args.push(coerced.expr);
     }
-    // Arc 8 v3 â€” canonicalize async-flavored aliases to their
+    // Arc 8 v3 — canonicalize async-flavored aliases to their
     // v2 nb counterparts at the typed-IR boundary so the
     // backends only need to know one name per primitive. When
     // the compiler-driven state-machine transform lands later
@@ -35403,7 +35403,7 @@ fn check_epoll_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” HashMap<i64, i64>
+/// Data-structures roadmap Level 2 — HashMap<i64, i64>
 /// builtins. v1 K = V = i64 (Copy element types both ways).
 ///
 ///   hashmap_new() -> HashMap<i64, i64>
@@ -35547,20 +35547,20 @@ fn check_hashmap_builtin(
     // ARC 1.4b: relax from (i64, i64)-only to (i64, V) where V
     // is any scalar integer type. Wider K (u64, struct, OwnedStr)
     // ships in ARC 1.7 / Arc 4. The per-(K, V) bundle emission
-    // wired in 1.4câ€“1.5e supplies the C/LLVM helpers that make
+    // wired in 1.4c–1.5e supplies the C/LLVM helpers that make
     // these new types work end-to-end.
     let v_is_scalar_int = matches!(
         v_ty,
         Type::I8 | Type::I16 | Type::I32 | Type::I64
             | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Bool
     );
-    // ARC 4.2: OwnedStr V with K=i64 â€” map clones each value
+    // ARC 4.2: OwnedStr V with K=i64 — map clones each value
     // internally on insert (sidesteps affine local-drop
     // issue), drop / clear walk free each stored copy, _get
     // returns a fresh clone, _insert / _remove transfer the
     // prior stored V ownership back to the caller via
     // Option<OwnedStr>.
-    // ARC 4.3: OwnedStr V with K=OwnedStr â€” same V semantics
+    // ARC 4.3: OwnedStr V with K=OwnedStr — same V semantics
     // on top of the OwnedStr K bundle (drop walks both axes).
     let v_is_owned_str_compatible_k = matches!(v_ty, Type::OwnedStr)
         && matches!(k_ty, Type::I64 | Type::OwnedStr);
@@ -35577,17 +35577,17 @@ fn check_hashmap_builtin(
         }
         _ => false,
     };
-    // ARC 4.5: f64 K â€” built-in equality + reinterpret hashing.
+    // ARC 4.5: f64 K — built-in equality + reinterpret hashing.
     // Caveat: NaN != NaN, so HashMap<f64, V> with NaN keys is
     // unrecoverable. Documented; user can guard with f64_is_nan.
     let k_is_f64 = matches!(k_ty, Type::F64);
-    // ARC 4.1: OwnedStr K â€” built-in FNV-1a byte hashing +
+    // ARC 4.1: OwnedStr K — built-in FNV-1a byte hashing +
     // strcmp equality. The map takes ownership of each key
     // string; clear/drop walk frees them. Insert is affine:
     // duplicate keys cause the *new* key to be freed and the
     // old one to remain (Rust HashMap<String, V> semantics).
     let k_is_owned_str = matches!(k_ty, Type::OwnedStr);
-    // ARC 4.4: Tuple K where every element is i64 â€” hash via
+    // ARC 4.4: Tuple K where every element is i64 — hash via
     // hash_combine, equality pairwise. Elements are Copy so no
     // drop walk. Initially scoped to (i64, i64) but generalized
     // here to any-arity tuple of i64. Wider element types
@@ -35596,7 +35596,7 @@ fn check_hashmap_builtin(
         Type::Tuple(els) => !els.is_empty() && els.iter().all(|t| matches!(t, Type::I64)),
         _ => false,
     };
-    // ARC 4.6: Vec<i64> K â€” map clones each Vec on insert
+    // ARC 4.6: Vec<i64> K — map clones each Vec on insert
     // (deep-copy of data array; sidesteps affine-system gap
     // for Vec moved into builtin args). Drop walks free each
     // stored Vec's data buffer. Hash: length-prefixed FNV-1a
@@ -35610,7 +35610,7 @@ fn check_hashmap_builtin(
             args[0].span,
             format!(
                 "{}() supports `HashMap<i64, V>` / `HashMap<f64, V>` / \
-                 `HashMap<OwnedStr, V>` / `HashMap<(i64, â€¦, i64), V>` / \
+                 `HashMap<OwnedStr, V>` / `HashMap<(i64, …, i64), V>` / \
                  `HashMap<Vec<i64>, V>` for scalar V, or \
                  `HashMap<Struct, V>` when Struct implements both \
                  `Hash` and `Eq`; got HashMap<{}, {}>",
@@ -35671,7 +35671,7 @@ fn check_hashmap_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” BTreeSet<i64> builtins.
+/// Data-structures roadmap Level 2 — BTreeSet<i64> builtins.
 /// v1 backed by a sorted Vec<i64>: binary_search for lookup,
 /// memmove shift for insert/remove. Sorted iteration order.
 fn check_btreeset_builtin(
@@ -35794,7 +35794,7 @@ fn check_btreeset_builtin(
         );
         typed_args.push(v.expr);
     }
-    // Closure #346: range query â€” (ref s, i64 lo, i64 hi, mut ref Vec<i64> out) -> i64.
+    // Closure #346: range query — (ref s, i64 lo, i64 hi, mut ref Vec<i64> out) -> i64.
     if name == "btreeset_range" {
         let lo_raw = check_expr(&args[1], env, signatures, diagnostics);
         let lo = coerce_checked(lo_raw, &Type::I64, args[1].span, "btreeset_range lo", diagnostics);
@@ -35837,7 +35837,7 @@ fn check_btreeset_builtin(
     )
 }
 
-/// Data-structures roadmap Level 2 â€” BTreeMap<i64, i64>
+/// Data-structures roadmap Level 2 — BTreeMap<i64, i64>
 /// builtins (closure #307). v1 backed by parallel sorted
 /// `keys` + `values` Vecs; binary_search lower_bound for
 /// lookup, memmove shift for insert/remove. Sorted iteration
@@ -35997,7 +35997,7 @@ fn check_btreemap_builtin(
         );
         typed_args.push(v.expr);
     }
-    // Closure #346: range_keys / range_values â€” (ref m, i64 lo, i64 hi, mut ref Vec<i64> out) -> i64.
+    // Closure #346: range_keys / range_values — (ref m, i64 lo, i64 hi, mut ref Vec<i64> out) -> i64.
     if matches!(name, "btreemap_range_keys" | "btreemap_range_values") {
         let lo_raw = check_expr(&args[1], env, signatures, diagnostics);
         let lo = coerce_checked(lo_raw, &Type::I64, args[1].span, "btreemap range lo", diagnostics);
@@ -36042,7 +36042,7 @@ fn check_btreemap_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” string surface builtins.
+/// Data-structures roadmap Level 1 — string surface builtins.
 ///
 ///   str_contains(s: Str, needle: Str) -> bool
 ///   str_starts_with(s: Str, prefix: Str) -> bool
@@ -36180,7 +36180,7 @@ fn check_str_builtin(
         );
     }
     // Closure #426: str_byte_at(s: Str, i: i64) -> i64.
-    // Returns the i-th byte of s (0..255 range, no bounds check â€”
+    // Returns the i-th byte of s (0..255 range, no bounds check —
     // caller must ensure 0 <= i < strlen(s)).
     if name == "str_byte_at" {
         if args.len() != 2 {
@@ -36212,7 +36212,7 @@ fn check_str_builtin(
         );
     }
     // Closures #466 + #467: str_first_byte / str_last_byte
-    // â€” (Str) -> Option<i64>.
+    // — (Str) -> Option<i64>.
     if matches!(name, "str_first_byte" | "str_last_byte") {
         if args.len() != 1 {
             diagnostics.push(Diagnostic::new(
@@ -36241,7 +36241,7 @@ fn check_str_builtin(
         );
     }
     // Closures #442 + #443: str_index_of_byte / str_last_index_of_byte
-    // â€” (Str, i64) -> Option<i64>. First / last occurrence index of
+    // — (Str, i64) -> Option<i64>. First / last occurrence index of
     // byte `b` in `s`, or None.
     if matches!(name, "str_index_of_byte" | "str_last_index_of_byte") {
         if args.len() != 2 {
@@ -36275,7 +36275,7 @@ fn check_str_builtin(
             span,
         );
     }
-    // Closures #454..#457 + #462+: ASCII-class counters â€” (Str) -> i64.
+    // Closures #454..#457 + #462+: ASCII-class counters — (Str) -> i64.
     if matches!(
         name,
         "str_count_ascii_digits"
@@ -36398,7 +36398,7 @@ fn check_str_builtin(
             span,
         );
     }
-    // Closure #426: str_len_bytes(s: Str) -> i64 â€” strlen.
+    // Closure #426: str_len_bytes(s: Str) -> i64 — strlen.
     if name == "str_len_bytes" {
         if args.len() != 1 {
             diagnostics.push(Diagnostic::new(
@@ -36507,7 +36507,7 @@ fn check_str_builtin(
     }
     // Closure #390: str_chars(s) -> Vec<i64>. Each element is
     // a byte value [0..255]. Note: byte-level, not Unicode-
-    // codepoint-level â€” for ASCII-only strings the two are the
+    // codepoint-level — for ASCII-only strings the two are the
     // same.
     if name == "str_chars" {
         if args.len() != 1 {
@@ -36591,7 +36591,7 @@ fn check_str_builtin(
     // -> OwnedStr. (Str, i64, i64) signature doesn't match any
     // of the family-uniform shapes so it gets its own early-
     // return path. Out-of-bounds is clamped at runtime (no
-    // diagnostic) â€” the byte length is bounded by `strlen(s)`.
+    // diagnostic) — the byte length is bounded by `strlen(s)`.
     if name == "substring" {
         if args.len() != 3 {
             diagnostics.push(Diagnostic::new(
@@ -36660,7 +36660,7 @@ fn check_str_builtin(
         "str_replace" => 3,
         // str_contains / str_starts_with / str_ends_with /
         // str_split / str_index_of / str_strip_prefix /
-        // str_strip_suffix / str_count_char â€” all
+        // str_strip_suffix / str_count_char — all
         // (Str, Str)-shaped.
         _ => 2,
     };
@@ -36712,7 +36712,7 @@ fn check_str_builtin(
         );
         typed_args.push(needle.expr);
     }
-    // Closure #349: str_replace(s, from, to) â€” coerce args 1 & 2
+    // Closure #349: str_replace(s, from, to) — coerce args 1 & 2
     // to Str. Other 3-arg shapes don't exist in this builtin
     // family today, so the gating on `want_args == 3` is enough.
     if want_args == 3 {
@@ -36766,17 +36766,17 @@ fn check_str_builtin(
     )
 }
 
-/// Data-structures roadmap Level 1 â€” in-place Vec mutators.
+/// Data-structures roadmap Level 1 — in-place Vec mutators.
 ///
 ///   swap_remove(mut ref xs: Vec<T>, i: i64) -> T
-///       â€” O(1) remove at index i; slot's value moves to the
+///       — O(1) remove at index i; slot's value moves to the
 ///         caller. Implementation swaps slot i with the last
 ///         slot, then decrements len. Order NOT preserved.
 ///   insert(mut ref xs: Vec<T>, i: i64, v: T) -> i64
-///       â€” shift slots i.. right by one; place v at slot i.
+///       — shift slots i.. right by one; place v at slot i.
 ///         Returns the new len. Consumes v.
 ///   clear(mut ref xs: Vec<T>) -> i64
-///       â€” drop every element (when non-Copy) and set len=0.
+///       — drop every element (when non-Copy) and set len=0.
 ///         Capacity is preserved (no realloc). Returns 0.
 ///
 /// v1 element-type scope: any non-array element. Array elements
@@ -36950,7 +36950,7 @@ fn check_set_builtin(
         diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
         consume_if_moved_var(&args[0], &xs, env, diagnostics);
     }
-    // The stored value is taken by value â€” for non-Copy element
+    // The stored value is taken by value — for non-Copy element
     // types the source binding must be marked moved to avoid a
     // double-free at scope exit. Mirrors push (closure #171).
     consume_if_moved_var(&args[2], &value, env, diagnostics);
@@ -37017,10 +37017,10 @@ fn check_clone_builtin(
     )
 }
 
-/// `clone_at(xs, i)` â€” deep-clone of a single Vec slot,
+/// `clone_at(xs, i)` — deep-clone of a single Vec slot,
 /// returning an owned copy of the element. Lets users
 /// extract non-Copy elements (e.g. `Vec<Vec<i64>>` slots)
-/// without aliasing the owner's buffer â€” refines #7 phase
+/// without aliasing the owner's buffer — refines #7 phase
 /// 2d (otherwise the only way to read `xs[i]` for non-Copy
 /// elements is via the `for v in &xs` view, which doesn't
 /// generalize to "I want THIS slot, named, by value").
@@ -37042,7 +37042,7 @@ fn check_clone_at_builtin(
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
-    // Closure #291: `clone_at` now also accepts arrays â€”
+    // Closure #291: `clone_at` now also accepts arrays —
     // `clone_at(ref [T; N], i)` returns an owned clone of
     // slot i. Mirrors the Vec path.
     let element_type = match xs.ty().deref() {
@@ -37119,7 +37119,7 @@ fn check_clone_at_builtin(
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     // clone_at deliberately does NOT consume its first
-    // argument â€” same convention as `clone`. The result is
+    // argument — same convention as `clone`. The result is
     // a fresh owned element value the caller can `let`-bind
     // without aliasing the source slot.
     CheckedExpr::new(
@@ -37151,9 +37151,9 @@ fn explicit_cast(
         return cast_expr(checked, target.clone(), constant, span);
     }
 
-    // Enum â†’ integer cast: enums lower to an i32 tag in
+    // Enum → integer cast: enums lower to an i32 tag in
     // both backends, so casting to any integer type is a
-    // safe widening (or in-range narrowing â€” bounded by
+    // safe widening (or in-range narrowing — bounded by
     // the variant count, capped at 255). Useful for
     // serialization, table-driven dispatch, and printing
     // diagnostic values. T1.3 follow-up.
@@ -37161,7 +37161,7 @@ fn explicit_cast(
         return cast_expr(checked, target.clone(), None, span);
     }
 
-    // Reference â†’ raw pointer casts. Layer 1.1+ of the
+    // Reference → raw pointer casts. Layer 1.1+ of the
     // embedded-vÄá¹‡à¥€ unsafe plan (`unsafe.md`). The canonical way
     // to create a raw pointer from a place: `&x as *const T` /
     // `&mut x as *mut T`. The cast itself is permitted whenever
@@ -37172,13 +37172,13 @@ fn explicit_cast(
     // heap-store of stack-derived pointers.
     //
     // Cast rules (v1):
-    // - `Ref(T) â†’ Ptr(T)` â€” read-only view through a raw const ptr.
-    // - `RefMut(T) â†’ PtrMut(T)` â€” mutable view.
-    // - `RefMut(T) â†’ Ptr(T)` â€” downgrade to const.
-    // - `Ptr(T) â†’ PtrMut(T)` is rejected â€” the cast direction
+    // - `Ref(T) → Ptr(T)` — read-only view through a raw const ptr.
+    // - `RefMut(T) → PtrMut(T)` — mutable view.
+    // - `RefMut(T) → Ptr(T)` — downgrade to const.
+    // - `Ptr(T) → PtrMut(T)` is rejected — the cast direction
     //   that *adds* mutation capability is a meaningful safety
     //   downgrade and shouldn't be implicit. Users who want it
-    //   can go through `RefMut â†’ PtrMut` from the source.
+    //   can go through `RefMut → PtrMut` from the source.
     match (checked.ty(), target) {
         (Type::Ref(a), Type::Ptr(b)) if a == b => {
             return cast_expr(checked, target.clone(), None, span);
@@ -37193,7 +37193,7 @@ fn explicit_cast(
     }
 
     // L2 Phase 3 (2026-06-08): explicit `value as dyn Iface`
-    // cast â€” route through the same DynCoerce node the
+    // cast — route through the same DynCoerce node the
     // implicit-coercion path uses. Lets `box(value as dyn Iface)`
     // surface the dyn coercion inline without needing a
     // temporary `let d: dyn Iface = value;`. The validation
@@ -37248,7 +37248,7 @@ fn coerce_checked(
     // `[T; N]` with the same length and the inner expression is an
     // ArrayLit, push the coercion down into each element. Lets
     // `let xs: [f32; 3] = [1.5, 2.5, 3.5];` work even though the
-    // bare float literals default to f64 â€” each element gets
+    // bare float literals default to f64 — each element gets
     // wrapped in a Cast to the target element type. The existing
     // backend lowerings already handle that cast (fptrunc, trunc,
     // etc.). Only fires when both element types are numeric so we
@@ -37291,14 +37291,14 @@ fn coerce_checked(
         }
     }
 
-    // Vtables Phase 4b: `Vec<T> â†’ Vec<dyn Iface>` coercion
+    // Vtables Phase 4b: `Vec<T> → Vec<dyn Iface>` coercion
     // when the vec literal's elements all have an
     // `implement Iface for T`. The element T can vary
     // across positions (heterogeneous Vec<dyn Iface> is the
     // canonical vtable use case). Recheck each element
     // against `dyn Iface`; coerce_checked emits a DynCoerce
     // per element. Restricted to the literal `vec(...)` call
-    // shape â€” for arbitrary Vec<T> sources Phase 4 doesn't
+    // shape — for arbitrary Vec<T> sources Phase 4 doesn't
     // try to convert in place.
     if let (Type::Vec(src_elem), Type::Vec(tgt_elem)) = (checked.ty(), target) {
         if let Type::Object(iface_name) = tgt_elem.as_ref() {
@@ -37394,7 +37394,7 @@ fn coerce_checked(
     // different `Channel<T, N>`, retype the call's TypedExpr
     // so the backend dispatches on the requested (T, N).
     // Element T must be a supported width; N must be a power
-    // of 2 â‰¥ 1.
+    // of 2 ≥ 1.
     if let (Type::Channel(_, _), Type::Channel(tgt_elem, tgt_cap)) =
         (checked.ty(), target)
     {
@@ -37419,7 +37419,7 @@ fn coerce_checked(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
-                        "Channel capacity must be a power of 2 â‰¥ 1, got {}",
+                        "Channel capacity must be a power of 2 ≥ 1, got {}",
                         tgt_cap
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
@@ -37470,7 +37470,7 @@ fn coerce_checked(
         return CheckedExpr::fallback(target.clone(), span);
     }
 
-    // Vtables Phase 3: materialize the `T â†’ dyn Iface`
+    // Vtables Phase 3: materialize the `T → dyn Iface`
     // coercion as a dedicated IR node so backends can emit
     // the fat pointer literal without re-deriving the
     // source type from the inner expression. Only fires for
@@ -37830,7 +37830,7 @@ fn eval_cast_constant(
 
 /// Constant fold an explicit `as` cast. Unlike implicit
 /// coercion, an `as` cast is the user's intentional
-/// truncation / sign-bit reinterpretation request â€” int-to-int
+/// truncation / sign-bit reinterpretation request — int-to-int
 /// folds with two-complement wrap (`200_i64 as i8 == -56_i8`)
 /// instead of erroring on overflow. Float-to-int still
 /// requires an in-range, finite value (no defined wrap for
@@ -37853,13 +37853,13 @@ fn eval_as_cast_constant(constant: &TypedConst, target: &Type) -> Option<TypedCo
             // modulo wrap.
             let mut wrapped = ((*value - min) % span + span) % span + min;
             // Avoid the off-by-one case where modulo over a
-            // signed range collapses min and max â€” explicit clamp.
+            // signed range collapses min and max — explicit clamp.
             if wrapped > max {
                 wrapped = min;
             }
             Some(TypedConst::Int(wrapped))
         }
-        // Float-to-int / int-to-float / float-to-float â€” defer
+        // Float-to-int / int-to-float / float-to-float — defer
         // to the range-checked path. `as` between floats has no
         // wrap semantics; out-of-range floats stay an error here
         // so the user gets a diagnostic.
@@ -37902,7 +37902,7 @@ fn can_assign(actual: &CheckedExpr, expected: &Type) -> bool {
     }
 
     // Auto-borrow `OwnedStr` to `Str` in read-only positions:
-    // function args, comparisons, len() â€” anywhere a `Str` is
+    // function args, comparisons, len() — anywhere a `Str` is
     // expected, an `OwnedStr` works because both lower to the
     // same pointer-to-NUL-terminated-bytes representation and the
     // caller doesn't consume the buffer. The OwnedStr binding
@@ -37911,7 +37911,7 @@ fn can_assign(actual: &CheckedExpr, expected: &Type) -> bool {
         return true;
     }
 
-    // Closure #221 / vtables Phase 2a: `T â†’ dyn Iface` coercion.
+    // Closure #221 / vtables Phase 2a: `T → dyn Iface` coercion.
     // Accept when (Iface, T's struct/enum name) has an impl
     // declared. The actual fat-pointer materialization is
     // codegen work (Phase 3); the type-checker just validates
@@ -38151,7 +38151,7 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
             // Substitution walks into block-internal let RHSes
             // and the tail. The let-bound names themselves
             // shadow any matching subs entry inside the block,
-            // but for v1 we don't gate on that â€” block-expr
+            // but for v1 we don't gate on that — block-expr
             // lets typically use fresh names and substitution
             // targets are outer free vars.
             let new_stmts = stmts.iter().map(|s| match s {
@@ -38438,7 +38438,7 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
             expr_mentions(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
         }
         ExprKind::Forall { var, body, .. } => {
-            // The bound variable is locally scoped â€” don't count it.
+            // The bound variable is locally scoped — don't count it.
             if var == name { false } else { expr_mentions(body, name) }
         }
         ExprKind::IndirectCall { callee, args } => {
@@ -38605,7 +38605,7 @@ fn filter_relevant_facts(
 /// Effects analysis: walk a typed-statement body and report a
 /// diagnostic for each operation that produces an observable side
 /// effect or might. Used for both `pure fn` bodies and the body of
-/// a `parallel for` loop â€” same set of rules either way:
+/// a `parallel for` loop — same set of rules either way:
 ///   - `print`, `assert` with a runtime message: side-effecting I/O
 ///     or panic visible to the outside world.
 ///   - `IndexAssign`: mutates a (mutable) array/Vec.
@@ -38613,18 +38613,18 @@ fn filter_relevant_facts(
 ///     drop has observable effects (frees memory).
 ///   - `Call`: only allowed if the target function is `pure`. The
 ///     Vec mutator builtins (`push`, `set`, `clone`, `vec`) are
-///     intrinsically pure-by-construction â€” they return new values
-///     and the consumed operand isn't shared â€” but they're
+///     intrinsically pure-by-construction — they return new values
+///     and the consumed operand isn't shared — but they're
 ///     conservatively excluded from a `pure fn` body because they
 ///     touch the heap (which can trap on allocator failure).
 /// Synthetic moves (e.g., consumes inside `set`) are not analyzed
-/// independently â€” the effect was attributed to the Call.
+/// independently — the effect was attributed to the Call.
 /// Pure-body check with a carve-out for `parallel for` reduction
 /// clauses. A Reassign of a declared reduction variable is allowed
 /// when its RHS has the shape `<var> <op> X` (or `X <op> <var>`)
 /// where `op` matches the clause's declared op and `X` is itself
 /// pure. Every other usage of the variable inside the body is an
-/// error â€” even reads, since they could see partial values.
+/// error — even reads, since they could see partial values.
 fn verify_pure_body_with_reductions(
     body: &[TypedStmt],
     signatures: &HashMap<String, Signature>,
@@ -38647,9 +38647,9 @@ fn verify_pure_body_with_reductions(
     // BUG-13 fix (2026-07-27): `verify_pure_body`'s IndexAssign arm
     // unconditionally rejects EVERY indexed write, with no allowance
     // for the single most common safe parallel-map pattern: `xs[i] =
-    // â€¦;` where `i` is the loop's own index. Each iteration owns a
+    // …;` where `i` is the loop's own index. Each iteration owns a
     // distinct `i`, so two threads never write the same slot -- unlike
-    // `xs[i-1] = â€¦` or `xs[j] = â€¦`, which genuinely race. This strip
+    // `xs[i-1] = …` or `xs[j] = …`, which genuinely race. This strip
     // pass only runs here (the `parallel for`-specific wrapper), NOT
     // in the shared `verify_pure_body` also used by `pure fn` and
     // `task` bodies, where there's no per-iteration index isolation
@@ -38660,8 +38660,8 @@ fn verify_pure_body_with_reductions(
     // strip pass has removed legitimate reduction-reassigns, any
     // surviving `Reassign` targeting a binding NOT declared
     // inside this body is a capture being mutated without a
-    // declared reduction â€” a runtime race waiting to happen.
-    // Walk the original body (not the stripped one â€” strip
+    // declared reduction — a runtime race waiting to happen.
+    // Walk the original body (not the stripped one — strip
     // replaced the reduction reassigns with discards) and flag
     // each non-body-local Copy reassign.
     let mut body_locals: std::collections::HashSet<String> =
@@ -38707,7 +38707,7 @@ fn check_for_captured_mutations(
                 // lets are scope-local but the conservative
                 // approximation (treating them as
                 // visible-to-rest-of-body) doesn't change the
-                // diagnostic outcome here â€” a captured reassign
+                // diagnostic outcome here — a captured reassign
                 // inside a branch is still racy.
                 check_for_captured_mutations(then_body, reductions, body_locals, diagnostics);
                 check_for_captured_mutations(else_body, reductions, body_locals, diagnostics);
@@ -38730,7 +38730,7 @@ fn check_for_captured_mutations(
 /// reduction variable, replace it with a no-op `Discard` of a
 /// dummy `Int(0)` so the downstream pure walk doesn't double-
 /// flag it. Read-uses of the variable in OTHER statements are an
-/// error â€” diagnosed here directly.
+/// error — diagnosed here directly.
 fn strip_reduction_uses(
     body: &[TypedStmt],
     reductions: &HashMap<String, crate::ast::ReductionOp>,
@@ -38851,11 +38851,11 @@ fn strip_reduction_uses(
 /// the RHS), just the write-to-a-Vec-slot itself is no longer flagged.
 /// Every iteration of a `parallel for` owns a distinct `loop_var`
 /// value, so two threads can never target the same slot this way --
-/// unlike `xs[i-1] = â€¦`, `xs[j] = â€¦`, or a write gated behind an
+/// unlike `xs[i-1] = …`, `xs[j] = …`, or a write gated behind an
 /// unrelated condition, all of which fall through unchanged to
 /// `verify_pure_body`'s unconditional rejection, exactly as before
-/// this fix. Field-path writes (`xs[i].field = â€¦`) are deliberately
-/// NOT covered -- kept narrowly scoped to the documented `xs[i] = â€¦`
+/// this fix. Field-path writes (`xs[i].field = …`) are deliberately
+/// NOT covered -- kept narrowly scoped to the documented `xs[i] = …`
 /// shape.
 fn strip_safe_same_index_writes(
     body: &[TypedStmt],
@@ -38970,7 +38970,7 @@ fn strip_safe_same_index_writes(
 // previous `validate_reduction_rhs -> bool` lets
 // `strip_reduction_uses` preserve the non-self subexpression so
 // the pure-body walker still sees calls hidden inside it (e.g.
-// `total = total + rand()` â€” without this, the strip pass
+// `total = total + rand()` — without this, the strip pass
 // swallowed the impure call).
 fn extract_reduction_other_side(
     name: &str,
@@ -39075,7 +39075,7 @@ fn flag_read(
         Diagnostic::new(
             span,
             format!(
-                "{} cannot read reduction variable(s) {} outside the named update â€” partial values would leak",
+                "{} cannot read reduction variable(s) {} outside the named update — partial values would leak",
                 context, label
             ),
         )
@@ -39273,7 +39273,7 @@ fn verify_pure_body(
                 }
                 TypedStmt::TaskJoin { .. } => {
                     // Consuming a Task handle in a pure context
-                    // is OK â€” join itself is side-effect-free in
+                    // is OK — join itself is side-effect-free in
                     // v1's sequential lowering.
                 }
                 TypedStmt::Detach { .. } => {
@@ -39316,7 +39316,7 @@ fn verify_pure_body(
                     );
                 }
                 TypedStmt::Break { .. } => {
-                    // OpenMP parallel-for rejects `break` â€”
+                    // OpenMP parallel-for rejects `break` —
                     // C compilers emit "break statement used
                     // with OpenMP for loop" and refuse to
                     // compile. Other pure contexts (regular
@@ -39328,7 +39328,7 @@ fn verify_pure_body(
                             Diagnostic::new(
                                 crate::span::Span::default(),
                                 format!(
-                                    "{} cannot use `break` â€” OpenMP `parallel for` doesn't allow early exit from worker iterations. Use a Mutex<bool>-guarded flag if you need to short-circuit",
+                                    "{} cannot use `break` — OpenMP `parallel for` doesn't allow early exit from worker iterations. Use a Mutex<bool>-guarded flag if you need to short-circuit",
                                     context
                                 ),
                             )
@@ -39342,7 +39342,7 @@ fn verify_pure_body(
                     // A nested `unsafe(reason = "...")` block inside
                     // a pure context surfaces its body's purity via
                     // recursion. `unsafe` itself doesn't make a body
-                    // impure â€” Layer 1.1 doesn't admit any
+                    // impure — Layer 1.1 doesn't admit any
                     // language construct that would; once raw
                     // pointers land in Layer 1.2+, those will
                     // separately be impure.
@@ -39383,7 +39383,7 @@ fn verify_pure_body(
                     // The check sees the lowered name `__box_new`
                     // (check_box_builtin rewrites the Call), so
                     // match both forms to be safe. Same impurity
-                    // class as `vec()`/`push()` â€” the previous
+                    // class as `vec()`/`push()` — the previous
                     // omission was a real gap (DO-178C Level A
                     // forbids dynamic alloc in pure paths).
                     diagnostics.push(
@@ -39409,7 +39409,7 @@ fn verify_pure_body(
                         | "rand_normal"
                         | "seed_rng"
                 ) {
-                    // RNG family â€” non-deterministic by design. A
+                    // RNG family — non-deterministic by design. A
                     // pure fn must be a mathematical function from
                     // its inputs to its outputs; randomness breaks
                     // referential transparency and is forbidden in
@@ -39503,7 +39503,7 @@ fn verify_pure_body(
             | TypedExprKind::FnRef { .. } => {}
             TypedExprKind::CallIndirect { callee, args } => {
                 // The name-based purity gate above can't see
-                // through an indirect call's callee â€” we have
+                // through an indirect call's callee — we have
                 // no signature to check. Conservatively reject
                 // indirect calls in pure contexts; the user
                 // can refactor to a direct call.
@@ -39511,7 +39511,7 @@ fn verify_pure_body(
                     Diagnostic::new(
                         expr.span,
                         format!(
-                            "{} cannot use indirect calls (fn-ptr) â€” \
+                            "{} cannot use indirect calls (fn-ptr) — \
                              the purity gate sees only direct calls",
                             context
                         ),
@@ -39833,7 +39833,7 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
 /// fact is sound: if any `break` can fire, the loop may exit while
 /// `cond` is still true, so we can't assume `!cond` after the loop.
 ///
-/// We do NOT recurse into nested loops â€” a `break` in an inner loop
+/// We do NOT recurse into nested loops — a `break` in an inner loop
 /// targets that inner loop, not the outer one, and is irrelevant.
 fn contains_break(stmts: &[Stmt]) -> bool {
     for s in stmts {
@@ -39853,7 +39853,7 @@ fn contains_break(stmts: &[Stmt]) -> bool {
 /// Logical negation that strips double-negation and flips comparison
 /// operators. Cleaner than wrapping with another `!` because it keeps
 /// branch-narrowing facts (and the eventual counterexample) readable.
-/// SMT would handle the `!!` form fine â€” this is purely for diagnostic
+/// SMT would handle the `!!` form fine — this is purely for diagnostic
 /// quality.
 fn negate(expr: &Expr) -> Expr {
     match &expr.kind {
@@ -39941,15 +39941,15 @@ fn current_smt_facts(smt_facts: &[Expr], env: &Env) -> Vec<Expr> {
 ///   i = i + 1;
 ///   acc = acc * 2;
 /// produces `i -> i + 1`, `acc -> (acc + 1) * 2`. Composition handles
-/// multiple reassignments per iteration soundly â€” refines #5 from
+/// multiple reassignments per iteration soundly — refines #5 from
 /// STATUS.md (was: only the last RHS per variable, ignoring intervening
 /// updates the RHS depended on). Recurses into `if`/`else` branches
-/// (union of reassignments â€” same conservatism as before; an SSA-driven
+/// (union of reassignments — same conservatism as before; an SSA-driven
 /// per-branch model would refine further), but not into nested loops
 /// (those have their own verification frames).
 /// Body-level reassignments collected for the loop-invariant
 /// preservation check. Pair of:
-///   - `subs`: substitution map (body-entry â†’ body-end) used by
+///   - `subs`: substitution map (body-entry → body-end) used by
 ///     `substitute_expr`.
 ///   - `havoc_vars`: fresh names introduced by nested loops as
 ///     "we can't symbolically express the post-loop value here"
@@ -39992,7 +39992,7 @@ fn walk_for_reassigns(
                 // stored expression talks about body-entry values
                 // only. Without this step, a follow-on reassign
                 // whose RHS references this variable would
-                // incorrectly drop the intermediate update â€” the
+                // incorrectly drop the intermediate update — the
                 // case #5 was about.
                 let rewritten = substitute_expr(expr, out);
                 out.insert(name.clone(), rewritten);
@@ -40052,7 +40052,7 @@ fn walk_for_reassigns(
                 // skipping the nested body (the old behavior)
                 // leaves stale `out` entries for variables the
                 // outer body wrote BEFORE the nested loop but the
-                // nested loop overwrites â€” and even removing those
+                // nested loop overwrites — and even removing those
                 // entries isn't enough, because the substituted
                 // invariant would still mention the bare `Var(x)`
                 // which the SMT layer conflates with the body-
@@ -40147,8 +40147,8 @@ fn verify_loop_invariants(
 }
 
 /// Same as `verify_loop_invariants` but also threads a list of
-/// `havoc_vars` â€” fresh `(name, type)` pairs introduced by
-/// nested-loop havocing (see `walk_for_reassigns`) â€” through to
+/// `havoc_vars` — fresh `(name, type)` pairs introduced by
+/// nested-loop havocing (see `walk_for_reassigns`) — through to
 /// the SMT prover so the substituted invariant's fresh symbols
 /// have a declared sort.
 fn verify_loop_invariants_with_havoc(
@@ -40220,18 +40220,18 @@ fn verify_loop_invariants_with_havoc(
 /// Append Vec-builtin length facts to `smt_facts` after a `let r = <call>`
 /// when `<call>` is one of the Vec-constructing builtins. The SMT layer
 /// otherwise sees `len(xs)` as an opaque per-binding symbol and can't
-/// relate two such symbols across a push/clone â€” this restores the
+/// relate two such symbols across a push/clone — this restores the
 /// arithmetic relationship so `prove len(xs2) == len(xs) + 1` discharges.
 ///
 /// Encoded relationships:
-///   `let r = vec(a, b, c);` â†’ len(r) == N
-///   `let r = push(xs, v);`  â†’ len(r) == len(xs) + 1
-///   `let r = clone(xs);`    â†’ len(r) == len(xs)
-///   `let r = set(xs, i, v)` â†’ len(r) == len(xs)   (set keeps the length)
+///   `let r = vec(a, b, c);` → len(r) == N
+///   `let r = push(xs, v);`  → len(r) == len(xs) + 1
+///   `let r = clone(xs);`    → len(r) == len(xs)
+///   `let r = set(xs, i, v)` → len(r) == len(xs)   (set keeps the length)
 /// Push `Eq` facts of the form `<let_var>[i] == elements[i]` for
 /// each i, so the SMT verifier can reason about a literal array /
 /// Vec initializer slot-by-slot. Pairs with the `(select arr_<name>
-/// i)` lowering in src/smt.rs. The facts are flat AST expressions â€”
+/// i)` lowering in src/smt.rs. The facts are flat AST expressions —
 /// invalidated by the usual `drop_facts_mentioning(<let_var>)` calls
 /// whenever the binding is reassigned or its slot is updated.
 fn record_array_element_facts(
@@ -40307,7 +40307,7 @@ fn record_vec_builtin_facts(
             });
             // Per-element identity facts: `xs[i] == args[i]` for
             // each i. Lets proofs like `prove xs[0] == 10` discharge
-            // statically against a literal `vec(10, â€¦)` initializer.
+            // statically against a literal `vec(10, …)` initializer.
             // The SMT encoder lowers `xs[i]` to `(select arr_xs i)`
             // (see smt.rs); the encoder is read-only, so any later
             // `xs[i] = v` IndexAssign invalidates these facts via
@@ -40364,7 +40364,7 @@ fn record_vec_builtin_facts(
             // so the same `__smt_store_eq` machinery used for `set`
             // applies. Lets the verifier derive `ys[k] == xs[k]`
             // for any `k != len(xs)` (caller is responsible for
-            // bounds â€” len(ys) == len(xs) + 1 is already a fact).
+            // bounds — len(ys) == len(xs) + 1 is already a fact).
             if let Some(base_var) = unwrap_to_var(&args[0]) {
                 smt_facts.push(Expr {
                     kind: ExprKind::Call {
@@ -40400,7 +40400,7 @@ fn record_vec_builtin_facts(
                 },
                 span: crate::span::Span::default(),
             });
-            // The base may be `Var(xs)` or `&xs` / `&mut xs` â€” pierce
+            // The base may be `Var(xs)` or `&xs` / `&mut xs` — pierce
             // through references to find the underlying binding name
             // so the SMT layer's `arr_<base>` resolution works.
             if let Some(base_var) = unwrap_to_var(&args[0]) {
@@ -40586,19 +40586,19 @@ fn pretty_expr(expr: &Expr) -> String {
             format!("{}.{}", pretty_expr(object), field)
         }
         ExprKind::Match { scrutinee, .. } => {
-            format!("match {} {{ â€¦ }}", pretty_expr(scrutinee))
+            format!("match {} {{ … }}", pretty_expr(scrutinee))
         }
         ExprKind::IfExpr { cond, .. } => {
-            format!("if {} {{ â€¦ }} else {{ â€¦ }}", pretty_expr(cond))
+            format!("if {} {{ … }} else {{ … }}", pretty_expr(cond))
         }
         ExprKind::Block { tail, .. } => {
-            format!("{{ â€¦ ; {} }}", pretty_expr(tail))
+            format!("{{ … ; {} }}", pretty_expr(tail))
         }
         ExprKind::Try { inner } => {
             format!("try {}", pretty_expr(inner))
         }
         ExprKind::WhileLoop { .. } => {
-            "while â€¦ { â€¦ }".to_string()
+            "while … { … }".to_string()
         }
         ExprKind::Forall { var, ty, body } => {
             format!("forall {}: {}, {}", var, ty, pretty_expr(body))
@@ -40608,7 +40608,7 @@ fn pretty_expr(expr: &Expr) -> String {
                 .iter()
                 .map(|p| format!("{}: {}", p.name, p.ty))
                 .collect();
-            format!("fn({}) -> {} {{ â€¦ }}", parts.join(", "), return_type)
+            format!("fn({}) -> {} {{ … }}", parts.join(", "), return_type)
         }
         ExprKind::IndirectCall { callee, args } => {
             let parts: Vec<String> = args.iter().map(pretty_expr).collect();
@@ -40634,7 +40634,7 @@ fn pretty_expr(expr: &Expr) -> String {
 /// into their original call syntax.
 ///
 /// This lets `prove f(args) > 0` work when `f` has an ensures clause that
-/// constrains its return value â€” the SMT solver sees an uninterpreted-but-
+/// constrains its return value — the SMT solver sees an uninterpreted-but-
 /// constrained symbol where the call used to be.
 fn rewrite_calls_to_fresh_vars(
     expr: &Expr,
@@ -40688,8 +40688,8 @@ fn rewrite_calls_to_fresh_vars(
             }
             // Vec builtins (`vec`, `push`, `set`, `clone`) carry an
             // implicit length relationship. Rewrite them to a fresh
-            // `Vec<i64>` symbol â€” the element type is irrelevant for
-            // length reasoning â€” and emit the same length fact that
+            // `Vec<i64>` symbol — the element type is irrelevant for
+            // length reasoning — and emit the same length fact that
             // `record_vec_builtin_facts` would emit at a let-binding.
             // This lets `len(push(xs, v))` discharge in proofs and
             // (more importantly) in substituted invariants for
@@ -40800,7 +40800,7 @@ fn rewrite_calls_to_fresh_vars(
 /// for each precondition the verifier cannot discharge.
 ///
 /// This catches at compile time the case where a caller passes
-/// arguments that violate the callee's contract â€” previously the
+/// arguments that violate the callee's contract — previously the
 /// caller's body would still typecheck and the runtime `assert`
 /// emitted from `requires` would fire, with no compile-time warning.
 fn verify_call_args_in_expr(
@@ -40985,7 +40985,7 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
             }),
         },
         // FnRef / CallIndirect aren't part of the SMT proof
-        // vocabulary â€” bounds elision over fn pointers needs a
+        // vocabulary — bounds elision over fn pointers needs a
         // separate analysis (TODO #A3 follow-up). Lower them
         // to a dummy `Var` so callers that walk the expression
         // tree don't crash, but the SMT pass will simply skip
@@ -41111,7 +41111,7 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
 /// bounds guard. We also try to discharge `0 <= i` for signed indices.
 ///
 /// Failure modes (Unknown / SkippedUnsupported / Unavailable) leave
-/// the runtime guard in place â€” never unsound.
+/// the runtime guard in place — never unsound.
 fn try_elide_bounds_in_typed_expr(
     expr: &mut TypedExpr,
     smt_facts: &[Expr],
@@ -41120,7 +41120,7 @@ fn try_elide_bounds_in_typed_expr(
     inside_loop: bool,
 ) {
     use crate::smt::Verdict;
-    // Skip elision under INTENTC_NO_VERIFY â€” leaving every runtime
+    // Skip elision under INTENTC_NO_VERIFY — leaving every runtime
     // guard intact preserves runtime safety even when we don't run
     // SMT at compile time.
     if crate::smt::verifier_disabled() {
@@ -41524,7 +41524,7 @@ fn try_elide_bounds_in_typed_expr(
 /// discharges if `area` has `ensures _return > 0`.
 ///
 /// Receivers that aren't bare `Var` (chained method calls, field
-/// accesses returning structs, etc.) are left as-is â€” the SMT
+/// accesses returning structs, etc.) are left as-is — the SMT
 /// encoder will bail with the existing "method calls not supported"
 /// diagnostic for those.
 fn rewrite_method_calls_to_calls(
@@ -41534,7 +41534,7 @@ fn rewrite_method_calls_to_calls(
 ) -> Expr {
     let new_kind = match &expr.kind {
         ExprKind::MethodCall { receiver, method, method_span, args } => {
-            // Only rewrite Var receivers in v1 â€” chained / nested
+            // Only rewrite Var receivers in v1 — chained / nested
             // method receivers need the inferred-type info that
             // only the typed IR carries.
             if let ExprKind::Var(name) = &receiver.kind {
@@ -41852,15 +41852,15 @@ fn prove_with_calls_extra(
     // know `xs[k]`'s value statically we can replace the read with
     // its literal value before sending the query.
     let prove_expr_owned = substitute_literal_vec_indices(prove_expr, env);
-    // Method-call desugar: `p.method(args)` â†’ `Call {
+    // Method-call desugar: `p.method(args)` → `Call {
     // name: "<Type>_<method>", args: [p, ...args] }` so the
     // inline-call discharger sees a function call and attaches
     // the method's `ensures` clauses. Var-receiver case only in
-    // v1 â€” chained / nested receivers stay as MethodCall and
+    // v1 — chained / nested receivers stay as MethodCall and
     // bail with the existing "method calls not supported" SMT
     // diagnostic.
     let prove_expr_owned = rewrite_method_calls_to_calls(&prove_expr_owned, env, signatures);
-    // Field-access rewrite: `p.x` â†’ `Var("p__x")` for every bound
+    // Field-access rewrite: `p.x` → `Var("p__x")` for every bound
     // binding that's a struct-literal init. Lets the SMT encoder
     // resolve the field access against the synthetic vars added
     // above.
@@ -42102,18 +42102,18 @@ fn is_simd_scalar(ty: &Type) -> bool {
     )
 }
 
-/// Native SIMD vector builtins â€” 128-bit (`vec128<T>`) and 256-bit (`vec256<T>`).
+/// Native SIMD vector builtins — 128-bit (`vec128<T>`) and 256-bit (`vec256<T>`).
 ///
 /// 128-bit family (AVX2 xmm / NEON q / RVV 128):
-/// - `simd_splat(val: T) -> vec128<T>` â€” broadcast scalar to all lanes
-/// - `simd_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec128<T>` â€” load N lanes at v[idx..]
-/// - `simd_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` â€” store N lanes
-/// - `simd_add(a: vec128<T>, b: vec128<T>) -> vec128<T>` â€” lane-wise add
-/// - `simd_sub(a: vec128<T>, b: vec128<T>) -> vec128<T>` â€” lane-wise subtract
-/// - `simd_mul(a: vec128<T>, b: vec128<T>) -> vec128<T>` â€” lane-wise multiply
-/// - `simd_reduce_add(v: vec128<T>) -> T` â€” horizontal add across all lanes
+/// - `simd_splat(val: T) -> vec128<T>` — broadcast scalar to all lanes
+/// - `simd_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec128<T>` — load N lanes at v[idx..]
+/// - `simd_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` — store N lanes
+/// - `simd_add(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise add
+/// - `simd_sub(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise subtract
+/// - `simd_mul(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise multiply
+/// - `simd_reduce_add(v: vec128<T>) -> T` — horizontal add across all lanes
 ///
-/// 256-bit family (AVX2 ymm / SVE-256 / RVV-256) â€” same operations, 2Ã— lanes:
+/// 256-bit family (AVX2 ymm / SVE-256 / RVV-256) — same operations, 2× lanes:
 /// - `simd256_splat(val: T) -> vec256<T>`
 /// - `simd256_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec256<T>`
 /// - `simd256_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec256<T>) -> Vec<T>`

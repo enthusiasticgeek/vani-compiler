@@ -17882,4 +17882,103 @@ actual regression is gone: the real-world Dhruva OS bare-metal program
 that originally surfaced this (an ARM32 interrupt handler calling
 `uart_puts`) now runs correctly under QEMU with no runaway.
 
-Next free bug number is **BUG-230**.
+## BUG-230: diagnostic rendering panicked on a Span landing mid-char (found by localfuzz, 2026-08-27)
+
+**Symptom**: `vanic check`/`vanic run` could crash outright --
+`thread 'main' panicked at src/diagnostic.rs:...: byte index N is not
+a char boundary` -- instead of printing the diagnostics it was trying
+to report. Found via vani-compiler-localfuzz's mutation corpus: a
+Russian `control_flow.vani` example, mutated by inserting a duplicate
+line, produced a program whose checker emitted a diagnostic (an
+enum-variant payload-type error, synthesized for `Option<T>`'s
+internal representation) with a span that -- for reasons unrelated to
+the crash itself -- landed a few bytes short of a real char boundary,
+inside a 3-byte em-dash character earlier in the same source file
+(from an unrelated `intent "..."` pragma string).
+
+**Root cause**: `src/diagnostic.rs`'s two diagnostic-rendering
+functions (`render_one`, the single-file path used by `format_
+diagnostics`; and `render_with_filemap`, the multi-file path used for
+`intent`-tagged programs) both sliced the source string directly at a
+`Span`'s raw byte offsets (`&source[span_start_byte..span_end_byte]`)
+with no check that those offsets actually land on char boundaries.
+`line_info` (used by both, and by two more call sites building JSON
+output) had the identical gap in its own `column_number` computation.
+A `Span`'s byte offsets are only as trustworthy as whatever code
+constructed them -- across a codebase this large, *some* diagnostic
+somewhere will eventually get a length/offset calculation wrong
+(here: a synthetic span for a compiler-generated `Option<T>` enum
+variant, not user-written code at all) -- and Rust's `&str` indexing
+panics immediately on a non-boundary offset, taking down the entire
+compiler run instead of just mis-rendering one diagnostic's
+underline.
+
+**Fix**: two hand-rolled stable equivalents of nightly's `str::
+floor_char_boundary`/`ceil_char_boundary` (`floor_char_boundary`,
+`ceil_char_boundary` in `diagnostic.rs`), applied to snap every
+span-derived offset to a real boundary immediately after it's read
+from a `Span`, in all three vulnerable spots (`render_one`,
+`render_with_filemap`, `line_info` itself, so every other caller going
+through it is covered too). This is a defense-in-depth fix at the
+*rendering* layer, deliberately not chasing down why this one
+particular synthetic span was wrong in the first place -- the goal is
+"never crash the whole compiler over an already-imperfect span,"
+which protects against this entire bug class regardless of which
+future diagnostic trips over it next.
+
+**Verification**: minimized repro confirmed 100% reproducible before
+the fix, gone after. New regression test
+`diagnostic_rendering_survives_multibyte_char_before_an_unrelated_span`
+(`src/lib.rs`) exercises both rendering paths (`format_diagnostics`
+and `format_diagnostics_with_files`) against a source file with a
+multi-byte character positioned to stress exactly this hazard. Full
+`cargo test --release`: 3021 passed / 0 failed / 1 pre-existing
+ignored (one more test than BUG-229's count, from this bug's own new
+regression test).
+
+**Also fixed as part of the same localfuzz triage session**: three of
+vani-compiler-localfuzz's own text-level fuzzing mutators
+(`_is_slow_prone_position`, `mut_delete_line`'s fn-signature guard,
+`mut_wrap_redundant`) checked only literal *English* keyword spellings
+("while ", "for ", "fn ", "let ", ...), silently doing nothing (or the
+wrong thing) on the ~60 translated-dialect example files that make up
+most of this project's fuzzing corpus -- fixed in the localfuzz repo
+itself (branch `local-fuzz-findings`, not this one) by generating a
+per-dialect keyword table directly from this file's own lexer.rs
+match arms (`tools/localfuzz/regen_loop_keywords.py`) instead of
+hand-copying English strings.
+
+**Follow-up sweep, same session**: BUG-230's investigation surfaced a
+much older, wider mojibake corruption -- some past tool/paste mangled
+UTF-8 typographic characters (em/en-dash, ellipsis, →/↔/∈/⇒/≤/≥, ×,
+and a couple of pinyin diacritics) into their double-encoded Latin-1-
+reinterpreted byte sequences ("â€"" etc.) directly in Rust string
+literals and comments across `src/checker.rs`, `src/parser.rs`, and
+one pre-existing test in `src/lib.rs` (already fixed once, narrowly,
+for that one test -- see `indexed_write_side_effect_diagnostic_uses_
+real_ellipsis_not_mojibake`'s own comment). This is exactly what
+directly caused the `â€"` garbage visible in this same BUG-230's own
+example diagnostic output above. Fixed 753 occurrences of 12 fully
+round-trip-verified sequences (checked byte-for-byte via a cp1252-
+encode/UTF-8-decode round trip, and manually reviewed for false-
+positive risk against legitimate short accented words) across all
+three files -- **user-facing diagnostic message text**, not just
+comments, so this was a real "users see garbled error messages" bug,
+not merely cosmetic. Full `cargo test --release` clean after (one
+unrelated, non-reproducing-in-isolation flake in `run_end_to_end`'s
+`concurrent_pipeline_dashboard_example_produces_correct_output_on_
+both_backends`, a pre-existing timing-sensitive test unrelated to this
+change).
+
+**Deliberately NOT fixed in this pass**: a separate, messier pocket of
+the same corruption class affecting Devanagari (Hindi) and CJK
+example text embedded in `src/parser.rs`'s own doc comments (e.g.
+mojibake for "यावत्", "जब तक", "异步") -- these are multi-character
+runs where a simple single-sequence substitution table isn't safe
+(some byte patterns don't round-trip cleanly through a single cp1252
+pass, needing more careful multi-character-run reconstruction to fix
+without risking further corruption), and they're comment-only text
+with no functional/user-facing impact, unlike the 753 already fixed.
+Left for a dedicated future pass rather than rushed here.
+
+Next free bug number is **BUG-231**.

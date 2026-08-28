@@ -1188,8 +1188,13 @@ pub fn format_diagnostics(path: &str, source: &str, diagnostics: &[Diagnostic]) 
 fn render_one(output: &mut String, path: &str, source: &str, span: Span, level: &str, message: &str) {
     let (line_number, column_number, line_start, line_end) = line_info(source, span.start);
     let line = &source[line_start..line_end];
-    let span_start_byte = span.start.min(line_end).max(line_start);
-    let span_end_byte = span.end.min(line_end).max(span_start_byte);
+    // Snapped before use -- see floor_char_boundary's doc comment
+    // (BUG-230); render_with_filemap had the identical bug in its own,
+    // separate copy of this same clamp-then-slice shape.
+    let span_start = floor_char_boundary(source, span.start.min(source.len()));
+    let span_end = ceil_char_boundary(source, span.end.min(source.len()));
+    let span_start_byte = span_start.min(line_end).max(line_start);
+    let span_end_byte = span_end.min(line_end).max(span_start_byte);
     let underline_start = char_count(&source[line_start..span_start_byte]);
     let underline_width = char_count(&source[span_start_byte..span_end_byte]).max(1);
 
@@ -1205,7 +1210,12 @@ fn render_one(output: &mut String, path: &str, source: &str, span: Span, level: 
 }
 
 fn line_info(source: &str, offset: usize) -> (usize, usize, usize, usize) {
-    let clamped = offset.min(source.len());
+    // Snapped here, not just at render_with_filemap's own call site
+    // (BUG-230) -- every other caller in this file passes a raw
+    // `span.start`/`span.end` straight through with no snapping of its
+    // own, so this function needs to protect itself rather than trust
+    // every call site to remember to pre-snap.
+    let clamped = floor_char_boundary(source, offset.min(source.len()));
     let mut line_number = 1;
     let mut line_start = 0;
 
@@ -1230,6 +1240,44 @@ fn line_info(source: &str, offset: usize) -> (usize, usize, usize, usize) {
 
 fn char_count(text: &str) -> usize {
     text.chars().count()
+}
+
+/// Snaps `offset` down to the nearest real char boundary in `s`
+/// (`str::floor_char_boundary` is nightly-only, hence this hand-rolled
+/// stable equivalent). Every byte offset this module slices `source`
+/// at ultimately comes from a `Span`, and a `Span` is only as correct
+/// as whatever code constructed it -- checker/parser code scattered
+/// across a codebase this large will occasionally get a length or
+/// offset calculation wrong (a synthetic/placeholder span reusing an
+/// unrelated byte range, a length computed in chars where bytes were
+/// needed, etc.). A wrong span pointing at the wrong place in the
+/// source is a real bug worth finding and fixing at its own source,
+/// but this renderer's job is to show a diagnostic, not to crash the
+/// entire compiler run over one already-imperfect span -- snapping
+/// defensively here is what actually prevents BUG-230 (found via
+/// localfuzz, 2026-08-27: a `NonCopyStruct` payload-type diagnostic's
+/// synthetic enum-variant span coincidentally landed inside a
+/// 3-byte em-dash character elsewhere in the file, panicking on the
+/// direct string-slice this function used to do).
+fn floor_char_boundary(s: &str, offset: usize) -> usize {
+    let mut o = offset.min(s.len());
+    while o > 0 && !s.is_char_boundary(o) {
+        o -= 1;
+    }
+    o
+}
+
+/// Snaps `offset` up to the nearest real char boundary in `s` -- the
+/// complementary direction to `floor_char_boundary` above, needed
+/// wherever an *end* offset must not fall short of covering a
+/// partially-included multi-byte character.
+fn ceil_char_boundary(s: &str, offset: usize) -> usize {
+    let len = s.len();
+    let mut o = offset.min(len);
+    while o < len && !s.is_char_boundary(o) {
+        o += 1;
+    }
+    o
 }
 
 /// Tracks where each source file's contents live in a concatenated multi-file
@@ -1363,13 +1411,21 @@ fn render_with_filemap(
         return;
     };
     let source = &entry.source;
-    let local_end = span
-        .end
-        .saturating_sub(entry.start)
-        .min(source.len());
+    // Snapped to a real char boundary immediately, before any further
+    // arithmetic -- see floor_char_boundary's own doc comment (BUG-230)
+    // for why a Span's byte offsets can't always be trusted to already
+    // land on one, regardless of which diagnostic produced this Span.
+    let local_start = floor_char_boundary(source, local_start);
+    let local_end = ceil_char_boundary(
+        source,
+        span.end.saturating_sub(entry.start).min(source.len()),
+    );
 
     let (line_number, column_number, line_start, line_end) = line_info(source, local_start);
     let line = &source[line_start..line_end];
+    // line_start/line_end (from line_info, always real boundaries) and
+    // local_start/local_end (snapped just above) are all already valid
+    // char boundaries, so min/max of any pair of them stays valid too.
     let span_start_byte = local_start.min(line_end).max(line_start);
     let span_end_byte = local_end.min(line_end).max(span_start_byte);
     let underline_start = char_count(&source[line_start..span_start_byte]);

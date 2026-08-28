@@ -73,11 +73,11 @@ impl Parser {
         // don't accumulate stale synthesized struct/poll-fn
         // pairs from earlier compiles in the same process.
         crate::ast::V31_TASK_REGISTRY.with(|r| r.borrow_mut().clear());
-        // Phase 3c -- clear the enum-name â†’ variants registry for
+        // Phase 3c -- clear the enum-name → variants registry for
         // the same reason. Populated as enum decls are parsed
         // (see the EnumDecl path inside the parse loop).
         crate::ast::V31_ENUM_REGISTRY.with(|r| r.borrow_mut().clear());
-        // Phase 3d -- clear the struct-name â†’ fields registry.
+        // Phase 3d -- clear the struct-name → fields registry.
         // Populated as struct decls are parsed (see the StructDecl
         // paths inside the parse loop).
         crate::ast::V31_STRUCT_REGISTRY.with(|r| r.borrow_mut().clear());
@@ -169,7 +169,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
-                        // Phase 3d -- stash struct_name â†’ fields so
+                        // Phase 3d -- stash struct_name → fields so
                         // the v3.1 desugar can synthesize per-field
                         // default-init for struct locals.
                         crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
@@ -188,7 +188,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Enum)) {
                 match self.parse_enum_decl() {
                     Ok(e) => {
-                        // Phase 3c -- stash enum_name â†’ variants
+                        // Phase 3c -- stash enum_name → variants
                         // into V31_ENUM_REGISTRY so the v3.1
                         // default-init synthesizer can find the
                         // first unit variant for enum locals.
@@ -413,7 +413,7 @@ impl Parser {
             // form. The `pub` is parsed here so it precedes the
             // `use`; UsePath's `is_pub` flag picks it up. After
             // flattening, the checker builds a global re-export
-            // map (`<this_mod>__<local> â†’ <imported_mangled>`)
+            // map (`<this_mod>__<local> → <imported_mangled>`)
             // and rewrites external references to the renamed
             // form.
             //
@@ -1987,17 +1987,17 @@ impl Parser {
         // label each record with its target standard.
         //
         // Expansion matrix:
-        //   misra_c_2012      â†’ no_heap + no_recursion
-        //   iec_62304_class_c â†’ no_heap + no_recursion
-        //   asil_d            â†’ no_heap + no_recursion + no_float
+        //   misra_c_2012      → no_heap + no_recursion
+        //   iec_62304_class_c → no_heap + no_recursion
+        //   asil_d            → no_heap + no_recursion + no_float
         //                       + deterministic_timing
         //                       (wcet + bounded_stack required)
-        //   do178c_level_a    â†’ same as asil_d
-        //   iec_61508_sil3    â†’ no_heap + no_recursion + no_float
+        //   do178c_level_a    → same as asil_d
+        //   iec_61508_sil3    → no_heap + no_recursion + no_float
         //                       + deterministic_timing
         //                       (wcet + bounded_stack required)
-        //   iec_61508_sil4    â†’ same as sil3 (strictest)
-        //   autosar_ap        â†’ no_heap + no_recursion
+        //   iec_61508_sil4    → same as sil3 (strictest)
+        //   autosar_ap        → no_heap + no_recursion
         //                       + deterministic_timing
         //                       (float permitted; wcet + bounded_stack
         //                       must still be declared)
@@ -2648,7 +2648,7 @@ impl Parser {
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 // Optional `, N` capacity. The checker
-                // validates N is a power of two â‰¥ 1; we just
+                // validates N is a power of two ≥ 1; we just
                 // parse the integer literal here.
                 let capacity = if self
                     .match_token(|kind| matches!(kind, TokenKind::Comma))
@@ -3425,9 +3425,9 @@ impl Parser {
     /// reads as "my name Ryan is" with the verb at the end.
     /// The same pattern applies to vÄá¹‡à¥€'s verb-like
     /// statements: `à¤ªà¥à¤¨à¤°à¤¾à¤—à¤® X;` (return X) reads more
-    /// naturally as `X à¤ªà¥à¤¨à¤°à¤¾à¤—à¤®;`. Similarly for `print` â†’
-    /// `à¤²à¤¿à¤–à¥‹` (Hindi) / `à¤²à¤¿à¤¹à¤¾` (Marathi), `assert` â†’
-    /// `à¤¸à¥à¤¨à¤¿à¤¶à¥à¤šà¤¿à¤¤` / `à¤–à¤¾à¤¤à¥à¤°à¥€`, `prove` â†’ `à¤¸à¤¿à¤¦à¥à¤§` / `à¤ªà¥à¤°à¤®à¤¾à¤£`.
+    /// naturally as `X à¤ªà¥à¤¨à¤°à¤¾à¤—à¤®;`. Similarly for `print` →
+    /// `à¤²à¤¿à¤–à¥‹` (Hindi) / `à¤²à¤¿à¤¹à¤¾` (Marathi), `assert` →
+    /// `à¤¸à¥à¤¨à¤¿à¤¶à¥à¤šà¤¿à¤¤` / `à¤–à¤¾à¤¤à¥à¤°à¥€`, `prove` → `à¤¸à¤¿à¤¦à¥à¤§` / `à¤ªà¥à¤°à¤®à¤¾à¤£`.
     ///
     /// Scans from `self.pos` to the next `;` at depth 0
     /// (tracking parens / brackets / braces). If the token
@@ -4152,7 +4152,7 @@ impl Parser {
     /// `unsafe.md` Â§ "Reason-string rules (v1)"):
     /// - Non-empty: a missing justification defeats the whole
     ///   point of the in-syntax form.
-    /// - â‰¤256 chars: keeps the deviation-record artifact compact
+    /// - ≤256 chars: keeps the deviation-record artifact compact
     ///   and discoverable; certification reviewers cluster by
     ///   prefix, not by paragraph.
     /// - ASCII-printable + no newlines: the reason flows through
@@ -4339,10 +4339,10 @@ impl Parser {
         let var = ident_text(var_tok);
         // The two `for` shapes are now disambiguated by the
         // post-counter keyword:
-        //   `for VAR in EXPR { ... }`           â†’ collection-iter
+        //   `for VAR in EXPR { ... }`           → collection-iter
         //                                          (consuming or
         //                                           borrowing -- `ref EXPR`)
-        //   `for VAR from LO to HI { ... }`     â†’ range form
+        //   `for VAR from LO to HI { ... }`     → range form
         // Refines T0.0. The prior `0..n` range shape is gone.
         if self.match_token(|k| matches!(k, TokenKind::In)).is_some() {
             // Borrowing form: `for x in ref xs { ... }`. The old
@@ -5747,7 +5747,7 @@ impl Parser {
                     // an identifier -- there's no `len(...)` builtin
                     // syntax after `.`. Recover by mapping the
                     // keyword to a synthetic ident "len" so method-
-                    // call sugar works (`m.len()` â†’ MethodCall).
+                    // call sugar works (`m.len()` → MethodCall).
                     // Closure #312.
                     TokenKind::Len => {
                         let name_text = "len".to_string();
@@ -6299,7 +6299,7 @@ impl Parser {
                 // Heuristic: a name is "struct-shaped" when either
                 // its FIRST segment OR its LAST segment starts
                 // uppercase. This catches both module-qualified
-                // user structs (`foo::Point` â†’ `foo__Point`,
+                // user structs (`foo::Point` → `foo__Point`,
                 // last segment upper) AND v3.1-synthesized
                 // names (`Task__showcase`, first segment upper)
                 // whose suffix after `__` is the user's
@@ -6580,7 +6580,7 @@ impl Parser {
     ///   English   -- `async`
     ///   Sanskrit / Hindi / Marathi -- `à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•` (atulyakÄlika,
     ///                                "non-synchronous")
-    ///   Mandarin  -- `å¼‚æ­¥` (yÃ¬bÃ¹)
+    ///   Mandarin  -- `å¼‚æ­¥` (yìbù)
     ///   Japanese  -- `éžåŒæœŸ` (hidouki)
     ///
     /// Caveat: the non-English spellings are tatsama / technical-
@@ -7291,7 +7291,7 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
 ///
 /// Rejected (deferred to Phase 2.3d):
 /// - Pattern::VariantWithBinding (binding scope across the
-///   tag-extraction â†’ if-chain split needs explicit relifting)
+///   tag-extraction → if-chain split needs explicit relifting)
 /// - Mixed Variant + non-Variant patterns in same match
 /// - Wildcard not at the end
 fn try_desugar_let_match_with_suspends(
@@ -7843,7 +7843,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         // v3.1 caveat #2 polish (2026-06-08): OwnedStr can't be
         // default-init'd as `ExprKind::Str("")` because that
         // types as Str (not OwnedStr), and `can_assign` doesn't
-        // accept Str â†’ OwnedStr in struct-lit field position.
+        // accept Str → OwnedStr in struct-lit field position.
         // Synthesize `"" + ""` instead -- the Binary-Add over two
         // Str literals dispatches through `check_str_concat`
         // which returns Type::OwnedStr (heap-allocating
@@ -7970,7 +7970,7 @@ fn desugar_try_in_v31_body(
     body: &[Stmt],
     return_type: &Type,
 ) -> Result<Vec<Stmt>, Diagnostic> {
-    // Fast path: no `try` anywhere â†’ return body unchanged.
+    // Fast path: no `try` anywhere → return body unchanged.
     let has_try = body.iter().any(|s| match s {
         Stmt::Let { expr, .. } => matches!(expr.kind, ExprKind::Try { .. }),
         _ => false,
@@ -9480,7 +9480,7 @@ pub(crate) fn try_v31_transform(
     // the synthesized Task__X struct so its field types (which
     // may reference Type::Param(T)) typecheck at template time.
     // Mono later specializes the struct alongside the fn --
-    // Task__identity<T> â†’ Task__identity__i64 etc.
+    // Task__identity<T> → Task__identity__i64 etc.
     let mut task_struct = StructDecl {
         name: task_struct_name.clone(),
         name_span: fn_name_span,
@@ -10491,7 +10491,7 @@ pub(crate) fn try_v31_transform(
     // enclosing async fn is generic, the poll fn is too. Its
     // single param's type is `mut ref Task__X<T1, T2, ...>`
     // (Type::Apply) so mono can substitute T per call site
-    // and re-collapse Apply<concrete> â†’ Struct(mangled) via
+    // and re-collapse Apply<concrete> → Struct(mangled) via
     // substitute_type_param's Type::Apply branch. For non-
     // generic templates, Type::Apply with empty args degrades
     // gracefully to Type::Struct(name) under existing

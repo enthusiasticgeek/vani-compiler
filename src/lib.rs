@@ -32755,6 +32755,65 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn diagnostic_rendering_survives_multibyte_char_before_an_unrelated_span() {
+        // BUG-230 (found via localfuzz, 2026-08-27): a diagnostic
+        // whose span happened to land at a byte offset that isn't a
+        // real char boundary crashed the whole compiler run --
+        // `str` slicing panics on a non-boundary index, and neither
+        // render_one (single-file) nor render_with_filemap
+        // (multi-file, used by `intent`-tagged programs) snapped a
+        // span's byte offsets to a real boundary before slicing.
+        // The live repro: an `intent "..."` pragma string containing
+        // a 3-byte em-dash early in the file, followed later by an
+        // enum-variant-payload-type error whose synthetic span
+        // happened (for reasons unrelated to the em-dash itself) to
+        // land a few bytes short of a real boundary. This test
+        // doesn't depend on reproducing that exact synthetic-span
+        // computation -- it directly exercises the same render path
+        // with a source file shaped to have a multi-byte character
+        // sitting in the middle of a line a later diagnostic's span
+        // touches, which is the actual generalizable hazard: ANY
+        // Span computed even slightly wrong anywhere in this
+        // codebase could have hit the identical panic before this
+        // fix, regardless of which diagnostic produced it.
+        let source = concat!(
+            "intent \"has an em—dash right in the middle\";\n",
+            "\n",
+            "fn main() -> i64 {\n",
+            "  let mut x: i64 = 0;\n",
+            "  return 0;\n",
+            "}\n",
+        );
+        let errors = compile(source).expect_err("`let mut` must still be rejected");
+        assert!(
+            !errors.is_empty(),
+            "expected at least one diagnostic to render"
+        );
+
+        // Exercise both rendering paths a real `vanic check` run can
+        // take -- single-file (format_diagnostics) and the
+        // FileMap-based multi-file path (format_diagnostics_with_files,
+        // used for `intent`-tagged / multi-file programs) -- neither
+        // should panic regardless of exactly where each error's span
+        // happens to land.
+        let single_file_output =
+            crate::diagnostic::format_diagnostics("test.vani", source, &errors);
+        assert!(
+            single_file_output.contains("error"),
+            "expected rendered output to mention the error, got: {single_file_output:?}"
+        );
+
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("test.vani".to_string(), source.to_string(), 0);
+        let multi_file_output =
+            crate::diagnostic::format_diagnostics_with_files(&map, &errors);
+        assert!(
+            multi_file_output.contains("error"),
+            "expected rendered output to mention the error, got: {multi_file_output:?}"
+        );
+    }
+
+    #[test]
     fn parallel_for_rejects_write_to_non_loop_var_index() {
         let source = r#"
             fn main() -> i64 {
