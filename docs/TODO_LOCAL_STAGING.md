@@ -11671,3 +11671,38 @@ Fix attempt: `tools/localfuzz/findings/20260828-102158-run-crash-bbffd03b29/fix_
 ```plaintext
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260828-103345-run-crash-27b1bf7167
+
+Repro: `tools/localfuzz/findings/20260828-103345-run-crash-27b1bf7167/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260828-103345-run-crash-27b1bf7167/fix_attempt.md`
+
+```plaintext
+STAGING ENTRY: vani-lang/localfuzz/examples/language/sanskrit/control_flow.vani
+
+Run command:
+vanic run examples/language/sanskrit/control_flow.vani --backend=c
+
+Mutant/generated source:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
+STATUS: needs human/frontier root-cause review.
