@@ -11706,3 +11706,53 @@ Mutant/generated source:
 ```
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260828-104806-run-crash-ee354b2598
+
+Repro: `tools/localfuzz/findings/20260828-104806-run-crash-ee354b2598/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260828-104806-run-crash-ee354b2598/fix_attempt.md`
+
+BASE CORPUS FILE: /home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/early_exit.vani
+
+MUTANT GENERATED SOURCE:
+```vani
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/early_exit.vani              # LLVM
+//   vanic run examples/language/bengali/early_exit.vani --backend=c  # C
+
+উদ্দেশ্য "break and continue for early exit and skip";
+
+// `বিরাম` = break, `এগিয়ে` = continue
+
+কাজ find_first_negative(xs: দেখ Vec<i64>) -> i64 {
+  মান i: u64 = 0;
+  মান result: i64 = 0 - 1;
+  যতক্ষণ i < len(xs) {
+    যদি xs[i] < 0 {
+      result = xs[i];
+      বিরাম;
+    }
+    i = i + 1;
+  }
+  ফেরত result;
+}
+
+কাজ count_positive(xs: দেখ Vec<i64>) -> i64 {
+  মান i: u64 = 0;
+  মান count: i64 = 0;
+  যতক্ষণ i < len(xs) {
+    যদি xs[i] <= 0 {
+      i = i + 1;
+      এগিয়ে;
+    }
+    count = count + 1;
+  }
+  ফেরত count;
+}
+
+কাজ main() -> i64 {
+  মান xs: Vec<i64> = vec(1, 2, 0 - 3
