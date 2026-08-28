@@ -11651,3 +11651,12 @@ STATUS: needs human/frontier root-cause review.
 The local staging log shows a run-crash for the `control_flow.vani` example file using vanic, targeting both LLVM and C backends. The mutant/generated source includes a `build_range` function that creates a vector of integers from 1 to 5, and then calculates the sum of these elements. The main function checks if the sum is greater than 5, which should be true for `n = 5`, but the program crashes due to an unhandled exception or error in the LLVM or C backend.
 
 This bug report describes the repro source (the mutant/generated source), the observed symptom (crash/hang/ divergent output), and which backend(s) it affects. The staging entry is complete with the status clearly indicating that a human/frontier root-cause review is required to resolve this issue.
+
+---
+
+### Candidate: 20260828-041857-run-crash-a48c33109b
+
+Repro: `tools/localfuzz/findings/20260828-041857-run-crash-a48c33109b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260828-041857-run-crash-a48c33109b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
