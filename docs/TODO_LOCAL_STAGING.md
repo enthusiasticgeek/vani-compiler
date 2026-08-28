@@ -11775,3 +11775,12 @@ Fix attempt: `tools/localfuzz/findings/20260828-133640-run-crash-b621d658a6/fix_
 **Backend Affected**: The bug affects both the LLVM and C backends, as indicated by the `raw_result_data` indicating a timed-out compilation attempt for the LLVM backend.
 
 ### STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260828-161046-run-crash-e6c6a9d6a8
+
+Repro: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
