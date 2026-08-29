@@ -11984,3 +11984,12 @@ entirely: `i: i64 = kutoka_n; while i > 0 { jumla = jumla + i; }` --
 starting value. Mutator-deleted loop decrement, not a compiler
 defect. No compiler change needed.
 
+
+---
+
+### Candidate: 20260829-140236-run-crash-742555c01b
+
+Repro: `tools/localfuzz/findings/20260829-140236-run-crash-742555c01b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260829-140236-run-crash-742555c01b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
