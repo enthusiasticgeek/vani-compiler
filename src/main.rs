@@ -1118,6 +1118,15 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 // builtin -> treat as a user fn" path.
                 || name == "assert_eq_i64" || name == "assert_eq_f64"
                 || name == "assert_eq_bool" || name == "assert_eq_str"
+                // Dhruva OS round 42: wrapping_add/sub/mul (explicit
+                // mod-2^N arithmetic opt-in for any integer width,
+                // added because the default checked +/-/* traps on
+                // overflow for ALL integer types including unsigned --
+                // an intentional ASIL-D/DO-178C-style safety default,
+                // see the overflow-helper comment in backend_c.rs).
+                // No SSA-backend lowering yet -- tree-C/tree-LLVM only.
+                || name == "wrapping_add" || name == "wrapping_sub"
+                || name == "wrapping_mul"
             {
                 return false;
             }

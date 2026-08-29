@@ -16525,6 +16525,36 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Dhruva OS round 42: wrapping_add/sub/mul -- explicit
+            // mod-2^N arithmetic, generic over any integer width
+            // (unlike the i64-only saturating family above). LLVM's
+            // plain `add`/`sub`/`mul` (with neither `nsw` nor `nuw`)
+            // already have exact two's-complement wraparound
+            // semantics with no UB regardless of the vāṇी type's own
+            // signedness -- simpler than the checked-arithmetic path
+            // above, which has to reach for the with-overflow
+            // intrinsics specifically to detect what plain add/sub/mul
+            // here silently (and correctly, for this builtin's whole
+            // purpose) allows through. The checker
+            // (check_wrapping_builtin) has already required both args
+            // to share the exact same integer type, so args[0].ty
+            // alone determines the width to use.
+            if name == "wrapping_add" || name == "wrapping_sub" || name == "wrapping_mul" {
+                let a = emit_expr(&args[0], ctx, out);
+                let b = emit_expr(&args[1], ctx, out);
+                let ty = llvm_type(&args[0].ty);
+                let llvm_op = match name.as_str() {
+                    "wrapping_add" => "add",
+                    "wrapping_sub" => "sub",
+                    _ => "mul",
+                };
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = {} {} {}, {}\n",
+                    dest, llvm_op, ty, a, b
+                ));
+                return dest;
+            }
             // Closure #411: scalar binary min / max / clamp.
             // i64 versions: icmp + select (no intrinsic).
             // f64 versions: @llvm.minnum.f64 / @llvm.maxnum.f64

@@ -20895,6 +20895,33 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[1])
             )
         }
+        // Dhruva OS round 42: wrapping_add/sub/mul -- explicit
+        // mod-2^N arithmetic, generic over any integer width (unlike
+        // the i64-only saturating family above). The checker
+        // (check_wrapping_builtin) has already required both args to
+        // share the exact same integer type, so result_ty alone
+        // determines the width/signedness to use here. See
+        // c_unsigned_scalar_type's own comment for why casting through
+        // the exact-width unsigned type is what makes this genuinely
+        // well-defined wraparound rather than relying on signed
+        // overflow being UB-but-usually-fine.
+        "wrapping_add" | "wrapping_sub" | "wrapping_mul" => {
+            let sty = c_scalar_type(result_ty);
+            let uty = c_unsigned_scalar_type(result_ty);
+            let c_op = match name {
+                "wrapping_add" => "+",
+                "wrapping_sub" => "-",
+                _ => "*",
+            };
+            format!(
+                "(({sty})(({uty})({a}) {op} ({uty})({b})))",
+                sty = sty,
+                uty = uty,
+                op = c_op,
+                a = emit_expr(&args[0]),
+                b = emit_expr(&args[1]),
+            )
+        }
         // Closure #411: scalar binary min / max / clamp.
         // i64 versions use plain C ternary on signed compare.
         // f64 versions emit `fmin` / `fmax` from <math.h> so
@@ -22548,6 +22575,25 @@ fn c_scalar_type(elem: &Type) -> &'static str {
 /// Same as c_scalar_type but for use in a cast (signed ints for splat fill).
 fn c_vec128_scalar(elem: &Type) -> &'static str {
     c_scalar_type(elem)
+}
+
+/// The exact-width unsigned counterpart of an integer scalar type.
+/// Used by wrapping_add/sub/mul (Dhruva OS round 42) to force
+/// mod-2^N arithmetic: casting to the exact-width unsigned type before
+/// +/-/* is well-defined modular wraparound per the C standard
+/// (unsigned overflow is defined; signed overflow is UB), regardless
+/// of the original type's own signedness. Falls back to uint32_t for
+/// any non-integer type, matching c_scalar_type's own fallback --
+/// unreachable in practice since the checker (check_wrapping_builtin)
+/// already rejects non-integer args before codegen ever sees this.
+fn c_unsigned_scalar_type(elem: &Type) -> &'static str {
+    match elem {
+        Type::I8 | Type::U8 => "uint8_t",
+        Type::I16 | Type::U16 => "uint16_t",
+        Type::I32 | Type::U32 => "uint32_t",
+        Type::I64 | Type::U64 => "uint64_t",
+        _ => "uint32_t",
+    }
 }
 
 /// Byte size of a simd element type (used to compute lane count).
