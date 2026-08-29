@@ -3670,7 +3670,7 @@ STATUS: NOT A COMPILER BUG (2026-08-08) -- re-verified on current main (commit a
 Repro: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-141920-backend-divergence-fc33c7c09f/fix_attempt.md`
 
-STATUS: REAL FINDING, NOT YET FIXED (2026-08-08) -- confirmed and minimized: `let bits: u8 = 1 as u8; let shifted: u8 = bits << 3 + 0;` produces malformed LLVM IR (`%v_2 = shl i8 %v_0, %v_1` where `%v_1` is typed i64, not i8 -- `lli` rejects it outright: "defined with type 'i64' but expected 'i8'"). Trigger is specifically a COMPOUND shift-amount expression (`3 + 0`); a bare literal shift amount (`bits << 3`) works fine, so this isn't the already-fixed BUG-141/BUG-138 index-width class -- it's the same width-mismatch family applied to `Shl`'s RHS operand instead of a GEP/call index. Queued as a category-A-shaped candidate in docs/BUG_PATTERN_AUDIT_TODO_3.md for the next session.
+STATUS: FIXED -- BUG-146 (category B) on main (2026-08-08, closed out here 2026-08-29 -- the fix already existed on main but this staging doc was never updated, see feedback_vani_localfuzz_closeout_workflow). Root cause was codegen-only and backend-specific: tree-LLVM (`backend_llvm.rs`) already had the correct width-adjustment for a compound shift-amount expression; SSA-LLVM (`ssa_backend_llvm.rs`, the path this simple repro actually takes by default) did not. Fixed by widening SSA-LLVM's shift-amount handling to match tree-LLVM's existing correct behavior. See `docs/TODO_CURRENT.md`'s BUG-146 entry on main for the full writeup.
 
 The provided CANDIDATE bug report has been drafted based on the given corpus file and mutant source, which exhibit a backend-divergence issue in the vani-compiler project. The backend-divergence kind indicates that the program's output differs significantly between LLVM and C backends when run with different options.
 
@@ -3725,7 +3725,7 @@ Fix attempt: `tools/localfuzz/findings/20260808-145959-backend-divergence-f3fef0
 Repro: `tools/localfuzz/findings/20260808-150021-backend-divergence-65faa42884/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260808-150021-backend-divergence-65faa42884/fix_attempt.md`
 
-**STATUS: REAL FINDING, NOT YET FIXED (2026-08-08) -- confirmed: an `enum` with a `Box<dyn Iface>`-payloaded variant that is NEVER CONSTRUCTED (only the enum's OTHER variants are instantiated in the repro) fails to compile on the C backend: `error: unknown type name 'intent_dyn_Drawable'` at the enum's own union-member declaration for that variant's storage slot. LLVM's on-demand lowering never touches the unconstructed variant and compiles clean. Same eager-whole-module-C-emission-vs-on-demand-LLVM-lowering divergence shape BUG-139 itself found (payload type never gets its prerequisite type declaration emitted before the union references it) -- but for `Box<dyn Iface>`'s fat-pointer/vtable type specifically, not a name-existence gap BUG-139's fix would catch (`Drawable` IS a real, declared interface here). Queued as a category-A-adjacent candidate in docs/BUG_PATTERN_AUDIT_TODO_3.md for the next session.**
+**STATUS: FIXED -- BUG-146 (category A) on main (2026-08-08, closed out here 2026-08-29 -- the fix already existed on main but this staging doc was never updated, see feedback_vani_localfuzz_closeout_workflow). Root cause: `collect_used_dyn_ifaces`'s `walk_type` helper (`backend_c.rs`) had arms for `Vec`/`Atomic`/`Mutex`/`Guard`/`Ref`/`RefMut`/`Channel`/`Tuple`/`FnPtr`/`Array` but not `Box`, so a `Box<dyn Iface>` payload/field that's never constructed never registered its interface for forward-declaration, even though the enum/struct's eager C emission unconditionally references `intent_dyn_<Iface>` regardless of construction. Also confirmed to break LLVM for the struct-field shape specifically. Fixed by widening `walk_type` to cover every "wraps exactly one inner type" `Type` variant (`Box`, `Vec128/256/512`, `TaskR`, `RwLock`, `ReadGuard`, `WriteGuard`, `Deque`, `HashSet`, `BTreeSet`, `BinaryHeap`, `Bst`, `Ptr`, `PtrMut`, `Pool`, `Handle`, `Tainted`, `BoundedPtr`, `ArenaRef`, plus `HashMap`/`BTreeMap` and `Closure`), not just `Box` alone. See `docs/TODO_CURRENT.md`'s BUG-146 entry on main for the full writeup.**
 
 **BACKENDS AFFECTED:**
 
@@ -11646,7 +11646,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260828-014256-run-crash-597ecd42d6/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-014256-run-crash-597ecd42d6/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-29). Base file is
+`examples/language/gujarati/control_flow.vani`; the mutation changed
+`sum()`'s loop increment from `i = i + 1;` to `i = i + 0;` -- `i`
+never advances past 0, `i < n` stays true forever. A logic bug the
+mutation introduced into the test program, not a compiler defect. No
+compiler change needed.
 
 The local staging log shows a run-crash for the `control_flow.vani` example file using vanic, targeting both LLVM and C backends. The mutant/generated source includes a `build_range` function that creates a vector of integers from 1 to 5, and then calculates the sum of these elements. The main function checks if the sum is greater than 5, which should be true for `n = 5`, but the program crashes due to an unhandled exception or error in the LLVM or C backend.
 
@@ -11659,7 +11664,11 @@ This bug report describes the repro source (the mutant/generated source), the ob
 Repro: `tools/localfuzz/findings/20260828-041857-run-crash-a48c33109b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-041857-run-crash-a48c33109b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: NOT A COMPILER BUG (reviewed 2026-08-29). Same
+`sleep_ms(i64::MAX)` async-template mutation as the many other
+already-closed entries of this shape: `await(delay(9223372036854775807,
+7));` is a real, legitimately multi-million-year sleep by design, not
+a compiler hang. No compiler change needed.
 
 ---
 
@@ -11671,6 +11680,14 @@ Fix attempt: `tools/localfuzz/findings/20260828-102158-run-crash-bbffd03b29/fix_
 ```plaintext
 STATUS: needs human/frontier root-cause review.
 ```
+
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. The mutation
+duplicated `let cfd: i64 = tcp_accept(server);` into two consecutive
+identical statements. `tcp_accept` blocks until a connection arrives;
+the peer task connects exactly once, so the first call succeeds and
+the second blocks forever waiting for a second client that never
+comes. A mutator-introduced hang in the test program's own control
+flow, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -11705,7 +11722,11 @@ Mutant/generated source:
 }
 ```
 
-STATUS: needs human/frontier root-cause review.
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. The mutation deleted
+the loop-index increment (`क = क + 1;`) from `योगः`/`sum`'s while-loop
+body entirely (also duplicated an unrelated `let` line, harmless). `क`
+never advances, `क < संख्या` stays true forever. Mutator-deleted loop
+increment, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -11757,6 +11778,17 @@ MUTANT GENERATED SOURCE:
 কাজ main() -> i64 {
   মান xs: Vec<i64> = vec(1, 2, 0 - 3
 
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Diffing against the
+base file (`examples/language/bengali/early_exit.vani`) shows the
+mutation deleted `count_positive`'s unconditional bottom-of-loop
+`i = i + 1;` (the one that runs on the fall-through/positive-number
+path, distinct from the `if`-branch's own increment before
+`continue`) -- without it, `i` never advances once a positive number
+is hit, `i < len(xs)` stays true forever. Confirmed by manually
+restoring the deleted increment in an isolated repro: runs correctly
+(prints 3) on both backends. A mutator-deleted loop increment on one
+control-flow path, not a compiler defect. No compiler change needed.
+
 ---
 
 ### Candidate: 20260828-133640-run-crash-b621d658a6
@@ -11776,6 +11808,10 @@ Fix attempt: `tools/localfuzz/findings/20260828-133640-run-crash-b621d658a6/fix_
 
 ### STATUS: needs human/frontier root-cause review.
 
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Same
+`sleep_ms(i64::MAX)` async-template mutation as the many other
+already-closed entries of this shape. No compiler change needed.
+
 ---
 
 ### Candidate: 20260828-161046-run-crash-e6c6a9d6a8
@@ -11783,7 +11819,12 @@ Fix attempt: `tools/localfuzz/findings/20260828-133640-run-crash-b621d658a6/fix_
 Repro: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-161046-run-crash-e6c6a9d6a8/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Same boundary-value
+infinite-loop shape as several already-closed entries:
+`i: i64 = -9223372036854775808; while i < 5 { if i == 3 { break; }
+i = i + 1; }` needs ~9.2 quintillion increments to ever reach 3 --
+both backends genuinely need far longer than the harness timeout to
+finish. Not a compiler defect. No compiler change needed.
 
 ---
 
@@ -11813,6 +11854,10 @@ Fix attempt: `tools/localfuzz/findings/20260828-205250-run-crash-21b8303d2c/fix_
 }
 ```
 
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Same
+`sleep_ms(i64::MAX)` async-template mutation (this one mutated the
+FIRST `delay` call instead of the second) as the many other
+already-closed entries of this shape. No compiler change needed.
 
 ---
 
@@ -11821,7 +11866,14 @@ Fix attempt: `tools/localfuzz/findings/20260828-205250-run-crash-21b8303d2c/fix_
 Repro: `tools/localfuzz/findings/20260828-210349-run-crash-7586964ad8/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-210349-run-crash-7586964ad8/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Base is a TCP/epoll
+echo-server example. The mutation changed a comparison threshold
+guarding the "client fd has data" branch to `ready >= 9223372036854775807`
+(effectively unreachable for any real fd number), so accepted client
+connections are never read from -- the epoll loop spins waiting for a
+condition ("N clients handled") that can never be satisfied. A
+mutator-broken comparison threshold in the test program's own control
+flow, not a compiler defect. No compiler change needed.
 
 ---
 
@@ -11830,7 +11882,12 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260828-223103-run-crash-34eaf1c40b/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-223103-run-crash-34eaf1c40b/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Base is
+`examples/language/tibetan/early_exit.vani`. The mutation deleted the
+loop counter's increment entirely: `n: i64 = 0; while n < 1 { if
+n == 5 { break; } }` -- `n` never changes, `n < 1` stays true forever,
+`n == 5` never fires. Mutator-deleted loop increment, not a compiler
+defect. No compiler change needed.
 
 ---
 
@@ -11839,7 +11896,40 @@ STATUS: needs human/frontier root-cause review.
 Repro: `tools/localfuzz/findings/20260828-235203-run-crash-774008c0ad/repro.vani`
 Fix attempt: `tools/localfuzz/findings/20260828-235203-run-crash-774008c0ad/fix_attempt.md`
 
-STATUS: needs human/frontier root-cause review.
+STATUS: FIXED (2026-08-29) -- this one is real. Base is the BUG-201
+regression test (`examples/language/english/bug201_closure_captures_vec_struct.vani`,
+a closure capturing a `Node { value: i64, children: Vec<i64> }` by
+value and calling it via a higher-order `apply(f, x)` helper). The
+mutation just duplicated `let r: i64 = apply(add_n, 5);` -- calling
+`apply` a second time with the SAME closure value crashed with
+"double free detected in tcache 2" on both backends (confirmed the
+duplicate-`let` shadowing itself was a red herring; a minimized repro
+with two DIFFERENTLY-named result bindings crashes identically).
+
+Root cause (real compiler bug, not the mutator): `check_program` runs
+`lambda_lift_program` -- which classifies each closure's captures as
+Copy/reusable vs. affine/consumed-on-use via `Type::is_copy()` -- well
+before the later pre-pass that populates
+`STRUCT_NON_COPY_REGISTRY`/`ENUM_NON_COPY_REGISTRY` (the thread-locals
+`Type::is_copy()` consults for `Type::Struct`/`Type::Enum`). At lambda-
+lift time those registries were always empty, so `Type::Struct(name)
+.is_copy()` unconditionally returned `true` regardless of the struct's
+real fields -- `add_n`'s capture of `node0` (non-Copy: owns a
+`Vec<i64>`) was silently misclassified as Copy and never registered in
+`CLOSURE_AFF_REGISTRY`, so nothing ever marked it consumed after the
+first `apply()` call, and its heap-allocated captured environment got
+freed twice.
+
+Fixed on main.vani-compiler (see that repo's own commit, not this one)
+with two changes: (1) `lambda_lift_program` now runs its own
+preliminary non-Copy struct/enum registration pass before doing any
+capture classification; (2) `consume_if_moved_var` (the generic call-
+argument move-tracking function used for e.g. `apply(f, x)`) now also
+consults `CLOSURE_AFF_REGISTRY` -- previously only the direct-
+invocation call path (`f(x)`) did. `apply(add_n, 5); apply(add_n, 5);`
+is now correctly rejected with a "value 'add_n' was moved; cannot use
+after move" diagnostic on both backends instead of crashing. Full
+`cargo test --release` clean.
 
 ---
 
@@ -11851,6 +11941,12 @@ Fix attempt: `tools/localfuzz/findings/20260829-010834-run-crash-b9baac5911/fix_
 ```plaintext
 STATUS: needs human/frontier root-cause review.
 ```
+
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Same
+`sleep_ms(i64::MAX)` async-template mutation as the many other
+already-closed entries of this shape (also has a harmless duplicated
+`bevestig b == 7;` assertion line, irrelevant to the hang). No
+compiler change needed.
 
 ---
 
@@ -11879,4 +11975,12 @@ Fix attempt: `tools/localfuzz/findings/20260829-012426-run-crash-cae0668c8d/fix_
   "coverage_score": 100
 }
 ```
+
+STATUS (reviewed 2026-08-29): NOT A COMPILER BUG. Base is
+`examples/language/swahili/control_flow.vani`. The mutation deleted
+`hesabu_nyuma`/`count_backward`'s loop decrement (`i = i - 1;`)
+entirely: `i: i64 = kutoka_n; while i > 0 { jumla = jumla + i; }` --
+`i` never changes, `i > 0` stays true forever for any positive
+starting value. Mutator-deleted loop decrement, not a compiler
+defect. No compiler change needed.
 
