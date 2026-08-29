@@ -12002,3 +12002,20 @@ Repro: `tools/localfuzz/findings/20260829-164758-run-crash-433dc704e1/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260829-164758-run-crash-433dc704e1/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260829-201817-backend-divergence-c05996655e
+
+Repro: `tools/localfuzz/findings/20260829-201817-backend-divergence-c05996655e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260829-201817-backend-divergence-c05996655e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The staging log reveals a backend-divergence issue with the `examples/language/english/detach_heartbeat.vani` file when compiled and run with both LLVM and C backends. The observed symptom is that the `main` function completes execution before the `hb` task has completed its intended behavior, leading to divergent output.
+
+The mutant/generated source demonstrates the creation of a background task with the intention to "fire and forget" the heartbeat process. However, after detaching the task, main continues to execute without waiting for it to complete, which leads to inconsistencies in the final result printed by `main`.
+
+To resolve this issue, the developer should ensure that the `hb` task is properly awaited or tracked to maintain the intended behavior of detaching the background heartbeat. This can be achieved by introducing proper synchronization mechanisms or modifying the logic to handle the detached task appropriately.
+
+STATUS: requires further investigation and fix to ensure reliable execution across different backends.
