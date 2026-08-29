@@ -11851,3 +11851,32 @@ Fix attempt: `tools/localfuzz/findings/20260829-010834-run-crash-b9baac5911/fix_
 ```plaintext
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260829-012426-run-crash-cae0668c8d
+
+Repro: `tools/localfuzz/findings/20260829-012426-run-crash-cae0668c8d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260829-012426-run-crash-cae0668c8d/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
