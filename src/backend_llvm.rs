@@ -18397,7 +18397,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // fn-ptr type which `llvm_type_string(expr.ty)`
             // already spells; callers use the value as an
             // SSA operand of that type.
-            format!("@{}", crate::backend_c::function_name(name))
+            //
+            // `#[no_mangle]` fns are DEFINED under their bare
+            // name (see the "Determine the LLVM symbol name"
+            // logic below, and the matching call-site check at
+            // `is_no_mangle` above) -- a FnRef to one of these
+            // must resolve to that same bare name, or the
+            // reference and the definition disagree and `llc`
+            // fails with "use of undefined value '@fn_<name>'".
+            // Found via a #[no_mangle] fn passed as a function-
+            // pointer VALUE (not called directly) to dhruvaos's
+            // task_create; direct calls already went through
+            // LLVM_NO_MANGLE_FN_REGISTRY correctly, only this
+            // value-reference path used the always-mangled
+            // `backend_c::function_name` unconditionally.
+            let is_no_mangle = LLVM_NO_MANGLE_FN_REGISTRY
+                .with(|r| r.borrow().contains(name.as_str()));
+            if is_no_mangle {
+                format!("@{}", name)
+            } else {
+                format!("@{}", crate::backend_c::function_name(name))
+            }
         }
         TypedExprKind::CallIndirect { callee, args } => {
             // Arc 5c: Closure-typed callee → indirect call

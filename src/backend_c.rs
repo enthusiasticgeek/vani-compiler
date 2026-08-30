@@ -16850,8 +16850,21 @@ fn emit_expr(expr: &TypedExpr) -> String {
         TypedExprKind::FnRef { name, .. } => {
             // C function names decay to function pointers
             // when used in non-call positions, so emitting the
-            // bare prefixed identifier just works.
-            function_name(name)
+            // bare prefixed identifier just works -- EXCEPT for
+            // `#[no_mangle]` fns, which are DEFINED under their
+            // bare (unprefixed) name (see the definition-site
+            // `is_no_mangle` check elsewhere in this file) and
+            // must be referenced the same way here, matching
+            // the existing call-site `NO_MANGLE_FN_REGISTRY`
+            // check. Same bug class as the LLVM backend's
+            // matching FnRef arm; see its comment for the
+            // motivating dhruvaos task_create case.
+            let is_no_mangle = NO_MANGLE_FN_REGISTRY.with(|r| r.borrow().contains(name.as_str()));
+            if is_no_mangle {
+                name.clone()
+            } else {
+                function_name(name)
+            }
         }
         TypedExprKind::CallIndirect { callee, args } => {
             // Arc 5c: when the callee is Closure-typed, lower
