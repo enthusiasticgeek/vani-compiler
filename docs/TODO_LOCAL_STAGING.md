@@ -12048,3 +12048,58 @@ Fix attempt: `tools/localfuzz/findings/20260830-034751-run-crash-092113032d/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260830-074720-run-crash-2880ab1164
+
+Repro: `tools/localfuzz/findings/20260830-074720-run-crash-2880ab1164/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260830-074720-run-crash-2880ab1164/fix_attempt.md`
+
+**STAGING ENTRY:**
+
+**RUN CRASH REPRODUCED**
+---
+
+**System:** Debian Buster (10.x)
+
+**Vani Compiler Version:** `vanic` v0.9.7
+
+**Input File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/swahili/control_flow.vani`
+
+**Mutant/Generated Source:**
+```vani
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/control_flow.vani              # LLVM
+//   vanic run examples/language/swahili/control_flow.vani --backend=c  # C
+
+lengo "Swahili control flow — ikiwa/vinginevyo/wakati";
+
+kazi ishara(n: i64) -> i64 {
+  ikiwa n > 0 {
+    rudi 1;
+  } vinginevyo ikiwa n < 0 {
+    rudi -1;
+  } vinginevyo {
+    rudi 0;
+  }
+}
+
+kazi hesabu_nyuma(kutoka_n: i64) -> i64 {
+  acha i: i64 = kutoka_n;
+  acha jumla: i64 = -1;
+  wakati i > 0 {
+    jumla = jumla + i;
+  }
+  rudi jumla;
+}
+
+kazi main() -> i64 {
+  thibitisha ishara(5)  == 1;
+  thibitisha ishara(-3) == -1;
+  thibitisha ishara(0)  == 0;
+  thibitisha hesabu_nyuma(4) == 10;
+  chapisha "ishara na hesabu_nyuma sawa";
+  rudi
