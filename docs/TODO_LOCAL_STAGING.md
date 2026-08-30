@@ -12019,3 +12019,32 @@ The mutant/generated source demonstrates the creation of a background task with 
 To resolve this issue, the developer should ensure that the `hb` task is properly awaited or tracked to maintain the intended behavior of detaching the background heartbeat. This can be achieved by introducing proper synchronization mechanisms or modifying the logic to handle the detached task appropriately.
 
 STATUS: requires further investigation and fix to ensure reliable execution across different backends.
+
+---
+
+### Candidate: 20260830-034751-run-crash-092113032d
+
+Repro: `tools/localfuzz/findings/20260830-034751-run-crash-092113032d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260830-034751-run-crash-092113032d/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:54:5: warning: this 'if' has identical 'then' and 'else' branches -- the condition has no effect on behavior\n    Action.Recv(cap) then io_recv_async(fd, cap),\n    ^^^^^^^^^^^^^^^^\n  help: 1. Both branches execute the exact same code, so whichever way the condition evaluates, the outcome is identical.\n  help: 2. This is often a copy-paste leftover, or a sign one branch was meant to diverge but didn't. If the duplication is intentional (e.g. a placeholder for future divergence), no fix is needed.\n",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "/tmp/localfuzz/candidate.vani:54:5: warning: this 'if' has identical 'then' and 'else' branches -- the condition has no effect on behavior\n    Action.Recv(cap) then io_recv_async(fd, cap),\n    ^^^^^^^^^^^^^^^^\n  help: 1. Both branches execute the exact same code, so whichever way the condition evaluates, the outcome is identical.\n  help: 2. This is often a copy-paste leftover, or a sign one branch was meant to diverge but didn't. If the duplication is intentional (e.g. a placeholder for future divergence), no fix is needed.\n",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
