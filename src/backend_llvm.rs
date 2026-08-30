@@ -16525,6 +16525,36 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Dhruva OS round 42: wrapping_add/sub/mul -- explicit
+            // mod-2^N arithmetic, generic over any integer width
+            // (unlike the i64-only saturating family above). LLVM's
+            // plain `add`/`sub`/`mul` (with neither `nsw` nor `nuw`)
+            // already have exact two's-complement wraparound
+            // semantics with no UB regardless of the vāṇी type's own
+            // signedness -- simpler than the checked-arithmetic path
+            // above, which has to reach for the with-overflow
+            // intrinsics specifically to detect what plain add/sub/mul
+            // here silently (and correctly, for this builtin's whole
+            // purpose) allows through. The checker
+            // (check_wrapping_builtin) has already required both args
+            // to share the exact same integer type, so args[0].ty
+            // alone determines the width to use.
+            if name == "wrapping_add" || name == "wrapping_sub" || name == "wrapping_mul" {
+                let a = emit_expr(&args[0], ctx, out);
+                let b = emit_expr(&args[1], ctx, out);
+                let ty = llvm_type(&args[0].ty);
+                let llvm_op = match name.as_str() {
+                    "wrapping_add" => "add",
+                    "wrapping_sub" => "sub",
+                    _ => "mul",
+                };
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = {} {} {}, {}\n",
+                    dest, llvm_op, ty, a, b
+                ));
+                return dest;
+            }
             // Closure #411: scalar binary min / max / clamp.
             // i64 versions: icmp + select (no intrinsic).
             // f64 versions: @llvm.minnum.f64 / @llvm.maxnum.f64
@@ -18367,7 +18397,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // fn-ptr type which `llvm_type_string(expr.ty)`
             // already spells; callers use the value as an
             // SSA operand of that type.
-            format!("@{}", crate::backend_c::function_name(name))
+            //
+            // `#[no_mangle]` fns are DEFINED under their bare
+            // name (see the "Determine the LLVM symbol name"
+            // logic below, and the matching call-site check at
+            // `is_no_mangle` above) -- a FnRef to one of these
+            // must resolve to that same bare name, or the
+            // reference and the definition disagree and `llc`
+            // fails with "use of undefined value '@fn_<name>'".
+            // Found via a #[no_mangle] fn passed as a function-
+            // pointer VALUE (not called directly) to dhruvaos's
+            // task_create; direct calls already went through
+            // LLVM_NO_MANGLE_FN_REGISTRY correctly, only this
+            // value-reference path used the always-mangled
+            // `backend_c::function_name` unconditionally.
+            let is_no_mangle = LLVM_NO_MANGLE_FN_REGISTRY
+                .with(|r| r.borrow().contains(name.as_str()));
+            if is_no_mangle {
+                format!("@{}", name)
+            } else {
+                format!("@{}", crate::backend_c::function_name(name))
+            }
         }
         TypedExprKind::CallIndirect { callee, args } => {
             // Arc 5c: Closure-typed callee → indirect call

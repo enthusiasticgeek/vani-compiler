@@ -17981,4 +17981,39 @@ without risking further corruption), and they're comment-only text
 with no functional/user-facing impact, unlike the 753 already fixed.
 Left for a dedicated future pass rather than rushed here.
 
-Next free bug number is **BUG-231**.
+## BUG-231: `#[no_mangle]` fn referenced as a function-pointer VALUE emitted the mangled symbol, not its bare one (2026-08-29)
+
+Found while building dhruvaos's new `task_create()` API, which takes a
+task entry function as a first-class `fn() -> i64` value (not a direct
+call). The entry function was declared `#[no_mangle]` (needed so a
+hand-written assembly caller can reference it by a stable symbol). A
+call to a `#[no_mangle]` fn already correctly resolved to its bare
+name in both backends, via each backend's own no-mangle registry
+(`NO_MANGLE_FN_REGISTRY` in `backend_c.rs`,
+`LLVM_NO_MANGLE_FN_REGISTRY` in `backend_llvm.rs`) — but
+`TypedExprKind::FnRef` (a bare function name used as a VALUE, e.g.
+passed as an argument, distinct from `TypedExprKind::Call`) never
+consulted either registry: `backend_llvm.rs` unconditionally called
+`backend_c::function_name(name)` (always `fn_<name>`), and
+`backend_c.rs`'s own `FnRef` arm did the same. The function's
+*definition* is correctly emitted under its bare name for
+`#[no_mangle]` in both backends — only the value-reference site
+disagreed, so `llc` failed to link with "use of undefined value
+'@fn_<name>'" (the reference), never finding `@<name>` (the
+definition).
+
+Isolated via a throwaway spike sequence (`test.vani`/`test2.vani`:
+plain function-pointer value, forward-referenced, no attributes, both
+worked — ruling out forward-references) `test3.vani`
+(`#[no_mangle]` + `#[bounded_stack]` together: reproduced)
+`test4.vani` (`#[no_mangle]` alone: reproduced) `test5.vani`
+(`#[bounded_stack]` alone: worked — isolating the bug to `#[no_mangle]`
+specifically), run through the real `vanic emit --backend=llvm
+--no-std` + `llc` toolchain path (the one dhruvaos's own `build.sh`
+actually uses), not just a same-process test harness.
+
+Fixed both backends' `FnRef` arms to check their own no-mangle
+registry (same one the call-site path already used) before choosing
+between the bare name and `backend_c::function_name`'s mangled form.
+
+Next free bug number is **BUG-232**.
