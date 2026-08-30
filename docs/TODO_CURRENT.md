@@ -18058,4 +18058,48 @@ existing `detach()` leak precedent) so CI is honest about a known,
 understood gap rather than either silently ignoring it or blocking on
 a rushed fix. Tracked here for a dedicated follow-up round.
 
-Next free bug number is **BUG-233**.
+## BUG-233: `#[bounded_stack]` silently charged 0 bytes for any `extern "C"` callee (2026-08-30)
+
+Found while investigating a real, reproducible DhruvaOS crash (a Data
+Abort, traced empirically to a genuine stack overflow in a task with a
+`#[bounded_stack(bytes=512)]`-verified budget). `stack_depth.rs`'s
+`compute_stack_depths` explicitly skips every `extern "C"` function
+(`if f.is_extern { continue; }`, since there's no vani-source body to
+analyze) — but `traverse_depth`'s handling of a callee absent from the
+resulting frame map then charged it exactly **0 bytes** and an empty
+chain entry, silently treating any hand-written-assembly function as
+using no stack whatsoever, regardless of what it actually does. For a
+checker whose own module doc explicitly frames its purpose as an
+ASIL-D/DO-178C-grade bounded-stack *guarantee*, this is a real
+soundness gap: a caller of an extern fn that genuinely pushes a
+register-save/context-switch frame (DhruvaOS's `dhruva_mutex_lock`/
+`task_sleep_ticks`, each ~64 real bytes) had that cost invisible to
+its own verified budget.
+
+In DhruvaOS's specific case this undercount was NOT the dominant cause
+of the crash on its own (the checker's honest `uart_puts`/`uart_put_i64`
+chain already dominated the reported worst case there; the deeper
+issue was the checker's declared-local-type-size model under-
+estimating real LLVM-compiled frame sizes more broadly, a separate,
+harder-to-close accuracy question, and DhruvaOS's own actual fix was
+simply to allocate real headroom above the verified minimum rather
+than the bare number) — but the 0-byte extern blind spot is real and
+worth closing regardless, independent of what caused that specific
+crash.
+
+Fixed conservatively and narrowly: an unresolvable (extern) callee now
+contributes `FRAME_OVERHEAD_BYTES` (32, the same conservative per-frame
+constant every ordinary function's own prologue already uses) instead
+of 0. Deliberately did not introduce a new `#[[stack_cost]]`-style
+annotation system to let a caller declare a real per-extern-fn cost —
+that would be the more precise fix, but is real new API surface with
+its own design questions (mandatory vs. opt-in, whether a missing
+annotation should be a hard error) not worth rushing here. This change
+can only ever raise a computed worst-case estimate, never lower one, so
+it cannot turn a real violation into a false pass — the only possible
+effect on existing code is surfacing a chain that was already
+dangerously close to its declared budget in reality. Full test suite
+(cargo test --release, all previously-passing) and the 8 `stack_depth::
+tests::*` unit tests confirmed still green.
+
+Next free bug number is **BUG-234**.
