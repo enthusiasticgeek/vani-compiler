@@ -12103,3 +12103,12 @@ kazi main() -> i64 {
   thibitisha hesabu_nyuma(4) == 10;
   chapisha "ishara na hesabu_nyuma sawa";
   rudi
+
+---
+
+### Candidate: 20260830-160749-run-crash-deddcda5b2
+
+Repro: `tools/localfuzz/findings/20260830-160749-run-crash-deddcda5b2/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260830-160749-run-crash-deddcda5b2/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
