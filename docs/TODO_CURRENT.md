@@ -18016,4 +18016,46 @@ Fixed both backends' `FnRef` arms to check their own no-mangle
 registry (same one the call-site path already used) before choosing
 between the bare name and `backend_c::function_name`'s mangled form.
 
-Next free bug number is **BUG-232**.
+## BUG-232: affine closure's heap env struct leaks when passed as a function argument instead of called directly (2026-08-30, triaged not fixed)
+
+Found by CI immediately after commit `0a41a48d` fixed BUG-201's own
+double-free in `examples/language/english/
+bug201_closure_captures_vec_struct.vani`: fixing that crash let the
+program run to completion for the first time, which let
+LeakSanitizer's exit-time scan see a second, previously-masked bug
+underneath it.
+
+An affine closure (one with non-Copy captures, e.g. a struct owning a
+`Vec<T>`) heap-allocates its env struct (`backend_c.rs`'s `is_aff`
+constructor path, `malloc`). That heap block is only ever freed via
+two mechanisms: (1) a `TypedStmt::Drop` at the owning **local
+binding's** scope exit (`checker.rs::emit_current_scope_drops`, gated
+on `CLOSURE_AFF_REGISTRY` containing that binding's name), or (2) an
+inlined save/null/free sequence when the binding is called directly as
+`name(args)`. Neither fires for `apply(add_n, 5)`: passing `add_n` by
+value into `apply` is correctly treated as a move (suppressing the
+caller-side Drop), but `apply`'s own parameter `f` is never registered
+in `CLOSURE_AFF_REGISTRY` — that registry is populated only at a
+closure literal's creation site, keyed by the name given there, with
+no mechanism to propagate through a call boundary to a differently-
+named callee parameter.
+
+The callee can't work this out on its own either: `Closure(i64) ->
+i64` is a single type regardless of whether a given call site's actual
+argument is heap-backed (affine) or stack-backed (`static __thread`,
+the ordinary Copy-capture case) — freeing unconditionally at scope
+exit would double-free/corrupt the far more common stack-backed case.
+A correct general fix needs the closure ABI itself to carry a runtime
+own-vs-borrowed tag (e.g. a third fat-pointer field), checked at
+*every* scope exit including a callee's parameter scope — a real
+design change touching every constructor and Drop site, not a local
+patch, and exactly the kind of rushed-ABI-change risk that produced
+the original BUG-201 double-free in this same file.
+
+Deliberately triaged, not fixed: added to `tools/
+leak_sweep_baseline.json` with a full root-cause writeup (matching the
+existing `detach()` leak precedent) so CI is honest about a known,
+understood gap rather than either silently ignoring it or blocking on
+a rushed fix. Tracked here for a dedicated follow-up round.
+
+Next free bug number is **BUG-233**.
