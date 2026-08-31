@@ -18016,4 +18016,90 @@ Fixed both backends' `FnRef` arms to check their own no-mangle
 registry (same one the call-site path already used) before choosing
 between the bare name and `backend_c::function_name`'s mangled form.
 
-Next free bug number is **BUG-232**.
+## BUG-232: affine closure's heap env struct leaks when passed as a function argument instead of called directly (2026-08-30, triaged not fixed)
+
+Found by CI immediately after commit `0a41a48d` fixed BUG-201's own
+double-free in `examples/language/english/
+bug201_closure_captures_vec_struct.vani`: fixing that crash let the
+program run to completion for the first time, which let
+LeakSanitizer's exit-time scan see a second, previously-masked bug
+underneath it.
+
+An affine closure (one with non-Copy captures, e.g. a struct owning a
+`Vec<T>`) heap-allocates its env struct (`backend_c.rs`'s `is_aff`
+constructor path, `malloc`). That heap block is only ever freed via
+two mechanisms: (1) a `TypedStmt::Drop` at the owning **local
+binding's** scope exit (`checker.rs::emit_current_scope_drops`, gated
+on `CLOSURE_AFF_REGISTRY` containing that binding's name), or (2) an
+inlined save/null/free sequence when the binding is called directly as
+`name(args)`. Neither fires for `apply(add_n, 5)`: passing `add_n` by
+value into `apply` is correctly treated as a move (suppressing the
+caller-side Drop), but `apply`'s own parameter `f` is never registered
+in `CLOSURE_AFF_REGISTRY` — that registry is populated only at a
+closure literal's creation site, keyed by the name given there, with
+no mechanism to propagate through a call boundary to a differently-
+named callee parameter.
+
+The callee can't work this out on its own either: `Closure(i64) ->
+i64` is a single type regardless of whether a given call site's actual
+argument is heap-backed (affine) or stack-backed (`static __thread`,
+the ordinary Copy-capture case) — freeing unconditionally at scope
+exit would double-free/corrupt the far more common stack-backed case.
+A correct general fix needs the closure ABI itself to carry a runtime
+own-vs-borrowed tag (e.g. a third fat-pointer field), checked at
+*every* scope exit including a callee's parameter scope — a real
+design change touching every constructor and Drop site, not a local
+patch, and exactly the kind of rushed-ABI-change risk that produced
+the original BUG-201 double-free in this same file.
+
+Deliberately triaged, not fixed: added to `tools/
+leak_sweep_baseline.json` with a full root-cause writeup (matching the
+existing `detach()` leak precedent) so CI is honest about a known,
+understood gap rather than either silently ignoring it or blocking on
+a rushed fix. Tracked here for a dedicated follow-up round.
+
+## BUG-233: `#[bounded_stack]` silently charged 0 bytes for any `extern "C"` callee (2026-08-30)
+
+Found while investigating a real, reproducible DhruvaOS crash (a Data
+Abort, traced empirically to a genuine stack overflow in a task with a
+`#[bounded_stack(bytes=512)]`-verified budget). `stack_depth.rs`'s
+`compute_stack_depths` explicitly skips every `extern "C"` function
+(`if f.is_extern { continue; }`, since there's no vani-source body to
+analyze) — but `traverse_depth`'s handling of a callee absent from the
+resulting frame map then charged it exactly **0 bytes** and an empty
+chain entry, silently treating any hand-written-assembly function as
+using no stack whatsoever, regardless of what it actually does. For a
+checker whose own module doc explicitly frames its purpose as an
+ASIL-D/DO-178C-grade bounded-stack *guarantee*, this is a real
+soundness gap: a caller of an extern fn that genuinely pushes a
+register-save/context-switch frame (DhruvaOS's `dhruva_mutex_lock`/
+`task_sleep_ticks`, each ~64 real bytes) had that cost invisible to
+its own verified budget.
+
+In DhruvaOS's specific case this undercount was NOT the dominant cause
+of the crash on its own (the checker's honest `uart_puts`/`uart_put_i64`
+chain already dominated the reported worst case there; the deeper
+issue was the checker's declared-local-type-size model under-
+estimating real LLVM-compiled frame sizes more broadly, a separate,
+harder-to-close accuracy question, and DhruvaOS's own actual fix was
+simply to allocate real headroom above the verified minimum rather
+than the bare number) — but the 0-byte extern blind spot is real and
+worth closing regardless, independent of what caused that specific
+crash.
+
+Fixed conservatively and narrowly: an unresolvable (extern) callee now
+contributes `FRAME_OVERHEAD_BYTES` (32, the same conservative per-frame
+constant every ordinary function's own prologue already uses) instead
+of 0. Deliberately did not introduce a new `#[[stack_cost]]`-style
+annotation system to let a caller declare a real per-extern-fn cost —
+that would be the more precise fix, but is real new API surface with
+its own design questions (mandatory vs. opt-in, whether a missing
+annotation should be a hard error) not worth rushing here. This change
+can only ever raise a computed worst-case estimate, never lower one, so
+it cannot turn a real violation into a false pass — the only possible
+effect on existing code is surfacing a chain that was already
+dangerously close to its declared budget in reality. Full test suite
+(cargo test --release, all previously-passing) and the 8 `stack_depth::
+tests::*` unit tests confirmed still green.
+
+Next free bug number is **BUG-234**.

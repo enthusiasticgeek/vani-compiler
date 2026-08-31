@@ -148,7 +148,39 @@ fn traverse_depth(
     is_inline_call: bool,
 ) -> TraverseResult {
     let Some(frame) = frames.get(name) else {
-        return TraverseResult { depth: Some(0), chain: vec![] };
+        // BUG (found 2026-08-30, via a real DhruvaOS crash traced back
+        // here): `name` not being in `frames` means it's an `extern
+        // "C"` function -- compute_stack_depths's own `if f.is_extern
+        // { continue; }` above never gave it a FrameReport at all. This
+        // used to charge such a callee exactly 0 bytes, silently
+        // treating any hand-written assembly function (this project has
+        // no way to inspect the real body of) as using NO stack
+        // whatsoever. That's unsound for a checker whose entire purpose
+        // (per this module's own doc comment) is an ASIL-D/DO-178C-
+        // grade bounded-stack GUARANTEE: a real extern fn that pushes a
+        // register-save frame before blocking/switching context (e.g. a
+        // hand-written RTOS context-switch primitive) contributes real,
+        // nonzero stack bytes this analysis had no way to see. A caller
+        // with a `#[bounded_stack]` budget sized with little to no
+        // headroom above the (silently undercounted) verified minimum
+        // could genuinely overflow its real stack in production while
+        // this checker reported it as fully verified — exactly what
+        // happened: DhruvaOS's dhruva_mutex_lock/task_sleep_ticks (both
+        // extern "C", each pushing a real 64-byte context-switch frame)
+        // were invisible here, and a task allocated exactly its
+        // "verified" budget with zero margin (matching this exact
+        // undercount) crashed with stack corruption after enough
+        // context-switch cycles.
+        //
+        // Charging the same FRAME_OVERHEAD_BYTES conservative constant
+        // ordinary functions already use is a minimal, strictly more
+        // conservative fix (raises estimates, never lowers one) that
+        // needs no new annotation surface: it cannot turn a real
+        // worst-case violation into a false pass, only the reverse
+        // (surfacing budgets that were already dangerously tight against
+        // reality, the same class of thing this project's own dhruva
+        // fix needed regardless of this checker change).
+        return TraverseResult { depth: Some(FRAME_OVERHEAD_BYTES), chain: vec![name.to_string()] };
     };
     // How many bytes this activation contributes to the stack.
     let frame_contribution = if is_inline_call {
