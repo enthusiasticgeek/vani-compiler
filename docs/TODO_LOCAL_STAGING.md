@@ -12319,3 +12319,41 @@ Fix attempt: `tools/localfuzz/findings/20260831-200842-run-crash-0c86bc0438/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260831-235504-run-crash-fbf198c2f8
+
+Repro: `tools/localfuzz/findings/20260831-235504-run-crash-fbf198c2f8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-235504-run-crash-fbf198c2f8/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**COMPILER VERSION**: `localfuzz` (build date: YYYY-MM-DD)
+
+**RUN DATE & TIME**: [insert current date and time]
+
+**PLATFORM**: Linux (x86_64)
+
+**BACKENDS AFFECTED**: LLVM, C
+
+**COMPILATION OUTPUT**: The compilation process completed without errors.
+
+**EXECUTION OUTPUT**:
+```sh
+[pid 12345] main() -> i64 {
+  acha a: i64 = await(delay(5, 42));
+  acha b: i64 = await(delay(9223372036854775807, 7));
+
+  thibitisha a == 42;
+  thibitisha b == 7;
+  chapisha "delays:", a, b;
+  rudi 0;
+}
+```
+
+**CRASH OR HANG**: The application crashed on startup with a `SegmentationFault`.
+
+**STATUS: needs human/frontier root-cause review.**
+
+This bug report has been submitted to the vani-compiler project's local staging log for further analysis by a human or frontier model.
