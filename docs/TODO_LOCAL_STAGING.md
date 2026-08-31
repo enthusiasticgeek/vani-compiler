@@ -12227,3 +12227,42 @@ Fix attempt: `tools/localfuzz/findings/20260831-054814-run-crash-ddd1bb4181/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260831-082120-backend-divergence-6c7463f420
+
+Repro: `tools/localfuzz/findings/20260831-082120-backend-divergence-6c7463f420/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-082120-backend-divergence-6c7463f420/fix_attempt.md`
+
+**STAGING ENTRY**
+
+---
+
+**Date:** YYYY-MM-DD
+
+**Time:** HH:MM:SS UTC
+
+**Subject:** CANDIDATE bug report for vani-compiler local staging log
+
+**Compiler Version:** vani-compiler-version (e.g., 0.1.2)
+
+**Machine:** machine-name (e.g., laptop123)
+
+**Commit:** commit-hash (e.g., abc123456789)
+
+---
+
+**Bugs Found:**
+
+  - **Bug-202**: `vec()`'s empty-`Vec<bool>` constructor recorded `cap` as an ELEMENT count instead of the BIT count this packed layout actually uses everywhere else (push's own growth math divides `cap` by 64). The undersized `cap` made the very next `push` past it compute a zero-byte `realloc` via integer-division-to-zero, then dereference the resulting null pointer -- a crash by the second push into any fresh `Vec<bool>`.
+
+  - **Bug-203**: `push`/`set_mut`'s bit-OR logic built the bit to insert via `sext i1 %v to i64`. `sext` of `true` produces all-ones (-1i64), not 1 -- shifted left by the target bit index, that sets every bit from that position through 63, silently corrupting every higher-indexed element the moment any element is written `true`.
+
+---
+
+**Mutation Details:**
+
+The generated source for this bug report contains a regression example for two bugs in the LLVM backend:
+- **BUG-202**: A `Vec<bool>`'s empty-`Vec<bool>` constructor was recording an incorrect count of elements, leading to a crash on the second push.
+- **BUG-203**: The bit-OR logic for inserting a new element into a `Vec<bool>` using `set
