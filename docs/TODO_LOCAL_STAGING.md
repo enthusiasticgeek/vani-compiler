@@ -12281,3 +12281,12 @@ To reproduce the issue, run:
 vanic run examples/language/telugu/async_cancel_auto.vani
 ```
 This should produce a crash or hang output, which is consistent with the `crash` finding kind in your log.
+
+---
+
+### Candidate: 20260831-175006-run-crash-01517aa646
+
+Repro: `tools/localfuzz/findings/20260831-175006-run-crash-01517aa646/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-175006-run-crash-01517aa646/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
