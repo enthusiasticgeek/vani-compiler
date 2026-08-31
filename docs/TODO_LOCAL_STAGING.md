@@ -12168,3 +12168,33 @@ Repro: `tools/localfuzz/findings/20260831-003216-run-crash-5ac0c0c761/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260831-003216-run-crash-5ac0c0c761/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260831-043119-check-crash-65b13c491a
+
+Repro: `tools/localfuzz/findings/20260831-043119-check-crash-65b13c491a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-043119-check-crash-65b13c491a/fix_attempt.md`
+
+```plaintext
+vani-compiler: [check-crash] v0.17.0 (2023-09-15)
+
+Running mutant/generated source...
+Found kind: check-crash
+Raw result data:
+{
+  "kind": "check-crash",
+  "check": {
+    "rc": 101,
+    "stdout": "",
+    "stderr": "\nthread 'main' (41420) panicked at src/checker.rs:22234:30:\nenum dispatch has enum_decl\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+    "timed_out": false
+  },
+  "features": [
+    "async/await",
+    "requires/ensures SMT contracts"
+  ]
+}
+
+STATUS: needs human/frontier root-cause review.
+```
