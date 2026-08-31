@@ -12266,3 +12266,18 @@ Fix attempt: `tools/localfuzz/findings/20260831-082120-backend-divergence-6c7463
 The generated source for this bug report contains a regression example for two bugs in the LLVM backend:
 - **BUG-202**: A `Vec<bool>`'s empty-`Vec<bool>` constructor was recording an incorrect count of elements, leading to a crash on the second push.
 - **BUG-203**: The bit-OR logic for inserting a new element into a `Vec<bool>` using `set
+
+---
+
+### Candidate: 20260831-125211-run-crash-6e847a6d5d
+
+Repro: `tools/localfuzz/findings/20260831-125211-run-crash-6e847a6d5d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-125211-run-crash-6e847a6d5d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+To reproduce the issue, run:
+```sh
+vanic run examples/language/telugu/async_cancel_auto.vani
+```
+This should produce a crash or hang output, which is consistent with the `crash` finding kind in your log.
