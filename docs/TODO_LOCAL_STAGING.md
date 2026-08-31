@@ -12198,3 +12198,32 @@ Raw result data:
 
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260831-054814-run-crash-ddd1bb4181
+
+Repro: `tools/localfuzz/findings/20260831-054814-run-crash-ddd1bb4181/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260831-054814-run-crash-ddd1bb4181/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 94
+}
+```
+
