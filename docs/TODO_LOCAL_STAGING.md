@@ -12424,3 +12424,32 @@ Fix attempt: `tools/localfuzz/findings/20260901-115805-run-crash-aa61d09760/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260901-234959-run-crash-ad638bcd17
+
+Repro: `tools/localfuzz/findings/20260901-234959-run-crash-ad638bcd17/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260901-234959-run-crash-ad638bcd17/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
