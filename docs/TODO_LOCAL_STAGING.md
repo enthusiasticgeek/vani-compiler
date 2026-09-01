@@ -12357,3 +12357,12 @@ Fix attempt: `tools/localfuzz/findings/20260831-235504-run-crash-fbf198c2f8/fix_
 **STATUS: needs human/frontier root-cause review.**
 
 This bug report has been submitted to the vani-compiler project's local staging log for further analysis by a human or frontier model.
+
+---
+
+### Candidate: 20260901-030956-run-crash-dc805ea21d
+
+Repro: `tools/localfuzz/findings/20260901-030956-run-crash-dc805ea21d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260901-030956-run-crash-dc805ea21d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
