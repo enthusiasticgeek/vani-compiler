@@ -12530,3 +12530,12 @@ Repro: `tools/localfuzz/findings/20260902-115548-run-crash-bbd7facd1d/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260902-115548-run-crash-bbd7facd1d/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260902-142614-run-crash-b5767ff3b0
+
+Repro: `tools/localfuzz/findings/20260902-142614-run-crash-b5767ff3b0/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260902-142614-run-crash-b5767ff3b0/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
