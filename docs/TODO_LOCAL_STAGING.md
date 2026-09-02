@@ -12509,3 +12509,15 @@ Fix attempt: `tools/localfuzz/findings/20260902-065546-backend-divergence-d2b9b9
 }
 ```
 
+
+---
+
+### Candidate: 20260902-110358-run-crash-97081887ce
+
+Repro: `tools/localfuzz/findings/20260902-110358-run-crash-97081887ce/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260902-110358-run-crash-97081887ce/fix_attempt.md`
+
+RUN: `vanic run examples/language/japanese/async_cancel_auto.vani`
+OUTPUT: Crash (Segmentation fault)
+
+STATUS: needs human/frontier root-cause review.
