@@ -12521,3 +12521,12 @@ RUN: `vanic run examples/language/japanese/async_cancel_auto.vani`
 OUTPUT: Crash (Segmentation fault)
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260902-115548-run-crash-bbd7facd1d
+
+Repro: `tools/localfuzz/findings/20260902-115548-run-crash-bbd7facd1d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260902-115548-run-crash-bbd7facd1d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
