@@ -12471,3 +12471,12 @@ Repro: `tools/localfuzz/findings/20260902-031914-run-crash-dc4049be12/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260902-031914-run-crash-dc4049be12/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260902-043527-run-crash-eba604ab16
+
+Repro: `tools/localfuzz/findings/20260902-043527-run-crash-eba604ab16/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260902-043527-run-crash-eba604ab16/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
