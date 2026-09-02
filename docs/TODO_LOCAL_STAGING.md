@@ -12539,3 +12539,14 @@ Repro: `tools/localfuzz/findings/20260902-142614-run-crash-b5767ff3b0/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260902-142614-run-crash-b5767ff3b0/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260902-152254-run-crash-97bcb9a47c
+
+Repro: `tools/localfuzz/findings/20260902-152254-run-crash-97bcb9a47c/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260902-152254-run-crash-97bcb9a47c/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The LLVM backend crashes when attempting to execute the `apply` function with a closure capturing a non-Copy struct (with a Vec<T> field) by ref. The C backend runs correctly without crashing, indicating that this issue is specific to the LLVM backend and related to type ordering requirements within closure environments.
