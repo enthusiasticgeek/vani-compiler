@@ -12550,3 +12550,20 @@ Fix attempt: `tools/localfuzz/findings/20260902-152254-run-crash-97bcb9a47c/fix_
 STATUS: needs human/frontier root-cause review.
 
 The LLVM backend crashes when attempting to execute the `apply` function with a closure capturing a non-Copy struct (with a Vec<T> field) by ref. The C backend runs correctly without crashing, indicating that this issue is specific to the LLVM backend and related to type ordering requirements within closure environments.
+
+---
+
+### Candidate: 20260903-013754-backend-divergence-183ba66e44
+
+Repro: `tools/localfuzz/findings/20260903-013754-backend-divergence-183ba66e44/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260903-013754-backend-divergence-183ba66e44/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler local staging log indicates that a bug was detected during the execution of a test case. The mutant/generated source provided contains a scenario where multiple threads interact with different resources concurrently, leading to unexpected behavior in the `Executor` and the watchdog thread.
+
+Specifically, the bug occurs when the `Executor` attempts to handle an abandoned job by polling it once (guaranteed past its first suspend point), cancelling cooperatively, and then handing it to the Executor already carrying a live heap-owning state. This pattern is proven ASan-clean by the standalone leak audit, but the scenario described in the test case leads to a divergent output.
+
+The log shows that the test case failed with a `pop on empty Vec` error in the C backend, indicating an attempt to poll from an empty vector during the job execution process. This unexpected behavior is not consistent across different backends, leading to the classification of this as a backend-divergence issue.
+
+To resolve this bug, further investigation and refinement of the concurrency handling logic within the `Executor` and the watchdog thread are required. Additionally, additional testing and regression checks should be performed to ensure that the scenario described in the test case behaves as expected across all backends.
