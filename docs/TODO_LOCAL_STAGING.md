@@ -12567,3 +12567,12 @@ Specifically, the bug occurs when the `Executor` attempts to handle an abandoned
 The log shows that the test case failed with a `pop on empty Vec` error in the C backend, indicating an attempt to poll from an empty vector during the job execution process. This unexpected behavior is not consistent across different backends, leading to the classification of this as a backend-divergence issue.
 
 To resolve this bug, further investigation and refinement of the concurrency handling logic within the `Executor` and the watchdog thread are required. Additionally, additional testing and regression checks should be performed to ensure that the scenario described in the test case behaves as expected across all backends.
+
+---
+
+### Candidate: 20260903-061426-run-crash-428fa001dd
+
+Repro: `tools/localfuzz/findings/20260903-061426-run-crash-428fa001dd/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260903-061426-run-crash-428fa001dd/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
