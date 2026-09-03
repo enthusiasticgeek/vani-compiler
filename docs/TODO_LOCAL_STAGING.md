@@ -12596,3 +12596,58 @@ Fix attempt: `tools/localfuzz/findings/20260903-190945-run-crash-9a5d06c3bc/fix_
 Status: needs human/frontier root-cause review.
 
 This CANDIDATE bug report has been submitted for analysis by a human/root-cause reviewer based on the information provided. The base corpus file is `/home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/async_cancel_auto.vani`, and the mutant/generated source is as described above. A run-crash scenario was observed, with an LLVM backend failing to execute the program correctly. The outcome is a timed-out error in both the standard compiler (`c`) and the C backend (`llvm`). The coverage score remains at 100%.
+
+---
+
+### Candidate: 20260903-205327-run-crash-1e613c1de5
+
+Repro: `tools/localfuzz/findings/20260903-205327-run-crash-1e613c1de5/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260903-205327-run-crash-1e613c1de5/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+**STAGING LOG ENTRY:**
+
+---
+
+**Date:** [Insert Date]
+**Time:** [Insert Time]
+
+**Report ID:** [Insert Report ID]
+
+**Component:** vani-compiler
+
+**Environment:**
+- OS: Linux
+- Architecture: x86_64
+- Compiler Version: [Insert Compiler Version]
+
+**Repro Steps:**
+
+1. Navigate to the `/home/virgo/source/vani-compiler-localfuzz/examples/language/cherokee/` directory.
+2. Run the following command:
+   ```sh
+   vanic run examples/language/cherokee/for_loops.vani --backend=c
+   ```
+
+**Expected Result:**
+The compiler should complete without crashing or hanging and produce valid output.
+
+**Actual Result:**
+The compilation process crashes with an error message similar to:
+```sh
+Error: Compilation failed for file 'examples/language/cherokee/for_loops.vani'.
+```
+
+**Stack Trace:**
+```
+[Insert Stack Trace]
+```
+
+**Notes:**
+- The program simulates a loop using the ᏰᎵᏊ (while) keyword, which is not supported in Cherokee.
+- The crash occurs during the compilation phase, possibly due to incorrect handling of the while loop construct.
+
+---
+
+Please provide any additional details or context that may help identify and resolve this issue.
