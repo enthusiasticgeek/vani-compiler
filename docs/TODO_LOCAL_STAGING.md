@@ -12651,3 +12651,12 @@ Error: Compilation failed for file 'examples/language/cherokee/for_loops.vani'.
 ---
 
 Please provide any additional details or context that may help identify and resolve this issue.
+
+---
+
+### Candidate: 20260903-210448-run-crash-f7d3799ee7
+
+Repro: `tools/localfuzz/findings/20260903-210448-run-crash-f7d3799ee7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260903-210448-run-crash-f7d3799ee7/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
