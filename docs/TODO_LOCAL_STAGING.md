@@ -12585,3 +12585,14 @@ Repro: `tools/localfuzz/findings/20260903-121959-run-crash-d669b7fd24/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260903-121959-run-crash-d669b7fd24/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260903-190945-run-crash-9a5d06c3bc
+
+Repro: `tools/localfuzz/findings/20260903-190945-run-crash-9a5d06c3bc/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260903-190945-run-crash-9a5d06c3bc/fix_attempt.md`
+
+Status: needs human/frontier root-cause review.
+
+This CANDIDATE bug report has been submitted for analysis by a human/root-cause reviewer based on the information provided. The base corpus file is `/home/virgo/source/vani-compiler-localfuzz/examples/language/bengali/async_cancel_auto.vani`, and the mutant/generated source is as described above. A run-crash scenario was observed, with an LLVM backend failing to execute the program correctly. The outcome is a timed-out error in both the standard compiler (`c`) and the C backend (`llvm`). The coverage score remains at 100%.
