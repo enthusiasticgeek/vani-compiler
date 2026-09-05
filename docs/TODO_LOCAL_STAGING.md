@@ -12705,3 +12705,32 @@ Repro: `tools/localfuzz/findings/20260905-003548-run-crash-63cc80b084/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260905-003548-run-crash-63cc80b084/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260905-014626-backend-divergence-7d26ebb582
+
+Repro: `tools/localfuzz/findings/20260905-014626-backend-divergence-7d26ebb582/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260905-014626-backend-divergence-7d26ebb582/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 3,
+    "stdout": "vani tic-tac-toe -- timed edition (15 seconds per move, or you forfeit)\n\n",
+    "stderr": "index out of bounds: 2, len -1\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 0,
+    "stdout": "vani tic-tac-toe -- timed edition (15 seconds per move, or you forfeit)\n\n 1 | 2 | 3\n---+---+---\n 4 | 5 | 6\n---+---+---\n 7 | 8 | 9\n\nPlayer \u001b[31mX\u001b[0m, enter a position (1-9), or 'quit' to exit:\nGoodbye!\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "coverage_score": 100
+}
+```
+
