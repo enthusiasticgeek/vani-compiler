@@ -12758,3 +12758,29 @@ Repro: `tools/localfuzz/findings/20260905-075049-run-crash-080632c37f/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260905-075049-run-crash-080632c37f/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260905-090316-check-crash-fbec2a7252
+
+Repro: `tools/localfuzz/findings/20260905-090316-check-crash-fbec2a7252/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260905-090316-check-crash-fbec2a7252/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "check-crash",
+  "check": {
+    "rc": 101,
+    "stdout": "",
+    "stderr": "\nthread 'main' (1833835) panicked at src/checker.rs:22234:30:\nenum dispatch has enum_decl\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+    "timed_out": false
+  },
+  "features": [
+    "async/await",
+    "bounded generics with an interface bound"
+  ]
+}
+```
+
