@@ -12793,3 +12793,16 @@ Repro: `tools/localfuzz/findings/20260905-093937-run-crash-6e948962d8/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260905-093937-run-crash-6e948962d8/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260905-100728-run-crash-5f6ebe462b
+
+Repro: `tools/localfuzz/findings/20260905-100728-run-crash-5f6ebe462b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260905-100728-run-crash-5f6ebe462b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The compiler was run on a specific file, `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/echo_with_timeout.vani`, with the specified mutated/generated source code. The observed symptom is a crash or hang during the execution of the program, which could indicate various issues such as incorrect control flow, memory corruption, or bugs in the compiler itself.
+
+The backend(s) affected by this mutation are LLVM and C.
