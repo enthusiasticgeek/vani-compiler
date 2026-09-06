@@ -12862,3 +12862,12 @@ Fix attempt: `tools/localfuzz/findings/20260906-043816-run-crash-9a42929ac7/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260906-074220-run-crash-0c8b537240
+
+Repro: `tools/localfuzz/findings/20260906-074220-run-crash-0c8b537240/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260906-074220-run-crash-0c8b537240/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
