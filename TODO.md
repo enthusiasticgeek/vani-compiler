@@ -36,6 +36,10 @@
 
 ## Open items (summary)
 
+Real language ergonomics gaps (missing features, not bugs) found
+while writing DhruvaOS, a large external bare-metal consumer of vani:
+see [docs/DHRUVAOS_ERGONOMICS_TODO.md](docs/DHRUVAOS_ERGONOMICS_TODO.md).
+
 See [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the full checkbox list.
 All items within our control are done. What's left is either blocked
 on something external, or an open design decision nobody's greenlit:
