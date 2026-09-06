@@ -618,6 +618,34 @@ qemu-aarch64-static prog_arm
 Attributes: `#[no_mangle]`, `#[link_section = ".vectors"]`.
 MMIO: `mmio_read_u32(addr)` / `mmio_write_u32(addr, val)` (also u8/u16).
 
+`#[mmio(size=N)]` on a top-level or module-scoped `const` declares that const's own
+literal value as an MMIO region's base address, `N` bytes wide. The whole-program
+checker collects every tagged const and rejects any pairwise address-range overlap at
+compile time — a hardware-description primitive (DHDL v0.1), not just documentation:
+
+```vani
+#[mmio(size=4)]
+const UART_DR: i64 = 0x20201000;
+#[mmio(size=4)]
+const UART_FR: i64 = 0x20201018;
+
+fn uart_putc(c: i64) -> i64 {
+    while true {
+        let fr: u32 = mmio_read_u32(UART_FR);
+        if (fr & (0x20 as u32)) == (0 as u32) { break; }
+    }
+    let _ = mmio_write_u8(UART_DR, c as u8);
+    return 0;
+}
+```
+
+A second const whose declared `[base, base+size)` range overlaps `UART_DR`'s above is a
+compile error, not a silent bug:
+
+```
+error: MMIO region 'BAD' (0x20201000..0x20201004) overlaps region 'UART_DR' (0x20201000..0x20201004)
+```
+
 ---
 
 ## Tooling reference
@@ -688,7 +716,7 @@ into any existing build system without LLVM on the host.
 | **SMT** | Satisfiability Modulo Theories; Z3 is the solver |
 | **vtable** | Fat pointer dispatch table for `dyn Iface` |
 | **affine drop** | Deterministic destructor call at scope exit (no GC) |
-| **MMIO** | Memory-mapped I/O; `mmio_read/write_u8/u16/u32` |
+| **MMIO** | Memory-mapped I/O; `mmio_read/write_u8/u16/u32`; regions declared/overlap-checked via `#[mmio(size=N)]` |
 | **qNaN** | Quiet NaN; returned by `vec_kth_smallest<f64>` on out-of-bounds |
 | **kosh** (package) | A single buildable project; defined by `vani.toml` |
 

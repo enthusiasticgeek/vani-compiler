@@ -571,6 +571,17 @@ pub struct ConstDecl {
     pub ty: Type,
     pub value: Expr,
     pub span: Span,
+    /// DHDL v0.1 MVP: `#[mmio(size=N)]` before this `const`
+    /// declares the const's own literal value as the base
+    /// address of a memory-mapped I/O region `N` bytes wide.
+    /// The whole-program checker collects every tagged const
+    /// and rejects pairwise address-range overlap. `None` for
+    /// an ordinary const.
+    pub mmio_size: Option<u64>,
+    /// Span of the `#[mmio(...)]` attribute itself, used so
+    /// overlap diagnostics point at the attribute rather than
+    /// the whole const declaration.
+    pub mmio_attr_span: Option<Span>,
 }
 
 /// `#[repr(...)]` layout attribute on a struct declaration.

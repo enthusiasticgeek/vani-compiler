@@ -51955,6 +51955,114 @@ função main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // DHDL v0.1 MVP — `#[mmio(size=N)]` on a top-level `const`.
+    // The const's own literal value is the region's base
+    // address; the whole-program checker rejects pairwise
+    // address-range overlap between every tagged const.
+
+    #[test]
+    fn mmio_non_overlapping_consts_compile() {
+        let source = r#"
+            #[mmio(size=4096)]
+            const GPIO_BASE: i64 = 4096;
+            #[mmio(size=256)]
+            const UART_BASE: i64 = 8192;
+            fn main() -> i64 { return GPIO_BASE + UART_BASE; }
+        "#;
+        let _ = compile(source).expect("non-overlapping mmio regions compile");
+    }
+
+    #[test]
+    fn mmio_adjacent_consts_compile() {
+        // [0, 4096) and [4096, 4352) touch but do not overlap.
+        let source = r#"
+            #[mmio(size=4096)]
+            const A: i64 = 0;
+            #[mmio(size=256)]
+            const B: i64 = 4096;
+            fn main() -> i64 { return A + B; }
+        "#;
+        let _ = compile(source).expect("adjacent (non-overlapping) mmio regions compile");
+    }
+
+    #[test]
+    fn mmio_overlapping_consts_rejected() {
+        let source = r#"
+            #[mmio(size=4096)]
+            const GPIO_BASE: i64 = 0;
+            #[mmio(size=256)]
+            const UART_BASE: i64 = 2048;
+            fn main() -> i64 { return GPIO_BASE + UART_BASE; }
+        "#;
+        let errs = compile(source).expect_err("overlapping mmio regions must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("overlaps")
+                && d.message.contains("GPIO_BASE")
+                && d.message.contains("UART_BASE")),
+            "expected mmio overlap diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn mmio_rejects_unknown_key() {
+        let source = r#"
+            #[mmio(bytes=4096)]
+            const GPIO_BASE: i64 = 0;
+            fn main() -> i64 { return GPIO_BASE; }
+        "#;
+        let errs = compile(source).expect_err("unknown key in `mmio` must reject");
+        assert!(
+            errs.iter().any(|d| d.message.contains("size")),
+            "expected `size` key requirement diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn mmio_rejects_zero_size() {
+        let source = r#"
+            #[mmio(size=0)]
+            const GPIO_BASE: i64 = 0;
+            fn main() -> i64 { return GPIO_BASE; }
+        "#;
+        let errs = compile(source).expect_err("size=0 must reject at parse time");
+        assert!(
+            errs.iter().any(|d| d.message.contains("positive")),
+            "expected positive-int diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn mmio_rejects_negative_base() {
+        let source = r#"
+            #[mmio(size=4096)]
+            const BAD: i64 = -1;
+            fn main() -> i64 { return BAD; }
+        "#;
+        let errs = compile(source).expect_err("negative base address must reject");
+        assert!(
+            errs.iter().any(|d| d.message.contains("non-negative")),
+            "expected non-negative base diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn mmio_works_inside_module_block() {
+        let source = r#"
+            module board {
+                pub #[mmio(size=4096)]
+                const GPIO_BASE: i64 = 0;
+                pub #[mmio(size=256)]
+                const UART_BASE: i64 = 8192;
+            }
+            fn main() -> i64 { return board::GPIO_BASE + board::UART_BASE; }
+        "#;
+        let _ = compile(source).expect("mmio attribute works inside module { } blocks");
+    }
+
     // Devanagari entry-point aliases — `मुख्य` / `प्रमुख` /
     // `प्रधान` canonicalize to `main` at parse time.
 
