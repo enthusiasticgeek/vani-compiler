@@ -253,6 +253,20 @@ impl Parser {
                         self.sync_to_top_level();
                     }
                 }
+            } else if self.check(|k| matches!(k, TokenKind::Hash))
+                && self.next_attr_name_is("mmio")
+            {
+                // DHDL v0.1 MVP: `#[mmio(size=N)]` before a
+                // top-level `const`. Distinct dispatch from the
+                // fn-attribute path below since `parse_attributed_fn`
+                // always expects `fn`/`pure fn` to follow.
+                match self.parse_attributed_const() {
+                    Ok(c) => consts.push(c),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_top_level();
+                    }
+                }
             } else if self.check(|k| matches!(k, TokenKind::Hash)) {
                 // Closure #286: `#[bounded(N)]` attribute
                 // before a function declaration. v1 only
@@ -642,6 +656,20 @@ impl Parser {
                     }
                     Err(e) => { self.errors.push(e); self.sync_past_brace(); }
                 }
+            } else if self.check(|k| matches!(k, TokenKind::Hash))
+                && self.next_attr_name_is("mmio")
+            {
+                // DHDL v0.1 MVP: `#[mmio(size=N)]` on a
+                // module-scoped const -- same dispatch split as
+                // the top-level loop above.
+                match self.parse_attributed_const() {
+                    Ok(c) => {
+                        consts.push(c);
+                        vis.consts_pub.push(is_pub);
+                        vis.consts_kosh_only.push(is_kosh_only);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_past_brace(); }
+                }
             } else if self.check(|k| matches!(k, TokenKind::Hash)) {
                 // Kosh namespacing arc, Phase 3 (2026-07-21): module
                 // bodies previously had no attribute-item branch at
@@ -810,7 +838,71 @@ impl Parser {
             ty,
             value,
             span: start.span.merge(semi.span),
+            mmio_size: None,
+            mmio_attr_span: None,
         })
+    }
+
+    /// DHDL v0.1 MVP: `#[mmio(size=N)]` before a top-level
+    /// `const` declaration. The const's own literal value
+    /// becomes the MMIO region's base address at whole-program
+    /// check time (see `checker.rs`'s overlap pass) — no
+    /// separate `base=` attribute argument needed, since the
+    /// const already carries that value.
+    fn parse_attributed_const(&mut self) -> Result<ConstDecl, Diagnostic> {
+        let hash_span = self.current().span;
+        self.bump(); // consume `#`
+        self.expect_keyword("'[' after '#'", |k| matches!(k, TokenKind::LBracket))?;
+        let attr_name_tok = self.expect_ident()?;
+        let attr_name = ident_text(attr_name_tok);
+        if attr_name != "mmio" {
+            return Err(Diagnostic::new(
+                self.current().span,
+                format!(
+                    "unknown attribute `#[{}]` before `const` -- v1 only \
+                     recognizes `#[mmio(size=N)]` on const declarations",
+                    attr_name
+                ),
+            ));
+        }
+        self.expect_keyword(
+            "'(' after `mmio`",
+            |k| matches!(k, TokenKind::LParen),
+        )?;
+        let key_tok = self.expect_ident()?;
+        let key = ident_text(key_tok);
+        if key != "size" {
+            return Err(Diagnostic::new(
+                self.current().span,
+                format!(
+                    "expected `size` key in `#[mmio(size=N)]`, got `{}`",
+                    key
+                ),
+            ));
+        }
+        self.expect_keyword(
+            "'=' after `size`",
+            |k| matches!(k, TokenKind::Equal),
+        )?;
+        let n_tok = self.bump();
+        let size = match n_tok.kind {
+            TokenKind::Int(v) if v > 0 => v as u64,
+            _ => {
+                return Err(Diagnostic::new(
+                    n_tok.span,
+                    "expected a positive integer literal as the MMIO region \
+                     size in bytes",
+                ));
+            }
+        };
+        self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+        let close = self.expect_keyword("']'", |k| matches!(k, TokenKind::RBracket))?;
+        let attr_span = hash_span.merge(close.span);
+
+        let mut decl = self.parse_const_decl()?;
+        decl.mmio_size = Some(size);
+        decl.mmio_attr_span = Some(attr_span);
+        Ok(decl)
     }
 
     fn parse_interface_decl(&mut self) -> Result<InterfaceDecl, Diagnostic> {
@@ -6672,6 +6764,21 @@ impl Parser {
 
     fn check(&self, predicate: impl FnOnce(&TokenKind) -> bool) -> bool {
         predicate(&self.current().kind)
+    }
+
+    /// Looks ahead past `#` `[` (without consuming) to check
+    /// whether the attribute name matches `name`. Used at the
+    /// top level to route `#[mmio(...)]` to the const-attribute
+    /// parser instead of the fn-attribute parser, before either
+    /// has consumed anything.
+    fn next_attr_name_is(&self, name: &str) -> bool {
+        matches!(
+            (
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                self.tokens.get(self.pos + 2).map(|t| &t.kind),
+            ),
+            (Some(TokenKind::LBracket), Some(TokenKind::Ident(n))) if n == name
+        )
     }
 
     fn current(&self) -> &Token {

@@ -617,6 +617,9 @@ fn type_to_source(ty: &crate::ast::Type) -> String {
 }
 
 fn format_const_decl(c: &crate::ast::ConstDecl, out: &mut String) {
+    if let Some(size) = c.mmio_size {
+        out.push_str(&format!("#[mmio(size={})]\n", size));
+    }
     out.push_str("const ");
     out.push_str(&c.name);
     out.push_str(": ");

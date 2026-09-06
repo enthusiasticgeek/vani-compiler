@@ -1879,6 +1879,70 @@ fn check_impl(
         );
     }
 
+    // DHDL v0.1 MVP: `#[mmio(size=N)]` on a const declares that
+    // const's own (already-validated-literal) value as the base
+    // address of a memory-mapped I/O region `N` bytes wide.
+    // Whole-program pass: collect every tagged const and reject
+    // pairwise address-range overlap. Runs unconditionally, like
+    // the other const-registry checks above -- no separate
+    // subcommand, since an overlapping MMIO map is always a bug.
+    {
+        let mut regions: Vec<(String, u64, u64, Span)> = Vec::new();
+        for decl in &program.consts {
+            let Some(size) = decl.mmio_size else { continue };
+            let attr_span = decl.mmio_attr_span.unwrap_or(decl.span);
+            // A const already rejected above (duplicate name, non-
+            // scalar type, non-literal initializer, out-of-range
+            // value) has no entry here -- skip silently rather than
+            // cascade a second, confusing diagnostic onto the same
+            // declaration.
+            let Some((_, value_const, _)) = const_registry.get(&decl.name) else {
+                continue;
+            };
+            let base = match value_const {
+                TypedConst::Int(v) if *v >= 0 && *v <= u64::MAX as i128 => *v as u64,
+                _ => {
+                    diagnostics.push(Diagnostic::new(
+                        attr_span,
+                        format!(
+                            "const '{}': `#[mmio(size=...)]` requires a \
+                             non-negative integer const as the region's \
+                             base address",
+                            decl.name
+                        ),
+                    ));
+                    continue;
+                }
+            };
+            let Some(end) = base.checked_add(size) else {
+                diagnostics.push(Diagnostic::new(
+                    attr_span,
+                    format!(
+                        "const '{}': MMIO region base 0x{:x} + size {} \
+                         overflows a 64-bit address space",
+                        decl.name, base, size
+                    ),
+                ));
+                continue;
+            };
+            for (other_name, other_base, other_end, other_span) in &regions {
+                if base < *other_end && *other_base < end {
+                    diagnostics.push(Diagnostic::new(
+                        attr_span,
+                        format!(
+                            "MMIO region '{}' (0x{:x}..0x{:x}) overlaps \
+                             region '{}' (0x{:x}..0x{:x})",
+                            decl.name, base, end, other_name, other_base, other_end
+                        ),
+                    ).with_related(*other_span, format!(
+                        "region '{}' declared here", other_name
+                    )));
+                }
+            }
+            regions.push((decl.name.clone(), base, end, attr_span));
+        }
+    }
+
     let mut functions = Vec::new();
     for function in &program.functions {
         functions.push(check_function(
