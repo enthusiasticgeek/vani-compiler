@@ -118,6 +118,93 @@ existing "always has an initializer" rule is satisfied trivially.
 
 ---
 
+## 3. No reborrow from `mut ref T` to `ref T`
+
+**Found**: round 88 of the Pi 4/5 port (a real shared IPv4 header
+module + packet filter, 2026-09-06), writing `ipv4_build_header_rpi4`
+and the packet-filter ingress hook in `netif_recv_frame_rpi4`.
+
+**Gap**: a value already held as a `mut ref T` function parameter
+cannot be passed to a callee expecting a plain `ref T`, even though a
+`mut ref` is a strictly more capable/permissive access than `ref` (in
+Rust terms, `&mut T` reborrows as `&T` for free, all the time — this
+is one of the most common patterns in Rust code). Confirmed via a
+standalone `vanic check` probe:
+
+```vani
+fn read_first(buf: ref [u8; 4]) -> u8 { return buf[0]; }
+fn write_and_read(buf: mut ref [u8; 4]) -> u8 {
+  buf[0] = 9 as u8;
+  return read_first(buf);        // error: got mut ref, wanted ref
+}
+```
+
+with the checker's own error: `argument 1 to 'read_first' must be
+assignable to ref [u8; 4], got mut ref [u8; 4]`. Wrapping the
+argument in an explicit `ref buf` doesn't help either — it produces a
+literal reference-to-a-reference (`ref mut ref [u8; 4]`), not a
+reborrow, and fails typecheck just as hard against the callee's plain
+`ref [u8; 4]` parameter. There is no syntax in the language today
+that gets from "I have a `mut ref T`" to "pass it somewhere that only
+needs read access" without changing the callee's own signature.
+
+This compounds badly in exactly the shape a real filtering/parsing
+pipeline naturally takes: a function holds a buffer `mut ref` because
+it just wrote into it (e.g. finishing a checksum-eligible header) and
+then needs to call a handful of small, genuinely read-only helper
+functions on that same buffer to finish its work (compute the
+checksum it just made room for, in this case). Every one of those
+read-only helpers has to be pushed onto `mut ref` too, purely to
+satisfy the type checker, not because they need write access — and
+that requirement then propagates transitively to every OTHER call
+site of those same helpers, even ones that only ever had a `ref` in
+hand and now can't call them at all (see gap's own worked case below).
+
+**Note this is a real design tension, not a simple oversight**: one
+of vani's own stated design principles (per this repo's docs) is that
+`ref`/`mut ref` at a call site make aliasing and mutation cheap to
+audit by inspection — a general reborrow rule needs to preserve that
+audit property (in particular, the reborrowed `ref` must not remain
+usable at the same time as the original `mut ref`, exactly like
+Rust's own borrow checker enforces for `&mut` reborrows) rather than
+just being a type-level `mut ref T -> ref T` coercion with no
+lifetime/exclusivity tracking behind it. Whoever picks this up should
+treat it as "does vani want a real (if narrow) borrow-checking pass,"
+not "loosen one type rule."
+
+**Workaround shipped, two shapes depending on the situation**:
+1. Where an *owned local* already exists (not a parameter) — pass it
+   as either kind at each call site instead of trying to convert an
+   existing reference value. This works because vani DOES let a plain
+   (non-`mut`) `let`-bound local supply `mut ref` (or `ref`) freely at
+   its own call site — the restriction is only on re-wrapping an
+   *already-reference-typed* value. See DhruvaOS commit `a9d189d`'s
+   own SHA-256 code for this pattern already in use before round 88
+   ever hit the parameter case.
+2. Where the value genuinely only exists behind a `mut ref` PARAMETER
+   (no owned local available) — copy through a fresh local first. See
+   `netif_recv_frame_rpi4` in `kernel_main_rpi4.vani`: instead of
+   filtering `out` (a `mut ref` param) directly, the function now
+   reads the frame into a local `[u8; 512]`, passes THAT local as
+   `ref` to the (read-only) packet filter, then copies it into `out`
+   only if the filter allows it. Costs one extra 512-byte copy per
+   receive call — acceptable at this scale, but a real reborrow
+   feature would remove both the copy and the extra local entirely.
+3. Where a read-only helper is called from both a `ref`-holding site
+   and a `mut ref`-holding site (this round's `ipv4_checksum_rpi4`,
+   needed from both `ipv4_build_header_rpi4`'s `mut ref frame` and
+   `ipv4_verify_checksum_rpi4`'s otherwise-`ref` frame): standardized
+   the helper AND every caller in that specific chain on `mut ref`,
+   inlining what would otherwise be a delegated call to a `ref`-only
+   sub-helper (`arp_read_u16_be_rpi4`) to avoid the mismatch
+   recurring one level down. Only done for the specific functions
+   that actually needed to interoperate with a `mut ref`-holding
+   caller — the rest of the file's read-only helpers (the whole ARP
+   module, most of the new IPv4 module) were left on plain `ref`,
+   since nothing ever calls them from a `mut ref` context.
+
+---
+
 *(Append new entries below this line as they're found. Keep the
 "found in round N" provenance and a real DhruvaOS commit/file
 reference on each — that's what makes these actionable instead of
