@@ -205,6 +205,80 @@ not "loosen one type rule."
 
 ---
 
+## 4. Fixed arrays (`[T; N]`) are move-only on plain `let`/`=` — no Copy, no `.clone()`
+
+**Found**: round 95 of the Pi 4/5 port (field25519 field arithmetic +
+X25519 Diffie-Hellman, 2026-09-06), writing the RFC 7748 Montgomery
+ladder in `x25519_scalarmult_rpi4`.
+
+**Gap**: `let y: [u32; 8] = x;` (or plain `y = x;` for two existing
+locals) MOVES `x` rather than copying it — a later use of `x` in the
+same function fails typecheck with `cannot borrow 'x' after it was
+moved`, confirmed via a standalone probe (`movetest.vani`):
+
+```vani
+fn use_it(v: ref [u32; 4]) -> u32 { return v[0]; }
+fn f() -> u32 {
+  let x: [u32; 4] = [1 as u32, 2 as u32, 3 as u32, 4 as u32];
+  let y: [u32; 4] = x;   // moves x
+  let a: u32 = use_it(ref x);   // error: cannot borrow 'x' after it was moved
+  return a + y[0];
+}
+```
+
+There is also no escape hatch: array types have no `.clone()` method
+(`clonetest.vani` probe: "methods are attached to struct/enum types
+only in v1"), so the only way to duplicate a `[T; N]` value today is a
+hand-written element-by-element copy loop.
+
+**This corrects a wrong assumption already written into this repo's
+own docs** (gap #1 above, line ~58: "matching how `[T; N]` locals are
+already documented as genuine `Copy` stack values elsewhere in this
+repo's own docs") and into an earlier DhruvaOS project memory note
+that called `[T; N]` arrays "genuine Copy stack values." That claim
+is only true for *passing* an array by `ref`/`mut ref` at a call site
+(the callee borrows the caller's storage, nothing is copied or
+moved) — it does NOT hold for plain value-binding (`let`/`=`), which
+is move-only with no opt-in Copy. For a value type with no heap
+involvement (a `[u32; 8]` is 32 bytes of plain data, no different
+from a struct of 8 `u32` fields), forcing move-only semantics with no
+Copy/Clone escape hatch is a real ergonomic gap other Rust-like
+languages close via `#[derive(Copy, Clone)]` for arrays of Copy
+element types.
+
+**Workaround shipped**: every place a genuine duplicate was needed
+(not just a borrow), replaced the natural `let y = x;` with an
+explicit zero-then-copy-loop:
+
+```vani
+let x3: [u32; 8] = fe_zero_rpi4();
+let x3i: i64 = 0;
+while x3i < 8 {
+  x3[x3i] = x1[x3i];
+  x3i = x3i + 1;
+}
+```
+
+Also drove a broader design choice this round: because this gap
+compounds with gap #3 (no reborrow) and a separate confirmed
+aliasing-XOR rule (a `mut ref` borrow of a variable cannot coexist
+with any other borrow of that same variable in one call — expected,
+correct behavior for a memory-safe language, not itself a gap, but
+worth recording as context: `f(ref x, ref y, mut ref x)` fails with
+"argument list aliases 'x': an '&mut' borrow cannot coexist with
+another use of the same variable in the same call"), the whole
+field25519/X25519 module was designed around bignum/field functions
+**returning their result by value** rather than Pi 1's ARM32
+out-parameter convention — sidesteps all three constraints at once,
+since an owned local can always supply either `ref` or `mut ref` at
+its own call site, and `x = f(ref x)` (read via `ref`, then reassign
+from the call's own return after the borrow ends) was confirmed via
+probe (`reassigntest.vani`) to work correctly. See DhruvaOS
+`kernel_main_rpi4.vani`'s `field25519_add_rpi4`/`field25519_mul_rpi4`/
+etc. and `x25519_scalarmult_rpi4`.
+
+---
+
 *(Append new entries below this line as they're found. Keep the
 "found in round N" provenance and a real DhruvaOS commit/file
 reference on each — that's what makes these actionable instead of
