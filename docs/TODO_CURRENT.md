@@ -18102,4 +18102,120 @@ dangerously close to its declared budget in reality. Full test suite
 (cargo test --release, all previously-passing) and the 8 `stack_depth::
 tests::*` unit tests confirmed still green.
 
-Next free bug number is **BUG-234**.
+## BUG-234: index-assignment with a function-call RHS fails name resolution inside any named scope (`module {}` or a `[deps]`-vendored Kosh package) (2026-09-06)
+
+Found while extracting DhruvaOS's Pi 4/5 crypto code (SHA-256/512,
+field25519/X25519/Ed25519) into standalone Kosh packages
+(`vani-crypto-hash`, `vani-curve25519`). A statement of the exact
+shape `buf[i] = helper(...);` (assign a function call's result into
+an array element) fails to resolve `helper` — "unknown function
+'helper'... but 'modname::helper' exists" — whenever the enclosing
+function lives inside an explicit `module NAME { ... }` block, OR
+inside a file pulled in via a `[deps]` entry in `vani.toml` (Kosh
+package consumption). The identical call resolves correctly in
+EVERY other position tested:
+
+```vani
+module foo {
+  fn helper() -> u32 { return 9 as u32; }
+
+  pub fn a() -> i64 {
+    let y: u32 = helper();      // OK -- let-binding, same module
+    return y as i64;
+  }
+
+  pub fn b() -> i64 {
+    let x: [u32; 2] = [0 as u32, 0 as u32];
+    x[0] = helper();            // FAILS -- index-assign, same module
+    return x[0] as i64;
+  }
+}
+```
+
+Confirmed independently for both trigger paths (isolated, minimal
+repros for each, not assumed to be the same root cause without
+checking): an explicit `module {}` block, AND a plain top-level
+function file pulled in by another package's `vani.toml` `[deps]`
+entry + `vanic vendor` (no `module {}` involved at all on the
+dependency's own side — merely being *declared* as a `[deps]` entry
+is enough to trigger it, independent of whether the consumer also
+`use`s the file directly). Both cases produce the same "did you mean
+`name::helper`" diagnostic, strongly suggesting one shared root cause:
+whatever pass rewrites/qualifies declarations for a named scope's
+external-facing symbol table does not equivalently rewrite (or
+consult the rewritten table for) call sites that are the RHS of an
+index-assignment statement specifically — `let` bindings and plain
+expression-statement calls in the exact same named scope resolve
+correctly, isolating the bug to that one statement form.
+
+**Impact**: this breaks real, idiomatic Kosh package consumption for
+any package whose public functions internally call sibling helpers
+via `buf[i] = helper(...)` — a very common pattern in any array-
+processing code (hash compression loops, checksum accumulation,
+anything filling a buffer element-by-element from a computed value).
+`vani-crypto-hash`'s own SHA-256/512 compression functions hit this
+immediately and pervasively (`h[7] = sha256_wrap_add32(h[7], hh);`,
+`w[i] = sha512_read_be64(msg, ...);`, etc.) the moment the package is
+consumed as a real `[deps]` dependency by `vani-curve25519`, despite
+passing its own standalone `vanic check`/`vanic run` perfectly (which
+never wraps it in a named scope at all — a package's own tests are
+NOT sufficient coverage for this bug, since it only manifests from
+the CONSUMER side).
+
+**Workaround shipped**: `vani-curve25519` does not declare
+`crypto_hash` as a `[deps]` entry at all (a comment in its `vani.toml`
+documents why); instead `src/lib.vani` pulls the vendored copy in via
+a direct relative `use "../vendor/crypto_hash/src/lib.vani";`, which
+lands crypto_hash's functions in the plain flat global namespace (no
+named-scope wrapper of any kind) and is unaffected by this bug. This
+sidesteps the bug but loses the `pkgname::item` qualification/
+collision-avoidance a real dependency graph should have — not a
+long-term fix, just what let real package extraction proceed today.
+
+Not triaged into `src/` yet — the likely place to start is wherever
+`Stmt::IndexAssign` (or equivalent) is lowered/checked for a named
+scope, comparing its call-site name-resolution path against the path
+`Stmt::Let`/plain expression-statement calls use in the same scope
+kind, since those provably work.
+
+## BUG-235: C backend emits a raw pointer instead of an array copy for a struct literal field initialized from a local array/field value (2026-09-06)
+
+Found via the same DhruvaOS crypto-package-extraction work, while
+sanity-checking `vani-curve25519`'s Ed25519 code (which uses a
+`struct Ed25519Point { x: [u32;8], y: [u32;8], z: [u32;8], t: [u32;8] }`)
+against the C backend (`--backend=c`) as a secondary check —
+DhruvaOS's own build only ever uses `--backend=llvm`, so this never
+surfaced there. A struct literal whose array-typed field is
+initialized from an existing local array variable (or another
+struct's field, read through a `ref` parameter) — e.g.
+`Ed25519Point { x: (dec_r).x, y: (dec_r).y, z: (dec_r).z, t: (dec_r).t }`
+— compiles to a C initializer that assigns the array's decayed
+pointer directly into the field slot instead of copying its
+contents:
+
+```c
+Struct_Ed25519Point v_rpoint = (Struct_Ed25519Point){
+  .x = (v_dec_r).x, .y = (v_dec_r).y, .z = (v_dec_r).z, .t = (v_dec_r).t
+};
+```
+
+`cc` correctly rejects this with `initialization of 'unsigned int'
+from 'uint32_t *' ... makes integer from pointer without a cast`
+(`-Wint-conversion`, promoted to a hard error) for every field. A
+struct literal built from an INLINE array literal (`Pt { x: [1,2,3,4],
+... }`) compiles fine on the C backend — only the from-a-variable
+case is affected, meaning the LLVM backend's own struct-literal
+lowering does the equivalent of a real `memcpy`/element-wise copy for
+this case and the C backend's does not; confirmed the LLVM backend
+produces correct output and behavior for the identical source (used
+as DhruvaOS's own workaround, since it only ever builds with
+`--backend=llvm`).
+
+Not triaged into `src/` yet — the likely place to start is
+`backend_c.rs`'s struct-literal-expression lowering, comparing how it
+emits an array-typed field's initializer when the field value's
+source expression is a local/variable (pointer decay, needs an
+element-wise copy loop or `memcpy` into the anonymous struct's field
+array) versus an inline array literal (works correctly today).
+
+Next free bug number is **BUG-236**.
