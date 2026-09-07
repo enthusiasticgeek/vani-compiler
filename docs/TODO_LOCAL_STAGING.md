@@ -13023,3 +13023,12 @@ Fix attempt: `tools/localfuzz/findings/20260906-231125-run-crash-dfc7124341/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260907-010631-run-crash-1483a41ee4
+
+Repro: `tools/localfuzz/findings/20260907-010631-run-crash-1483a41ee4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260907-010631-run-crash-1483a41ee4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
