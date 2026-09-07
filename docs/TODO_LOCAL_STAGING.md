@@ -13045,3 +13045,32 @@ Status: needs human/frontier root-cause review.
 The `vanic run` command with the input file `/home/virgo/source/vani-compiler-localfuzz/examples/language/burmese/early_exit.vani` was executed. The output produced was a crash, as indicated by the error message "Program exited prematurely." This indicates that the program failed to complete its execution before reaching any termination condition.
 
 The backend(s) affected are LLVM and C. This suggests that the crash might be due to issues with the underlying compiler infrastructure or optimizations specific to these backends.
+
+---
+
+### Candidate: 20260907-114935-run-crash-f729e2934e
+
+Repro: `tools/localfuzz/findings/20260907-114935-run-crash-f729e2934e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260907-114935-run-crash-f729e2934e/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
