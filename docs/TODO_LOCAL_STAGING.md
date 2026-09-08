@@ -13179,3 +13179,12 @@ Repro: `tools/localfuzz/findings/20260907-234910-run-crash-efbe607a25/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260907-234910-run-crash-efbe607a25/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260908-073310-run-crash-4b3860f004
+
+Repro: `tools/localfuzz/findings/20260908-073310-run-crash-4b3860f004/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260908-073310-run-crash-4b3860f004/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
