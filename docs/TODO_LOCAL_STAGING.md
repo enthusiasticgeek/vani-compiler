@@ -13217,3 +13217,12 @@ Fix attempt: `tools/localfuzz/findings/20260908-115536-backend-divergence-5b529d
 }
 ```
 
+
+---
+
+### Candidate: 20260908-132917-run-crash-05c4fe9d4e
+
+Repro: `tools/localfuzz/findings/20260908-132917-run-crash-05c4fe9d4e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260908-132917-run-crash-05c4fe9d4e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
