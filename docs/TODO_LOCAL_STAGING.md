@@ -13188,3 +13188,32 @@ Repro: `tools/localfuzz/findings/20260908-073310-run-crash-4b3860f004/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260908-073310-run-crash-4b3860f004/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260908-115536-backend-divergence-5b529ddbb6
+
+Repro: `tools/localfuzz/findings/20260908-115536-backend-divergence-5b529ddbb6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260908-115536-backend-divergence-5b529ddbb6/fix_attempt.md`
+
+(ollama unavailable -- raw finding only)
+
+```json
+{
+  "kind": "backend-divergence",
+  "c": {
+    "rc": 3,
+    "stdout": "registered 4 sensors\n[dashboard] still processing...\nworker 0 derived 2 arena values from raw reading 5\nworker 1 derived 2 arena values from raw reading 10\nworker 2 derived 2 arena values from raw reading -1\nworker 3 derived 2 arena values from raw reading 20\ncheckpoint reached, running total: 140\ngrand total: 140\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\n/tmp/vanic-candidate-1048795-1788868534614135592.c:1069: fn_main: Assertion `(v_grand_total == 204)' failed.\n",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": 3,
+    "stdout": "registered 4 sensors\nworker 0 derived 2 arena values from raw reading 5\n[dashboard] still processing...\nworker 2 derived 2 arena values from raw reading -1\nworker 1 derived 2 arena values from raw reading 10\nworker 3 derived 2 arena values from raw reading 20\ncheckpoint reached, running total: 140\ngrand total: 140\n",
+    "stderr": "/tmp/localfuzz/candidate.vani:102:3: warning: unused variable 'hb' -- never referenced after its declaration\n  let hb: Task<i64> = task heartbeat_log(6);\n  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  help: 1. 'hb' is declared here but never read or otherwise referenced again in this scope.\n  help: 2. If this is intentional -- e.g. a lock guard (Guard<T>/ReadGuard<T>/WriteGuard<T>) kept alive only for its scope-exit unlock, never read directly -- prefix the name with an underscore ('_name') to silence this warning.\nassertion failed: \n",
+    "timed_out": false
+  },
+  "coverage_score": 100
+}
+```
+
