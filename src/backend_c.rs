@@ -12172,7 +12172,20 @@ pub(crate) fn emit_vec_bundle_functions(element: &Type, out: &mut String) {
     // see `reverse` above): the caller supplies the order through a
     // `fn(T, T) -> i64` comparator, so `qsort_impl` never needs `>`/`<`
     // on the element type itself.
-    if element.is_copy() {
+    // DHRUVAOS_ERGONOMICS_TODO.md gap #4 (2026-09-10): `[T; N]` is
+    // now `is_copy()` for Copy element types (checker-level move
+    // semantics), but this generic sort/sort_by helper additionally
+    // assumes `is_copy() == true` implies plain C `=` assignment and
+    // a bare `{ct} key = a[i];`-style local works for the element
+    // type -- true for scalars/structs/enums, but NEVER true for a
+    // raw C array (`intent_arr2_Struct_Point key = a[i];` doesn't
+    // compile in C; arrays can't be assigned via `=` or copy-
+    // initialized as a plain local, only memcpy'd). Excluding
+    // `Type::Array` here restores the pre-existing behavior for
+    // array elements (sort/sort_by simply unavailable for
+    // `Vec<[T; N]>`, same as before this gap's own is_copy() change)
+    // without reverting the fix for actual scalar/struct Copy types.
+    if element.is_copy() && !matches!(element, Type::Array { .. }) {
         let ct = c_element.clone();
         out.push_str(&format!(
             "typedef int64_t (*{sn}__cmp_fn)({ct}, {ct});\n",

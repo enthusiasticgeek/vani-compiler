@@ -1835,17 +1835,28 @@ mod tests {
 
     #[test]
     fn move_into_function_consumes_array() {
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #4 (2026-09-10): `[T; N]`
+        // is now Copy for Copy element types, so an `[i64; 4]` param
+        // no longer consumes the caller's own array (see the
+        // `copy_element_array_survives_move_into_function` test
+        // below for that new behavior). This test's own real
+        // subject -- passing an array BY VALUE genuinely consumes
+        // it -- still needs coverage for a non-Copy element type
+        // (`OwnedStr`), where affine ownership still applies.
         let source = r#"
-            fn sum_four(xs: [i64; 4]) -> i64 {
-              return xs[0] + xs[1] + xs[2] + xs[3];
+            fn first(xs: [OwnedStr; 2]) -> OwnedStr {
+              return xs[0];
             }
 
             fn main() -> i64 {
-              let xs: [i64; 4] = [1, 2, 3, 4];
-              let total: i64 = sum_four(xs);
-              let after: i64 = xs[0];
-              prove total == 10;
-              return after;
+              let a: OwnedStr = "hi" + "";
+              let b: OwnedStr = "yo" + "";
+              let xs: [OwnedStr; 2] = [a, b];
+              let head: OwnedStr = first(xs);
+              let _ = head;
+              let after: OwnedStr = xs[0];
+              let _ = after;
+              return 0;
             }
         "#;
 
@@ -1855,6 +1866,37 @@ mod tests {
             "expected use-after-move diagnostic, got: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn copy_element_array_survives_move_into_function() {
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #4: the flip side of
+        // `move_into_function_consumes_array` above -- an `[i64; 4]`
+        // is Copy, so passing it by value must NOT consume the
+        // caller's own binding.
+        // `assert` (a runtime check compiled into the emitted C/LLVM,
+        // separately confirmed to actually pass live via `vanic run`
+        // on both backends), not `prove` -- the SMT-based `prove`
+        // verifier doesn't yet track array VALUES symbolically
+        // across a copy (arrays were always-moved before this gap's
+        // own fix, so it never needed to). That's a separate, deeper
+        // limitation outside gap #4's own scope (checker move-
+        // tracking + codegen, both already confirmed correct here).
+        let source = r#"
+            fn sum_four(xs: [i64; 4]) -> i64 {
+              return xs[0] + xs[1] + xs[2] + xs[3];
+            }
+
+            fn main() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let total: i64 = sum_four(xs);
+              let after: i64 = xs[0];
+              assert total == 10;
+              return after;
+            }
+        "#;
+
+        compile_to_c(source).expect("Copy-element array should survive being passed by value");
     }
 
     #[test]
@@ -1878,13 +1920,21 @@ mod tests {
 
     #[test]
     fn let_alias_moves_source_array() {
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #4 (2026-09-10): `[i64; 2]`
+        // is now Copy, so plain `let`-aliasing no longer moves it
+        // (see `copy_element_array_let_alias_does_not_move` below).
+        // Retargeted to `[OwnedStr; 2]`, a genuinely non-Copy element
+        // type, to keep covering real array move semantics.
         let source = r#"
             fn main() -> i64 {
-              let xs: [i64; 2] = [1, 2];
-              let ys: [i64; 2] = xs;
-              let bad: i64 = xs[0];
-              prove ys[0] == 1;
-              return bad;
+              let a: OwnedStr = "hi" + "";
+              let b: OwnedStr = "yo" + "";
+              let xs: [OwnedStr; 2] = [a, b];
+              let ys: [OwnedStr; 2] = xs;
+              let bad: OwnedStr = xs[0];
+              let _ = ys;
+              let _ = bad;
+              return 0;
             }
         "#;
 
@@ -1894,6 +1944,27 @@ mod tests {
             "expected move diagnostic, got: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn copy_element_array_let_alias_does_not_move() {
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #4's own worked example:
+        // previously "cannot borrow 'x' after it was moved".
+        // `assert`, not `prove` -- see the same note in
+        // `copy_element_array_survives_move_into_function` above.
+        let source = r#"
+            fn read_first(buf: ref [u32; 4]) -> u32 { return buf[0]; }
+
+            fn main() -> i64 {
+              let x: [u32; 4] = [1 as u32, 2 as u32, 3 as u32, 4 as u32];
+              let y: [u32; 4] = x;
+              let a: u32 = read_first(ref x);
+              assert a + y[0] == 2 as u32;
+              return 0;
+            }
+        "#;
+
+        compile_to_c(source).expect("Copy-element array let-alias should not move the source");
     }
 
     #[test]
@@ -32508,11 +32579,20 @@ fn main() -> i64 {
     fn task_rejects_non_copy_capture_by_value() {
         // Capturing an owned array directly (non-Copy) must
         // fail with the explicit refs-only diagnostic.
+        //
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #4 (2026-09-10): `[i64; 4]`
+        // is now Copy, so it's no longer a valid non-Copy fixture for
+        // this test -- retargeted to `[OwnedStr; 4]`, which stays
+        // genuinely affine.
         let source = r#"
             fn main() -> i64 {
-              let xs: [i64; 4] = [10, 20, 30, 40];
+              let a: OwnedStr = "a" + "";
+              let b: OwnedStr = "b" + "";
+              let c: OwnedStr = "c" + "";
+              let d: OwnedStr = "d" + "";
+              let xs: [OwnedStr; 4] = [a, b, c, d];
               task ta {
-                let v: i64 = xs[0];
+                let v: OwnedStr = xs[0];
                 let _ = v;
               }
               join ta;

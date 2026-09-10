@@ -247,7 +247,61 @@ not "loosen one type rule."
 
 ---
 
-## 4. Fixed arrays (`[T; N]`) are move-only on plain `let`/`=` — no Copy, no `.clone()`
+## 4. Fixed arrays (`[T; N]`) are move-only on plain `let`/`=` — no Copy, no `.clone()` — FIXED 2026-09-10
+
+**Fixed**: `Type::is_copy()` (`src/ast.rs`) now recurses into the
+array element type (`Type::Array { element, .. } => element.is_copy()`)
+instead of unconditionally returning `false` -- mirroring the
+`Type::Tuple` rule immediately below it ("Copy only when ALL elements
+are Copy"). Both backends ALREADY emitted a real whole-array value
+copy for `let ys: [T; N] = xs;` regardless of this flag (LLVM: load/
+store the aggregate; C: memcpy) -- this was purely a checker-level
+move-tracking restriction with no codegen dependency, so the fix is a
+single match-arm change plus one follow-on codegen fix below.
+
+**A real regression found and fixed along the way**: the C backend's
+generic `Vec<T>.sort_by()` helper (`backend_c.rs`, the
+`if element.is_copy() { ... }` block emitting a quicksort
+implementation) had silently relied on `is_copy() == true` also
+implying "plain C `=` assignment and a bare `{ct} key = a[i];`-style
+local works for this element type" -- true for scalars/structs/enums,
+but never true for a raw C array (C arrays can't be assigned via `=`
+or copy-initialized as a plain local, only `memcpy`'d). Before this
+fix, `Type::Array` was ALWAYS `is_copy() == false`, so this whole
+sort/sort_by codegen path was simply never emitted for any
+`Vec<[T; N]>` instantiation -- once arrays could be Copy, the C
+backend tried to emit `intent_arr2_Struct_Point key = a[i];`-style
+code, which doesn't compile in C. Fixed by excluding `Type::Array`
+from that specific gate (`element.is_copy() && !matches!(element,
+Type::Array { .. })`), restoring the exact pre-existing behavior for
+array elements (sort/sort_by unavailable for `Vec<[T; N]>`, same as
+before) without reverting the fix for actual scalar/struct Copy
+types. Found via the full local e2e test suite, not manual review --
+`vec_of_array_of_struct_from_named_variables_runs_correctly_on_both_
+backends` failed with a C compile error inside a never-called-at-
+runtime helper function, since many of this codebase's C helper
+functions are emitted eagerly per `Vec<T>` instantiation regardless
+of whether the program actually calls them.
+
+Also updated 3 pre-existing lib.rs unit tests
+(`let_alias_moves_source_array`, `move_into_function_consumes_array`,
+`task_rejects_non_copy_capture_by_value`) that had used `[i64; N]`/
+`[u32; N]` purely as a stand-in "non-Copy" fixture type -- retargeted
+to `[OwnedStr; N]` (genuinely non-Copy) to keep covering real array
+move/capture semantics, and added 2 new tests
+(`copy_element_array_survives_move_into_function`,
+`copy_element_array_let_alias_does_not_move`) covering the new
+Copy-array behavior itself, including gap #4's own original worked
+example from this file. Both new tests use `assert` rather than
+`prove` -- the SMT-based `prove` verifier doesn't yet track array
+VALUES symbolically across a copy (arrays were always-moved before
+this fix, so it never needed to), a separate, deeper limitation
+outside this gap's own scope; real runtime correctness (including
+mutation-isolation -- proving the copy is a true bytewise copy, not
+an aliased reference) was separately confirmed via standalone probes
+run live on both backends.
+
+Full local suite: 3030 lib tests + 279 e2e tests, 0 failures.
 
 **Found**: round 95 of the Pi 4/5 port (field25519 field arithmetic +
 X25519 Diffie-Hellman, 2026-09-06), writing the RFC 7748 Montgomery
