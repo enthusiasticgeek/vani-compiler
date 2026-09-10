@@ -6493,8 +6493,64 @@ impl Parser {
             TokenKind::LBracket => {
                 let mut elements = Vec::new();
                 if !self.check(|kind| matches!(kind, TokenKind::RBracket)) {
+                    let first = self.parse_expr()?;
+                    // `[expr; N]` repeat form -- a single expr
+                    // followed by `;` instead of `,`/`]`. Desugars
+                    // at parse time to N clones of the same AST
+                    // node, the exact same "N copies" ArrayLit shape
+                    // v31_default_init_expr already builds internally
+                    // for missing-struct-field defaults (Type::Array
+                    // arm above). N must be a compile-time constant
+                    // (literal int or a previously-declared `const
+                    // NAME: i64 = <int>;`) -- same acceptance rule
+                    // `parse_type`'s own `[T; N]` array-length parsing
+                    // already uses, mirrored here rather than
+                    // invented fresh.
+                    if self
+                        .match_token(|kind| matches!(kind, TokenKind::Semicolon))
+                        .is_some()
+                    {
+                        let length_token = self.bump();
+                        let raw_length = match &length_token.kind {
+                            TokenKind::Int(v) => *v,
+                            TokenKind::Ident(name) => match self.const_int_values.get(name) {
+                                Some(v) => *v,
+                                None => {
+                                    return Err(Diagnostic::new(
+                                        length_token.span,
+                                        format!(
+                                            "array-repeat length '{}' must be a literal integer \
+                                             or a previously-declared `const NAME: i64 = <int>;`",
+                                            name
+                                        ),
+                                    ));
+                                }
+                            },
+                            _ => {
+                                return Err(Diagnostic::new(
+                                    length_token.span,
+                                    "expected integer literal or const identifier for \
+                                     array-repeat length",
+                                ));
+                            }
+                        };
+                        if raw_length < 0 {
+                            return Err(Diagnostic::new(
+                                length_token.span,
+                                "array-repeat length must be non-negative",
+                            ));
+                        }
+                        let close = self
+                            .expect_keyword("']'", |kind| matches!(kind, TokenKind::RBracket))?;
+                        let elements: Vec<Expr> =
+                            (0..raw_length).map(|_| first.clone()).collect();
+                        return Ok(Expr {
+                            kind: ExprKind::ArrayLit { elements },
+                            span: token.span.merge(close.span),
+                        });
+                    }
+                    elements.push(first);
                     loop {
-                        elements.push(self.parse_expr()?);
                         if self
                             .match_token(|kind| matches!(kind, TokenKind::Comma))
                             .is_none()
@@ -6508,6 +6564,7 @@ impl Parser {
                         if self.check(|k| matches!(k, TokenKind::RBracket)) {
                             break;
                         }
+                        elements.push(self.parse_expr()?);
                     }
                 }
                 let close =
