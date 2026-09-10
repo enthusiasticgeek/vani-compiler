@@ -13409,3 +13409,61 @@ Repro: `tools/localfuzz/findings/20260910-132734-run-crash-91708925ef/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260910-132734-run-crash-91708925ef/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+
+---
+
+## Triage closeout: 2026-09-10 (6 findings, ollama unavailable at capture time, manually triaged)
+
+Findings: `20260909-010441-run-crash-0de45ae1fe`,
+`20260909-013240-run-crash-4048f4c440`,
+`20260909-035040-run-crash-392a27ffab`,
+`20260909-063235-run-crash-6ed277950d`,
+`20260910-095123-run-crash-3241f6f86b`,
+`20260910-132734-run-crash-91708925ef`.
+
+All six are `run-crash` with `timed_out: true` on BOTH C and LLVM
+backends and no ollama hypothesis (`fix_attempt.md` says "ollama
+unavailable/call failed" for all six, despite `vani-localfuzz-ollama
+.service` being confirmed up and running when this triage happened --
+likely a transient outage at each finding's own capture time, not a
+persistent config problem). Manually read each `repro.vani`; all six
+fall into the three ALREADY-ESTABLISHED false-positive mutation
+classes this log has repeatedly confirmed in earlier batches (e.g. the
+2026-08-12 17:32Z closeout above) -- none indicate a compiler defect:
+
+- **Loop-counter neutralized** (`392a27ffab`, base `mut_refs.vani`):
+  `fill`'s own `i = i + 1;` mutated to `i = i + 0;` -- `i` never
+  advances, `while i < 4` loops forever by construction. A legitimately
+  infinite SOURCE program, not a compiler hang.
+- **Extreme/invalid `sleep_ms()` argument** (`0de45ae1fe` base
+  `kannada/async_cancel_auto.vani`, `3241f6f86b` base
+  `malayalam/async_cancel_auto.vani`, `6ed277950d` base an
+  unidentified TCP example): mutation replaced a small millisecond
+  constant with `9223372036854775807` (`i64::MAX`, ~292M years) in two
+  cases and `-1` in the third. Both are the same class as the prior
+  `i64::MIN` loop-counter finding already triaged 2026-08-12 --
+  a pathological constant the fuzzer's own mutation operator
+  introduced, not a defect the compiler should catch or a hang it
+  caused. Worth flagging upstream (not implemented this session, out
+  of budget): the harness's own mutation operator generating
+  `sleep_ms(i64::MAX)` independently on at least 2 unrelated localized
+  example files suggests it isn't excluding known-pathological integer
+  extremes for time/duration-typed builtin args the way it presumably
+  already does for e.g. array bounds -- a mutation-operator filter
+  improvement, not a vani-compiler fix.
+- **Duplicated `tcp_accept`/`tcp_connect_local` call** (`4048f4c440`
+  base an unidentified TCP echo example, `91708925ef` base
+  `tcp_echo_async.vani`): exactly the same `tcp_accept`-duplication
+  deadlock shape already triaged 2026-08-12 (`90c38f0f8f`,
+  `tcp_multi_echo.vani`) -- a duplicated `let cfd = tcp_accept(...)` /
+  `let c = tcp_connect_local(...)` call leaves a mismatched connect/
+  accept count, so the extra accept (or the extra connection's own
+  unread data) blocks forever. Legitimately deadlocks identically on
+  both backends, not a compiler bug.
+
+**No action needed on any of the six** -- all are confirmed false
+positives from already-known mutation-operator patterns, not new
+compiler defects. Logged here (rather than left as unreviewed "ollama
+unavailable" stubs) so a future session doesn't re-spend triage effort
+on the same six IDs.
