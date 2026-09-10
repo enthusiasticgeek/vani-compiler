@@ -160,7 +160,52 @@ existing "always has an initializer" rule is satisfied trivially.
 
 ---
 
-## 3. No reborrow from `mut ref T` to `ref T`
+## 3. No reborrow from `mut ref T` to `ref T` — PARTIALLY FIXED 2026-09-10 (call-argument case only)
+
+**Fixed (narrow scope)**: a `mut ref T` value already in hand (a bare
+variable reference -- `f(buf)`, not `f(ref buf)`/`f(mut ref buf)`) can
+now satisfy a `ref T` parameter at a direct function-call argument
+position without an explicit cast. `src/checker.rs`'s new
+`reborrow_mut_ref_as_ref_arg` fires only when: the argument expression
+is a plain `ExprKind::Var`, its checked type is `Type::RefMut(inner)`,
+and the parameter wants exactly `Type::Ref(inner)` (identical inner
+type) -- it retypes the argument in place (`Ref`/`RefMut` share an
+identical runtime representation, a plain pointer, in both backends;
+this is a pure relabeling, not a value transformation).
+
+**Deliberately NOT a general reborrow feature**: this gap's own
+original writeup flagged the real design tension -- "does vani want a
+real (if narrow) borrow-checking pass" with lifetime/exclusivity
+tracking, not just a type-coercion rule. This fix takes the narrowest
+sound slice of that: reborrowing ONLY at a direct-call argument
+position, where the reborrowed `ref` never outlives that one call (not
+stored, not returned, not bound to a `let`). `let y: ref T = mut_ref_
+var;` (a persistent reborrowed binding) and reborrow through other
+expression positions (field access, index, indirect/fn-pointer calls)
+remain unimplemented -- picking those up would need the fuller
+borrow-checking pass this writeup originally called out, not an
+extension of this same narrow mechanism.
+
+**Soundness reasoning**: the existing argument-list aliasing check
+(`classify_arg`/`check_arg_aliasing`, `src/checker.rs`) already treats
+a bare ref-typed `Var` argument as an untracked Copy value (per its
+own pre-existing comment: "Re-borrows of `&T`/`&mut T` could alias the
+underlying owner but we don't track that yet") -- this fix's retyping
+introduces no NEW aliasing hazard beyond that pre-existing, already-
+accepted limitation, since it only changes what TYPE a `mut ref T`
+argument presents as at one call site, not whether it's tracked.
+
+Verified via 3 standalone probes on both backends: this gap's own
+exact worked example (`read_first`/`write_and_read`), a negative
+control confirming `ref T -> mut ref T` is still correctly rejected
+(the reborrow is intentionally asymmetric), and workaround case 3 from
+this entry's own "workaround shipped" section below (one `ref`-typed
+helper now callable from both a `ref`-holding site and a `mut ref`-
+holding site, no more standardizing every caller on `mut ref`). Full
+local suite: 3030 lib tests + 278/279 e2e tests (the 1 "failure",
+`detach_heartbeat_example...`, confirmed flaky/unrelated -- passed 3/3
+in isolated reruns, a non-deterministic concurrent-print interleaving
+issue with no connection to call-argument type coercion).
 
 **Found**: round 88 of the Pi 4/5 port (a real shared IPv4 header
 module + packet filter, 2026-09-06), writing `ipv4_build_header_rpi4`

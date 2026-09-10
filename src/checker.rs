@@ -26359,7 +26359,10 @@ fn check_call(
         .iter()
         .enumerate()
         .map(|(index, arg)| {
-            let checked = check_expr(arg, env, signatures, diagnostics);
+            let mut checked = check_expr(arg, env, signatures, diagnostics);
+            if let Some(expected) = signature.params.get(index) {
+                reborrow_mut_ref_as_ref_arg(arg, &mut checked, expected);
+            }
             let coerced = if let Some(expected) = signature.params.get(index) {
                 coerce_checked(
                     checked,
@@ -26560,6 +26563,44 @@ fn check_task_join_expr(
         None,
         span,
     )
+}
+
+/// DHRUVAOS_ERGONOMICS_TODO.md gap #3: a `mut ref T` value already in
+/// hand (a bare variable reference -- the caller wrote `f(buf)`, not
+/// `f(ref buf)` / `f(mut ref buf)`) can satisfy a `ref T` parameter
+/// without an explicit cast. Deliberately scoped narrow: only fires
+/// for a plain `ExprKind::Var` argument expression whose checked type
+/// is already `Type::RefMut(inner)` and the parameter wants exactly
+/// `Type::Ref(inner)` (identical inner type). This is a pure
+/// relabeling, not a value transformation -- `Ref`/`RefMut` share an
+/// identical runtime representation (a plain pointer) in both
+/// backends, confirmed via the `Type::Ref(_) | Type::RefMut(_) => …`
+/// shape matched uniformly throughout backend_llvm.rs/backend_c.rs.
+///
+/// Soundness: the reborrowed `ref` never outlives this one call --
+/// it's consumed directly as a by-value call argument, never stored,
+/// returned, or bound to a `let` (that broader "does vani want a real
+/// borrow-checking pass" question, flagged in this gap's own original
+/// writeup, stays open; this covers only the call-argument case every
+/// real DhruvaOS workaround site actually needed). The existing
+/// argument-list aliasing check (`classify_arg`/`check_arg_aliasing`
+/// below) already treats a bare ref-typed `Var` argument as an
+/// untracked Copy value (see its own comment: "Re-borrows of `&T`/
+/// `&mut T` could alias the underlying owner but we don't track that
+/// yet") -- this retyping introduces no NEW aliasing hazard beyond
+/// that pre-existing, already-accepted limitation, since it only
+/// changes what TYPE a `mut ref T` argument presents as here, not
+/// whether it's tracked.
+fn reborrow_mut_ref_as_ref_arg(arg: &Expr, checked: &mut CheckedExpr, expected: &Type) {
+    let should_reborrow = match (checked.ty(), expected) {
+        (Type::RefMut(src_inner), Type::Ref(tgt_inner)) => {
+            src_inner == tgt_inner && matches!(arg.kind, ExprKind::Var(_))
+        }
+        _ => false,
+    };
+    if should_reborrow {
+        checked.expr.ty = expected.clone();
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
