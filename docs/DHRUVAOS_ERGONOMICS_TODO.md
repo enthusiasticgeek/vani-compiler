@@ -116,7 +116,7 @@ the scratch-then-fill pattern this gap exists to unblock; the
 `f32`-has-no-default error path; the no-annotation `let v;` case still
 producing the original "expected '='" error) on both backends, plus
 the full local test suite (0 failures). Commit range starting
-`c395b8b6` (parser.rs's own combined gap #2 + integer-width diff).
+`87805ef5` (parser.rs's own combined gap #2 + integer-width diff).
 
 **Found**: same round 86 session, immediately adjacent to gap #1
 above (the two compound each other).
