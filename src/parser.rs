@@ -4967,6 +4967,50 @@ impl Parser {
         } else {
             None
         };
+        // DHRUVAOS_ERGONOMICS_TODO.md gap #2: `let x: T;` with no
+        // initializer, for types with a well-defined zero value.
+        // Only reachable when a type annotation was actually given
+        // (an uninitialized `let x;` with no annotation at all has
+        // nothing to infer a zero value FROM, so that case still
+        // falls through to the `expect_keyword("'='"...)` below and
+        // produces the ordinary "expected '='" parse error). Chosen
+        // design (option (b) from the gap's own writeup): sidestep a
+        // real definite-assignment dataflow analysis entirely by
+        // restricting this form to types `v31_local_type_allowed`
+        // already recognizes as having a synthesizable default (the
+        // same allow-list the v3.1 async-fn default-init synthesizer
+        // uses for missing struct fields) and eagerly desugaring to
+        // `let x: T = <T's zero value>;` right here at parse time --
+        // by the time the checker/backends ever see this statement
+        // it's indistinguishable from one the user wrote with an
+        // explicit zero initializer. Composes directly with gap #1's
+        // `[expr; N]` -- `[T; N]`'s own zero value is now literally
+        // built via `v31_default_init_expr`'s pre-existing
+        // `Type::Array` arm (N copies of `element`'s own default),
+        // not a new array-specific code path.
+        if let Some(ty) = &annotation {
+            if self.check(|kind| matches!(kind, TokenKind::Semicolon)) {
+                let semi =
+                    self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
+                if !v31_local_type_allowed(ty) {
+                    return Err(Diagnostic::new(
+                        start.span.merge(semi.span),
+                        format!(
+                            "'{}' has no well-defined zero value, so `let {}: {};` needs an \
+                             explicit initializer (`= expr`)",
+                            ty, name, ty
+                        ),
+                    ));
+                }
+                let expr = v31_default_init_expr(ty, start.span.merge(semi.span));
+                return Ok(Stmt::Let {
+                    name,
+                    annotation: Some(ty.clone()),
+                    expr,
+                    span: start.span.merge(semi.span),
+                });
+            }
+        }
         self.expect_keyword("'='", |kind| matches!(kind, TokenKind::Equal))?;
         let expr = self.parse_expr()?;
         let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
@@ -7899,7 +7943,16 @@ fn v31_local_type_allowed_with_params(ty: &Type, type_params: &[String]) -> bool
     match ty {
         // Phase 4c-broad: accept generic type params.
         Type::Param(name) => type_params.iter().any(|t| t == name),
-        Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr => true,
+        // Gap #2 (DHRUVAOS_ERGONOMICS_TODO.md): the sized integer
+        // widths (u8/u16/u32/u64/i8/i16/i32) all have the same
+        // well-defined `0` zero value I64 already gets here --
+        // without this, `let buf: [u8; 512];` (this gap's own
+        // primary motivating case, a bare-metal scratch frame
+        // buffer with no heap allocator) would stay rejected even
+        // though `let buf: [i64; 512];` was already accepted.
+        Type::I64 | Type::I8 | Type::I16 | Type::I32
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64
+        | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr => true,
         // Parser stamps user-typed identifiers as Type::Struct(name)
         // before the checker's pre-pass resolves them to Type::Enum.
         // Try enum registry first; fall back to struct registry
@@ -8001,6 +8054,17 @@ fn v31_enum_default_variant(enum_name: &str) -> Option<(String, Vec<Type>)> {
 fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
     let kind = match ty {
         Type::I64 => ExprKind::Int(0),
+        // Sized integer widths: vāṇी has no implicit conversion
+        // between them (matching the language's own no-implicit-
+        // narrowing design), so `0` on its own would still type as
+        // i64 -- wrap in the same explicit `0 as u8`-style cast the
+        // rest of this codebase already uses everywhere for a
+        // sized-integer zero literal.
+        Type::I8 | Type::I16 | Type::I32
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64 => ExprKind::Cast {
+            expr: Box::new(Expr { kind: ExprKind::Int(0), span }),
+            ty: ty.clone(),
+        },
         Type::Bool => ExprKind::Bool(false),
         Type::F64 => ExprKind::Float(0.0),
         Type::Str => ExprKind::Str(String::new()),

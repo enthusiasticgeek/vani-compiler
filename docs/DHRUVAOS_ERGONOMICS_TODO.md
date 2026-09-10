@@ -88,7 +88,35 @@ not just a one-time inconvenience.
 
 ---
 
-## 2. `let` always requires a full initializer — no uninitialized declaration
+## 2. `let` always requires a full initializer — no uninitialized declaration — FIXED 2026-09-10
+
+**Fixed**: `parse_let_stmt` now accepts `let x: T;` (type annotation,
+no `= expr`) for any `T` the v3.1 async-fn default-init synthesizer's
+own `v31_local_type_allowed` already recognizes as having a
+well-defined zero value -- desugars eagerly at parse time to `let x: T
+= v31_default_init_expr(T);`, exactly option (b) from this gap's own
+original design note. By the time the checker/backends see the
+statement it's indistinguishable from one the user wrote with an
+explicit zero initializer, so no new dataflow analysis was needed.
+
+Also extended `v31_local_type_allowed`/`v31_default_init_expr`
+themselves (previously only `i64`/`bool`/`f64`/`str`/`OwnedStr`) to
+cover every sized integer width (`u8`/`u16`/`u32`/`u64`/`i8`/`i16`/
+`i32`, defaulting to an explicit `0 as <T>` cast expr, matching this
+codebase's own established zero-literal idiom) -- without this, gap
+#2's own primary motivating case, `let buf: [u8; 512];` (a bare-metal
+scratch frame buffer with no heap allocator), would have stayed
+rejected even though `let buf: [i64; 512];` was already accepted. This
+extension is a strict superset for the pre-existing synthesizer too
+(struct-field defaults), not a behavior change for anything it already
+handled.
+
+Verified via 3 standalone probes (scalar/array/struct zero values +
+the scratch-then-fill pattern this gap exists to unblock; the
+`f32`-has-no-default error path; the no-annotation `let v;` case still
+producing the original "expected '='" error) on both backends, plus
+the full local test suite (0 failures). Commit range starting
+`c395b8b6` (parser.rs's own combined gap #2 + integer-width diff).
 
 **Found**: same round 86 session, immediately adjacent to gap #1
 above (the two compound each other).
