@@ -20,7 +20,21 @@ redundant). Pick items up in any order — none block each other.
 
 ---
 
-## 1. No array-repeat literal syntax (`[expr; N]`)
+## 1. No array-repeat literal syntax (`[expr; N]`) — FIXED 2026-09-10
+
+**Fixed**: `src/parser.rs`'s `TokenKind::LBracket` arm in
+`parse_primary_expr` now accepts `[expr; N]`, desugaring at parse time
+to N clones of the same `Expr` AST node -- exactly the "N copies"
+`ArrayLit` shape `v31_default_init_expr` already built internally.
+`N` must be a compile-time constant (literal int or a previously-
+declared `const NAME: i64 = <int>;`), mirroring `parse_type`'s own
+`[T; N]` array-length acceptance rule rather than inventing a new one.
+Verified via a standalone probe (int-literal length, const-name
+length, alongside the pre-existing comma-list form) on both the LLVM
+and C backends, plus the full local test suite (278/279 passing; the
+1 failure, `concurrent_pipeline_dashboard_example...`, is pre-existing
+flaky concurrency test infrastructure unrelated to this change --
+confirmed by rerunning it alone, which passed). Commit `8b2bc9bb`.
 
 **Found**: round 86 of the Pi 4/5 port (loopback netif abstraction,
 2026-09-06), writing a 512-byte zero-initialized frame buffer.
