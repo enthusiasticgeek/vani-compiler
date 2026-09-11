@@ -20,7 +20,21 @@ redundant). Pick items up in any order — none block each other.
 
 ---
 
-## 1. No array-repeat literal syntax (`[expr; N]`)
+## 1. No array-repeat literal syntax (`[expr; N]`) — FIXED 2026-09-10
+
+**Fixed**: `src/parser.rs`'s `TokenKind::LBracket` arm in
+`parse_primary_expr` now accepts `[expr; N]`, desugaring at parse time
+to N clones of the same `Expr` AST node -- exactly the "N copies"
+`ArrayLit` shape `v31_default_init_expr` already built internally.
+`N` must be a compile-time constant (literal int or a previously-
+declared `const NAME: i64 = <int>;`), mirroring `parse_type`'s own
+`[T; N]` array-length acceptance rule rather than inventing a new one.
+Verified via a standalone probe (int-literal length, const-name
+length, alongside the pre-existing comma-list form) on both the LLVM
+and C backends, plus the full local test suite (278/279 passing; the
+1 failure, `concurrent_pipeline_dashboard_example...`, is pre-existing
+flaky concurrency test infrastructure unrelated to this change --
+confirmed by rerunning it alone, which passed). Commit `8b2bc9bb`.
 
 **Found**: round 86 of the Pi 4/5 port (loopback netif abstraction,
 2026-09-06), writing a 512-byte zero-initialized frame buffer.
@@ -74,7 +88,35 @@ not just a one-time inconvenience.
 
 ---
 
-## 2. `let` always requires a full initializer — no uninitialized declaration
+## 2. `let` always requires a full initializer — no uninitialized declaration — FIXED 2026-09-10
+
+**Fixed**: `parse_let_stmt` now accepts `let x: T;` (type annotation,
+no `= expr`) for any `T` the v3.1 async-fn default-init synthesizer's
+own `v31_local_type_allowed` already recognizes as having a
+well-defined zero value -- desugars eagerly at parse time to `let x: T
+= v31_default_init_expr(T);`, exactly option (b) from this gap's own
+original design note. By the time the checker/backends see the
+statement it's indistinguishable from one the user wrote with an
+explicit zero initializer, so no new dataflow analysis was needed.
+
+Also extended `v31_local_type_allowed`/`v31_default_init_expr`
+themselves (previously only `i64`/`bool`/`f64`/`str`/`OwnedStr`) to
+cover every sized integer width (`u8`/`u16`/`u32`/`u64`/`i8`/`i16`/
+`i32`, defaulting to an explicit `0 as <T>` cast expr, matching this
+codebase's own established zero-literal idiom) -- without this, gap
+#2's own primary motivating case, `let buf: [u8; 512];` (a bare-metal
+scratch frame buffer with no heap allocator), would have stayed
+rejected even though `let buf: [i64; 512];` was already accepted. This
+extension is a strict superset for the pre-existing synthesizer too
+(struct-field defaults), not a behavior change for anything it already
+handled.
+
+Verified via 3 standalone probes (scalar/array/struct zero values +
+the scratch-then-fill pattern this gap exists to unblock; the
+`f32`-has-no-default error path; the no-annotation `let v;` case still
+producing the original "expected '='" error) on both backends, plus
+the full local test suite (0 failures). Commit range starting
+`87805ef5` (parser.rs's own combined gap #2 + integer-width diff).
 
 **Found**: same round 86 session, immediately adjacent to gap #1
 above (the two compound each other).
@@ -118,7 +160,52 @@ existing "always has an initializer" rule is satisfied trivially.
 
 ---
 
-## 3. No reborrow from `mut ref T` to `ref T`
+## 3. No reborrow from `mut ref T` to `ref T` — PARTIALLY FIXED 2026-09-10 (call-argument case only)
+
+**Fixed (narrow scope)**: a `mut ref T` value already in hand (a bare
+variable reference -- `f(buf)`, not `f(ref buf)`/`f(mut ref buf)`) can
+now satisfy a `ref T` parameter at a direct function-call argument
+position without an explicit cast. `src/checker.rs`'s new
+`reborrow_mut_ref_as_ref_arg` fires only when: the argument expression
+is a plain `ExprKind::Var`, its checked type is `Type::RefMut(inner)`,
+and the parameter wants exactly `Type::Ref(inner)` (identical inner
+type) -- it retypes the argument in place (`Ref`/`RefMut` share an
+identical runtime representation, a plain pointer, in both backends;
+this is a pure relabeling, not a value transformation).
+
+**Deliberately NOT a general reborrow feature**: this gap's own
+original writeup flagged the real design tension -- "does vani want a
+real (if narrow) borrow-checking pass" with lifetime/exclusivity
+tracking, not just a type-coercion rule. This fix takes the narrowest
+sound slice of that: reborrowing ONLY at a direct-call argument
+position, where the reborrowed `ref` never outlives that one call (not
+stored, not returned, not bound to a `let`). `let y: ref T = mut_ref_
+var;` (a persistent reborrowed binding) and reborrow through other
+expression positions (field access, index, indirect/fn-pointer calls)
+remain unimplemented -- picking those up would need the fuller
+borrow-checking pass this writeup originally called out, not an
+extension of this same narrow mechanism.
+
+**Soundness reasoning**: the existing argument-list aliasing check
+(`classify_arg`/`check_arg_aliasing`, `src/checker.rs`) already treats
+a bare ref-typed `Var` argument as an untracked Copy value (per its
+own pre-existing comment: "Re-borrows of `&T`/`&mut T` could alias the
+underlying owner but we don't track that yet") -- this fix's retyping
+introduces no NEW aliasing hazard beyond that pre-existing, already-
+accepted limitation, since it only changes what TYPE a `mut ref T`
+argument presents as at one call site, not whether it's tracked.
+
+Verified via 3 standalone probes on both backends: this gap's own
+exact worked example (`read_first`/`write_and_read`), a negative
+control confirming `ref T -> mut ref T` is still correctly rejected
+(the reborrow is intentionally asymmetric), and workaround case 3 from
+this entry's own "workaround shipped" section below (one `ref`-typed
+helper now callable from both a `ref`-holding site and a `mut ref`-
+holding site, no more standardizing every caller on `mut ref`). Full
+local suite: 3030 lib tests + 278/279 e2e tests (the 1 "failure",
+`detach_heartbeat_example...`, confirmed flaky/unrelated -- passed 3/3
+in isolated reruns, a non-deterministic concurrent-print interleaving
+issue with no connection to call-argument type coercion).
 
 **Found**: round 88 of the Pi 4/5 port (a real shared IPv4 header
 module + packet filter, 2026-09-06), writing `ipv4_build_header_rpi4`
@@ -205,7 +292,61 @@ not "loosen one type rule."
 
 ---
 
-## 4. Fixed arrays (`[T; N]`) are move-only on plain `let`/`=` — no Copy, no `.clone()`
+## 4. Fixed arrays (`[T; N]`) are move-only on plain `let`/`=` — no Copy, no `.clone()` — FIXED 2026-09-10
+
+**Fixed**: `Type::is_copy()` (`src/ast.rs`) now recurses into the
+array element type (`Type::Array { element, .. } => element.is_copy()`)
+instead of unconditionally returning `false` -- mirroring the
+`Type::Tuple` rule immediately below it ("Copy only when ALL elements
+are Copy"). Both backends ALREADY emitted a real whole-array value
+copy for `let ys: [T; N] = xs;` regardless of this flag (LLVM: load/
+store the aggregate; C: memcpy) -- this was purely a checker-level
+move-tracking restriction with no codegen dependency, so the fix is a
+single match-arm change plus one follow-on codegen fix below.
+
+**A real regression found and fixed along the way**: the C backend's
+generic `Vec<T>.sort_by()` helper (`backend_c.rs`, the
+`if element.is_copy() { ... }` block emitting a quicksort
+implementation) had silently relied on `is_copy() == true` also
+implying "plain C `=` assignment and a bare `{ct} key = a[i];`-style
+local works for this element type" -- true for scalars/structs/enums,
+but never true for a raw C array (C arrays can't be assigned via `=`
+or copy-initialized as a plain local, only `memcpy`'d). Before this
+fix, `Type::Array` was ALWAYS `is_copy() == false`, so this whole
+sort/sort_by codegen path was simply never emitted for any
+`Vec<[T; N]>` instantiation -- once arrays could be Copy, the C
+backend tried to emit `intent_arr2_Struct_Point key = a[i];`-style
+code, which doesn't compile in C. Fixed by excluding `Type::Array`
+from that specific gate (`element.is_copy() && !matches!(element,
+Type::Array { .. })`), restoring the exact pre-existing behavior for
+array elements (sort/sort_by unavailable for `Vec<[T; N]>`, same as
+before) without reverting the fix for actual scalar/struct Copy
+types. Found via the full local e2e test suite, not manual review --
+`vec_of_array_of_struct_from_named_variables_runs_correctly_on_both_
+backends` failed with a C compile error inside a never-called-at-
+runtime helper function, since many of this codebase's C helper
+functions are emitted eagerly per `Vec<T>` instantiation regardless
+of whether the program actually calls them.
+
+Also updated 3 pre-existing lib.rs unit tests
+(`let_alias_moves_source_array`, `move_into_function_consumes_array`,
+`task_rejects_non_copy_capture_by_value`) that had used `[i64; N]`/
+`[u32; N]` purely as a stand-in "non-Copy" fixture type -- retargeted
+to `[OwnedStr; N]` (genuinely non-Copy) to keep covering real array
+move/capture semantics, and added 2 new tests
+(`copy_element_array_survives_move_into_function`,
+`copy_element_array_let_alias_does_not_move`) covering the new
+Copy-array behavior itself, including gap #4's own original worked
+example from this file. Both new tests use `assert` rather than
+`prove` -- the SMT-based `prove` verifier doesn't yet track array
+VALUES symbolically across a copy (arrays were always-moved before
+this fix, so it never needed to), a separate, deeper limitation
+outside this gap's own scope; real runtime correctness (including
+mutation-isolation -- proving the copy is a true bytewise copy, not
+an aliased reference) was separately confirmed via standalone probes
+run live on both backends.
+
+Full local suite: 3030 lib tests + 279 e2e tests, 0 failures.
 
 **Found**: round 95 of the Pi 4/5 port (field25519 field arithmetic +
 X25519 Diffie-Hellman, 2026-09-06), writing the RFC 7748 Montgomery
@@ -276,6 +417,45 @@ from the call's own return after the borrow ends) was confirmed via
 probe (`reassigntest.vani`) to work correctly. See DhruvaOS
 `kernel_main_rpi4.vani`'s `field25519_add_rpi4`/`field25519_mul_rpi4`/
 etc. and `x25519_scalarmult_rpi4`.
+
+---
+
+## Gap #5: C backend rejects struct literals whose fields are arrays (found round 166→172, 2026-09-10)
+
+Found while extracting DhruvaOS's round-166 TLS 1.3 code into the new
+`vani-tls13` standalone kosh package (task #172) and validating it
+with `vanic run test/host_test.vani --backend=c` as a second check
+beyond the usual host-LLVM-JIT verification. Not a TLS bug or a
+DhruvaOS bug — it's in the shared `crypto_hash` package's own
+`Sha256Ctx`/`Sha512Ctx` structs, which have `[u32; 8]`/`carry: [u8; N]`
+array fields. `vani-crypto-hash`'s own standalone `test/host_test.vani
+--backend=c` reproduces the same error with zero DhruvaOS/TLS code
+involved at all — confirmed pre-existing, not introduced by this
+round's work.
+
+Repro: any `fn f(...) -> SomeStruct { return SomeStruct{ arr_field:
+some_array_local, ... }; }` where `arr_field`'s declared type is a
+fixed-size array. `backend_c.rs`'s struct-literal codegen emits a
+plain scalar assignment (`.h = v_h0`) into a designated-initializer
+list for an array-typed struct field, which C rejects as "makes
+integer from pointer without a cast" — the codegen path is treating
+the array-typed field like a scalar field instead of emitting a
+`memcpy`/element-wise-copy the way `is_copy()`-array assignment
+elsewhere in the C backend already does (see gap #4's own `sort_by`
+fix in `backend_c.rs`, which hit a related but different array-vs-
+scalar assumption).
+
+**Not yet fixed** — found via a package validation pass, not blocking
+any live DhruvaOS work (the Pi 4/5 build pipeline uses `vanic emit
+--backend=llvm`, never `--backend=c`, and the LLVM path handles this
+correctly — confirmed via the live QEMU boot). Every kosh package with
+an array-field struct (crypto_hash's Sha256Ctx/Sha512Ctx, chacha20_
+poly1305's Poly1305Ctx, tls13's TlsTrafficKeys/TlsEncryptResult/
+TlsDecryptResult, etc.) likely can't be validated under `--backend=c`
+until this is fixed — worth a real fix pass in `backend_c.rs`'s
+struct-literal emission for array-typed fields, but scoped as
+compiler-side follow-up work, not attempted inside the DhruvaOS
+session that found it.
 
 ---
 

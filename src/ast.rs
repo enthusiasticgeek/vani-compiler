@@ -1444,8 +1444,22 @@ impl Type {
         // owns a unique cell identity — copying would silently
         // de-share state across threads, so it's affine too.
         match self {
-            Type::Array { .. }
-            | Type::Vec(_)
+            // Gap #4 (DHRUVAOS_ERGONOMICS_TODO.md): a `[T; N]` of
+            // Copy elements is itself Copy -- both backends already
+            // emit a real whole-array copy (LLVM: load/store the
+            // aggregate; C: memcpy) for `let ys: [T; N] = xs;`
+            // regardless of this flag (see backend_llvm.rs's own
+            // `TypedExprKind::Var(src)` arm in the Array `Let` case,
+            // and backend_c.rs's matching memcpy-from-array form) --
+            // this was purely a checker-level move-tracking
+            // restriction with no codegen dependency on it, unlike
+            // `Vec<T>`'s own genuinely heap-backed, always-affine
+            // storage right below. An array of a non-Copy element
+            // (e.g. `[OwnedStr; N]`, `[Struct-with-OwnedStr; N]`)
+            // stays affine via the same recursive `element.is_copy()`
+            // rule `Type::Tuple` already uses below.
+            Type::Array { element, .. } => element.is_copy(),
+            Type::Vec(_)
             | Type::OwnedStr
             | Type::Task
             | Type::TaskR(_)
