@@ -13467,3 +13467,12 @@ positives from already-known mutation-operator patterns, not new
 compiler defects. Logged here (rather than left as unreviewed "ollama
 unavailable" stubs) so a future session doesn't re-spend triage effort
 on the same six IDs.
+
+---
+
+### Candidate: 20260911-095933-run-crash-d669b7fd24
+
+Repro: `tools/localfuzz/findings/20260911-095933-run-crash-d669b7fd24/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260911-095933-run-crash-d669b7fd24/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
