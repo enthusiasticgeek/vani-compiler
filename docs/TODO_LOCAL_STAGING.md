@@ -13547,3 +13547,19 @@ The vani-compiler local staging log indicates a run-crash, specifically at line 
 The reproduction source, provided in the prompt, can be used to reproduce this bug. The observed symptom is a crash or hang during execution, as indicated by the "timed_out: true" field in the JSON output. The backend(s) affected are LLVM and C.
 
 No further details are needed at this stage to proceed with the review process.
+
+---
+
+### Candidate: 20260911-201408-backend-divergence-14cf3805ff
+
+Repro: `tools/localfuzz/findings/20260911-201408-backend-divergence-14cf3805ff/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260911-201408-backend-divergence-14cf3805ff/fix_attempt.md`
+
+Running:
+```sh
+vanic run examples/language/english/detach_heartbeat.vani --backend=c
+```
+Observed symptom: Backend diverged; no main computation result was printed.
+Divergence occurred in backend C. The generated source contains an unused variable `hb`, causing the heartbeat task to be never tracked by main. This is a genuine race condition, not a bug.
+
+STATUS: needs human/frontier root-cause review.
