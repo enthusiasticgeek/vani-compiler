@@ -420,6 +420,45 @@ etc. and `x25519_scalarmult_rpi4`.
 
 ---
 
+## Gap #5: C backend rejects struct literals whose fields are arrays (found round 166→172, 2026-09-10)
+
+Found while extracting DhruvaOS's round-166 TLS 1.3 code into the new
+`vani-tls13` standalone kosh package (task #172) and validating it
+with `vanic run test/host_test.vani --backend=c` as a second check
+beyond the usual host-LLVM-JIT verification. Not a TLS bug or a
+DhruvaOS bug — it's in the shared `crypto_hash` package's own
+`Sha256Ctx`/`Sha512Ctx` structs, which have `[u32; 8]`/`carry: [u8; N]`
+array fields. `vani-crypto-hash`'s own standalone `test/host_test.vani
+--backend=c` reproduces the same error with zero DhruvaOS/TLS code
+involved at all — confirmed pre-existing, not introduced by this
+round's work.
+
+Repro: any `fn f(...) -> SomeStruct { return SomeStruct{ arr_field:
+some_array_local, ... }; }` where `arr_field`'s declared type is a
+fixed-size array. `backend_c.rs`'s struct-literal codegen emits a
+plain scalar assignment (`.h = v_h0`) into a designated-initializer
+list for an array-typed struct field, which C rejects as "makes
+integer from pointer without a cast" — the codegen path is treating
+the array-typed field like a scalar field instead of emitting a
+`memcpy`/element-wise-copy the way `is_copy()`-array assignment
+elsewhere in the C backend already does (see gap #4's own `sort_by`
+fix in `backend_c.rs`, which hit a related but different array-vs-
+scalar assumption).
+
+**Not yet fixed** — found via a package validation pass, not blocking
+any live DhruvaOS work (the Pi 4/5 build pipeline uses `vanic emit
+--backend=llvm`, never `--backend=c`, and the LLVM path handles this
+correctly — confirmed via the live QEMU boot). Every kosh package with
+an array-field struct (crypto_hash's Sha256Ctx/Sha512Ctx, chacha20_
+poly1305's Poly1305Ctx, tls13's TlsTrafficKeys/TlsEncryptResult/
+TlsDecryptResult, etc.) likely can't be validated under `--backend=c`
+until this is fixed — worth a real fix pass in `backend_c.rs`'s
+struct-literal emission for array-typed fields, but scoped as
+compiler-side follow-up work, not attempted inside the DhruvaOS
+session that found it.
+
+---
+
 *(Append new entries below this line as they're found. Keep the
 "found in round N" provenance and a real DhruvaOS commit/file
 reference on each — that's what makes these actionable instead of
