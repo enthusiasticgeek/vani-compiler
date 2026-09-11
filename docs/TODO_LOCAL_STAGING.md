@@ -13532,3 +13532,18 @@ Fix attempt: `tools/localfuzz/findings/20260911-141910-backend-divergence-e79504
 ```plaintext
 [staging] Added vanilla tic-tac-toe -- networked timed edition (TCP, task + cancel per-turn budget)
 ```
+
+---
+
+### Candidate: 20260911-175411-run-crash-092113032d
+
+Repro: `tools/localfuzz/findings/20260911-175411-run-crash-092113032d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260911-175411-run-crash-092113032d/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler local staging log indicates a run-crash, specifically at line 54 of `candidate.vani`. The issue is that the `if` statement with identical `then` and `else` branches has no effect on behavior. This warning suggests that the intention was to diverge one branch but did not do so due to copy-paste or oversight.
+
+The reproduction source, provided in the prompt, can be used to reproduce this bug. The observed symptom is a crash or hang during execution, as indicated by the "timed_out: true" field in the JSON output. The backend(s) affected are LLVM and C.
+
+No further details are needed at this stage to proceed with the review process.
