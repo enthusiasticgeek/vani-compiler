@@ -13521,3 +13521,14 @@ The exact repro source for this test is provided below:
 //
 // Caveat: the Sanskrit spellings of `async` / `await` are
 // tatsama coinages (verified for face-validity
+
+---
+
+### Candidate: 20260911-141910-backend-divergence-e79504bc95
+
+Repro: `tools/localfuzz/findings/20260911-141910-backend-divergence-e79504bc95/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260911-141910-backend-divergence-e79504bc95/fix_attempt.md`
+
+```plaintext
+[staging] Added vanilla tic-tac-toe -- networked timed edition (TCP, task + cancel per-turn budget)
+```
