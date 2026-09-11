@@ -13485,3 +13485,39 @@ Repro: `tools/localfuzz/findings/20260911-102634-run-crash-60ef3d07f5/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260911-102634-run-crash-60ef3d07f5/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260911-131953-run-crash-916a4861fe
+
+Repro: `tools/localfuzz/findings/20260911-131953-run-crash-916a4861fe/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260911-131953-run-crash-916a4861fe/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The `async_cancel_auto.vani` source file was run with the `vanic run` command, producing a crash without any output or error message.
+
+The exact repro source for this test is provided below:
+
+```vani
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/sanskrit/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/sanskrit/async_cancel_auto.vani --backend=c    # C
+//
+// Polish-arc Sanskrit demo of the async/await dialect lift
+// (2026-06-08). The `async` keyword spells as `अतुल्यकालिक`
+// (atulyakālika, "non-synchronous") and `await(…)` spells as
+// `प्रतीक्षा(…)` (pratīkṣā, "wait/await"). The full v3.1
+// CancelToken auto-plumbing surface (A4.4) is documented in
+// examples/language/english/async_cancel_auto.vani — its full
+// translation would also require Sanskrit spellings of `task`,
+// `join`, `ref`, `mut`, `true`, and the synthesized `Task__<fn>`
+// / `__poll_<fn>` mangled names. Most of those exist
+// (नियोग / संयोजन / दृष्ट्या / परिवर्तनीय / सत्य); the
+// mangled-name pass is queued as a separate Tier 3 follow-up.
+//
+// Caveat: the Sanskrit spellings of `async` / `await` are
+// tatsama coinages (verified for face-validity
