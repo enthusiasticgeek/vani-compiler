@@ -13643,3 +13643,33 @@ Fix attempt: `tools/localfuzz/findings/20260912-144927-run-crash-d669b7fd24/fix_
 }
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260912-220140-check-crash-13e227e3f4
+
+Repro: `tools/localfuzz/findings/20260912-220140-check-crash-13e227e3f4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260912-220140-check-crash-13e227e3f4/fix_attempt.md`
+
+```markdown
+### Vani Compiler Local Staging Log Entry
+
+#### Description:
+The given mutant code in `candidate.vani` caused a compilation error due to incorrect syntax and missing declarations. The code attempted to define a function `tcp_listen` that does not exist, leading to an internal error during the compilation process.
+
+#### Steps Executed:
+1. **Mutant Generation**: The mutation testing tool identified a potential issue with the `tcp_listen` function definition.
+2. **Compilation Error Analysis**:
+   - The error message indicated that the compiler expected a `>` character after the `let` keyword in line 7, which is not present.
+   - Another error occurred at line 10 where a `use`, `intent`, `struct`, or `fn` statement was missing before the function definition.
+   - The remaining errors were related to unused variables and parameters.
+
+#### Backend Affected:
+The error was encountered across all backends supported by the vani compiler. This indicates that the issue is not specific to any particular backend but rather a general syntax or declaration issue.
+
+#### Symptoms Observed:
+- Compilation failed with an error message indicating multiple syntax errors.
+- The program crashed during execution, resulting in a `SIGSEGV` signal.
+
+#### Root Cause Review Needed:
+The root cause of this bug needs to be determined by a human/frontier expert who can examine the compiler source and understand the semantic rules governing function definitions and declarations.
