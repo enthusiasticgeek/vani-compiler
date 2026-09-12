@@ -13563,3 +13563,31 @@ Observed symptom: Backend diverged; no main computation result was printed.
 Divergence occurred in backend C. The generated source contains an unused variable `hb`, causing the heartbeat task to be never tracked by main. This is a genuine race condition, not a bug.
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260912-002240-run-crash-40b0afcf04
+
+Repro: `tools/localfuzz/findings/20260912-002240-run-crash-40b0afcf04/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260912-002240-run-crash-40b0afcf04/fix_attempt.md`
+
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": 56, // crash exit code on Linux (Linux: 56 = Segmentation fault)
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
+STATUS: needs human/frontier root-cause review.
