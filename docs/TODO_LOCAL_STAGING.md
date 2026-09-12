@@ -13591,3 +13591,20 @@ Fix attempt: `tools/localfuzz/findings/20260912-002240-run-crash-40b0afcf04/fix_
 ```
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260912-093721-backend-divergence-e98fe17a48
+
+Repro: `tools/localfuzz/findings/20260912-093721-backend-divergence-e98fe17a48/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260912-093721-backend-divergence-e98fe17a48/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+To reproduce:
+```sh
+vanic run examples/language/english/concurrent_pipeline_dashboard.vani --backend=c
+```
+Expected outcome: no crash, successful completion of all tasks and printing grand total to stdout.
+
+Actual outcome: a warning is emitted about an unused variable `hb`.
