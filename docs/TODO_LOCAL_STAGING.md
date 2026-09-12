@@ -13608,3 +13608,38 @@ vanic run examples/language/english/concurrent_pipeline_dashboard.vani --backend
 Expected outcome: no crash, successful completion of all tasks and printing grand total to stdout.
 
 Actual outcome: a warning is emitted about an unused variable `hb`.
+
+---
+
+### Candidate: 20260912-144927-run-crash-d669b7fd24
+
+Repro: `tools/localfuzz/findings/20260912-144927-run-crash-d669b7fd24/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260912-144927-run-crash-d669b7fd24/fix_attempt.md`
+
+```json
+{
+  "id": "42",
+  "run_id": "56789",
+  "corpus_file": "/home/virgo/source/vani-compiler-localfuzz/examples/edge_cases/mix_conc_channel_send_recv.vani",
+  "mutant_source": "fn main() -> i64 { let ch: Channel<i64> = channel_new(); return channel_recv(ref ch); }",
+  "observable_symptom": "crash",
+  "backend_affects": ["llvm"],
+  "raw_result_data": {
+    "kind": "run-crash",
+    "c": {
+      "rc": null,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": true
+    },
+    "llvm": {
+      "rc": null,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": true
+    },
+    "coverage_score": 100
+  }
+}
+STATUS: needs human/frontier root-cause review.
+```
