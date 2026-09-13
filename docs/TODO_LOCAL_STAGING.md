@@ -13820,3 +13820,12 @@ The staging log indicates that the program encountered a crash while executing t
 
 **Which backend(s) it affects:**
 The bug report specifically targets LLVM and C backends.
+
+---
+
+### Candidate: 20260913-134617-run-crash-b638d5d94e
+
+Repro: `tools/localfuzz/findings/20260913-134617-run-crash-b638d5d94e/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260913-134617-run-crash-b638d5d94e/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
