@@ -13702,3 +13702,53 @@ Fix attempt: `tools/localfuzz/findings/20260913-012939-backend-divergence-7247fe
 }
 ```
 
+
+---
+
+### Candidate: 20260913-021108-run-crash-e62abe58ef
+
+Repro: `tools/localfuzz/findings/20260913-021108-run-crash-e62abe58ef/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260913-021108-run-crash-e62abe58ef/fix_attempt.md`
+
+```plaintext
+vani-compiler-localfuzz examples/language/maithili/early_exit.vani
+
+Mutant/generated source:
+```vani
+// vani-lang: maithili
+उद्देश्य "Maithili early-exit smoke-test";
+कार्य main() -> i64 {
+  माना न: i64 = -9223372036854775808;
+  जबतक न < 100 {
+    यदि न == 5 { विराम; }
+    न = न + 1;
+  }
+  लिखो "Maithili early exit OK", न;
+  लौटाओ 0;
+}
+
+```
+
+Finding kind: run-crash
+Raw result data:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": 0,
+    "stdout": "Maithili early exit OK \u096b\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
+STATUS: needs human/frontier root-cause review.
+```
