@@ -13752,3 +13752,12 @@ Raw result data:
 
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260913-030533-run-crash-97039ed0b1
+
+Repro: `tools/localfuzz/findings/20260913-030533-run-crash-97039ed0b1/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260913-030533-run-crash-97039ed0b1/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
