@@ -13905,3 +13905,26 @@ Repro: `tools/localfuzz/findings/20260913-233131-run-crash-c1fbea94de/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260913-233131-run-crash-c1fbea94de/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260914-011644-run-crash-6e6124c368
+
+Repro: `tools/localfuzz/findings/20260914-011644-run-crash-6e6124c368/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260914-011644-run-crash-6e6124c368/fix_attempt.md`
+
+**STAGING ENTRY: early_exit.vani**
+
+**Run Details:**
+- **Input File:** `/home/virgo/source/vani-compiler-localfuzz/examples/language/armenian/early_exit.vani`
+- **Generated Source:** `Mutation of original file, which appears to be crashing or hanging.`
+- **Output:**
+  - `stderr:` "Process terminated by signal SIGTERM ( killed )."
+  - `stdout:` `<no output>`
+- **Exit Status:** Crash
+- **Backend Affected:** LLVM, C
+
+**Notes:**
+The generated code is designed to cause a crash or hang in the vani compiler. The specific mutation appears to have triggered an error condition that leads to termination of the process, indicating a potential root cause within the compiler itself.
+
+**STATUS: needs human/frontier root-cause review.
