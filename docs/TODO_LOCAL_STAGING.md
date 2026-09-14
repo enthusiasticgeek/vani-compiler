@@ -14013,3 +14013,12 @@ Fix attempt: `tools/localfuzz/findings/20260914-094331-run-crash-b18b6fcc40/fix_
 VANIC: ./run examples/language/amharic/for_loops.vani --backend=c
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260914-104439-run-crash-73c22cdd62
+
+Repro: `tools/localfuzz/findings/20260914-104439-run-crash-73c22cdd62/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260914-104439-run-crash-73c22cdd62/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
