@@ -14022,3 +14022,16 @@ Repro: `tools/localfuzz/findings/20260914-104439-run-crash-73c22cdd62/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260914-104439-run-crash-73c22cdd62/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260914-160729-run-crash-f20c98c1b4
+
+Repro: `tools/localfuzz/findings/20260914-160729-run-crash-f20c98c1b4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260914-160729-run-crash-f20c98c1b4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
+
+The vani-compiler was run with a specific mutant generated from a control flow scenario in Romanian. The mutation introduced a conditional statement that incorrectly handles negative numbers, leading to an incorrect evaluation of the `semn` function. When executed with LLVM backend, the program crashed due to an unhandled exception during the execution of the `numaratoare_inversa` function. When executed with the C backend, the program produced divergent output, indicating that it did not terminate properly and exhibited unexpected behavior.
+
+The failure mode was consistent across both backends, indicating that the mutation introduced a critical bug in the control flow logic of the code. The repro source provided includes comments explaining each change made to ensure clarity and traceability of the mutation.
