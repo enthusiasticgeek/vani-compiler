@@ -13928,3 +13928,50 @@ Fix attempt: `tools/localfuzz/findings/20260914-011644-run-crash-6e6124c368/fix_
 The generated code is designed to cause a crash or hang in the vani compiler. The specific mutation appears to have triggered an error condition that leads to termination of the process, indicating a potential root cause within the compiler itself.
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260914-015134-run-crash-c0252078f6
+
+Repro: `tools/localfuzz/findings/20260914-015134-run-crash-c0252078f6/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260914-015134-run-crash-c0252078f6/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**COMPILER VERSION**: [Specify the version of your vani-compiler project]
+
+**RUN DATE & TIME**: [Insert date and time when you ran this test]
+
+**COMMAND LINE**: `vanic run examples/language/korean/early_exit.vani`
+
+**BACKENDS AFFECTED**: LLVM, C
+
+**RESULT**: Run crashed with exit code 127.
+
+**REPRO SOURCE**:
+```vani
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/early_exit.vani              # LLVM
+//   vanic run examples/language/korean/early_exit.vani --backend=c  # C
+
+목적 "Korean early-exit (break) smoke-test";
+
+함수 main() -> i64 {
+  정의 n: i64 = 0;
+  동안 n < 100 {
+    만약 n == 5 {
+      중단;
+    }
+  }
+  확인 n == 5;
+  출력 "Korean early exit OK", n;
+  반환 0;
+}
+
+```
+
+**OBSERVED SYMptom**: The compilation process crashed immediately, with an exit code of 127.
+
+**STATUS: needs human/frontier root-cause review.
