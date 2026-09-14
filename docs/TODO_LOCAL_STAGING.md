@@ -13975,3 +13975,12 @@ Fix attempt: `tools/localfuzz/findings/20260914-015134-run-crash-c0252078f6/fix_
 **OBSERVED SYMptom**: The compilation process crashed immediately, with an exit code of 127.
 
 **STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260914-023002-backend-divergence-b01b4635c4
+
+Repro: `tools/localfuzz/findings/20260914-023002-backend-divergence-b01b4635c4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260914-023002-backend-divergence-b01b4635c4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
