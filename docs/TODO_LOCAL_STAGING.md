@@ -14073,3 +14073,29 @@ Fix attempt: `tools/localfuzz/findings/20260915-002915-run-crash-8e6fb8feef/fix_
 }
 ```
 
+
+---
+
+### Candidate: 20260915-095520-run-crash-2c659278b7
+
+Repro: `tools/localfuzz/findings/20260915-095520-run-crash-2c659278b7/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-095520-run-crash-2c659278b7/fix_attempt.md`
+
+**STAGING ENTRY**
+
+**Bug Report**: vani-compiler-localfuzz
+
+**Run Type**: local staging log
+
+**Mutant/Corpus File**: /home/virgo/source/vani-compiler-localfuzz/examples/language/cherokee/early_exit.vani
+
+**Generated Source (Mutant)**:
+```vani
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/early_exit.vani              # LLVM
+//   vanic run examples/language/cherokee/early_exit.vani --backend=c  # C
+
+
+
