@@ -14231,3 +14231,12 @@ The repro affects both the `c` (C backend) and the `llvm` (LLVM backend).
 - This leads to a `backend-divergence`, which means the program's behavior diverges from expected results due to an issue with how the heartbeat task is managed.
 
 **STATUS: needs human/frontier root-cause review.**
+
+---
+
+### Candidate: 20260915-223345-run-crash-40b37a485a
+
+Repro: `tools/localfuzz/findings/20260915-223345-run-crash-40b37a485a/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-223345-run-crash-40b37a485a/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
