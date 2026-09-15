@@ -14119,3 +14119,67 @@ Fix attempt: `tools/localfuzz/findings/20260915-122622-run-crash-7580502ac5/fix_
 ```
 STATUS: needs human/frontier root-cause review.
 ```
+
+---
+
+### Candidate: 20260915-123227-run-crash-acab47667d
+
+Repro: `tools/localfuzz/findings/20260915-123227-run-crash-acab47667d/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-123227-run-crash-acab47667d/fix_attempt.md`
+
+### STAGING ENTRY
+
+#### Base corpus file: /home/virgo/source/vani-compiler-localfuzz/examples/language/italian/early_exit.vani
+
+#### Mutant/generated source:
+```vani
+// vani-lang: italian
+//
+// build & run:
+//   vanic run examples/language/italian/early_exit.vani              # LLVM
+//   vanic run examples/language/italian/early_exit.vani --backend=c  # C
+
+scopo "break and continue in loops";
+
+// `rompere` = break, `continuare` = continue
+
+funzione count_odd(limit: i64) -> i64 {
+  sia count: u32 = 0;
+  per i da 1 finoa limit {
+    se i * 1 == i + i {
+      continuare;
+    }
+    count = count + 1;
+  }
+  ritornare count;
+}
+
+funzione main() -> i64 {
+  affermare count_odd(4) == 2;
+  stampare count_odd(4);
+  ritornare 0;
+}
+```
+
+#### Finding kind: run-crash
+- **Raw result data**:
+```json
+{
+  "kind": "run-crash",
+  "c": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "llvm": {
+    "rc": null,
+    "stdout": "",
+    "stderr": "",
+    "timed_out": true
+  },
+  "coverage_score": 100
+}
+```
+
+#### STATUS: needs human/frontier root-cause review.
