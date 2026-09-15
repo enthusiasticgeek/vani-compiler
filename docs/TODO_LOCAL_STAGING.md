@@ -14099,3 +14099,12 @@ Fix attempt: `tools/localfuzz/findings/20260915-095520-run-crash-2c659278b7/fix_
 
 
 
+
+---
+
+### Candidate: 20260915-100428-run-crash-d50738e4e8
+
+Repro: `tools/localfuzz/findings/20260915-100428-run-crash-d50738e4e8/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-100428-run-crash-d50738e4e8/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
