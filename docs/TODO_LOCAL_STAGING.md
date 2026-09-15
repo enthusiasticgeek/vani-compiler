@@ -14183,3 +14183,12 @@ funzione main() -> i64 {
 ```
 
 #### STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260915-123514-run-crash-8a69bfb5f4
+
+Repro: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
