@@ -14192,3 +14192,42 @@ Repro: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+---
+
+### Candidate: 20260915-214121-backend-divergence-d3f77f92bf
+
+Repro: `tools/localfuzz/findings/20260915-214121-backend-divergence-d3f77f92bf/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260915-214121-backend-divergence-d3f77f92bf/fix_attempt.md`
+
+## VANIC RUN STAGING ENTRY
+
+### Environment:
+- Compiler: `vanic`
+- Backend: `c` (C backend)
+- Fuzzing Type: Local Staging Log
+- Fuzz Target: `/home/virgo/source/vani-compiler-localfuzz/examples/language/english/detach_heartbeat.vani`
+
+### Repro Steps:
+1. **Build & Run the Example**:
+    ```sh
+    vanic run examples/language/english/detach_heartbeat.vani --backend=c
+    ```
+
+2. **Analyze the Output**:
+    The output shows that the heartbeat task is never printed to stdout, indicating a `backend-divergence`.
+
+### Observed Symptom:
+- The heartbeat task is not executed, and the program crashes before completing the main computation.
+
+### Stack Trace (if applicable):
+The provided stack trace does not include any error messages or hints about why the heartbeat task fails to execute.
+
+### Backends Affected:
+The repro affects both the `c` (C backend) and the `llvm` (LLVM backend).
+
+### Summary:
+- The `heartbeat` function in the `detach_heartbeat.vani` example is never executed.
+- This leads to a `backend-divergence`, which means the program's behavior diverges from expected results due to an issue with how the heartbeat task is managed.
+
+**STATUS: needs human/frontier root-cause review.**
