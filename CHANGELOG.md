@@ -1,5 +1,32 @@
 # Changelog
 
+## [v0.9.7] — 2026-09-16
+
+See `RELEASE_NOTES/v0.9.7.md` for the full writeup.
+
+### Added
+
+- `[expr; N]` array-repeat literal syntax.
+- Uninitialized `let x: T;` for zero-default-able types.
+- `mut ref T -> ref T` reborrow allowed at call-argument position.
+- `[T; N]` is now `Copy` when its element type `T` is `Copy`.
+- DHDL v0.1 MVP: `#[mmio(size=N)]` attribute + whole-program MMIO
+  overlap check.
+
+### Fixed
+
+- BUG-228: `--no-std` C emission no longer pulls in `pthread.h`/`signal.h`.
+- BUG-229: `strlen` no longer declared `i64`, fixing garbage on 32-bit targets.
+- BUG-230: diagnostic rendering no longer panics when a `Span` lands mid-char.
+- BUG-231: `FnRef` (fn-pointer value) now respects `#[no_mangle]`, not just call sites.
+- BUG-232: closure-environment leak triaged and fixed.
+- BUG-233: `#[bounded_stack]` no longer undercounts `extern "C"` callee stack usage.
+- Closure-capture double-free fixed; added `wrapping_add`/`wrapping_sub`/`wrapping_mul`.
+- Fixed 753 instances of double-encoded mojibake in diagnostic text/comments.
+- `leak_sweep` no longer flags `detach()`'s own inherently-flaky LeakSanitizer finding.
+
+---
+
 ## [v0.9.6] — 2026-08-24
 
 Same-day CI-fix follow-up to v0.9.5. See `RELEASE_NOTES/v0.9.6.md` for
