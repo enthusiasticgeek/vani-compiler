@@ -18211,11 +18211,49 @@ produces correct output and behavior for the identical source (used
 as DhruvaOS's own workaround, since it only ever builds with
 `--backend=llvm`).
 
-Not triaged into `src/` yet — the likely place to start is
-`backend_c.rs`'s struct-literal-expression lowering, comparing how it
-emits an array-typed field's initializer when the field value's
-source expression is a local/variable (pointer decay, needs an
-element-wise copy loop or `memcpy` into the anonymous struct's field
-array) versus an inline array literal (works correctly today).
+**Fixed 2026-09-16.** The root cause was narrower than "needs a copy
+loop": `backend_c.rs`'s struct/tuple/enum-variant-payload compound-
+literal lowering only special-cased an array-typed field whose VALUE
+was itself a literal `TypedExprKind::ArrayLit` AST node (e.g. `x:
+[1,2,3,4]`), building the correct bare-brace `{e1, e2, ...}` form by
+emitting each literal element directly. Any OTHER array-typed source
+expression — a variable, a field access, an array/tuple access — has
+no such element list to destructure, so it fell through to plain
+`emit_expr`, which for an array-typed value just emits the expression
+as-is (decaying to a pointer in C), producing exactly the invalid
+initializer shown above.
+
+Fixed by generalizing the SAME bare-brace form to any array-typed
+expression, not just literal ArrayLit ones: a new `array_init_rhs`
+helper indexes the source expression once per element (`(src)[0],
+(src)[1], ..., (src)[N-1]`) when it isn't already an ArrayLit — `[]`
+always yields a plain scalar regardless of whether the indexed thing
+is a real array or an already-decayed pointer, so this sidesteps the
+"array as a value" restriction entirely rather than working around
+it with a copy loop or memcpy (neither of which fits a single-
+expression initializer-list position anyway). Applied at all 3 call
+sites that had the identical gap: tuple literals, struct literals,
+and enum-variant payloads (the last of these was undocumented before
+this fix but shared the exact same bug).
+
+Assumes the source expression is side-effect-free to re-evaluate N
+times — true for every array-typed expression kind the checker
+currently allows in this position (Var, FieldAccess, ArrayAccess,
+TupleAccess; none can embed a function call or mutate state). A
+hypothetical future array-typed expression kind WITH side effects
+here would need its own temp-hoisting fix — `emit_expr` has no
+mechanism to hoist a preceding statement out of an initializer-list
+position today, so that's a known, separately-scoped limitation, not
+silently assumed away.
+
+Regression coverage: `examples/language/english/
+bug235_struct_array_field_from_var.vani` +
+`bug235_struct_literal_array_field_from_variable_compiles_on_both_backends`
+in `tests/run_end_to_end.rs` (checks real `cc`-compiled output on
+`--backend=c`, not just that the C backend accepts the syntax).
+Confirmed the fix is real, not incidental, by reverting it and
+re-running the exact repro: unfixed code reproduces the original `cc`
+error character-for-character (`makes integer from pointer without a
+cast`); fixed code passes on both backends.
 
 Next free bug number is **BUG-236**.

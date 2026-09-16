@@ -16598,3 +16598,53 @@ fn bug207_foriter_vecfill_phi_example_produces_correct_output_on_both_backends()
         );
     }
 }
+
+// BUG-235 (2026-09-06, fixed 2026-09-16): the C backend's struct/
+// tuple/enum-payload compound-literal codegen only special-cased an
+// array-typed field whose source was an INLINE `[...]` ArrayLit,
+// emitting the correct bare-brace `{e1, e2, ...}` form. Any other
+// array-typed source expression (a plain variable's own field, read
+// through `src.x`) fell through to plain `emit_expr`, which for an
+// array-typed value emits a decayed-pointer expression -- assigning
+// that into a `.x = ...` designated-initializer slot of array type is
+// invalid C ("makes integer from pointer without a cast",
+// -Wint-conversion, a hard error under this project's own -std=c11
+// build). The LLVM backend was always correct; only --backend=c was
+// affected -- confirmed this exact repro compiles clean on LLVM but
+// fails `cc` on the unfixed C backend with that exact diagnostic.
+// Fixed via a new `array_init_rhs` helper in backend_c.rs that
+// generalizes the brace-list form to any array-typed expression by
+// indexing the source once per element, applied at all 3 call sites
+// (tuple literal, struct literal, enum-variant payload).
+#[test]
+fn bug235_struct_literal_array_field_from_variable_compiles_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/bug235_struct_array_field_from_var.vani",
+        manifest_dir
+    );
+    let expected = "BUG-235 OK\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "BUG-235: intentc {:?} failed with status {:?}\nstdout: {}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "BUG-235: struct-literal array field sourced from a variable produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}

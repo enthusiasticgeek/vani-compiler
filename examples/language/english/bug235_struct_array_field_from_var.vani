@@ -1,0 +1,41 @@
+// BUG-235 (2026-09-06, fixed 2026-09-16): a struct literal's
+// array-typed field, initialized from an EXISTING variable's field
+// (not an inline `[...]` literal), used to compile to invalid C on
+// the C backend -- the array decayed to a pointer instead of being
+// copied element-by-element. Found via DhruvaOS's vani-curve25519
+// Ed25519 code. LLVM backend was always correct; only --backend=c
+// was affected.
+//
+// build & run:
+//   vanic run examples/language/english/bug235_struct_array_field_from_var.vani              # LLVM
+//   vanic run examples/language/english/bug235_struct_array_field_from_var.vani --backend=c  # C
+
+intent "BUG-235: struct-literal array field sourced from a variable, not an inline literal";
+
+struct Point4 {
+  x: [u32; 8],
+  y: [u32; 8],
+}
+
+fn make_point() -> Point4 {
+  return Point4 {
+    x: [1, 2, 3, 4, 5, 6, 7, 8],
+    y: [10, 20, 30, 40, 50, 60, 70, 80],
+  };
+}
+
+fn main() -> i64 {
+  let src: Point4 = make_point();
+  // The affected shape: array-typed fields read from an existing
+  // variable's own fields, not inline array literals.
+  let copy: Point4 = Point4 {
+    x: src.x,
+    y: src.y,
+  };
+  assert copy.x[0] == 1;
+  assert copy.x[7] == 8;
+  assert copy.y[3] == 40;
+  assert copy.y[7] == 80;
+  print "BUG-235 OK";
+  return 0;
+}

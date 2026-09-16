@@ -16703,6 +16703,53 @@ fn emit_eprint_expr_no_newline(expr: &TypedExpr, spec: &Option<crate::ast::Forma
     }
 }
 
+/// Builds the RHS for an array-typed field inside a struct/tuple/enum-
+/// payload C compound-literal initializer list (`.field = <this>`). C
+/// forbids assigning an array VALUE (whether a cast compound literal
+/// `(T[N]){...}` or a plain decayed pointer) into a designated-
+/// initializer slot of array type -- "array initialized from
+/// non-constant array expression" (compound literal) or "makes
+/// integer from pointer without a cast" (decayed pointer, what plain
+/// `emit_expr` produces for anything array-typed). Only a bare
+/// brace-enclosed element list (`{ e0, e1, ..., eN-1 }`) is valid
+/// there, matching a nested initializer rather than an assignment.
+///
+/// An inline `[...]` ArrayLit already has its elements as separate
+/// sub-expressions, so those are emitted directly (this part predates
+/// BUG-235 -- see BUG-74). BUG-235 (2026-09-06): any OTHER array-typed
+/// source expression -- a variable, a field access read through a
+/// `ref` parameter (`(dec_r).x`), an array-access, a tuple-access --
+/// used to fall through to plain `emit_expr`, producing exactly that
+/// invalid decayed-pointer assignment; every prior caller only special-
+/// cased ArrayLit specifically instead of any array-typed value. Fixed
+/// by building the same brace-list form for the general case too,
+/// indexing the source expression once per element -- `[]` always
+/// yields a scalar regardless of whether the indexed thing is a real
+/// array or an already-decayed pointer, so this sidesteps the "array
+/// as a value" restriction entirely rather than working around it.
+///
+/// Assumes the source expression is side-effect-free to re-evaluate N
+/// times (true for every array-typed expression kind the checker
+/// currently allows to reach this position -- Var, FieldAccess,
+/// ArrayAccess, TupleAccess -- none of which can embed a function call
+/// or mutate state). A hypothetical future array-typed expression kind
+/// that DOES have side effects here would need its own temp-hoisting
+/// fix; `emit_expr` has no mechanism to hoist a preceding statement
+/// out of an initializer-list position today, so that's out of this
+/// bug's scope.
+fn array_init_rhs(e: &TypedExpr) -> String {
+    let Type::Array { length, .. } = &e.ty else {
+        unreachable!("array_init_rhs called on a non-array-typed expr: {:?}", e.ty);
+    };
+    if let TypedExprKind::ArrayLit { elements } = &e.kind {
+        let parts: Vec<String> = elements.iter().map(emit_expr).collect();
+        return format!("{{ {} }}", parts.join(", "));
+    }
+    let src = emit_expr(e);
+    let parts: Vec<String> = (0..*length).map(|i| format!("({})[{}]", src, i)).collect();
+    format!("{{ {} }}", parts.join(", "))
+}
+
 fn emit_expr(expr: &TypedExpr) -> String {
     match &expr.kind {
         TypedExprKind::Int(value) => value.to_string(),
@@ -16914,12 +16961,10 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 .iter()
                 .enumerate()
                 .map(|(i, e)| {
-                    let rhs = match (&e.ty, &e.kind) {
-                        (Type::Array { .. }, TypedExprKind::ArrayLit { elements }) => {
-                            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
-                            format!("{{ {} }}", parts.join(", "))
-                        }
-                        _ => emit_expr(e),
+                    let rhs = if matches!(e.ty, Type::Array { .. }) {
+                        array_init_rhs(e)
+                    } else {
+                        emit_expr(e)
                     };
                     format!("._{} = {}", i, rhs)
                 })
@@ -16940,12 +16985,10 @@ fn emit_expr(expr: &TypedExpr) -> String {
             let parts: Vec<String> = fields
                 .iter()
                 .map(|(n, e)| {
-                    let rhs = match (&e.ty, &e.kind) {
-                        (Type::Array { .. }, TypedExprKind::ArrayLit { elements }) => {
-                            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
-                            format!("{{ {} }}", parts.join(", "))
-                        }
-                        _ => emit_expr(e),
+                    let rhs = if matches!(e.ty, Type::Array { .. }) {
+                        array_init_rhs(e)
+                    } else {
+                        emit_expr(e)
                     };
                     format!(".{} = {}", n, rhs)
                 })
@@ -17017,12 +17060,10 @@ fn emit_expr(expr: &TypedExpr) -> String {
             // compound-literal array into a struct field of
             // array type. Same fix as struct fields in
             // closure #100. Closure #119.
-            let payload_str = match (&payload.ty, &payload.kind) {
-                (Type::Array { .. }, TypedExprKind::ArrayLit { elements }) => {
-                    let parts: Vec<String> = elements.iter().map(emit_expr).collect();
-                    format!("{{ {} }}", parts.join(", "))
-                }
-                _ => emit_expr(payload),
+            let payload_str = if matches!(payload.ty, Type::Array { .. }) {
+                array_init_rhs(payload)
+            } else {
+                emit_expr(payload)
             };
             // Closure #283: mixed-payload-type enums store
             // the payload through a per-variant union member
