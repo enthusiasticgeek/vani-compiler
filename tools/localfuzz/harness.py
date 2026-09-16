@@ -85,6 +85,11 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
 CHECK_TIMEOUT = int(os.environ.get("CHECK_TIMEOUT", "15"))
 RUN_TIMEOUT = int(os.environ.get("RUN_TIMEOUT", "20"))
+# Total samples per backend (including the initial run already taken) used
+# to confirm a same-backend result is actually stable before trusting a
+# cross-backend difference as a real "backend-divergence" -- see
+# test_candidate's own comment on why a single repeat wasn't enough.
+BACKEND_STABILITY_SAMPLES = int(os.environ.get("HARNESS_BACKEND_STABILITY_SAMPLES", "5"))
 AUTOCOMMIT = os.environ.get("HARNESS_AUTOCOMMIT", "1") == "1"
 GENERATE_EVERY = int(os.environ.get("HARNESS_GENERATE_EVERY", "10"))
 ATTEMPT_FIXES = os.environ.get("HARNESS_ATTEMPT_FIXES", "1") == "1"
@@ -459,6 +464,42 @@ def test_candidate(path):
         return {"kind": "run-crash", "c": run_c, "llvm": run_l}
 
     if run_c["rc"] != run_l["rc"] or run_c["stdout"] != run_l["stdout"]:
+        # FIX (2026-09-16): the same base corpus file (detach_heartbeat.vani
+        # and its fuzzer-mutated variants) has now been flagged as a
+        # "backend-divergence" three separate times (2026-08-20, 2026-09-04,
+        # 2026-09-15) across multiple staging-doc review cycles, and every
+        # time it was a false positive: `detach` fires a background task
+        # with NO join, so whether its own output reaches stdout before
+        # main exits is a genuine, intentional race (the example's own
+        # comment says so explicitly) -- completely independent of which
+        # backend ran it. A single-shot stdout diff between one C run and
+        # one LLVM run can't distinguish "backend A and B genuinely behave
+        # differently" from "this program is non-deterministic and just
+        # happened to land differently on these two particular runs."
+        #
+        # A single same-backend repeat isn't a strong enough test: measured
+        # directly against this exact repro, a lone extra C-backend re-run
+        # only caught the flakiness 1 time in 5, because the race's own
+        # variance means a repeat can coincidentally roll the same value as
+        # the first run even though the backend is NOT actually
+        # deterministic. Instead, sample EACH backend
+        # BACKEND_STABILITY_SAMPLES times total and check that every
+        # sample within a backend agrees with itself -- only if BOTH
+        # backends are internally 100% consistent across all samples, and
+        # their consistent values still differ from each other, is this a
+        # real cross-backend divergence. Only runs on the already-rare path
+        # where an initial difference was found at all, so the added cost
+        # (2*(BACKEND_STABILITY_SAMPLES-1) extra `run_vanic` calls) doesn't
+        # touch the common case.
+        c_samples = [run_c] + [run_vanic(["run", str(path), "--backend=c"], RUN_TIMEOUT)
+                                for _ in range(BACKEND_STABILITY_SAMPLES - 1)]
+        l_samples = [run_l] + [run_vanic(["run", str(path)], RUN_TIMEOUT)
+                                for _ in range(BACKEND_STABILITY_SAMPLES - 1)]
+        c_outputs = {(s["rc"], s["stdout"]) for s in c_samples}
+        l_outputs = {(s["rc"], s["stdout"]) for s in l_samples}
+        if len(c_outputs) > 1 or len(l_outputs) > 1:
+            return {"kind": "flaky-nondeterministic", "c_samples": c_samples,
+                    "llvm_samples": l_samples}
         return {"kind": "backend-divergence", "c": run_c, "llvm": run_l}
 
     return {"kind": "clean-success", "c": run_c, "llvm": run_l}
@@ -937,6 +978,18 @@ def main():
             log(f"cycle {cycle}: qwen-generated candidate rejected by checker "
                 f"(features={feature_names}, gap_target={gap_target}) -- "
                 "not staged, not a finding")
+        elif kind == "flaky-nondeterministic":
+            # See test_candidate's own comment: this program disagreed with
+            # ITSELF on a same-backend re-run, so the original cross-backend
+            # difference that triggered this check was noise from the
+            # program's own non-determinism, not a real backend bug.
+            # Deliberately not staged -- committing this to STAGING_DOC would
+            # just recreate the exact false-positive pattern this check
+            # exists to catch (see docs/TODO_LOCAL_STAGING.md's own repeated
+            # detach_heartbeat.vani entries from 2026-08-20, 2026-09-04, and
+            # 2026-09-15, all the same non-bug).
+            log(f"cycle {cycle}: flaky/non-deterministic (base={base_path}) -- "
+                "same backend disagreed with itself on a re-run, not staged")
         else:
             log(f"cycle {cycle}: clean (base={base_path})")
 

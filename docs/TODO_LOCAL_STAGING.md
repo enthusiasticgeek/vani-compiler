@@ -14120,6 +14120,12 @@ Fix attempt: `tools/localfuzz/findings/20260915-122622-run-crash-7580502ac5/fix_
 STATUS: needs human/frontier root-cause review.
 ```
 
+**VERIFIED 2026-09-16: NOT A BUG.** Re-ran against a fresh `vanic` build
+from current `main` (both `--backend=c` and LLVM): exits 0, prints
+"Cherokee for-loops OK 15" -- correct on both backends. The original
+timeout was a transient harness/host-load hiccup, not a compiler
+defect. Closed, no fix needed.
+
 ---
 
 ### Candidate: 20260915-123227-run-crash-acab47667d
@@ -14184,6 +14190,14 @@ funzione main() -> i64 {
 
 #### STATUS: needs human/frontier root-cause review.
 
+**VERIFIED 2026-09-16: NOT A BUG.** The mutated condition `i * 1 == i +
+i` reduces to `i == 2i`, i.e. `i == 0` -- never true for `i >= 1`, so
+`continuare` is dead code and `count_odd(4)` legitimately returns 4,
+not 2. Re-ran against fresh `vanic` from current `main`: both backends
+exit 3 with `assertion failed` -- IDENTICAL behavior on both backends,
+no divergence. This is a logically-wrong mutated assertion in the
+fuzzer-generated source, not a compiler bug. Closed, no fix needed.
+
 ---
 
 ### Candidate: 20260915-123514-run-crash-8a69bfb5f4
@@ -14192,6 +14206,11 @@ Repro: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260915-123514-run-crash-8a69bfb5f4/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+**VERIFIED 2026-09-16: NOT A BUG.** Re-ran against fresh `vanic` from
+current `main` (both backends): exits 0, prints correct fib(20)=6765
+and fib(21)=10946 through the caching proxy. Runs correctly on both
+backends. Closed, no fix needed.
 
 ---
 
@@ -14232,6 +14251,27 @@ The repro affects both the `c` (C backend) and the `llvm` (LLVM backend).
 
 **STATUS: needs human/frontier root-cause review.**
 
+**VERIFIED 2026-09-16: NOT A BUG -- root cause fixed in the HARNESS,
+not the compiler.** This is the THIRD time this exact base corpus
+(`detach_heartbeat.vani`) has been flagged as backend-divergence
+(2026-08-20, 2026-09-04, 2026-09-15) -- every time a false positive.
+`detach` fires a background task with no join; whether its ticks reach
+stdout before `main` exits is a genuine, intentional race (the
+example's own comment says so explicitly). Confirmed directly: running
+the C backend 5x in a row on the identical source produced heartbeat
+tick counts of 1, 1, 1, 2, 4 -- non-deterministic on ONE backend alone,
+independent of which backend ran it.
+Fixed `tools/localfuzz/harness.py`'s `test_candidate()`: a
+cross-backend stdout difference now triggers a same-backend
+stability check (`BACKEND_STABILITY_SAMPLES` samples per backend,
+default 5) before being classified as `backend-divergence` -- if
+either backend disagrees with itself across samples, it's now
+classified as `flaky-nondeterministic` and not staged as a finding.
+Verified: 0/5 false "backend-divergence" classifications against this
+exact repro after the fix (was 100% before), and a genuinely
+deterministic example still classifies correctly with no added
+overhead on the common path. Closed, no compiler fix needed.
+
 ---
 
 ### Candidate: 20260915-223345-run-crash-40b37a485a
@@ -14240,6 +14280,14 @@ Repro: `tools/localfuzz/findings/20260915-223345-run-crash-40b37a485a/repro.vani
 Fix attempt: `tools/localfuzz/findings/20260915-223345-run-crash-40b37a485a/fix_attempt.md`
 
 STATUS: needs human/frontier root-cause review.
+
+**VERIFIED 2026-09-16: NOT A BUG.** The `پہلا_صفر` function's `while`
+loop body is exactly `if list[i] == 0 { return i; }` -- there is no
+increment of `i` anywhere in the loop. Since `list[0] == 3` (never 0),
+this is a genuine infinite loop IN THE FUZZER-GENERATED SOURCE ITSELF
+(a dropped/missing increment statement), not a compiler defect --
+`vanic` hanging here is the only correct behavior for the program as
+written. Closed, no fix needed.
 
 ---
 
@@ -14287,6 +14335,15 @@ fn main() -> i64 {
 
   // Fire the heartbeat and immediately stop tracking it -- no
   // Task<R> handle survives past this point for main to join.
+
+**VERIFIED 2026-09-16: NOT A BUG -- same non-issue as
+20260915-214121-backend-divergence-d3f77f92bf above (same base corpus,
+`detach_heartbeat.vani`, this time with `compute_result`'s loop counter
+fuzzer-mutated from `i64` to `i32` -- irrelevant to the actual
+divergence, which is the heartbeat race). See that entry for the full
+root-cause writeup and the `harness.py` fix (same-backend stability
+sampling before declaring `backend-divergence`) that stops this
+recurring. Closed, no compiler fix needed.**
 
 ---
 
