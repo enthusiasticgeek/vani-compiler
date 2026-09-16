@@ -14287,3 +14287,12 @@ fn main() -> i64 {
 
   // Fire the heartbeat and immediately stop tracking it -- no
   // Task<R> handle survives past this point for main to join.
+
+---
+
+### Candidate: 20260916-034449-run-crash-46ed5b2a8b
+
+Repro: `tools/localfuzz/findings/20260916-034449-run-crash-46ed5b2a8b/repro.vani`
+Fix attempt: `tools/localfuzz/findings/20260916-034449-run-crash-46ed5b2a8b/fix_attempt.md`
+
+STATUS: needs human/frontier root-cause review.
