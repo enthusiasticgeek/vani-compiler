@@ -120,6 +120,12 @@ pub struct TypedFunction {
     /// worst-case stack depth (via call-graph + frame-size
     /// analysis) doesn't exceed the bound.
     pub bounded_stack: Option<u64>,
+    /// Task #245: per-extern-fn real measured stack cost in bytes,
+    /// forwarded from `ast::Function::stack_cost_bytes`. Read by
+    /// `stack_depth::compute_stack_depths` as an override for the
+    /// flat `FRAME_OVERHEAD_BYTES` default every unresolvable
+    /// (extern) callee is otherwise charged.
+    pub stack_cost_bytes: Option<u64>,
     /// T3.2: per-fn worst-case cycle budget, forwarded from
     /// `ast::Function::wcet_cycles`. Read by
     /// `safety::enforce_wcet` to verify the static cycle estimate

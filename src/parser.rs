@@ -1806,6 +1806,7 @@ impl Parser {
             link_section: None,
             safety_standard: None,
             bounded_stack: None,
+            stack_cost_bytes: None,
             wcet_cycles: None,
             deterministic_timing: false,
             vectorize: false,
@@ -1847,6 +1848,7 @@ impl Parser {
         let mut vectorize = false;
         let mut link_section: Option<String> = None;
         let mut bounded_stack: Option<u64> = None;
+        let mut stack_cost_bytes: Option<u64> = None;
         let mut wcet_cycles: Option<u64> = None;
         let mut deterministic_timing = false;
         let mut safety_standard: Option<String> = None;
@@ -1983,6 +1985,47 @@ impl Parser {
                     self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
                     bounded_stack = Some(n);
                 }
+                // Task #245 (RTOS true-compliance sweep, 2026-09-18):
+                // `#[stack_cost(bytes=N)]` -- a real, caller-measured
+                // stack cost for an `extern "C"` function declaration,
+                // closing BUG-233's own explicitly-deferred remainder.
+                // Semantic-checked below (only legal on an extern fn)
+                // rather than here, mirroring how other cross-field
+                // attribute constraints in this same function are
+                // validated after all attributes are collected.
+                "stack_cost" => {
+                    self.expect_keyword(
+                        "'(' after `stack_cost`",
+                        |k| matches!(k, TokenKind::LParen),
+                    )?;
+                    let key_tok = self.expect_ident()?;
+                    let key = ident_text(key_tok);
+                    if key != "bytes" {
+                        return Err(Diagnostic::new(
+                            self.current().span,
+                            format!(
+                                "expected `bytes` key in `#[stack_cost(bytes=N)]`, got `{}`",
+                                key
+                            ),
+                        ));
+                    }
+                    self.expect_keyword(
+                        "'=' after `bytes`",
+                        |k| matches!(k, TokenKind::Equal),
+                    )?;
+                    let n_tok = self.bump();
+                    let n = match n_tok.kind {
+                        TokenKind::Int(v) if v > 0 => v as u64,
+                        _ => {
+                            return Err(Diagnostic::new(
+                                n_tok.span,
+                                "expected a positive integer literal as the byte cost",
+                            ));
+                        }
+                    };
+                    self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+                    stack_cost_bytes = Some(n);
+                }
                 // T3.2: `#[wcet(cycles=N)]` -- per-fn worst-case
                 // execution time budget. Post-check pass runs a
                 // coarse cycle estimator and rejects if the
@@ -2054,7 +2097,8 @@ impl Parser {
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
                              `#[no_mangle]`, `#[vectorize]`, `#[test]`, \
                              `#[link_section = \"s\"]`, \
-                             `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
+                             `#[bounded_stack(bytes=N)]`, `#[stack_cost(bytes=N)]`, \
+                             `#[wcet(cycles=N)]`, \
                              `#[deterministic_timing]`, `#[inline]`, \
                              `#[interrupt]` or `#[interrupt(priority=N)]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
@@ -2067,6 +2111,36 @@ impl Parser {
                 }
             }
             self.expect_keyword("']'", |k| matches!(k, TokenKind::RBracket))?;
+        }
+        // Task #245 (RTOS true-compliance sweep, 2026-09-18):
+        // `#[stack_cost(bytes=N)]` is the one attribute meaningful on
+        // an `extern "C" fn` declaration (a body-less FFI signature --
+        // every other attribute here targets a real vani-source body
+        // this parser can walk, which an extern declaration doesn't
+        // have). Dispatch to `parse_extern_fn` instead of `parse_
+        // function` when that's what follows the attribute list, and
+        // reject combining it with any attribute that has no meaning
+        // on a body-less declaration rather than silently ignoring
+        // them (the same "hard error on misapplied attribute" stance
+        // `#[inline(...)]`/`#[interrupt(priority=N)]`'s own bad-key
+        // checks already take above).
+        if self.check(|k| matches!(k, TokenKind::Extern)) {
+            if bound_value.is_some() || no_heap || no_float || no_nan || no_recursion
+                || interrupt || inline || no_mangle || vectorize
+                || link_section.is_some() || bounded_stack.is_some()
+                || wcet_cycles.is_some() || deterministic_timing
+                || safety_standard.is_some() || is_test || is_should_panic
+            {
+                return Err(Diagnostic::new(
+                    self.current().span,
+                    "only `#[stack_cost(bytes=N)]` is meaningful on an \
+                     `extern \"C\" fn` declaration -- it has no vani-source \
+                     body for any other attribute here to apply to",
+                ));
+            }
+            let mut ef = self.parse_extern_fn()?;
+            ef.stack_cost_bytes = stack_cost_bytes;
+            return Ok(ef);
         }
         // Continue with the fn declaration. Supports both
         // plain `fn` and `pure fn`.
@@ -2156,6 +2230,15 @@ impl Parser {
         f.wcet_cycles = wcet_cycles;
         f.is_test = is_test;
         f.is_should_panic = is_should_panic;
+        if stack_cost_bytes.is_some() {
+            return Err(Diagnostic::new(
+                f.span,
+                "`#[stack_cost(bytes=N)]` is only meaningful on an \
+                 `extern \"C\" fn` declaration (stack_depth's own call-graph \
+                 walk already computes a real cost for an ordinary function \
+                 from its own body)",
+            ));
+        }
         Ok(f)
     }
 
@@ -2227,6 +2310,7 @@ impl Parser {
             link_section: None,
             safety_standard: None,
             bounded_stack: None,
+            stack_cost_bytes: None,
             wcet_cycles: None,
             deterministic_timing: false,
             vectorize: false,
@@ -10764,6 +10848,7 @@ pub(crate) fn try_v31_transform(
         link_section: None,
         safety_standard: None,
         bounded_stack: None,
+        stack_cost_bytes: None,
         wcet_cycles: None,
         deterministic_timing: false,
         vectorize: false,

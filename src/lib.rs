@@ -51927,6 +51927,75 @@ função main() -> i64 {
         let _ = compile(source).expect("bounded_stack within budget compiles");
     }
 
+    // Task #245 (RTOS true-compliance sweep, 2026-09-18): real
+    // per-extern-fn stack costs via `#[stack_cost(bytes=N)]`, closing
+    // BUG-233's own explicitly-deferred remainder (an unannotated
+    // extern callee was charged a flat FRAME_OVERHEAD_BYTES=32
+    // conservative default -- this lets a caller supply the real
+    // measured cost instead).
+
+    #[test]
+    fn stack_cost_overrides_flat_extern_default() {
+        let annotated = r#"
+            #[stack_cost(bytes=500)]
+            extern "C" fn heavy_asm() -> i64;
+            fn caller() -> i64 { return heavy_asm(); }
+            fn main() -> i64 { return caller(); }
+        "#;
+        let checked = compile(annotated).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, Some("caller"));
+        let depth = report.entries[0].max_depth_bytes.expect("bounded");
+
+        let unannotated = r#"
+            extern "C" fn heavy_asm() -> i64;
+            fn caller() -> i64 { return heavy_asm(); }
+            fn main() -> i64 { return caller(); }
+        "#;
+        let checked2 = compile(unannotated).expect("compiles");
+        let report2 = crate::stack_depth::compute_stack_depths(&checked2.ir, Some("caller"));
+        let depth2 = report2.entries[0].max_depth_bytes.expect("bounded");
+        // Same call shape (identical caller frame in both), only the
+        // annotation differs -- the computed worst-case depth must
+        // grow by EXACTLY (declared cost - the flat default it
+        // replaces), proving the annotation is genuinely read and
+        // used, not just accepted syntax with no effect on the
+        // estimate BUG-233's own flat FRAME_OVERHEAD_BYTES=32 default
+        // still governs when absent.
+        assert_eq!(depth, depth2 + (500 - 32));
+    }
+
+    #[test]
+    fn stack_cost_rejects_on_non_extern_fn() {
+        let source = r#"
+            #[stack_cost(bytes=100)]
+            fn not_extern() -> i64 { return 0; }
+            fn main() -> i64 { return not_extern(); }
+        "#;
+        let errors = compile(source).expect_err("must reject stack_cost on a non-extern fn");
+        assert!(
+            errors.iter().any(|e| e.message.contains("only meaningful on an `extern")),
+            "unexpected errors: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn stack_cost_rejects_combined_with_other_extern_attrs() {
+        let source = r#"
+            #[no_heap]
+            #[stack_cost(bytes=100)]
+            extern "C" fn bad() -> i64;
+            fn main() -> i64 { return bad(); }
+        "#;
+        let errors = compile(source)
+            .expect_err("must reject stack_cost combined with another attribute on extern");
+        assert!(
+            errors.iter().any(|e| e.message.contains("only `#[stack_cost(bytes=N)]` is meaningful")),
+            "unexpected errors: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn bounded_stack_rejects_over_budget() {
         let source = r#"

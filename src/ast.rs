@@ -919,6 +919,23 @@ pub struct Function {
     /// real WCET analysis requires architecture-specific timing
     /// models, deferred.
     pub wcet_cycles: Option<u64>,
+    /// Task #245 of the RTOS true-compliance sweep (2026-09-18),
+    /// closing BUG-233's own explicitly-deferred remainder: a real,
+    /// per-function stack-cost annotation for `extern "C"` function
+    /// declarations, so `stack_depth`'s call-graph walk can use an
+    /// accurate measured value instead of the flat
+    /// `FRAME_OVERHEAD_BYTES` (32) conservative default every
+    /// unresolvable (extern) callee was charged after BUG-233's own
+    /// fix. Set when the declaration is annotated
+    /// `#[stack_cost(bytes=N)]` -- semantic-checked to only be legal
+    /// on an `extern "C" fn` (meaningless, and a build error, on an
+    /// ordinary function whose real cost the checker already computes
+    /// from its own body). A caller supplies this from a real
+    /// measurement of the hand-written assembly's own frame size, not
+    /// a guess -- see `stack_depth.rs`'s own header comment for the
+    /// full design and BUG-233's original write-up for why this
+    /// wasn't done immediately (real new API surface, not rushed).
+    pub stack_cost_bytes: Option<u64>,
     /// T3.4 of the safety-standard alignment arc: set when the
     /// function is annotated `#[deterministic_timing]`. The
     /// post-check pass walks the function body and rejects any

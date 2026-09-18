@@ -80,6 +80,23 @@ pub struct StackReport {
 /// top-level function if `entry_filter` is None).
 pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) -> StackReport {
     let size_ctx = SizeCtx::new(program);
+    // Task #245 (RTOS true-compliance sweep, 2026-09-18): real,
+    // caller-declared per-extern-fn stack costs, closing BUG-233's own
+    // explicitly-deferred remainder. Built once here from every
+    // `extern "C" fn` carrying `#[stack_cost(bytes=N)]`
+    // (`ast::Function::stack_cost_bytes`, forwarded through the
+    // checker unchanged for extern fns -- see checker.rs's own extern
+    // TypedFunction construction). `traverse_depth`'s unresolvable-
+    // callee branch consults this before falling back to the flat
+    // `FRAME_OVERHEAD_BYTES` conservative default BUG-233 introduced.
+    let mut extern_costs: HashMap<String, u64> = HashMap::new();
+    for f in &program.functions {
+        if f.is_extern {
+            if let Some(cost) = f.stack_cost_bytes {
+                extern_costs.insert(f.name.clone(), cost);
+            }
+        }
+    }
     let mut frames: Vec<FrameReport> = Vec::new();
     for f in &program.functions {
         if f.is_extern {
@@ -123,7 +140,7 @@ pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) 
         }
         let mut visiting: HashSet<String> = HashSet::new();
         let mut chain: Vec<String> = Vec::new();
-        let result = traverse_depth(&f.name, &frame_map, &mut visiting, &mut chain, false);
+        let result = traverse_depth(&f.name, &frame_map, &extern_costs, &mut visiting, &mut chain, false);
         entries.push(EntryReport {
             name: f.name.clone(),
             max_depth_bytes: result.depth,
@@ -141,6 +158,7 @@ struct TraverseResult {
 fn traverse_depth(
     name: &str,
     frames: &HashMap<String, FrameReport>,
+    extern_costs: &HashMap<String, u64>,
     visiting: &mut HashSet<String>,
     chain: &mut Vec<String>,
     // When true, this function is being inlined into its caller: contribute
@@ -180,6 +198,16 @@ fn traverse_depth(
         // (surfacing budgets that were already dangerously tight against
         // reality, the same class of thing this project's own dhruva
         // fix needed regardless of this checker change).
+        //
+        // Task #245 (2026-09-18): the new annotation surface BUG-233's
+        // own write-up explicitly deferred now exists --
+        // `#[stack_cost(bytes=N)]` on the extern declaration lets a
+        // caller supply the real measured cost instead of this flat
+        // default. Consulted first; only a genuinely un-annotated
+        // extern callee still falls back to FRAME_OVERHEAD_BYTES.
+        if let Some(&real_cost) = extern_costs.get(name) {
+            return TraverseResult { depth: Some(real_cost), chain: vec![name.to_string()] };
+        }
         return TraverseResult { depth: Some(FRAME_OVERHEAD_BYTES), chain: vec![name.to_string()] };
     };
     // How many bytes this activation contributes to the stack.
@@ -222,7 +250,7 @@ fn traverse_depth(
         // If the callee is marked inline, fold its locals into the current
         // frame rather than pushing a new activation record.
         let callee_is_inline = frames.get(callee.as_str()).map(|f| f.inline).unwrap_or(false);
-        let sub = traverse_depth(callee, frames, visiting, chain, callee_is_inline);
+        let sub = traverse_depth(callee, frames, extern_costs, visiting, chain, callee_is_inline);
         let combined = match (best, sub.depth) {
             (Some(a), Some(b)) => Some(a.max(b)),
             _ => None,
