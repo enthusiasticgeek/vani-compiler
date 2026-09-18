@@ -18256,4 +18256,97 @@ re-running the exact repro: unfixed code reproduces the original `cc`
 error character-for-character (`makes integer from pointer without a
 cast`); fixed code passes on both backends.
 
-Next free bug number is **BUG-236**.
+## BUG-236: WCET estimator charged every binary operator identically, silently undercounting `/`/`%` (2026-09-18)
+
+Found via a real-world independent-verification pass on a downstream
+project (DhruvaOS, an ARMv6 bare-metal RTOS this compiler targets),
+specifically auditing whether `#[wcet(cycles=N)]`'s own static
+estimator is SOUND (never under-estimates real execution time) --
+exactly the property a hard-RT safety budget depends on.
+
+`src/safety.rs`'s `wcet_expr`, `E::Binary` arm, used to be:
+
+```rust
+E::Binary { left, right, .. } => Some(
+    2 + wcet_expr(left, ...)? + wcet_expr(right, ...)?,
+),
+```
+
+The `..` silently discarded `op: BinaryOp` -- every operator (`+`,
+`-`, `*`, `/`, `%`, shifts, comparisons, bitwise, logical) got charged
+an identical flat 2 cycles. `wcet_builtin_cycles`'s own adjacent
+header comment already documented an INTENDED "Integer divide /
+modulo: 20-40 cycles (in-order cores)" category, but that number was
+only ever wired up for named stdlib functions (`i64_div_floor` etc.)
+-- never for the raw `/`/`%` operators a program writes directly. On
+a target with no hardware integer-divide instruction at all
+(ARM1176JZF-S -- any `i64` `/` there compiles to a call to
+`__aeabi_ldivmod`, a real software division routine), this meant
+`#[wcet(cycles=N)]` could pass a function whose real worst-case
+execution time it dramatically underestimated.
+
+Also discarded `checked: bool` (the runtime divisor-!=-0 / shift-
+bounds / integer-overflow guard `TypedExprKind::Binary`'s own doc
+comment describes) -- a real branch+compare this estimator ignored
+for every operator regardless.
+
+Fix: dispatch on `op`. ALU-class ops (add/sub/bitwise/shift/compare/
+logical) stay at 2 cycles; multiply at 4; divide/modulo at 50 --
+informed by a REAL measurement, not the old documented-but-unapplied
+"20-40" range: DhruvaOS's own `i64_div_wcet_measure_self_test`
+(TIMER_CLO-bracketed, ARM1176/QEMU, real not simulated) put a single
+division's own marginal cost at roughly 10.6x a single checked-add's
+in an apples-to-apples same-loop-shape comparison sharing the
+identical host-emulation-speed baseline -- scaling the add's own
+total charge (2 base + 3 guard) by that ratio lands division around
+50-53, past the old "20-40" ceiling (itself apparently tuned for
+cores with SOME hardware divide support, optimistic for ARM1176
+specifically). A `checked` op additionally adds +3 regardless of
+which operator, on top of whichever base applies.
+
+Regression coverage: `tests::wcet_computes_ceiling_trip_count_for_
+stepped_loop` / `tests::wcet_rejects_over_budget_stepped_loop` (both
+pre-existing tests, their own hardcoded expected cycle counts moved
+from 35/34 to 47/46 -- the delta is entirely the `checked`-guard fix
+applying to the loop body's own `+`, confirmed by hand: 4 iterations
+x 3 extra cycles = 12, 35+12=47, exact). `cargo test --release`:
+3030 passed, 0 failed after the fix (2 failures immediately before
+it, both the tests above, both legitimate consequences of the fix
+becoming more honest, not test bugs).
+
+## BUG-237: `#[interrupt]`'s own lock-forbidding check used a hardcoded builtin-name denylist that missed real extern blocking primitives (2026-09-18)
+
+Same independent-verification pass, same downstream project. `#[interrupt]`
+functions are supposed to forbid any blocking lock acquire (the
+function's own diagnostic message: "An ISR holding a lock the main
+thread is waiting on creates a deadlock"). `src/safety.rs`'s
+`walk_expr_for_isr`, `TypedExprKind::Call` arm, implemented this via:
+
+```rust
+if matches!(name.as_str(), "mutex_lock" | "condvar_wait" | "condvar_wait_timeout") {
+    violations.push((expr.span, "a blocking lock acquire"));
+}
+```
+
+-- three hardcoded names, all vani's own LANGUAGE-LEVEL `Mutex<T>`/
+`Condvar` builtins. DhruvaOS's own real, genuinely-blocking mutex
+(`dhruva_mutex_lock`, a real priority-inheritance mutex, `extern "C"`,
+hand-written ARM assembly) matches none of them -- a call to it from
+inside an `#[interrupt]` function would have been silently allowed,
+defeating the exact guarantee this check exists for. Confirmed
+currently INERT for DhruvaOS itself (its one `#[interrupt]` function,
+`irq_dispatch`, never calls it) -- a real, exploitable gap in the
+mechanism, not a live incident, caught by direct code reading, not a
+crash report.
+
+Fix (narrowly scoped, not the general solution): added
+`"dhruva_mutex_lock"` to the same hardcoded list. The RIGHT general
+fix is a new `#[blocking]` attribute surface for `extern` function
+declarations (parser + AST + IR + typechecker + this checker) so any
+project's own hand-written blocking primitives get covered without
+baking project-specific names into a general-purpose compiler --
+real, substantial scope (a new attribute, not a bugfix), tracked as
+its own follow-up item, not attempted here. Recorded honestly as a
+known limitation of this fix, not silently left unfixed either.
+
+Next free bug number is **BUG-238**.

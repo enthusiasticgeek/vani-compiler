@@ -54488,12 +54488,22 @@ função main() -> i64 {
         // the 10 a step-1 loop over the same bounds would need.
         // Confirmed empirically against this exact body: a step-1
         // version of this loop needs a 71-cycle budget; this step-3
-        // version needs exactly 35 -- proving the trip count used
-        // here is really the stepped one (4 iterations), not a
-        // leftover naive `end - start` count that would demand the
-        // same 71 cycles a step-1 loop does.
+        // version needed exactly 35 at the time -- proving the trip
+        // count used here is really the stepped one (4 iterations),
+        // not a leftover naive `end - start` count that would demand
+        // the same 71 cycles a step-1 loop does.
+        //
+        // ROUND 2026-09-18 (DhruvaOS RTOS audit, Gap D): 35 -> 47.
+        // `s = s + i`'s `+` carries a `checked: bool` runtime overflow
+        // guard (true by default for integer Add/Sub/Mul -- see
+        // TypedExprKind::Binary's own doc comment), a real cost
+        // wcet_expr's E::Binary arm used to ignore for EVERY operator
+        // regardless of `checked`. Now charges +3 per checked op; 4
+        // iterations x 3 = 12 extra, 35 + 12 = 47, confirmed exactly.
+        // The trip-count logic this test actually exists to verify is
+        // unchanged -- only the per-op cost model got more honest.
         let source = r#"
-            #[wcet(cycles=35)]
+            #[wcet(cycles=47)]
             fn loops() -> i64 {
               let s: i64 = 0;
               for i from 0 to 10 step 3 {
@@ -54508,8 +54518,15 @@ função main() -> i64 {
 
     #[test]
     fn wcet_rejects_over_budget_stepped_loop() {
+        // ROUND 2026-09-18 (DhruvaOS RTOS audit, Gap D): budget
+        // 34 -> 46, expected estimate 35 -> 47 cycles -- see the
+        // sibling test's own comment (wcet_computes_ceiling_trip_
+        // count_for_stepped_loop) for exactly why (the `checked`
+        // overflow-guard cost this file's own wcet_expr::E::Binary
+        // arm used to ignore entirely). Still "one cycle under the
+        // real cost must fail" -- only the real cost's own value moved.
         let source = r#"
-            #[wcet(cycles=34)]
+            #[wcet(cycles=46)]
             fn loops() -> i64 {
               let s: i64 = 0;
               for i from 0 to 10 step 3 {
@@ -54523,8 +54540,8 @@ função main() -> i64 {
         assert!(
             errs.iter().any(|d| d.message.contains("wcet")
                 && d.message.contains("exceeds")
-                && d.message.contains("35 cycles")),
-            "expected a wcet-exceeded diagnostic citing 35 cycles, got: {:?}",
+                && d.message.contains("47 cycles")),
+            "expected a wcet-exceeded diagnostic citing 47 cycles, got: {:?}",
             errs
         );
     }

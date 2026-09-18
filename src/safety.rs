@@ -426,9 +426,40 @@ fn walk_expr_for_isr(
         TypedExprKind::Call { name, args, .. } => {
             calls.push(name.clone());
             // Lock-acquiring builtins.
+            //
+            // ROUND 2026-09-18 (DhruvaOS RTOS/DharaFS safety-
+            // certification audit, Gap D — independent verification
+            // that #[interrupt]'s own enforcement is sound, not just
+            // #[wcet]/#[bounded_stack]): this denylist only ever
+            // matched vani's own LANGUAGE-LEVEL Mutex<T>/Condvar
+            // builtin names. Confirmed via DhruvaOS (a real project
+            // this checker is supposed to protect): its own actual
+            // blocking mutex, `dhruva_mutex_lock` (a genuine priority-
+            // inheritance mutex that really blocks, `extern "C"`,
+            // hand-written ARM assembly), matched NONE of these three
+            // names — a call to it from inside a `#[interrupt]`
+            // function would have been silently allowed, defeating
+            // the exact deadlock-prevention guarantee this whole check
+            // exists for (per this function's own diagnostic message).
+            // Currently inert for DhruvaOS itself (its one `#[interrupt]`
+            // function, `irq_dispatch`, never calls it) but a real,
+            // exploitable gap in the mechanism, not a theoretical one.
+            //
+            // Added directly rather than a byte-for-byte general fix:
+            // a proper solution needs a new `#[blocking]` attribute
+            // surface for `extern` function declarations (parser + AST
+            // + IR + typechecker + this checker), so ANY project's own
+            // hand-written blocking primitives get covered without
+            // hardcoding project-specific names into a general-purpose
+            // compiler — real, substantial scope, tracked as its own
+            // follow-up, not done here. This is the narrower, still-
+            // honest fix: extend the same hardcoded-name mechanism
+            // (already used for vani's own builtins) to also cover the
+            // one concretely-identified gap, not silently ignore it
+            // while the general fix waits.
             if matches!(
                 name.as_str(),
-                "mutex_lock" | "condvar_wait" | "condvar_wait_timeout"
+                "mutex_lock" | "condvar_wait" | "condvar_wait_timeout" | "dhruva_mutex_lock"
             ) {
                 violations.push((expr.span, "a blocking lock acquire"));
             }
@@ -1080,7 +1111,15 @@ pub fn enforce_bounded_stack(program: &TypedProgram, diagnostics: &mut Vec<Diagn
 ///
 /// V1 cycle model (over-estimating is always safe for WCET):
 /// - Each scalar op (Var, literal, Cast, Unary): 1 cycle
-/// - Binary op / comparison: 2 cycles
+/// - Binary op: operator-dependent (ROUND 2026-09-18 fix — see
+///   `wcet_expr`'s own `E::Binary` arm comment for the real finding
+///   this replaced: every operator used to be charged an identical
+///   flat 2 cycles, `/`/`%` included, which silently underestimated
+///   real cost on any target without hardware integer divide). ALU
+///   ops (add/sub/bitwise/shift/compare/logical): 2 cycles. Multiply:
+///   4 cycles. Divide/modulo: 40 cycles. Plus 3 more if `checked`
+///   (a real runtime zero/bounds/overflow guard this model previously
+///   ignored regardless of operator).
 /// - Memory load (Index, Field): 2 cycles
 /// - Named call: 10 cycles (CALL + RET + arg marshaling)
 /// - Branch (if): cond + max(then, else) + 2
@@ -1481,10 +1520,68 @@ fn wcet_expr(
         E::FnRef { .. } => Some(1),
         E::Unary { expr: inner, .. } => Some(1 + wcet_expr(inner, fn_map, visiting, None)?),
         E::Cast { expr: inner, .. } => Some(1 + wcet_expr(inner, fn_map, visiting, None)?),
-        E::Binary { left, right, .. } => Some(
-            2 + wcet_expr(left, fn_map, visiting, None)?
-                + wcet_expr(right, fn_map, visiting, None)?,
-        ),
+        // ROUND 2026-09-18 (DhruvaOS RTOS/DharaFS safety-certification
+        // audit, Gap D — independent verification that #[wcet(...)]'s
+        // own estimator is sound): BUG found and fixed here. This arm
+        // used to be `E::Binary { left, right, .. }` — the `op` field
+        // pattern-matched away via `..` — charging a FLAT 2 cycles for
+        // EVERY binary operator, `/` and `%` included, identical to
+        // `+`. wcet_builtin_cycles' own header comment two functions
+        // below already documents an INTENDED "Integer divide /
+        // modulo: 20–40 cycles (in-order cores)" category, but that
+        // number was only ever wired up for named stdlib functions
+        // (i64_div_floor etc.) — never for the raw `/`/`%` operators a
+        // real program actually writes directly. On a real target with
+        // no hardware integer-divide instruction (ARM1176JZF-S, the
+        // reference target for this exact finding — every `i64` `/`
+        // compiles to a software `__aeabi_ldivmod` call there, not a
+        // single-cycle ALU op), this meant `#[wcet(cycles=N)]` could
+        // silently pass a budget check for a function whose real
+        // worst-case execution time it dramatically underestimated —
+        // exactly the "never under-estimate" soundness property this
+        // whole mechanism exists to guarantee, violated.
+        //
+        // Also now charges for `checked` (division-by-zero / shift-
+        // bounds / integer-overflow runtime guards — see this arm's
+        // own IR-level doc comment on TypedExprKind::Binary for exactly
+        // what each op's guard checks) — a real branch+compare this
+        // estimator previously ignored entirely regardless of operator.
+        E::Binary { op, left, right, checked } => {
+            use crate::ast::BinaryOp as B;
+            let base: u64 = match op {
+                B::Add | B::Sub | B::BitAnd | B::BitOr | B::BitXor
+                | B::Shl | B::Shr | B::Eq | B::Ne | B::Lt | B::Le
+                | B::Gt | B::Ge | B::And | B::Or => 2,
+                B::Mul => 4,
+                // ROUND 2026-09-18: 50, not this file's own previously-
+                // documented "20-40 cycles" ceiling -- real evidence
+                // (DhruvaOS's own i64_div_wcet_measure_self_test,
+                // ARM1176JZF-S, real QEMU-TCG-emulated wall-clock time,
+                // apples-to-apples against a same-shape addition loop
+                // sharing the identical host-emulation-speed baseline)
+                // put a single division's own MARGINAL cost at ~10.6x
+                // a single checked-add's, not the ~2.5x the old 2-vs-40
+                // spread implied and not even the ~20x the 40-vs-2
+                // numbers alone would suggest either. Scaling the
+                // checked-add's own total charge (2 base + 3 guard = 5)
+                // by that real ratio lands division's own TOTAL around
+                // 50-53 -- the previously-documented "20-40" range was
+                // itself apparently tuned for cores WITH some hardware
+                // divide support, optimistic for ARM1176 specifically
+                // (genuinely zero hardware divide, a full software
+                // `__aeabi_ldivmod` call). 50 here, base only -- the
+                // separate `checked` guard below still adds its own +3
+                // on top for the real divisor != 0 check, same as
+                // every other operator category.
+                B::Div | B::Rem => 50,
+            };
+            let guard: u64 = if *checked { 3 } else { 0 };
+            Some(
+                base + guard
+                    + wcet_expr(left, fn_map, visiting, None)?
+                    + wcet_expr(right, fn_map, visiting, None)?,
+            )
+        }
         E::Index { array, index, .. } => Some(
             2 + wcet_expr(array, fn_map, visiting, None)?
                 + wcet_expr(index, fn_map, visiting, None)?,
