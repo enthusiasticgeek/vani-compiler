@@ -18102,6 +18102,25 @@ dangerously close to its declared budget in reality. Full test suite
 (cargo test --release, all previously-passing) and the 8 `stack_depth::
 tests::*` unit tests confirmed still green.
 
+**Remainder closed, commit `0eb25978` (2026-09-18)**: the deferred
+`#[stack_cost(bytes=N)]` annotation surface, exactly as scoped above --
+legal only on an `extern "C" fn` declaration, semantic-checked (hard
+error, not silently ignored, on a non-extern fn or combined with any
+other attribute on an extern fn), consulted by `stack_depth`'s
+call-graph walk before falling back to the flat `FRAME_OVERHEAD_BYTES`
+default. 3 new tests (override changes the computed depth by exactly
+the declared delta; both misapplication cases rejected), full suite
+3033/3033. Driven by a DhruvaOS RTOS-true-compliance sweep (task #245
+there). Honest scope note: this closes the COMPILER-side gap: a real
+mechanism now exists. Actually annotating DhruvaOS's own real extern
+fns (`dhruva_mutex_lock`, `task_sleep_ticks`, etc. -- the ~64-byte
+figures this bug's own original write-up cited informally, not yet
+independently re-measured) with real `#[stack_cost(...)]` values,
+rebuilding `vanic` from this commit, and re-verifying DhruvaOS's own
+`#[bounded_stack]` budgets against the tighter, more accurate numbers
+is a real, natural follow-up NOT done here -- flagged in DhruvaOS's
+own `docs/TODO.md`, not silently left implicit.
+
 ## BUG-234: index-assignment with a function-call RHS fails name resolution inside any named scope (`module {}` or a `[deps]`-vendored Kosh package) (2026-09-06)
 
 Found while extracting DhruvaOS's Pi 4/5 crypto code (SHA-256/512,
