@@ -446,10 +446,16 @@ that returns `Result<T, E>` and `try` / `?` propagates.
 ### Bigint / arbitrary-precision
 
 **Not in vāṇī.** Integers are `i64` / `u64` / smaller.
-Runtime overflow guards are now emitted (L4, 2026-07-16) — every signed `+`, `-`,
-`*` site gets a guard; the SMT pass elides guards it can prove safe from `requires`
-bounds. See the **Integer overflow runtime guards** row in Mixed-feature gaps below
-(now marked fixed).
+Runtime overflow guards are now emitted (L4, 2026-07-16) — every `+`, `-`, `*` site
+gets a guard, **signed and unsigned alike** (unsigned wraparound is not assumed
+safe by default; see `docs/v1_limitations.md`'s design contract: "Integer
+arithmetic overflow, division/shift, and bounds accesses are all checked and
+produce a well-defined panic in v1"). Use `wrapping_add`/`wrapping_sub` when
+wraparound is the actually-intended semantics (ring buffers, sequence-number
+arithmetic, checksums, etc.) — plain `+`/`-` on `u32`/`u64` will trap at runtime
+the moment it wraps, it does not silently wrap like C. The SMT pass elides guards
+it can prove safe from `requires` bounds. See the **Integer overflow runtime
+guards** row in Mixed-feature gaps below (now marked fixed).
 
 **Workaround:** for cryptographic / arbitrary-precision
 work, use C bigint via FFI (`extern "C"` declarations to
@@ -645,7 +651,7 @@ checking these as the compiler evolves.
 | Generic fn `<T>` inferred from complex argument types (e.g. `Vec<T>` with Vec-typed arg) | Rejected — v1 inference supports literal / Var / (v3.1 only) Ref(Var) at the T-position. | Pre-extract the arg into a Var, or restructure the fn to not be generic over composite types. |
 | Turbofish syntax (`f::<i64>(arg)`) | Not supported in v1. | Rely on inference (which is limited; see above). |
 | OwnedStr payload bound in match arm returned as OwnedStr | ✅ **Fixed 2026-07-15 (M5)** — scrutinee Drop suppressed only on direct move-out (arm body = Var(binding)); view-only / no-binding arms retain the Drop. Fixes double-free exit-116 crash. | No workaround needed. |
-| **Integer overflow runtime guards** | ✅ **Fixed 2026-07-16 (L4)** — `llvm.sadd/ssub/smul.with.overflow` in LLVM; `__builtin_add/sub/mul_overflow` in C. SMT elision extended to discharge guards when `requires` bounds prove safety. | No workaround needed. |
+| **Integer overflow runtime guards** | ✅ **Fixed 2026-07-16 (L4)** — signed and unsigned alike: `llvm.s{add,sub,mul}.with.overflow` for signed in LLVM, explicit `icmp ult/ugt` carry/borrow checks (`llvm.umul.with.overflow` for Mul) for unsigned in LLVM; `__builtin_{add,sub,mul}_overflow` in C (already type-generic over signedness). SMT elision extended to discharge guards when `requires` bounds prove safety. | Use `wrapping_add`/`wrapping_sub` when wraparound is the intended semantics. |
 | Two refs to the same Vec at once (read + write) | Aliasing rule: many shared XOR one mut. | End one borrow before taking the other; or split the operation into two passes. |
 | Generic fn with multiple lifetime-distinct ref params returning a ref | Path-D territory; v1 only does single-ref-param elision. | Split into two narrower fns, each with one ref param. |
 | `async fn` containing a `dyn Iface` method call across an `await` | ✅ **Confirmed working (2026-08-03, feature-combination gap audit category 11)** — this entry was stale. A `dyn Iface`-typed local binding held across TWO separate `await` points, with a method call both before and after the second await, produces correct output on both backends (verified with two different concrete types behind the same `dyn` binding). No Pin-like restriction is needed or present. | No workaround needed. |
