@@ -14149,9 +14149,25 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                             | TypedExprKind::Match { .. }
                     );
                     if needs_struct_unwrap {
+                        // Found via a real curve25519 x25519_scalarmult
+                        // ladder step reassigning the same variable
+                        // (e.g. `z3 = ...; z3 = ...;`) twice in a row:
+                        // the temp name was built from the vani
+                        // variable name alone, with no per-site
+                        // uniqueness, so two Reassigns to the same
+                        // name in one C block scope redeclared the
+                        // identical `_intent_reassign_<name>` temp --
+                        // gcc error "redefinition of '_intent_reassign_
+                        // <name>'". Wrapping in its own `{ }` block
+                        // scope is enough: the temp only needs to
+                        // live for these two lines, and each
+                        // Reassign site already gets its own `{ }`
+                        // this way regardless of how many other
+                        // Reassigns to the same name precede or
+                        // follow it in the same enclosing scope.
                         let wrapper = array_return_struct_name(element, *length);
                         out.push_str(&format!(
-                            "  {} _intent_reassign_{} = {};\n  memcpy({}, _intent_reassign_{}.data, sizeof({}));\n",
+                            "  {{ {} _intent_reassign_{} = {};\n  memcpy({}, _intent_reassign_{}.data, sizeof({})); }}\n",
                             wrapper,
                             name,
                             emit_expr(expr),
@@ -16738,7 +16754,7 @@ fn emit_eprint_expr_no_newline(expr: &TypedExpr, spec: &Option<crate::ast::Forma
 /// out of an initializer-list position today, so that's out of this
 /// bug's scope.
 fn array_init_rhs(e: &TypedExpr) -> String {
-    let Type::Array { length, .. } = &e.ty else {
+    let Type::Array { element, length } = &e.ty else {
         unreachable!("array_init_rhs called on a non-array-typed expr: {:?}", e.ty);
     };
     if let TypedExprKind::ArrayLit { elements } = &e.kind {
@@ -16746,7 +16762,47 @@ fn array_init_rhs(e: &TypedExpr) -> String {
         return format!("{{ {} }}", parts.join(", "));
     }
     let src = emit_expr(e);
-    let parts: Vec<String> = (0..*length).map(|i| format!("({})[{}]", src, i)).collect();
+    // The four lvalue-projection kinds below (Var, FieldAccess,
+    // Index/"ArrayAccess", TupleAccess) are backed by real
+    // contiguous C array storage (a local var, a struct member, a
+    // nested array element, ...), so `emit_expr` already yields
+    // something plain `[]` can subscript directly -- this is
+    // BUG-235's own original fix (2026-09-06), unchanged.
+    //
+    // Anything else -- a Call being the first real-world case found
+    // (an array-returning function's result is NOT backed by any
+    // lvalue; C can't return a raw array by value at all, so the
+    // call instead returns the `intent_arr_ret_<N>_<T>` wrapper
+    // struct this file emits per-shape, see `array_return_struct_
+    // name`) -- can't be subscripted with bare `[]`: `(fn_foo())[i]`
+    // tries to index a STRUCT, which gcc rejects as "subscripted
+    // value is neither array nor pointer nor vector". Found via a
+    // real ed25519/curve25519 struct literal (`Ed25519DecompressResult
+    // { x: fe_zero(), ... }`) failing to compile under --backend=c.
+    // Fixed the same way the doc comment above already anticipated
+    // ("a hypothetical future array-typed expression kind... would
+    // need its own temp-hoisting fix"): materialize the call's
+    // wrapper-struct result into a GCC statement-expression-scoped
+    // temp, once per element position (still side-effect-safe since
+    // every array-returning fn in this language is a plain value
+    // computation, same assumption the Var/FieldAccess/etc. case
+    // already relies on), then read `.data[i]` off that temp instead
+    // of subscripting the call expression directly.
+    let is_lvalue_projection = matches!(
+        &e.kind,
+        TypedExprKind::Var(_)
+            | TypedExprKind::FieldAccess { .. }
+            | TypedExprKind::Index { .. }
+            | TypedExprKind::TupleAccess { .. }
+    );
+    if is_lvalue_projection {
+        let parts: Vec<String> = (0..*length).map(|i| format!("({})[{}]", src, i)).collect();
+        return format!("{{ {} }}", parts.join(", "));
+    }
+    let wrapper_ty = array_return_struct_name(element, *length);
+    let parts: Vec<String> = (0..*length)
+        .map(|i| format!("({{ {} _intent_arr_init_tmp = ({}); _intent_arr_init_tmp.data[{}]; }})", wrapper_ty, src, i))
+        .collect();
     format!("{{ {} }}", parts.join(", "))
 }
 
