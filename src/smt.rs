@@ -121,7 +121,7 @@ pub fn try_satisfiable(
     if smt_debug_enabled() {
         eprintln!("--- SMT sat-query ---\n{}---", out);
     }
-    let output = match run_z3(&out, &z3) {
+    let output = match run_z3_via_session(&out, &z3) {
         Ok(o) => o,
         Err(_) => return SatVerdict::Unknown,
     };
@@ -309,7 +309,7 @@ pub fn try_prove(
         return parse_verdict(&cached, vars);
     }
 
-    match run_z3(&query, &z3) {
+    match run_z3_via_session(&query, &z3) {
         Ok(output) => {
             if smt_debug_enabled() {
                 eprintln!("--- SMT output ---\n{}---", output);
@@ -321,7 +321,7 @@ pub fn try_prove(
     }
 }
 
-fn find_z3() -> Option<String> {
+fn find_z3_uncached() -> Option<String> {
     if let Ok(path) = std::env::var("Z3") {
         if std::path::Path::new(&path).exists() {
             return Some(path);
@@ -340,6 +340,154 @@ fn find_z3() -> Option<String> {
         }
     }
     None
+}
+
+/// PERFORMANCE (2026-10-11): `find_z3_uncached` spawns `z3 --version` just
+/// to confirm a candidate path is runnable -- cheap next to an actual
+/// solve, but every one of the thousands of `try_prove`/`try_satisfiable`
+/// calls on a large program used to re-pay it. The result can't change
+/// mid-process (the `Z3` env var and the binary at a given path are both
+/// fixed for the process's lifetime), so look it up once and cache it.
+static Z3_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn find_z3() -> Option<String> {
+    Z3_PATH.get_or_init(find_z3_uncached).clone()
+}
+
+/// PERFORMANCE (2026-10-11): a persistent, per-thread z3 session fed
+/// multiple queries over its stdin, replacing a fresh `Command::spawn()`
+/// (fork+exec+z3-startup) for every single query -- that per-query
+/// process-spawn cost dominated cold-cache runs (the disk cache above
+/// only helps once a query has been seen before). `(reset)` before each
+/// query gives the exact same "blank slate" guarantee a brand-new
+/// process always had, so correctness is unaffected; `(set-option
+/// :timeout ...)` replaces the old `-T:5` CLI flag, applied per-query
+/// instead of once per process.
+///
+/// Thread-local, not a single global session: `check_function` now runs
+/// on a worker-thread pool (see checker.rs's `TlsSnapshot`/parallel
+/// check_function loop), and queries from DIFFERENT functions are
+/// already independent — serializing them all through one shared z3
+/// process would trade away that parallelism. Each thread gets its own
+/// session instead, spawned lazily on first use and reused for the rest
+/// of that thread's queries; `Drop` closes stdin so z3 exits cleanly
+/// when the thread (a `thread::scope` worker, or the main thread at
+/// process exit) is done with it.
+struct Z3Session {
+    child: std::process::Child,
+    // `Option` so `Drop` can `.take()` it to explicitly close the pipe
+    // (signaling EOF to z3) before waiting on the child -- a plain
+    // field can't be moved out of `&mut self` inside `drop()`.
+    stdin: Option<std::process::ChildStdin>,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    next_marker: u64,
+}
+
+impl Z3Session {
+    fn spawn(z3: &str) -> std::io::Result<Self> {
+        let mut child = Command::new(z3)
+            .arg("-in")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdin = child.stdin.take().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "z3 stdin unavailable")
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "z3 stdout unavailable")
+        })?;
+        Ok(Z3Session {
+            child,
+            stdin: Some(stdin),
+            stdout: std::io::BufReader::new(stdout),
+            next_marker: 0,
+        })
+    }
+
+    /// Runs one complete query (already including its own `check-sat`/
+    /// `get-model`, exactly as the one-shot `run_z3` path expected) and
+    /// returns everything z3 printed for it, with the same shape the
+    /// old one-process-per-query output had.
+    fn run_query(&mut self, query: &str, timeout_ms: u64) -> std::io::Result<String> {
+        let stdin = self.stdin.as_mut().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "z3 session already closed")
+        })?;
+        self.next_marker += 1;
+        let marker = format!("vanic-smt-done-{}", self.next_marker);
+        let framed = format!(
+            "(reset)\n(set-option :timeout {})\n{}\n(echo \"{}\")\n",
+            timeout_ms, query, marker,
+        );
+        stdin.write_all(framed.as_bytes())?;
+        stdin.flush()?;
+        let mut output = String::new();
+        loop {
+            let mut line = String::new();
+            let n = std::io::BufRead::read_line(&mut self.stdout, &mut line)?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "z3 session closed before echoing its done-marker",
+                ));
+            }
+            // Different z3/SMT-LIB2 builds have printed `echo`'s
+            // argument both with and without its surrounding quotes
+            // historically -- match on substring containment so both
+            // shapes terminate the read loop instead of hanging.
+            if line.contains(&marker) {
+                break;
+            }
+            output.push_str(&line);
+        }
+        Ok(output)
+    }
+}
+
+impl Drop for Z3Session {
+    fn drop(&mut self) {
+        // Drop the stdin handle first: closing the pipe signals EOF,
+        // z3's own documented way to end an `-in` session cleanly.
+        self.stdin.take();
+        // Bounded, non-blocking poll -- never let `vanic` itself hang
+        // on exit waiting for a child that didn't respond to EOF.
+        for _ in 0..20 {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                Err(_) => return,
+            }
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+thread_local! {
+    static Z3_SESSION: std::cell::RefCell<Option<Z3Session>> = std::cell::RefCell::new(None);
+}
+
+/// Runs `query` through this thread's persistent z3 session, lazily
+/// spawning one on first use. On any I/O error (session never started,
+/// or died mid-query -- e.g. OOM-killed, or a malformed query crashed
+/// it) the broken session is dropped so the NEXT call gets a fresh one
+/// instead of repeating the same failure forever, and this call falls
+/// back to the one-shot `run_z3` path so a single flaky session never
+/// turns into a permanent "verifier unavailable" for the rest of this
+/// thread's queries.
+fn run_z3_via_session(query: &str, z3: &str) -> std::io::Result<String> {
+    let result = Z3_SESSION.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        if guard.is_none() {
+            *guard = Some(Z3Session::spawn(z3)?);
+        }
+        guard.as_mut().unwrap().run_query(query, 5000)
+    });
+    if result.is_err() {
+        Z3_SESSION.with(|cell| *cell.borrow_mut() = None);
+        return run_z3(query, z3);
+    }
+    result
 }
 
 fn run_z3(query: &str, z3: &str) -> std::io::Result<String> {

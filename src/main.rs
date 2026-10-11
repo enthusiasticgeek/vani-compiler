@@ -2080,8 +2080,35 @@ fn run() -> Result<ExitCode, String> {
                 }).cloned());
                 v
             };
-            let (backend_kind, out, big_o_mode) = parse_emit_args(&filtered_args, 3, &cmd_name)?;
+            let (backend_kind, out, big_o_mode, stack_depth_entry, stack_depth_max) =
+                parse_emit_args(&filtered_args, 3, &cmd_name)?;
             let checked = compile_path_or_report(&file)?;
+            // PERFORMANCE (2026-10-11): gate on the stack-depth budget
+            // using the IR already produced by `compile_path_or_report`
+            // above, instead of a build script running `vanic
+            // stack-depth` as a second, wholly separate process first
+            // (paying the full lex+parse+typecheck(+SMT) cost twice for
+            // the same file just to get this one report). Prints the
+            // exact same text report the standalone `stack-depth`
+            // subcommand does, and fails BEFORE any backend output is
+            // produced below if the budget is exceeded -- matching the
+            // net effect `set -euo pipefail` + a prior `stack-depth`
+            // invocation already had.
+            if let Some(max_bytes) = stack_depth_max {
+                let report = vani::stack_depth::compute_stack_depths(
+                    &checked.ir,
+                    stack_depth_entry.as_deref(),
+                );
+                let (report_text, failure) =
+                    vani::stack_depth::format_text(&report, Some(max_bytes));
+                print!("{}", report_text);
+                if failure {
+                    return Err(format!(
+                        "'{}' stack-depth budget exceeded (see report above)",
+                        cmd_name
+                    ));
+                }
+            }
             let body = match backend_kind {
                 BackendKind::C => {
                     if no_std {
@@ -3927,7 +3954,10 @@ fn parse_emit_args(
     args: &[String],
     from: usize,
     cmd_name: &str,
-) -> Result<(BackendKind, Option<PathBuf>, Option<vani::big_o::BigOMode>), String> {
+) -> Result<
+    (BackendKind, Option<PathBuf>, Option<vani::big_o::BigOMode>, Option<String>, Option<u64>),
+    String,
+> {
     // LLVM is now the default — the project's direction is to move
     // away from the C backend. The `emit-c` legacy alias forces C
     // regardless of this default.
@@ -3938,9 +3968,30 @@ fn parse_emit_args(
     };
     let mut out: Option<PathBuf> = None;
     let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
+    // PERFORMANCE (2026-10-11): lets a build script fold a
+    // `stack-depth` gate check into this SAME `emit` invocation
+    // instead of running `vanic stack-depth` as a wholly separate
+    // process first — see this function's only caller for why that
+    // used to pay the full lex+parse+typecheck(+SMT) cost twice for
+    // the same file. Mirrors `stack-depth`'s own `--entry=`/`--max=`
+    // flags exactly (renamed here to avoid colliding with any future
+    // `emit`-specific `--max=`).
+    let mut stack_depth_entry: Option<String> = None;
+    let mut stack_depth_max: Option<u64> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
-        if let Some(value) = arg.strip_prefix("--backend=") {
+        if let Some(value) = arg.strip_prefix("--stack-depth-entry=") {
+            stack_depth_entry = Some(value.to_string());
+            idx += 1;
+        } else if let Some(value) = arg.strip_prefix("--stack-depth-max=") {
+            stack_depth_max = Some(value.parse::<u64>().map_err(|_| {
+                format!(
+                    "--stack-depth-max=<bytes> expects a non-negative integer, got '{}'",
+                    value
+                )
+            })?);
+            idx += 1;
+        } else if let Some(value) = arg.strip_prefix("--backend=") {
             if cmd_name == "emit-c" {
                 return Err(
                     "'emit-c' forces backend=c; use 'emit --backend=…' to choose"
@@ -3979,7 +4030,7 @@ fn parse_emit_args(
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((backend, out, big_o_mode))
+    Ok((backend, out, big_o_mode, stack_depth_entry, stack_depth_max))
 }
 
 
