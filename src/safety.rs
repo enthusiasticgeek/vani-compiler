@@ -1058,12 +1058,23 @@ pub fn enforce_no_recursion(program: &TypedProgram, diagnostics: &mut Vec<Diagno
 /// + this check together provide the audit trail.
 pub fn enforce_bounded_stack(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
     use crate::stack_depth::compute_stack_depths;
+    // PERFORMANCE FIX (2026-10-11, found alongside the enforce_lock_order
+    // fix above while profiling the same DhruvaOS build): `entry_filter`
+    // in `compute_stack_depths` is applied AFTER it already computes
+    // EVERY function's depth via the memoized `compute_all_fn_depths`
+    // pass -- calling it once per `#[bounded_stack]`-annotated function
+    // (as the old code below the FIX line did) re-derives the whole
+    // program's SCCs + depths from scratch for each one, just to keep a
+    // single entry. Call it once, unfiltered, and look up each
+    // annotated function's own entry from the single resulting report.
+    let report = compute_stack_depths(program, None);
+    let entries_by_name: HashMap<&str, &crate::stack_depth::EntryReport> =
+        report.entries.iter().map(|e| (e.name.as_str(), e)).collect();
     for f in &program.functions {
         let Some(bound) = f.bounded_stack else {
             continue;
         };
-        let report = compute_stack_depths(program, Some(&f.name));
-        let Some(entry) = report.entries.iter().find(|e| e.name == f.name) else {
+        let Some(entry) = entries_by_name.get(f.name.as_str()) else {
             // Should not happen — the entry is built from the
             // same fn list. Defensive skip.
             continue;
@@ -3150,60 +3161,123 @@ fn lock_intern(
 /// the call returns.  This prevents spurious ordering constraints between
 /// sequential independent function calls (L20 correctness fix for the
 /// held-set vs. flat-sequence ambiguity).
+// BUG (found 2026-10-11 while profiling DhruvaOS's build): the original
+// version of this pass called `build_lock_edges` once per top-level
+// function with a fresh `held`/`visiting` pair, re-walking a shared
+// callee's ENTIRE subtree from scratch for every distinct caller that
+// reaches it -- the exact same unmemoized-call-graph-traversal blowup
+// already root-caused and fixed in `stack_depth.rs`'s `traverse_depth`
+// (see that module's history). On a real ~1000-function kernel this
+// made `enforce_lock_order` alone take minutes.
+//
+// Fixed the same way: memoize each function's contribution once via
+// `compute_local_lock_seq`, keyed by function name. The key insight that
+// makes this sound (not just an approximation): a lock newly acquired at
+// ANY depth under function F gets an edge from every lock the caller
+// already held -- but WHICH locks a caller already held, when it reaches
+// F, is exactly "whatever `held` was before the call", clone-and-discard
+// on return (the callee's own acquisitions never become visible to the
+// caller's later statements -- "locks released on return"). So each
+// function's own contribution decomposes into two independent pieces
+// that can be computed once, regardless of caller context:
+//   - `held` (local to the walk): only F's own DIRECT `mutex_lock` calls,
+//     in program order -- drives within-F edges and this-call's cross
+//     edges to each callee's `full_seq` exactly as the original
+//     caller-held-set-threading did.
+//   - `full_seq` (returned/cached): F's own locks UNION every lock
+//     transitively reachable through F's callees -- this is what a
+//     caller of F needs in order to extend edges to everything F (or
+//     anything F calls) might acquire, no matter how deep.
+// Recursive cycles get the exact same "silently contributes nothing
+// further" treatment the original `visiting` guard gave them --
+// lock-order detection only needs an over-approximation of reachable
+// locks, not a certification-grade bound, so short-circuiting a cycle
+// (rather than SCC-merging, as stack_depth.rs's ASIL-D estimator does)
+// is an acceptable, deliberately simpler choice for this diagnostic.
+fn compute_local_lock_seq(
+    name: &str,
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+    lock_id: &mut std::collections::HashMap<String, usize>,
+    next_id: &mut usize,
+    id_name: &mut std::collections::HashMap<usize, String>,
+    edges: &mut std::collections::HashMap<usize, std::collections::HashMap<usize, crate::span::Span>>,
+    cache: &mut std::collections::HashMap<String, Vec<(usize, crate::span::Span)>>,
+    in_progress: &mut std::collections::HashSet<String>,
+) -> Vec<(usize, crate::span::Span)> {
+    if let Some(seq) = cache.get(name) {
+        return seq.clone();
+    }
+    if in_progress.contains(name) {
+        return Vec::new();
+    }
+    let Some(&body) = fn_map.get(name) else {
+        return Vec::new();
+    };
+    in_progress.insert(name.to_string());
+    let mut held: Vec<(usize, crate::span::Span)> = Vec::new();
+    let mut full_seq: Vec<(usize, crate::span::Span)> = Vec::new();
+    build_lock_edges(body, &mut held, &mut full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+    in_progress.remove(name);
+    cache.insert(name.to_string(), full_seq.clone());
+    full_seq
+}
+
 fn build_lock_edges(
     stmts: &[crate::ir::TypedStmt],
     held: &mut Vec<(usize, crate::span::Span)>,
+    full_seq: &mut Vec<(usize, crate::span::Span)>,
     lock_id: &mut std::collections::HashMap<String, usize>,
     next_id: &mut usize,
     id_name: &mut std::collections::HashMap<usize, String>,
     edges: &mut std::collections::HashMap<usize, std::collections::HashMap<usize, crate::span::Span>>,
     fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
-    visiting: &mut std::collections::HashSet<String>,
+    cache: &mut std::collections::HashMap<String, Vec<(usize, crate::span::Span)>>,
+    in_progress: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedStmt as S;
     for stmt in stmts {
         match stmt {
             S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. } => {
-                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(expr, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::If { cond, then_body, else_body } => {
-                build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(cond, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
                 // Linear over-approximation: process both branches sequentially.
-                build_lock_edges(then_body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges(else_body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges(then_body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges(else_body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::While { cond, body, .. } => {
-                build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(cond, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges(body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::For { start, end, body, .. } => {
-                build_lock_edges_expr(start, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges_expr(end, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(start, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges_expr(end, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges(body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::ForIter { body, .. }
             | S::TaskSpawn { body, .. }
             | S::UnsafeBlock { body, .. } => {
-                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges(body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::Assert { expr, .. } | S::Prove { expr, .. } => {
-                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(expr, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::IndexAssign { index, value, .. } => {
-                build_lock_edges_expr(index, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(index, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges_expr(value, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::FieldAssign { object, value, .. } => {
-                build_lock_edges_expr(object, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(object, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+                build_lock_edges_expr(value, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::Return { expr } => {
-                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(expr, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
                     if let crate::ir::TypedPrintItem::Expr(e, _) = item {
-                        build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                        build_lock_edges_expr(e, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
                     }
                 }
             }
@@ -3217,12 +3291,14 @@ fn build_lock_edges(
 fn build_lock_edges_expr(
     expr: &crate::ir::TypedExpr,
     held: &mut Vec<(usize, crate::span::Span)>,
+    full_seq: &mut Vec<(usize, crate::span::Span)>,
     lock_id: &mut std::collections::HashMap<String, usize>,
     next_id: &mut usize,
     id_name: &mut std::collections::HashMap<usize, String>,
     edges: &mut std::collections::HashMap<usize, std::collections::HashMap<usize, crate::span::Span>>,
     fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
-    visiting: &mut std::collections::HashSet<String>,
+    cache: &mut std::collections::HashMap<String, Vec<(usize, crate::span::Span)>>,
+    in_progress: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedExprKind as EK;
     match &expr.kind {
@@ -3238,89 +3314,100 @@ fn build_lock_edges_expr(
                             }
                         }
                         held.push((new_id, expr.span));
+                        full_seq.push((new_id, expr.span));
                     }
                 }
                 for a in args {
-                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                    build_lock_edges_expr(a, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
                 }
-            } else if let Some(body) = fn_map.get(name.as_str()) {
-                if !visiting.contains(name.as_str()) {
-                    // Recurse into the callee with a snapshot of the current held set.
-                    // The callee's locks are released on return → discard callee_held.
-                    let mut callee_held = held.clone();
-                    visiting.insert(name.clone());
-                    build_lock_edges(body, &mut callee_held, lock_id, next_id, id_name, edges, fn_map, visiting);
-                    visiting.remove(name.as_str());
+            } else if fn_map.contains_key(name.as_str()) {
+                // Memoized: computed once per callee name, not re-walked
+                // per call site. See `compute_local_lock_seq`'s doc
+                // comment for why caching the callee's own (caller-
+                // independent) contribution is sound.
+                let callee_seq = compute_local_lock_seq(name, fn_map, lock_id, next_id, id_name, edges, cache, in_progress);
+                for &(h_id, _h_span) in held.iter() {
+                    for &(c_id, c_span) in callee_seq.iter() {
+                        if h_id != c_id {
+                            edges.entry(h_id).or_default().entry(c_id).or_insert(c_span);
+                        }
+                    }
                 }
+                // Propagate upward so THIS function's own caller(s) also
+                // get edges to whatever the callee (transitively)
+                // acquires -- but never into `held` itself: the callee's
+                // locks are released on return, so they must not become
+                // visible to sibling statements later in this same body.
+                full_seq.extend(callee_seq.iter().cloned());
                 for a in args {
-                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                    build_lock_edges_expr(a, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
                 }
             } else {
                 for a in args {
-                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                    build_lock_edges_expr(a, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
                 }
             }
         }
         EK::Unary { expr: inner, .. } | EK::Cast { expr: inner, .. } => {
-            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(inner, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::Ref { .. } | EK::RefMut { .. } => {}
         EK::Binary { left, right, .. }
         | EK::Index { array: left, index: right, .. } => {
-            build_lock_edges_expr(left, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-            build_lock_edges_expr(right, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(left, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+            build_lock_edges_expr(right, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::Block { stmts, tail } => {
-            build_lock_edges(stmts, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-            build_lock_edges_expr(tail, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges(stmts, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+            build_lock_edges_expr(tail, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::IfExpr { cond, then_value, else_value } => {
-            build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-            build_lock_edges_expr(then_value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
-            build_lock_edges_expr(else_value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(cond, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+            build_lock_edges_expr(then_value, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
+            build_lock_edges_expr(else_value, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::Match { scrutinee, arms } => {
-            build_lock_edges_expr(scrutinee, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(scrutinee, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             for arm in arms {
-                build_lock_edges_expr(&arm.body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(&arm.body, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
         }
         EK::EnumVariantWithPayload { payload, .. } => {
-            build_lock_edges_expr(payload, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(payload, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::DynCoerce { value, .. } => {
-            build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(value, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::DynDispatch { receiver, args, .. } => {
-            build_lock_edges_expr(receiver, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(receiver, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             for a in args {
-                build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(a, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
         }
         EK::CallIndirect { callee, args } => {
-            build_lock_edges_expr(callee, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(callee, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             for a in args {
-                build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(a, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
         }
         EK::Tuple { elements } | EK::ArrayLit { elements } => {
             for e in elements {
-                build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(e, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
         }
         EK::TupleAccess { tuple: inner, .. }
         | EK::FieldAccess { object: inner, .. } => {
-            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(inner, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::RefMutIndex { index, .. } => {
-            build_lock_edges_expr(index, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(index, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::Len { array: inner, .. } => {
-            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(inner, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
         }
         EK::StructLit { fields, .. } => {
             for (_, e) in fields {
-                build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(e, held, full_seq, lock_id, next_id, id_name, edges, fn_map, cache, in_progress);
             }
         }
         _ => {}
@@ -3374,17 +3461,16 @@ pub fn enforce_lock_order(
             .map(|f| (f.name.clone(), f.body.as_slice()))
             .collect();
 
+    let mut lock_seq_cache: HashMap<String, Vec<(usize, crate::span::Span)>> = HashMap::new();
+    let mut in_progress: HashSet<String> = HashSet::new();
     for func in &program.functions {
         if func.is_extern {
             continue;
         }
-        let mut held: Vec<(usize, crate::span::Span)> = Vec::new();
-        let mut visiting: HashSet<String> = HashSet::new();
-        visiting.insert(func.name.clone());
-        build_lock_edges(
-            &func.body, &mut held,
+        compute_local_lock_seq(
+            &func.name, &fn_map,
             &mut lock_id, &mut next_id, &mut id_name,
-            &mut edges, &fn_map, &mut visiting,
+            &mut edges, &mut lock_seq_cache, &mut in_progress,
         );
     }
 

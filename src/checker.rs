@@ -826,6 +826,16 @@ fn check_impl(
     let mut diagnostics = Vec::new();
     let mut program = program;
 
+    let __prof_start = std::time::Instant::now();
+    let __profile_on = std::env::var("VANIC_PROFILE").is_ok();
+    macro_rules! __prof_mark {
+        ($name:expr) => {
+            if __profile_on {
+                eprintln!("[profile:check_impl] after {}: {:?}", $name, __prof_start.elapsed());
+            }
+        };
+    }
+
     // 2026-08-14: style warnings (self-assignment, unused variable,
     // unused parameter). All Severity::Warning -- see the
     // `to`/`downto` bounds check inside `check_one_stmt`'s
@@ -846,6 +856,7 @@ fn check_impl(
     // LOCAL variable/parameter name's own self-reference, so
     // checking the pre-desugar shape is both correct and safer.
     check_style_warnings(&program, &mut diagnostics);
+    __prof_mark!("check_style_warnings");
 
     // Closure #242: flatten modules into the global program
     // before anything else runs. Items inside a module
@@ -856,6 +867,7 @@ fn check_impl(
     // rest of the checker sees a flat program with
     // colon-colon-mangled names.
     flatten_modules_in_program(&mut program, &mut diagnostics, kosh_boundary_names);
+    __prof_mark!("flatten_modules_in_program");
 
     // Closure #308: lambda-lift anonymous fn expressions.
     // Walks each function's body / requires / ensures and
@@ -870,6 +882,7 @@ fn check_impl(
     // diagnostic once check_function runs (captures land
     // in the next closure under Level 3).
     lambda_lift_program(&mut program);
+    __prof_mark!("lambda_lift_program");
 
     // BUG-155 (2026-08-09): record, for every function, which local
     // variable (if any) its body returns directly as a bare `Var`
@@ -899,6 +912,7 @@ fn check_impl(
     // after lambda-lift so closures-in-Let-RHS positions
     // (closure #314/#315) are already lifted.
     fuse_combinator_chains_in_program(&mut program);
+    __prof_mark!("fuse_combinator_chains_in_program");
 
     // Pre-pass: resolve `Type::Struct(name)` → `Type::Enum(name)`
     // for every name declared as an enum. The parser can't
@@ -909,6 +923,7 @@ fn check_impl(
         program.enums.iter().map(|e| e.name.clone()).collect();
     GENERIC_ENUM_TEMPLATE_NAMES.with(|c| *c.borrow_mut() = enum_names_pre.clone());
     resolve_enum_types_in_program(&mut program, &enum_names_pre);
+    __prof_mark!("resolve_enum_types_in_program");
 
     // T4.15 alias half: build the alias registry, detect
     // recursion, and substitute `Type::Struct(name)`
@@ -937,12 +952,14 @@ fn check_impl(
     // `Call { name: "<T>_<method>", args: [receiver, …] }`,
     // so resolving against the mangled name "just works".
     hoist_methods_into_functions(&mut program, &mut diagnostics);
+    __prof_mark!("alias_resolution+hoist_methods_into_functions");
 
     // T2.6 phase 2: rewrite `let v: T = try opt; ...; return X;`
     // function bodies into `return match opt { Opt.Some(__t)
     // then { let v: T = __t; ...; X }, Opt.None then Opt.None };`.
     // Runs after methods hoisting so signatures are settled.
     desugar_try_let_in_program(&mut program, &mut diagnostics);
+    __prof_mark!("desugar_try_let_in_program");
 
     // L4 lifetime-elision fix (2026-07-24): catch a `ref T` nested
     // inside a tuple or generic type argument (`(ref i64, ref i64)`,
@@ -992,6 +1009,7 @@ fn check_impl(
     // each Type::Apply into the corresponding mangled
     // Struct(name) / Enum(name).
     monomorphize_type_decls_in_program(&mut program, &mut diagnostics);
+    __prof_mark!("monomorphize_type_decls_in_program");
 
     // T1.4 phase 2: monomorphize generic functions. Walks the
     // program for calls to `fn name<T>(…)` generic functions,
@@ -1001,6 +1019,7 @@ fn check_impl(
     // the original generic functions so downstream type-check
     // sees a fully-concrete program.
     monomorphize_generics_in_program(&mut program, &mut diagnostics);
+    __prof_mark!("monomorphize_generics_in_program");
 
     // BUG-91 fix (task #40, 2026-08-04): materialize any concrete
     // struct/enum decl that ONLY became discoverable through the
@@ -1082,6 +1101,7 @@ fn check_impl(
     // for signature validation; impl method signatures must
     // match the interface's declared shape exactly.
     hoist_impls_into_functions(&mut program, &mut diagnostics);
+    __prof_mark!("materialize_late_discovered+bare_ctor_resolve+hoist_impls_into_functions");
     // After monomorphization + impl hoisting, no function in
     // the program should still carry an unresolved
     // where-clause. If any does, it means a non-generic
@@ -1100,10 +1120,12 @@ fn check_impl(
         }
     }
 
+    __prof_mark!("where_clause_validation_loop");
     let signatures = collect_signatures(&program, &mut diagnostics);
     if require_main {
         validate_main(&program, &signatures, &mut diagnostics);
     }
+    __prof_mark!("collect_signatures+validate_main");
 
     // Reject struct/enum/alias declarations whose name
     // collides with a reserved built-in type. Lexer
@@ -1796,6 +1818,7 @@ fn check_impl(
             },
         );
     }
+    __prof_mark!("struct_registry+recursive_cycle_check+enum_registry");
 
     // T4.15: build the const registry. v1 accepts only
     // literal initializers (`Int` / `Float` / `Bool` /
@@ -1943,6 +1966,7 @@ fn check_impl(
         }
     }
 
+    __prof_mark!("const_registry+mmio_region_check");
     let mut functions = Vec::new();
     for function in &program.functions {
         functions.push(check_function(
@@ -1955,6 +1979,7 @@ fn check_impl(
             &mut diagnostics,
         ));
     }
+    __prof_mark!("check_function_loop (full per-function type inference)");
 
     // T1.2 of safety-standard alignment arc: enforce
     // `#[no_heap]`. Runs after per-fn typechecking so the
@@ -1977,12 +2002,14 @@ fn check_impl(
         #[cfg(test)]
         let global = false;
         crate::safety::enforce_no_heap(&typed_program_view, global, &mut diagnostics);
+        __prof_mark!("safety::enforce_no_heap");
         // T2.3 / T2.5 — additional per-function safety
         // attributes. No env-var global mode for these in v1;
         // strict opt-in via the function annotation.
         crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_nan(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_no_float+no_nan+no_recursion");
         // T2.2 — `#[interrupt]` ISR calling convention. Local
         // pass checks for blocking lock acquires + task spawn +
         // parallel-for inside marked fns. The no_heap and
@@ -1991,16 +2018,19 @@ fn check_impl(
         // `f.no_recursion = true` automatically when
         // `#[interrupt]` is present — see parser hook).
         crate::safety::enforce_interrupt(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_interrupt");
         // T3.1 — `#[bounded_stack(bytes=N)]`. Runs the call-graph
         // stack-depth estimator for each annotated function and
         // verifies the worst-case bound is within budget. Unbounded
         // recursion in the call graph also reports here.
         crate::safety::enforce_bounded_stack(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_bounded_stack");
         // T3.2 — `#[wcet(cycles=N)]`. Coarse cycle estimator
         // walks the fn body; reports UNBOUNDED for non-const-bound
         // loops / unbounded recursion / ForIter / While / spawn,
         // exceeded budget when the static estimate > N.
         crate::safety::enforce_wcet(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_wcet");
         // T3.4 — `#[deterministic_timing]`. Reject branches with
         // unequal arm cycles, while loops, non-const-bound for,
         // collection iteration, and calls to non-deterministic
@@ -2008,65 +2038,76 @@ fn check_impl(
         crate::safety::enforce_deterministic_timing(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_deterministic_timing");
         // T3.5 — MISRA C 2012 Rule 13.5 tightening. Reject
         // function calls in the RHS of `&&` / `||` for pure fns
         // and for fns tagged with a standard composite. Short-
         // circuit evaluation makes the side effect conditional,
         // creating evaluation-order-dependent behaviour.
         crate::safety::enforce_misra_13(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_misra_13");
         // S-5 — MISRA C 2012 Rule 14.1: no unreachable / always-dead
         // branches (literal true/false conditions) in functions tagged
         // with any composite standard.
         crate::safety::enforce_misra_no_dead_branch(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_misra_no_dead_branch");
         // S-6 — MISRA C 2012 Rule 15.5: single point of exit. Flag
         // functions with more than one `return` under composite tags.
         crate::safety::enforce_misra_single_exit(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_misra_single_exit");
         // S-10 — MISRA C 2012 Rule 2.1: unreachable code after
         // unconditional jump (return/break/continue). Fires for all
         // functions (Required rule — not gated behind a composite tag).
         crate::safety::enforce_dead_code_after_jump(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_dead_code_after_jump");
         // S-8 — MISRA C 2012 Rule 17.1: no variadic fn declarations
         // under composite safety tags. vÄá¹‡Ä« has no user-level variadics
         // but the pass guards against future backend changes.
         crate::safety::enforce_misra_no_variadic(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_misra_no_variadic");
         // S-9 — MISRA C 2012 Rules 11.1 / 11.3: fn-ptr ↔ data-ptr
         // casts and incompatible data-ptr casts forbidden under
         // composite-tagged functions.
         crate::safety::enforce_misra_no_fnptr_cast(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_misra_no_fnptr_cast");
         // S-7 — MISRA C 2012 Rule 13.2: same binding in two argument
         // positions of a single call — C evaluation order is
         // unspecified; forbidden under composite-tagged functions.
         crate::safety::enforce_misra_eval_order(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_misra_eval_order");
         // S-19 — Lock-order cycle detection. Builds a directed
         // acquisition-order graph across all functions and reports
         // any cycle as a potential deadlock (warning level).
         crate::safety::enforce_lock_order(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_lock_order");
         // S-20 — ISR priority and preemption check. Warns when two
         // ISRs at different priority levels both acquire the same
         // mutex (potential priority inversion / deadlock).
         crate::safety::enforce_isr_preemption(
             &typed_program_view, &mut diagnostics,
         );
+        __prof_mark!("safety::enforce_isr_preemption");
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
         // preserve compile-with-and-without parity.
         #[cfg(not(test))]
         crate::safety::enforce_complexity(&typed_program_view, &mut diagnostics);
+        __prof_mark!("safety::enforce_complexity");
     }
 
     // 2026-08-14: only ERROR-severity diagnostics fail the build now
@@ -2209,14 +2250,24 @@ fn propagate_locks_params(
 ) {
     loop {
         let mut changed = false;
+        // PERFORMANCE FIX (2026-10-11, found in the same bottleneck
+        // sweep as enforce_lock_order/enforce_bounded_stack): the old
+        // code cloned the ENTIRE signature table once PER FUNCTION per
+        // iteration -- O(N) clones of an O(N)-sized map every pass,
+        // O(N^2) per fixpoint iteration on a program with N functions.
+        // A single snapshot per outer iteration is enough: this pass
+        // only ever flips bits from false to true (a monotone lattice,
+        // per the termination argument below), so using this
+        // iteration's start-of-pass state instead of its in-progress
+        // state can only mean a few more outer iterations to reach the
+        // same fixed point -- it can never change what that fixed
+        // point IS.
+        let snapshot = signatures.clone();
         for function in functions {
             let param_names: Vec<&str> =
                 function.params.iter().map(|p| p.name.as_str()).collect();
-            // Read-only snapshot of the current signature table
-            // so we can mutate the target inside the loop. Since
-            // we only flip bits to `true`, monotonicity guarantees
-            // termination — the lattice has finite height.
-            let snapshot = signatures.clone();
+            // Since we only flip bits to `true`, monotonicity
+            // guarantees termination — the lattice has finite height.
             let target = signatures
                 .get_mut(&function.name)
                 .expect("signature exists for every function");

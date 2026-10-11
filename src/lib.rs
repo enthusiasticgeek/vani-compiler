@@ -102,14 +102,26 @@ fn compile_with(
     checker_fn: fn(ast::Program, &std::collections::HashSet<String>) -> Result<CheckedProgram, Vec<Diagnostic>>,
     kosh_boundary_names: &std::collections::HashSet<String>,
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    let __prof_start = std::time::Instant::now();
     let tokens = lexer::lex(source).map_err(|diagnostic| vec![diagnostic])?;
+    if std::env::var("VANIC_PROFILE").is_ok() {
+        eprintln!("[profile] lex: {:?}", __prof_start.elapsed());
+    }
     // Phase 1.1 (2026-06-07): `inject_prelude` will lex the
     // pragma-free PRELUDE source next, which would overwrite
     // the user file's `// vani-lang:` pragma decision. Capture
     // the user file's mode now and restore it after.
     let saved_mode = lexer::current_print_lang_mode();
+    let __prof_t1 = std::time::Instant::now();
     let (mut program, parse_errors) = parser::parse(tokens);
+    if std::env::var("VANIC_PROFILE").is_ok() {
+        eprintln!("[profile] parse: {:?}", __prof_t1.elapsed());
+    }
+    let __prof_t2 = std::time::Instant::now();
     inject_prelude(&mut program);
+    if std::env::var("VANIC_PROFILE").is_ok() {
+        eprintln!("[profile] inject_prelude: {:?}", __prof_t2.elapsed());
+    }
     lexer::set_current_print_lang_mode(saved_mode);
     if !kosh_boundary_names.is_empty() {
         mark_kosh_boundary_modules_pub(&mut program, kosh_boundary_names);
@@ -125,8 +137,17 @@ fn compile_with(
     // is both correct (matches what the user actually wrote) and
     // matches `checker.rs`'s own style-warning checks, which for the
     // identical reason now run before those same desugaring passes.
+    let __prof_t3 = std::time::Instant::now();
     let pre_desugar_program = program.clone();
-    match checker_fn(program, kosh_boundary_names) {
+    if std::env::var("VANIC_PROFILE").is_ok() {
+        eprintln!("[profile] program.clone() for pre_desugar: {:?}", __prof_t3.elapsed());
+    }
+    let __prof_t4 = std::time::Instant::now();
+    let checker_result = checker_fn(program, kosh_boundary_names);
+    if std::env::var("VANIC_PROFILE").is_ok() {
+        eprintln!("[profile] checker_fn: {:?}", __prof_t4.elapsed());
+    }
+    match checker_result {
         Ok(mut checked) if parse_errors.is_empty() => {
             // Identical if/else branches. Text-based (not a full
             // span-insensitive AST comparison) -- there's no
@@ -134,10 +155,14 @@ fn compile_with(
             // this codebase, and building one just for this check
             // wasn't worth it when the source text is already right
             // here.
+            let __prof_t5 = std::time::Instant::now();
             checked.warnings.extend(detect_identical_if_else_branches(
                 &pre_desugar_program,
                 source,
             ));
+            if std::env::var("VANIC_PROFILE").is_ok() {
+                eprintln!("[profile] detect_identical_if_else_branches: {:?}", __prof_t5.elapsed());
+            }
             Ok(checked)
         }
         Ok(_) => Err(parse_errors),
