@@ -59,6 +59,93 @@ thread_local! {
         RefCell<Vec<(String, Vec<Type>, bool)>> = RefCell::new(Vec::new());
 }
 
+/// PERFORMANCE (2026-10-11): snapshot of every thread-local fact table
+/// that `check_function` (and anything it calls) reads but does NOT
+/// itself populate -- all of them are filled in by one-time, whole-
+/// program passes that run BEFORE the per-function checking loop
+/// (module-flattening, lambda-lifting + closure-affinity discovery,
+/// impl/interface hoisting, the struct/enum Copy-ness fixed point,
+/// enum template collection) and are read-only from that point on.
+/// `CURRENT_FN_PARAMS`/`CURRENT_FN_NAME` are deliberately excluded --
+/// `check_function` itself overwrites them fresh at its own entry (see
+/// that call site's own comment), so they're naturally thread-isolated
+/// and need no propagation.
+///
+/// Exists so `check_function` can be run on a worker thread: thread-
+/// local storage is per-OS-thread, so a freshly spawned thread starts
+/// with each of these at its empty/default value, not the main
+/// thread's already-populated one. `capture()` snapshots the main
+/// thread's state once, right before dispatching work; `restore()`
+/// replicates that exact snapshot into the calling thread before it
+/// runs any `check_function` call. Both methods are the designated
+/// updater each name's own `.borrow_mut()` must stay in sync with.
+struct TlsSnapshot {
+    struct_non_copy: std::collections::HashSet<String>,
+    box_recursive: std::collections::HashSet<String>,
+    enum_non_copy: std::collections::HashSet<String>,
+    iface_impl: std::collections::HashSet<(String, String)>,
+    iface_method: std::collections::HashMap<String, Vec<(String, Vec<Type>, Type)>>,
+    private_module_items: std::collections::HashMap<String, String>,
+    kosh_module_items: std::collections::HashMap<String, String>,
+    iface_impls_list: std::collections::HashMap<String, Vec<String>>,
+    user_drop_by_ref: std::collections::HashSet<String>,
+    closure_make_registry:
+        std::collections::HashMap<String, (String, String, Vec<Type>, Vec<Type>, Type)>,
+    closure_aff_registry: std::collections::HashMap<String, (String, Vec<(String, Type)>)>,
+    fn_return_var_name: std::collections::HashMap<String, String>,
+    closure_aff_env_set: std::collections::HashSet<String>,
+    generic_enum_template_names: std::collections::HashSet<String>,
+    newly_collapsed_generic_applies: Vec<(String, Vec<Type>, bool)>,
+}
+
+impl TlsSnapshot {
+    fn capture() -> Self {
+        TlsSnapshot {
+            struct_non_copy: crate::ast::STRUCT_NON_COPY_REGISTRY.with(|r| r.borrow().clone()),
+            box_recursive: crate::ast::BOX_RECURSIVE_STRUCTS_REGISTRY.with(|r| r.borrow().clone()),
+            enum_non_copy: crate::ast::ENUM_NON_COPY_REGISTRY.with(|r| r.borrow().clone()),
+            iface_impl: crate::ast::IFACE_IMPL_REGISTRY.with(|r| r.borrow().clone()),
+            iface_method: crate::ast::IFACE_METHOD_REGISTRY.with(|r| r.borrow().clone()),
+            private_module_items: crate::ast::PRIVATE_MODULE_ITEMS.with(|r| r.borrow().clone()),
+            kosh_module_items: crate::ast::KOSH_MODULE_ITEMS.with(|r| r.borrow().clone()),
+            iface_impls_list: crate::ast::IFACE_IMPLS_LIST.with(|r| r.borrow().clone()),
+            user_drop_by_ref: crate::ast::USER_DROP_BY_REF.with(|r| r.borrow().clone()),
+            closure_make_registry: crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| r.borrow().clone()),
+            closure_aff_registry: crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().clone()),
+            fn_return_var_name: crate::ast::FN_RETURN_VAR_NAME.with(|r| r.borrow().clone()),
+            closure_aff_env_set: crate::ast::CLOSURE_AFF_ENV_SET.with(|r| r.borrow().clone()),
+            generic_enum_template_names: GENERIC_ENUM_TEMPLATE_NAMES.with(|r| r.borrow().clone()),
+            newly_collapsed_generic_applies: NEWLY_COLLAPSED_GENERIC_APPLIES
+                .with(|r| r.borrow().clone()),
+        }
+    }
+
+    fn restore(&self) {
+        crate::ast::STRUCT_NON_COPY_REGISTRY.with(|r| *r.borrow_mut() = self.struct_non_copy.clone());
+        crate::ast::BOX_RECURSIVE_STRUCTS_REGISTRY
+            .with(|r| *r.borrow_mut() = self.box_recursive.clone());
+        crate::ast::ENUM_NON_COPY_REGISTRY.with(|r| *r.borrow_mut() = self.enum_non_copy.clone());
+        crate::ast::IFACE_IMPL_REGISTRY.with(|r| *r.borrow_mut() = self.iface_impl.clone());
+        crate::ast::IFACE_METHOD_REGISTRY.with(|r| *r.borrow_mut() = self.iface_method.clone());
+        crate::ast::PRIVATE_MODULE_ITEMS
+            .with(|r| *r.borrow_mut() = self.private_module_items.clone());
+        crate::ast::KOSH_MODULE_ITEMS.with(|r| *r.borrow_mut() = self.kosh_module_items.clone());
+        crate::ast::IFACE_IMPLS_LIST.with(|r| *r.borrow_mut() = self.iface_impls_list.clone());
+        crate::ast::USER_DROP_BY_REF.with(|r| *r.borrow_mut() = self.user_drop_by_ref.clone());
+        crate::ast::CLOSURE_MAKE_REGISTRY
+            .with(|r| *r.borrow_mut() = self.closure_make_registry.clone());
+        crate::ast::CLOSURE_AFF_REGISTRY
+            .with(|r| *r.borrow_mut() = self.closure_aff_registry.clone());
+        crate::ast::FN_RETURN_VAR_NAME.with(|r| *r.borrow_mut() = self.fn_return_var_name.clone());
+        crate::ast::CLOSURE_AFF_ENV_SET
+            .with(|r| *r.borrow_mut() = self.closure_aff_env_set.clone());
+        GENERIC_ENUM_TEMPLATE_NAMES
+            .with(|r| *r.borrow_mut() = self.generic_enum_template_names.clone());
+        NEWLY_COLLAPSED_GENERIC_APPLIES
+            .with(|r| *r.borrow_mut() = self.newly_collapsed_generic_applies.clone());
+    }
+}
+
 const BUILTIN_FUNCTION_NAMES: &[&str] =
     &["vec", "push", "pop", "set", "sort", "sort_by", "sort_desc", "vec_swap", "vec_remove_at", "vec_replace_all", "reverse", "dedup", "find", "contains", "binary_search", "swap_remove", "insert", "clear", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_split", "parse_int", "parse_float", "i64_to_str", "f64_to_str", "bool_to_str", "str_index_of", "substring", "str_repeat", "str_to_upper", "str_to_lower", "parse_bool", "str_join", "str_pad_left", "str_pad_right", "str_lines", "str_chars", "str_reverse", "str_strip_prefix", "str_strip_suffix", "str_count_char", "pow", "sqrt", "sin", "cos", "tan", "floor", "ceil", "abs", "log", "log2", "log10", "exp", "atan2", "f64_is_nan", "f64_is_inf", "f64_is_finite", "f64_pi", "f64_e", "f64_inf", "f64_nan", "f64_round", "f64_trunc_to_i64", "i64_gcd", "i64_lcm", "i64_pow", "i64_abs_diff", "i64_signum", "f64_signum", "is_ascii_digit", "is_ascii_alpha", "is_ascii_alphanumeric", "is_ascii_whitespace", "i64_count_set_bits", "i64_leading_zeros", "i64_trailing_zeros", "i64_bswap", "i64_rotate_left", "i64_rotate_right", "f64_to_bits", "f64_from_bits", "i64_min_value", "i64_max_value", "f64_max_finite", "i64_div_floor", "i64_mod_floor", "f64_lerp", "f64_clamp01", "i64_log2_floor", "i64_log2_ceil", "i64_is_power_of_2", "i64_next_power_of_2", "i64_saturating_add", "i64_saturating_sub", "i64_saturating_mul", "i64_min", "i64_max", "i64_clamp", "f64_min", "f64_max", "f64_clamp", "i64_isqrt", "f64_hypot", "f64_to_radians", "f64_to_degrees", "asin", "acos", "atan", "sinh", "cosh", "tanh", "f64_epsilon", "f64_min_positive", "f64_min_subnormal", "f64_copysign", "f64_fma", "f64_remainder", "f64_is_normal", "f64_is_subnormal", "f64_sign_bit", "f64_next_up", "f64_next_down", "i64_div_ceil", "i64_div_round", "f64_trunc", "f64_frac", "i64_count_digits", "i64_log10_floor", "i64_log10_ceil", "i64_pow_mod", "i64_is_prime", "i64_factorial", "i64_fibonacci", "i64_binomial", "i64_perm", "i64_avg", "i64_wrap", "f64_wrap", "f64_mod_floor", "i64_min_3", "i64_max_3", "f64_min_3", "f64_max_3", "f64_sigmoid", "f64_softsign", "f64_step", "f64_smoothstep", "f64_smoothstep5", "f64_inv_lerp", "f64_chebyshev", "f64_l1_norm", "i64_isqrt_ceil", "i64_is_perfect_square", "i64_divisor_count", "i64_divisor_sum", "i64_totient", "i64_radical", "i64_next_prime", "i64_prev_prime", "i64_mod_inverse", "i64_set_bit", "i64_clear_bit", "i64_toggle_bit", "i64_test_bit", "i64_reverse_bits", "f64_relu", "f64_leaky_relu", "f64_softplus", "f64_swish", "f64_logit", "f64_sinc", "f64_safe_div", "f64_safe_sqrt", "i64_safe_div", "f64_safe_log", "f64_geometric_mean", "f64_harmonic_mean", "f64_quadratic_mean", "f64_log_b", "f64_erf", "f64_erfc", "f64_tgamma", "f64_lgamma", "f64_cbrt", "f64_expm1", "f64_log1p", "f64_exp2", "f64_exp10", "f64_inv_sqrt", "f64_round_to", "f64_sec", "f64_csc", "f64_cot", "f64_normal_pdf", "f64_normal_cdf", "f64_lerp_clamp", "f64_atan2_deg", "f64_uniform_random", "f64_inv_smoothstep", "f64_atan_deg", "f64_rgb_to_grayscale", "i64_pack_rgb", "i64_unpack_rgb_r", "i64_unpack_rgb_g", "i64_unpack_rgb_b", "f64_remap", "str_byte_at", "str_len_bytes", "str_starts_with_byte", "str_ends_with_byte", "str_byte_count", "str_index_of_byte", "str_last_index_of_byte", "str_count_ascii_digits", "str_count_ascii_alpha", "str_count_ascii_alphanumeric", "str_count_ascii_whitespace", "str_count_ascii_upper", "str_count_ascii_lower", "str_count_ascii_punct", "str_count_ascii_control", "str_first_byte", "str_last_byte", "seed_rng", "rand_i64", "rand_in_range", "hash_i64", "hash_f64", "hash_str", "hash_combine", "siphash_i64", "siphash_str", "heap_push", "heap_pop", "heap_peek", "heapify", "deque_new", "deque_push_back", "deque_push_front", "deque_pop_back", "deque_pop_front", "deque_peek_back", "deque_peek_front", "deque_len", "deque_clear", "hashset_new", "hashset_insert", "hashset_contains", "hashset_remove", "hashset_len", "hashset_clear", "hashmap_new", "hashmap_insert", "hashmap_get", "hashmap_contains_key", "hashmap_remove", "hashmap_len", "hashmap_clear", "btreeset_new", "btreeset_insert", "btreeset_contains", "btreeset_remove", "btreeset_len", "btreeset_range", "btreeset_min", "btreeset_max", "btreeset_clear", "btreemap_new", "btreemap_insert", "btreemap_get", "btreemap_contains_key", "btreemap_remove", "btreemap_len", "btreemap_range_keys", "btreemap_range_values", "btreemap_min_key", "btreemap_max_key", "btreemap_clear", "vec_map", "vec_fold", "vec_filter", "vec_position", "vec_count_if", "vec_max_by", "vec_min_by", "vec_zip_with", "vec_take", "vec_drop", "vec_take_while", "vec_drop_while", "vec_map_fold", "vec_filter_fold", "vec_map_filter", "vec_map_filter_fold", "vec_sum", "vec_product", "vec_min", "vec_max", "vec_count", "vec_any", "vec_all", "vec_chain", "vec_range", "vec_repeat", "vec_extend", "vec_concat", "vec_reverse_copy", "vec_unique", "vec_iota", "vec_first", "vec_last", "vec_running_sum", "vec_dot", "vec_intersect", "vec_difference", "vec_union", "option_unwrap_or", "option_is_some", "option_is_none", "option_map", "option_filter", "option_or", "option_and_then", "option_unwrap_or_f64", "option_is_some_f64", "option_is_none_f64", "union_find_new", "union_find_union", "union_find_find", "union_find_connected", "union_find_count", "union_find_clear", "binary_heap_new", "binary_heap_push", "binary_heap_pop", "binary_heap_peek", "binary_heap_len", "binary_heap_clear", "bloom_filter_new", "bloom_filter_insert", "bloom_filter_contains", "bloom_filter_len", "bloom_filter_count", "bloom_filter_clear", "bst_new", "bst_insert", "bst_contains", "bst_remove", "bst_len", "bst_min", "bst_max", "bst_clear", "graph_new", "graph_add_edge", "graph_num_nodes", "graph_num_edges", "graph_bfs_reach", "graph_dfs_reach", "graph_dijkstra", "graph_has_cycle", "graph_mst_kruskal", "graph_mst_prim", "graph_astar", "graph_topo_sort", "graph_clear", "trie_new", "trie_insert", "trie_contains", "trie_starts_with", "trie_delete", "trie_len", "trie_node_count", "trie_clear", "skiplist_new", "skiplist_insert", "skiplist_contains", "skiplist_remove", "skiplist_len", "skiplist_min", "skiplist_max", "skiplist_clear", "clone", "clone_at", "hash_combine_3", "hash_combine_4", "hash_pair", "hash_triple", "f64_hash_pair", "f64_hash_triple", "str_hash_pair", "str_hash_triple", "vec_argmin", "vec_argmax", "vec_count_value", "vec_index_of_value", "vec_last_index_of_value", "vec_cumulative_max", "vec_cumulative_min", "vec_running_product", "vec_running_xor", "vec_running_and", "vec_running_or", "vec_all_equal", "vec_is_sorted_asc", "vec_is_sorted_desc", "vec_is_palindrome", "vec_sliding_max", "vec_sliding_min", "vec_sliding_sum", "vec_sliding_product", "vec_abs", "vec_negate", "vec_signum", "vec_square", "vec_add_scalar", "vec_sub_scalar", "vec_mul_scalar", "vec_div_scalar", "vec_eq_mask", "vec_ne_mask", "vec_lt_mask", "vec_le_mask", "vec_gt_mask", "vec_ge_mask", "vec_min_with_scalar", "vec_max_with_scalar", "vec_clamp_scalar", "vec_add_pairwise", "vec_sub_pairwise", "vec_mul_pairwise", "vec_min_pairwise", "vec_max_pairwise", "vec_mod_scalar", "vec_pow_scalar", "vec_shl_scalar", "vec_shr_scalar", "vec_rotate_left", "vec_rotate_right", "vec_shift_left", "vec_shift_right", "vec_subset_of", "vec_disjoint", "vec_equal_set", "vec_equal_seq", "vec_diff", "vec_pad_left", "vec_pad_right", "vec_replace_value", "vec_count_distinct", "vec_indices_of_value", "vec_dedup_consecutive", "vec_mean", "vec_merge_sorted", "vec_insert_sorted", "vec_is_sorted_unique", "vec_range_span", "vec_mode", "vec_kth_smallest", "vec_median", "i64_byte_at", "i64_set_byte", "i64_count_leading_ones", "i64_count_trailing_ones", "f64_asin_deg", "f64_acos_deg", "f64_sec_deg", "f64_csc_deg", "f64_cot_deg", "str_is_ascii", "str_is_digit_only", "str_is_alpha_only", "str_is_alphanumeric_only", "str_is_whitespace_only", "str_is_empty", "rand_f64", "rand_in_range_f64", "rand_bool", "rand_choice", "rand_normal", "vec_chunks", "vec_windows", "vec_flatten", "vec_group_by_value", "i64_parity", "i64_mod_pos", "i64_cube_root", "f64_pow_int", "f64_round_to_multiple", "f64_quadratic_root", "vec_running_mean", "vec_intersperse", "pool_new", "pool_alloc", "pool_get", "pool_free", "taint", "assert_safe", "raw_load", "raw_store", "unsafe_alloc", "unsafe_free", "bptr_new", "bptr_get", "bptr_set", "bptr_len", "region_new", "region_alloc_i64", "region_len", "region_borrow_i64", "aref_load", "aref_store", "mmio_read_u32", "mmio_write_u32", "mmio_read_u8", "mmio_read_u16", "mmio_write_u8", "mmio_write_u16", "sleep_ms", "assert_eq_i64", "assert_eq_f64", "assert_eq_bool", "assert_eq_str",
     // Dhruva OS round 42 (2026-08-29): explicit mod-2^N wraparound
@@ -1967,17 +2054,90 @@ fn check_impl(
     }
 
     __prof_mark!("const_registry+mmio_region_check");
-    let mut functions = Vec::new();
-    for function in &program.functions {
-        functions.push(check_function(
-            function,
-            &signatures,
-            &struct_registry,
-            &enum_registry,
-            &interface_names_for_type_check,
-            &const_registry,
-            &mut diagnostics,
-        ));
+    // PERFORMANCE (2026-10-11): each function's own type-check is
+    // independent of every other's -- no shared mutable state besides
+    // the read-only tables already built above and the thread-local
+    // fact tables `TlsSnapshot` exists to replicate (see its own doc
+    // comment). Dispatched across a bounded pool of OS threads via
+    // `std::thread::scope` (borrows `program`/the registries directly,
+    // no `Arc` needed -- the scope guarantees every spawned thread
+    // joins before this function returns). Each z3 subprocess the SMT
+    // verifier spawns (src/smt.rs) already runs as an independent OS
+    // process, and its query cache is already behind a `Mutex`, so
+    // running multiple functions' verification concurrently gives
+    // real wall-clock parallelism on the dominant remaining cost
+    // without any further changes there.
+    //
+    // Falls back to the plain sequential loop for `n<=1` or a
+    // function count too small to be worth thread-spawn overhead --
+    // correctness doesn't depend on which path runs; only speed does.
+    let num_functions = program.functions.len();
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(num_functions.max(1));
+    let mut functions: Vec<TypedFunction>;
+    if n_threads <= 1 || num_functions < 2 * n_threads {
+        functions = Vec::with_capacity(num_functions);
+        for function in &program.functions {
+            functions.push(check_function(
+                function,
+                &signatures,
+                &struct_registry,
+                &enum_registry,
+                &interface_names_for_type_check,
+                &const_registry,
+                &mut diagnostics,
+            ));
+        }
+    } else {
+        let tls_snapshot = TlsSnapshot::capture();
+        let indices: Vec<usize> = (0..num_functions).collect();
+        let chunk_size = (num_functions + n_threads - 1) / n_threads;
+        let results_mutex: std::sync::Mutex<Vec<(usize, TypedFunction, Vec<Diagnostic>)>> =
+            std::sync::Mutex::new(Vec::with_capacity(num_functions));
+        std::thread::scope(|scope| {
+            for chunk in indices.chunks(chunk_size) {
+                let tls_snapshot = &tls_snapshot;
+                let program_functions = &program.functions;
+                let signatures = &signatures;
+                let struct_registry = &struct_registry;
+                let enum_registry = &enum_registry;
+                let interface_names_for_type_check = &interface_names_for_type_check;
+                let const_registry = &const_registry;
+                let results_mutex = &results_mutex;
+                scope.spawn(move || {
+                    tls_snapshot.restore();
+                    let mut local_results = Vec::with_capacity(chunk.len());
+                    for &idx in chunk {
+                        let function = &program_functions[idx];
+                        let mut local_diags = Vec::new();
+                        let tf = check_function(
+                            function,
+                            signatures,
+                            struct_registry,
+                            enum_registry,
+                            interface_names_for_type_check,
+                            const_registry,
+                            &mut local_diags,
+                        );
+                        local_results.push((idx, tf, local_diags));
+                    }
+                    results_mutex.lock().unwrap().extend(local_results);
+                });
+            }
+        });
+        let mut all_results = results_mutex.into_inner().unwrap();
+        // Sort back into declaration order: diagnostics shown to the
+        // user, and the `functions` Vec other passes index by
+        // position, must not depend on which thread happened to
+        // finish first.
+        all_results.sort_by_key(|(idx, _, _)| *idx);
+        functions = Vec::with_capacity(num_functions);
+        for (_, tf, local_diags) in all_results {
+            diagnostics.extend(local_diags);
+            functions.push(tf);
+        }
     }
     __prof_mark!("check_function_loop (full per-function type inference)");
 

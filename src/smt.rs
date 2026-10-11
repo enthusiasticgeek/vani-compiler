@@ -176,24 +176,110 @@ pub(crate) fn smt_cache_disabled() -> bool {
 static SMT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
     std::sync::Mutex::new(None);
 
+/// PERFORMANCE (2026-10-11): the in-memory `SMT_CACHE` above only ever
+/// helps WITHIN a single `vanic` invocation -- every fresh `check`/
+/// `emit` run starts cold and re-pays the full fork+exec+solve cost
+/// for every query, even when the program (or the overwhelming
+/// majority of its functions, in the common "edit a few lines,
+/// rebuild" loop) is unchanged from the previous run. A disk-backed
+/// cache closes that gap: same directory-resolution fallback chain as
+/// `runtime_obj_cache_dir` in main.rs (duplicated here rather than
+/// shared, since main.rs is the separate binary crate and can't be
+/// called from this lib crate) -- `$XDG_CACHE_HOME` / `$HOME/.cache` /
+/// `%LOCALAPPDATA%`, in that order; if none resolve, caching is simply
+/// unavailable and every call falls back to a fresh z3 invocation --
+/// fail OPEN to "always correct, possibly slow," never fail closed to
+/// "fast but maybe wrong."
+///
+/// Keyed by the exact query text (same key the in-memory cache already
+/// uses) hashed to a filename -- the query string itself already
+/// embeds every variable's name, type, and version, so two queries
+/// that hash alike are, for all but astronomically unlikely 64-bit
+/// hash collisions, the same query. `VANIC_SMT_NO_CACHE=1` (existing
+/// flag) disables this layer too, same as the in-memory one.
+fn smt_cache_dir() -> Option<std::path::PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(std::path::PathBuf::from(xdg).join("vanic").join("smt-queries"));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return Some(
+                std::path::PathBuf::from(home)
+                    .join(".cache")
+                    .join("vanic")
+                    .join("smt-queries"),
+            );
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        if !local.is_empty() {
+            return Some(std::path::PathBuf::from(local).join("vanic").join("smt-queries"));
+        }
+    }
+    None
+}
+
+fn query_cache_path(query: &str) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    query.hash(&mut hasher);
+    let digest = hasher.finish();
+    smt_cache_dir().map(|dir| dir.join(format!("{:016x}.z3out", digest)))
+}
+
+fn disk_cache_lookup(query: &str) -> Option<String> {
+    let path = query_cache_path(query)?;
+    std::fs::read_to_string(path).ok()
+}
+
+fn disk_cache_store(query: &str, output: &str) {
+    let Some(path) = query_cache_path(query) else { return };
+    let Some(dir) = path.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    // Write-to-temp-then-rename: a reader never observes a partially
+    // written file, even if two `vanic` processes race on the exact
+    // same query (the same content would be written either way, so
+    // whichever rename wins is fine).
+    let tmp_path = path.with_extension(format!("tmp-{}", std::process::id()));
+    if std::fs::write(&tmp_path, output).is_err() {
+        return;
+    }
+    let _ = std::fs::rename(&tmp_path, &path);
+}
+
 fn cache_lookup(query: &str) -> Option<String> {
     if smt_cache_disabled() {
         return None;
     }
-    let guard = SMT_CACHE.lock().ok()?;
-    guard.as_ref()?.get(query).cloned()
+    if let Ok(guard) = SMT_CACHE.lock() {
+        if let Some(hit) = guard.as_ref().and_then(|m| m.get(query).cloned()) {
+            return Some(hit);
+        }
+    }
+    let disk_hit = disk_cache_lookup(query)?;
+    cache_store_memory_only(query.to_string(), disk_hit.clone());
+    Some(disk_hit)
 }
 
-fn cache_store(query: String, output: String) {
-    if smt_cache_disabled() {
-        return;
-    }
+fn cache_store_memory_only(query: String, output: String) {
     let Ok(mut guard) = SMT_CACHE.lock() else {
         return;
     };
     guard
         .get_or_insert_with(std::collections::HashMap::new)
         .insert(query, output);
+}
+
+fn cache_store(query: String, output: String) {
+    if smt_cache_disabled() {
+        return;
+    }
+    disk_cache_store(&query, &output);
+    cache_store_memory_only(query, output);
 }
 
 pub fn try_prove(
