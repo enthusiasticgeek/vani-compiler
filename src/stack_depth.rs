@@ -127,158 +127,320 @@ pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) 
             callees,
         });
     }
-    let mut entries: Vec<EntryReport> = Vec::new();
     let frame_map: HashMap<String, FrameReport> = frames
         .iter()
         .map(|f| (f.name.clone(), f.clone()))
         .collect();
+    // PERFORMANCE FIX (2026-10-11, found live: a real DhruvaOS build on a
+    // 45,613-line single-file kernel took 10m40s wall-clock for this one
+    // analysis pass alone -- over half a ~20-minute total build). The
+    // previous implementation was a plain top-down recursive DFS
+    // (`traverse_depth`, removed) with NO memoization: every time a
+    // widely-shared helper (e.g. a `uart_puts`/`buf_read_byte`-style leaf
+    // called from thousands of sites) was reached via a DIFFERENT call
+    // path, its entire subtree got re-walked from scratch. On a call
+    // graph this size that's the textbook shape of exponential/
+    // polynomial blowup in path count, even though the actual underlying
+    // computation (each function's own max-depth-below-it) is a
+    // path-independent property almost everywhere.
+    //
+    // Fixed by computing the call graph's strongly-connected components
+    // once (`compute_sccs`, iterative Tarjan's, O(V+E)) and then doing a
+    // SINGLE bottom-up memoized pass over the resulting DAG of SCCs
+    // (`compute_all_fn_depths`) instead of re-deriving each function's
+    // depth once per incoming call-graph edge. SCCs are the textbook-
+    // correct way to make this sound: the OLD code's `visiting`-based
+    // cycle detection only saw the CURRENT path's ancestors, so whether
+    // a given back-edge counted as "a cycle" could (in a pathological
+    // multi-function-mutual-recursion case) depend on which caller
+    // reached a function first -- a real, inherent soundness gap, not
+    // just a performance one. SCC membership is a global, path-
+    // independent graph property, so this fix closes that gap as a
+    // side effect of fixing the performance bug. True multi-function
+    // cycles (SCC size > 1) are always reported unbounded, matching this
+    // module's own documented contract above ("Mutual recursion via
+    // cycle detection: same treatment as direct unbounded" -- #[bounded
+    // (N)] is documented and used for DIRECT self-recursion only); a
+    // single-function SCC with a self-loop keeps the exact existing
+    // self-recursion-bounded formula. Both changes only ever make an
+    // already-ambiguous case MORE conservative (bounded -> unbounded),
+    // never the reverse, matching this checker's own stated "over-
+    // estimation is safe" philosophy stated elsewhere in this module.
+    let fn_depths = compute_all_fn_depths(&frame_map, &extern_costs);
+    let mut entries: Vec<EntryReport> = Vec::new();
     for f in &frames {
         if let Some(filter) = entry_filter {
             if filter != f.name {
                 continue;
             }
         }
-        let mut visiting: HashSet<String> = HashSet::new();
-        let mut chain: Vec<String> = Vec::new();
-        let result = traverse_depth(&f.name, &frame_map, &extern_costs, &mut visiting, &mut chain, false);
+        // Entry points always use this function's own full frame cost
+        // (never folded as an inline callee), matching the previous
+        // implementation's own hardcoded `is_inline_call=false` for
+        // every top-level entry.
+        let fd = &fn_depths[&f.name];
+        let depth = fd.best.map(|b| b + f.frame_bytes);
+        let mut chain = vec![f.name.clone()];
+        chain.extend(fd.chain_tail.clone());
         entries.push(EntryReport {
             name: f.name.clone(),
-            max_depth_bytes: result.depth,
-            chain: result.chain,
+            max_depth_bytes: depth,
+            chain,
         });
     }
     StackReport { frames, entries }
 }
 
-struct TraverseResult {
-    depth: Option<u64>,
-    chain: Vec<String>,
+/// Strongly-connected components of the function call graph, computed via
+/// iterative (non-recursive, to stay safe on deep real-world call chains)
+/// Tarjan's algorithm. Returns `name -> scc_id`. SCC ids are assigned in
+/// Tarjan's own natural completion order, which guarantees: if SCC X calls
+/// into a DIFFERENT SCC Y, then `id(Y) < id(X)` -- i.e., increasing scc_id
+/// order is already bottom-up (callee SCCs complete, and get an id,
+/// strictly before the SCCs of anything that calls into them).
+fn compute_sccs(frame_map: &HashMap<String, FrameReport>) -> HashMap<String, usize> {
+    let mut index_counter: usize = 0;
+    let mut indices: HashMap<String, usize> = HashMap::new();
+    let mut lowlink: HashMap<String, usize> = HashMap::new();
+    let mut on_stack_set: HashSet<String> = HashSet::new();
+    let mut tstack: Vec<String> = Vec::new();
+    let mut scc_of: HashMap<String, usize> = HashMap::new();
+    let mut next_scc_id: usize = 0;
+
+    let all_names: Vec<String> = frame_map.keys().cloned().collect();
+
+    for start_name in &all_names {
+        if indices.contains_key(start_name) {
+            continue;
+        }
+        // Explicit DFS stack standing in for the call stack a recursive
+        // Tarjan's would use: (node name, index of the next callee of
+        // `node` still to be examined).
+        let mut work: Vec<(String, usize)> = vec![(start_name.clone(), 0)];
+
+        while let Some(top) = work.last().cloned() {
+            let (cur_name, cur_idx) = top;
+            if !indices.contains_key(&cur_name) {
+                indices.insert(cur_name.clone(), index_counter);
+                lowlink.insert(cur_name.clone(), index_counter);
+                index_counter += 1;
+                tstack.push(cur_name.clone());
+                on_stack_set.insert(cur_name.clone());
+            }
+
+            let callees: &[String] = frame_map
+                .get(&cur_name)
+                .map(|f| f.callees.as_slice())
+                .unwrap_or(&[]);
+
+            let mut i = cur_idx;
+            let mut pushed_child: Option<String> = None;
+            while i < callees.len() {
+                let callee = &callees[i];
+                // A callee not present in frame_map is an extern fn (or
+                // otherwise outside the analyzed program) -- a leaf with
+                // no further edges, not a graph node here.
+                if !frame_map.contains_key(callee) {
+                    i += 1;
+                    continue;
+                }
+                if !indices.contains_key(callee) {
+                    pushed_child = Some(callee.clone());
+                    i += 1; // resume here once the child fully returns
+                    break;
+                }
+                if on_stack_set.contains(callee) {
+                    let callee_idx = indices[callee];
+                    let cur_low = lowlink[&cur_name];
+                    if callee_idx < cur_low {
+                        lowlink.insert(cur_name.clone(), callee_idx);
+                    }
+                }
+                i += 1;
+            }
+
+            if let Some(child) = pushed_child {
+                work.last_mut().unwrap().1 = i;
+                work.push((child, 0));
+                continue;
+            }
+
+            // No unvisited children left -- cur_name is fully explored.
+            work.pop();
+            if let Some((parent_name, _)) = work.last() {
+                let cur_low = lowlink[&cur_name];
+                let parent_low = lowlink[parent_name];
+                if cur_low < parent_low {
+                    lowlink.insert(parent_name.clone(), cur_low);
+                }
+            }
+            if lowlink[&cur_name] == indices[&cur_name] {
+                // cur_name roots an SCC -- pop the Tarjan stack down to it.
+                let scc_id = next_scc_id;
+                next_scc_id += 1;
+                loop {
+                    let member = tstack.pop().expect("Tarjan stack underflow: unreachable, every pushed node is popped exactly once");
+                    on_stack_set.remove(&member);
+                    scc_of.insert(member.clone(), scc_id);
+                    if member == cur_name {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    scc_of
 }
 
-fn traverse_depth(
-    name: &str,
-    frames: &HashMap<String, FrameReport>,
-    extern_costs: &HashMap<String, u64>,
-    visiting: &mut HashSet<String>,
-    chain: &mut Vec<String>,
-    // When true, this function is being inlined into its caller: contribute
-    // local_bytes only (no separate frame push, no prologue overhead).
-    is_inline_call: bool,
-) -> TraverseResult {
-    let Some(frame) = frames.get(name) else {
-        // BUG (found 2026-08-30, via a real DhruvaOS crash traced back
-        // here): `name` not being in `frames` means it's an `extern
-        // "C"` function -- compute_stack_depths's own `if f.is_extern
-        // { continue; }` above never gave it a FrameReport at all. This
-        // used to charge such a callee exactly 0 bytes, silently
-        // treating any hand-written assembly function (this project has
-        // no way to inspect the real body of) as using NO stack
-        // whatsoever. That's unsound for a checker whose entire purpose
-        // (per this module's own doc comment) is an ASIL-D/DO-178C-
-        // grade bounded-stack GUARANTEE: a real extern fn that pushes a
-        // register-save frame before blocking/switching context (e.g. a
-        // hand-written RTOS context-switch primitive) contributes real,
-        // nonzero stack bytes this analysis had no way to see. A caller
-        // with a `#[bounded_stack]` budget sized with little to no
-        // headroom above the (silently undercounted) verified minimum
-        // could genuinely overflow its real stack in production while
-        // this checker reported it as fully verified — exactly what
-        // happened: DhruvaOS's dhruva_mutex_lock/task_sleep_ticks (both
-        // extern "C", each pushing a real 64-byte context-switch frame)
-        // were invisible here, and a task allocated exactly its
-        // "verified" budget with zero margin (matching this exact
-        // undercount) crashed with stack corruption after enough
-        // context-switch cycles.
-        //
-        // Charging the same FRAME_OVERHEAD_BYTES conservative constant
-        // ordinary functions already use is a minimal, strictly more
-        // conservative fix (raises estimates, never lowers one) that
-        // needs no new annotation surface: it cannot turn a real
-        // worst-case violation into a false pass, only the reverse
-        // (surfacing budgets that were already dangerously tight against
-        // reality, the same class of thing this project's own dhruva
-        // fix needed regardless of this checker change).
-        //
-        // Task #245 (2026-09-18): the new annotation surface BUG-233's
-        // own write-up explicitly deferred now exists --
-        // `#[stack_cost(bytes=N)]` on the extern declaration lets a
-        // caller supply the real measured cost instead of this flat
-        // default. Consulted first; only a genuinely un-annotated
-        // extern callee still falls back to FRAME_OVERHEAD_BYTES.
-        if let Some(&real_cost) = extern_costs.get(name) {
-            return TraverseResult { depth: Some(real_cost), chain: vec![name.to_string()] };
-        }
-        return TraverseResult { depth: Some(FRAME_OVERHEAD_BYTES), chain: vec![name.to_string()] };
-    };
-    // How many bytes this activation contributes to the stack.
-    let frame_contribution = if is_inline_call {
-        frame.local_bytes
+/// Per-function memoized result: `best` is the max depth contributed by
+/// this function's OWN callees (i.e. NOT including this function's own
+/// frame/local-byte contribution -- that depends on whether the CALLER
+/// treats this function as inlined or not, so it's added back by each
+/// caller separately, matching the previous implementation's own
+/// `is_inline_call`-dependent `frame_contribution`). `chain_tail` is the
+/// deepest call chain starting from (and including) the deepest callee,
+/// NOT including this function's own name (each caller prepends its own
+/// name when consuming this).
+struct FnDepth {
+    best: Option<u64>,
+    chain_tail: Vec<String>,
+}
+
+fn leaf_depth(name: &str, extern_costs: &HashMap<String, u64>) -> (Option<u64>, Vec<String>) {
+    // See the long comment on this exact branch in the previous
+    // `traverse_depth` implementation (preserved verbatim in spirit):
+    // an extern fn with no `#[stack_cost(bytes=N)]` is conservatively
+    // charged the same flat `FRAME_OVERHEAD_BYTES` every ordinary
+    // function uses, rather than silently treating it as zero-cost.
+    if let Some(&real_cost) = extern_costs.get(name) {
+        (Some(real_cost), vec![name.to_string()])
     } else {
-        frame.frame_bytes
-    };
-    if visiting.contains(name) {
-        // Cycle — recursion. Unbounded unless a #[bounded(N)]
-        // entry on the current frame is going to consume it.
-        if let Some(n) = frame.bounded_recursion {
-            // Cap at N additional frames.
-            return TraverseResult {
-                depth: Some(frame_contribution.saturating_mul(n + 1)),
-                chain: vec![name.to_string()],
-            };
-        }
-        return TraverseResult { depth: None, chain: vec![format!("[recursion in {}]", name)] };
+        (Some(FRAME_OVERHEAD_BYTES), vec![name.to_string()])
     }
-    visiting.insert(name.to_string());
-    chain.push(name.to_string());
-    let mut best: Option<u64> = Some(0);
-    let mut best_chain: Vec<String> = vec![name.to_string()];
-    for callee in &frame.callees {
-        if callee == name {
-            // Self-call — handled via bounded_recursion or flagged unbounded.
-            if let Some(n) = frame.bounded_recursion {
-                let extra = frame_contribution.saturating_mul(n);
-                if best.is_some() && extra > best.unwrap_or(0) {
-                    best = Some(extra);
-                    best_chain = vec![name.to_string(), format!("[bounded {} self-recursion]", n)];
-                }
-            } else {
-                best = None; // unbounded
-                best_chain = vec![name.to_string(), format!("[unbounded self-recursion]")];
+}
+
+/// Single bottom-up pass over the call graph's SCCs (in increasing,
+/// already-bottom-up scc_id order), computing each function's `FnDepth`
+/// exactly once. Replaces the old per-call-path recursive re-derivation.
+fn compute_all_fn_depths(
+    frame_map: &HashMap<String, FrameReport>,
+    extern_costs: &HashMap<String, u64>,
+) -> HashMap<String, FnDepth> {
+    let scc_of = compute_sccs(frame_map);
+    let mut scc_count: usize = 0;
+    for &id in scc_of.values() {
+        if id + 1 > scc_count {
+            scc_count = id + 1;
+        }
+    }
+    let mut scc_members: Vec<Vec<String>> = vec![Vec::new(); scc_count];
+    for (name, &id) in &scc_of {
+        scc_members[id].push(name.clone());
+    }
+
+    let mut memo: HashMap<String, FnDepth> = HashMap::new();
+
+    for members in &scc_members {
+        if members.len() > 1 {
+            // Genuine multi-function mutual recursion. Per this module's
+            // own documented contract, always unbounded -- #[bounded(N)]
+            // is for direct self-recursion only (handled in the
+            // single-member branch below).
+            for name in members {
+                memo.insert(
+                    name.clone(),
+                    FnDepth { best: None, chain_tail: vec!["[unbounded mutual recursion]".to_string()] },
+                );
             }
             continue;
         }
-        // If the callee is marked inline, fold its locals into the current
-        // frame rather than pushing a new activation record.
-        let callee_is_inline = frames.get(callee.as_str()).map(|f| f.inline).unwrap_or(false);
-        let sub = traverse_depth(callee, frames, extern_costs, visiting, chain, callee_is_inline);
-        let combined = match (best, sub.depth) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            _ => None,
-        };
-        if combined.is_none() || sub.depth.is_none() {
-            best = None;
-            best_chain = {
-                let mut c = vec![name.to_string()];
-                c.extend(sub.chain.clone());
-                c
-            };
-        } else if let Some(b) = sub.depth {
-            if b > best.unwrap_or(0) {
-                best = Some(b);
-                best_chain = {
-                    let mut c = vec![name.to_string()];
-                    c.extend(sub.chain.clone());
+
+        let name = &members[0];
+        let frame = &frame_map[name];
+        let has_self_loop = frame.callees.iter().any(|c| c == name);
+
+        let mut best: Option<u64> = Some(0);
+        let mut chain_tail: Vec<String> = Vec::new();
+
+        if has_self_loop {
+            if let Some(n) = frame.bounded_recursion {
+                let frame_contribution = if frame.inline { frame.local_bytes } else { frame.frame_bytes };
+                let extra = frame_contribution.saturating_mul(n);
+                if extra > best.unwrap_or(0) {
+                    best = Some(extra);
+                    chain_tail = vec![format!("[bounded {} self-recursion]", n)];
+                }
+            } else {
+                best = None;
+                chain_tail = vec!["[unbounded self-recursion]".to_string()];
+            }
+        }
+
+        if best.is_some() {
+            // PERFORMANCE (2026-10-11, found immediately after the first
+            // version of this SCC-based rewrite still took minutes, not
+            // the expected near-instant): this scan used to build the
+            // FULL candidate chain (`c.extend(cd.chain_tail.clone())`)
+            // for EVERY callee just to compare depths, even for the
+            // losing candidates -- O(E * average-chain-depth) instead of
+            // O(E), and on this call graph's own long self-test chains
+            // that was still enough to dominate real time. Comparing
+            // bare `Option<u64>` depths first (O(1) per callee) and only
+            // building the winning chain ONCE, after the scan, drops
+            // this back to genuinely O(E) for the comparison pass.
+            let mut best_callee: Option<&str> = None;
+            for callee in &frame.callees {
+                if callee == name {
+                    continue; // handled via has_self_loop above
+                }
+                let sub_depth: Option<u64> = if let Some(cf) = frame_map.get(callee) {
+                    // Callee's own SCC is guaranteed already memoized:
+                    // it necessarily has a smaller scc_id (processed
+                    // earlier in this same bottom-up loop) unless it's
+                    // in the SAME SCC as `name` -- impossible here since
+                    // this branch is single-member-SCC-only and callee
+                    // != name was just checked above.
+                    let cd = &memo[callee];
+                    let contribution = if cf.inline { cf.local_bytes } else { cf.frame_bytes };
+                    cd.best.map(|b| b + contribution)
+                } else if let Some(&c) = extern_costs.get(callee.as_str()) {
+                    Some(c)
+                } else {
+                    Some(FRAME_OVERHEAD_BYTES)
+                };
+
+                match (best, sub_depth) {
+                    (Some(a), Some(b)) => {
+                        if b > a {
+                            best = Some(b);
+                            best_callee = Some(callee.as_str());
+                        }
+                    }
+                    _ => {
+                        best = None;
+                        best_callee = Some(callee.as_str());
+                        break; // unbounded is terminal -- no later callee can un-set it
+                    }
+                }
+            }
+            if let Some(bc) = best_callee {
+                chain_tail = if let Some(_cf) = frame_map.get(bc) {
+                    let cd = &memo[bc];
+                    let mut c = vec![bc.to_string()];
+                    c.extend(cd.chain_tail.clone());
                     c
+                } else {
+                    let (_, lc) = leaf_depth(bc, extern_costs);
+                    lc
                 };
             }
         }
+
+        memo.insert(name.clone(), FnDepth { best, chain_tail });
     }
-    visiting.remove(name);
-    chain.pop();
-    TraverseResult {
-        depth: best.map(|b| b + frame_contribution),
-        chain: best_chain,
-    }
+
+    memo
 }
 
 /// Struct/enum field-type lookup so `type_size` can compute real
